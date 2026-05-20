@@ -1,0 +1,62 @@
+### General ###
+.DS_Store
+**/.DS_Store
+*.log
+
+### Environment / Secrets ###
+.env
+.env.*
+!.env.example
+
+### Claude Code ###
+.claude/settings.local.json
+.mcp.json
+
+### Local-only imports (개인정보 포함 가능) ###
+docs/_import/
+
+### Gradle / Spring Boot (backend/) ###
+backend/.gradle
+backend/build/
+backend/out/
+backend/bin/
+backend/!**/src/main/**/build/
+backend/!**/src/test/**/build/
+backend/!gradle/wrapper/gradle-wrapper.jar
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### VS Code ###
+.vscode/
+
+### Node / Next.js (web/) ###
+web/node_modules/
+web/.next/
+web/out/
+web/build/
+web/dist/
+web/.turbo/
+web/coverage/
+web/.vercel
+web/next-env.d.ts
+web/*.tsbuildinfo
+web/.pnp.*
+web/yarn-error.log
+web/npm-debug.log*
+web/pnpm-debug.log*
+
+### Docker ###
+**/docker-data/
