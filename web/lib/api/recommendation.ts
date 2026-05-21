@@ -57,6 +57,16 @@ export type RecommendationCreateRequest = {
   voiceRangeLow: number;
   voiceRangeHigh: number;
   mood?: Mood | null;
+  /**
+   * 재추천 시 결과에서 제외할 곡 ID 목록.
+   *
+   * - PR #64 / #74로 BE 지원 완료. nullable / JSON 생략 가능.
+   * - 같은 voiceRange + 다른 excludeSongIds → SeedDeriver가 다른 seed를 만들어
+   *   결정성을 유지하면서 다른 결과를 보장한다 (spec §9 2026-05-21 결정 로그).
+   * - 호출 측은 store(`useSessionStore.excludedSongIds`)의 누적 리스트를
+   *   그대로 전달한다.
+   */
+  excludeSongIds?: number[];
 };
 
 /**

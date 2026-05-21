@@ -1,0 +1,145 @@
+name: Auto Update Project Status
+
+# Projects v2 보드 Status 필드 자동 전이.
+#
+# 전이 규칙:
+#   - PR ready_for_review → Status = "In Progress"
+#   - PR converted_to_draft → Status = "Todo"
+#   - issue reopened → Status = "Todo"
+#
+# PR/issue closed → Done은 prebuilt 자동화(Project workflow)가 처리.
+#
+# 필요한 secrets/vars:
+#   - vars.PROJECT_URL: 보드 URL (auto-add workflow와 공유)
+#   - secrets.PROJECT_TOKEN: repo + project scope의 Classic PAT (user-owned project 필수)
+#
+# 보호 영역(.github/workflows/**) — 변경 시 needs-human-review 라벨 필수.
+
+on:
+  pull_request:
+    types: [ready_for_review, converted_to_draft]
+  issues:
+    types: [reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  update-status:
+    runs-on: ubuntu-22.04
+    # PROJECT_URL 미설정이면 graceful skip. PROJECT_TOKEN 부재는 각 step에서 fallback.
+    if: vars.PROJECT_URL != ''
+    continue-on-error: true
+
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      # Project + Status 필드 메타데이터 (mobruji 보드 기준, hard-coded).
+      # 갱신이 필요하면 다음 쿼리로 재확인:
+      #   gh project view 5 --owner goohong --format json
+      #   gh project field-list 5 --owner goohong --format json
+      PROJECT_ID: PVT_kwHOBRYNe84BYVlg
+      STATUS_FIELD_ID: PVTSSF_lAHOBRYNe84BYVlgzhTcJt8
+      OPTION_TODO: f75ad846
+      OPTION_IN_PROGRESS: 47fc9ee4
+      OPTION_DONE: "98236657"
+
+    steps:
+      - name: Guard PROJECT_TOKEN
+        id: guard
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          if [[ -z "${PROJECT_TOKEN}" ]]; then
+            echo "PROJECT_TOKEN secret 미설정. user-owned project status 업데이트 불가. graceful skip."
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Determine target status
+        id: target
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          action="${{ github.event.action }}"
+
+          option=""
+          case "${event}:${action}" in
+            pull_request:ready_for_review)
+              option="${OPTION_IN_PROGRESS}"
+              ;;
+            pull_request:converted_to_draft)
+              option="${OPTION_TODO}"
+              ;;
+            issues:reopened)
+              option="${OPTION_TODO}"
+              ;;
+            *)
+              echo "no matching transition for ${event}:${action}, skip."
+              exit 0
+              ;;
+          esac
+
+          echo "option_id=${option}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve content node id
+        id: content
+        if: steps.guard.outputs.skip == 'false' && steps.target.outputs.option_id != ''
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "node_id=${{ github.event.pull_request.node_id }}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "node_id=${{ github.event.issue.node_id }}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Find project item id
+        id: item
+        if: steps.guard.outputs.skip == 'false' && steps.target.outputs.option_id != ''
+        run: |
+          set -euo pipefail
+          content_id="${{ steps.content.outputs.node_id }}"
+
+          # 해당 PR/issue가 이미 보드에 add되어 있어야 한다. add는 auto-add-to-project.yml가 담당.
+          # 여기서는 projectItems 중 PROJECT_ID 매칭만 가져온다.
+          item_id=$(gh api graphql -f query='
+            query($id: ID!) {
+              node(id: $id) {
+                ... on PullRequest {
+                  projectItems(first: 20) { nodes { id project { id } } }
+                }
+                ... on Issue {
+                  projectItems(first: 20) { nodes { id project { id } } }
+                }
+              }
+            }
+          ' -F id="${content_id}" \
+            --jq ".data.node.projectItems.nodes[] | select(.project.id == \"${PROJECT_ID}\") | .id" \
+            || true)
+
+          if [[ -z "${item_id}" ]]; then
+            echo "no project item for this content in PROJECT_ID=${PROJECT_ID}. auto-add workflow가 먼저 돌아야 함. skip."
+            exit 0
+          fi
+
+          echo "item_id=${item_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update status field
+        if: steps.guard.outputs.skip == 'false' && steps.item.outputs.item_id != ''
+        run: |
+          set -euo pipefail
+          gh api graphql -f query='
+            mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $project,
+                itemId: $item,
+                fieldId: $field,
+                value: { singleSelectOptionId: $option }
+              }) { projectV2Item { id } }
+            }
+          ' \
+            -F project="${PROJECT_ID}" \
+            -F item="${{ steps.item.outputs.item_id }}" \
+            -F field="${STATUS_FIELD_ID}" \
+            -F option="${{ steps.target.outputs.option_id }}"

@@ -19,11 +19,19 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import { createRecommendation } from "@/lib/api/recommendation";
+import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 const { sessionMock } = await vi.hoisted(async () => {
   const helper = await import("@/lib/test-helpers/mock-session-store");
@@ -163,11 +171,13 @@ describe("RecommendPage", () => {
     });
 
     // recommendation 자동 트리거가 voice-range 정보를 그대로 전달했는지 확인.
+    // 초기 excludeSongIds는 빈 배열 — store 누적이 비어 있는 상태.
     await waitFor(() => {
       expect(createRecommendationMock).toHaveBeenCalledWith({
         sessionId: "sess-abc",
         voiceRangeLow: 48,
         voiceRangeHigh: 69,
+        excludeSongIds: [],
       });
     });
 
@@ -250,6 +260,7 @@ describe("RecommendPage", () => {
       sessionId: "sess-stable",
       voiceRangeLow: 50,
       voiceRangeHigh: 70,
+      excludeSongIds: [],
     });
 
     // 결과가 렌더될 때까지 대기 → mutation isIdle=false, isSuccess=true 상태로 전이.
@@ -299,6 +310,7 @@ describe("RecommendPage", () => {
       sessionId: "sess-A",
       voiceRangeLow: 48,
       voiceRangeHigh: 60,
+      excludeSongIds: [],
     });
 
     await waitFor(() => {
@@ -332,6 +344,7 @@ describe("RecommendPage", () => {
       sessionId: "sess-B",
       voiceRangeLow: 55,
       voiceRangeHigh: 75,
+      excludeSongIds: [],
     });
 
     await waitFor(() => {
@@ -345,5 +358,287 @@ describe("RecommendPage", () => {
       await Promise.resolve();
     });
     expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ---------- closes #83 #84 ----------
+  //
+  // "다른 곡 추천받기" 버튼이 store의 누적 excludedSongIds와 함께 호출하고,
+  // 응답을 store에 다시 누적하는 흐름을 검증한다. 페이지 mock은 selector
+  // 패턴이라 appendExcluded를 실제 누적으로 wire해 두 번째 호출 시점에
+  // store가 첫 응답을 반영하고 있는지 본다.
+
+  /**
+   * 추천 응답 헬퍼 — 곡 ID 리스트로 응답을 생성.
+   */
+  function buildResponseWithSongIds(
+    requestId: number,
+    songIds: number[],
+  ): Awaited<ReturnType<typeof createRecommendation>> {
+    return {
+      requestId,
+      recommendations: songIds.map((id, idx) => ({
+        rankPosition: idx + 1,
+        score: 0.9 - idx * 0.05,
+        matchReason: "음역 매칭",
+        song: {
+          id,
+          title: `곡-${id}`,
+          artist: "가수",
+          releaseYear: 2024,
+          keyOriginal: "C_MAJOR" as const,
+          bpm: 110,
+          mood: "UPBEAT" as const,
+          language: "ko",
+          genre: "POP",
+          tjNumber: `T-${id}`,
+          kyNumber: `K-${id}`,
+          metadataSource: "MANUAL_SEED" as const,
+        },
+      })),
+    };
+  }
+
+  /**
+   * sessionMock의 appendExcluded를 실제 누적 로직으로 wire한다.
+   * "다시 추천" 흐름에서 두 번째 호출이 첫 응답을 반영하는지 검증하기 위함.
+   */
+  function wireAppendExcluded() {
+    const append = vi.fn((ids: number[]) => {
+      const merged = new Set(sessionMock.state().excludedSongIds);
+      for (const id of ids) merged.add(id);
+      sessionMock.set({ excludedSongIds: Array.from(merged) });
+    });
+    sessionMock.set({ appendExcluded: append });
+    return append;
+  }
+
+  it("'다른 곡 추천받기' 클릭 시 이전 곡 ID들이 excludeSongIds에 포함되어 호출된다", async () => {
+    sessionMock.set({ sessionId: "sess-again", voiceRangeId: 11 });
+    wireAppendExcluded();
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 11,
+      sessionId: "sess-again",
+      lowestNoteMidi: 50,
+      highestNoteMidi: 70,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+
+    createRecommendationMock
+      .mockResolvedValueOnce(buildResponseWithSongIds(1, [10, 20]))
+      .mockResolvedValueOnce(buildResponseWithSongIds(2, [30, 40]));
+
+    const user = userEvent.setup();
+    renderWithQueryClient(<RecommendPage />);
+
+    // 첫 호출은 빈 excludeSongIds.
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
+        sessionId: "sess-again",
+        voiceRangeLow: 50,
+        voiceRangeHigh: 70,
+        excludeSongIds: [],
+      });
+    });
+
+    // 첫 응답 카드 렌더 대기.
+    await waitFor(() => {
+      expect(screen.getByText("곡-10")).toBeInTheDocument();
+    });
+
+    // 응답 곡 ID가 store에 누적되었는지 확인 (appendExcluded wire 덕분).
+    expect(sessionMock.state().excludedSongIds).toEqual([10, 20]);
+
+    // "다른 곡 추천받기" 클릭.
+    const againButton = screen.getByRole("button", {
+      name: "다른 곡 추천받기",
+    });
+    await user.click(againButton);
+
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+    });
+    expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
+      sessionId: "sess-again",
+      voiceRangeLow: 50,
+      voiceRangeHigh: 70,
+      excludeSongIds: [10, 20],
+    });
+  });
+
+  it("'다른 곡 추천받기'를 두 번 클릭하면 누적된 ID들이 모두 excludeSongIds에 포함된다", async () => {
+    sessionMock.set({ sessionId: "sess-accum", voiceRangeId: 22 });
+    wireAppendExcluded();
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 22,
+      sessionId: "sess-accum",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 72,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+
+    createRecommendationMock
+      .mockResolvedValueOnce(buildResponseWithSongIds(1, [100, 200]))
+      .mockResolvedValueOnce(buildResponseWithSongIds(2, [300, 400]))
+      .mockResolvedValueOnce(buildResponseWithSongIds(3, [500, 600]));
+
+    const user = userEvent.setup();
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("곡-100")).toBeInTheDocument();
+    });
+
+    // 1차 클릭 — exclude는 첫 응답 ID만.
+    await user.click(screen.getByRole("button", { name: "다른 곡 추천받기" }));
+    await waitFor(() => {
+      expect(screen.getByText("곡-300")).toBeInTheDocument();
+    });
+    expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
+      sessionId: "sess-accum",
+      voiceRangeLow: 48,
+      voiceRangeHigh: 72,
+      excludeSongIds: [100, 200],
+    });
+
+    // 2차 클릭 — 1차+2차 응답 ID가 누적되어 전달.
+    await user.click(screen.getByRole("button", { name: "다른 곡 추천받기" }));
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenCalledTimes(3);
+    });
+    expect(createRecommendationMock).toHaveBeenNthCalledWith(3, {
+      sessionId: "sess-accum",
+      voiceRangeLow: 48,
+      voiceRangeHigh: 72,
+      excludeSongIds: [100, 200, 300, 400],
+    });
+  });
+
+  // closes #107 — 추천 결과 페이지는 NoSession fallback, 카드 리스트, 빈 결과 fallback
+  // 세 상태가 모두 노출 가능하다. 각 상태에 대해 a11y 위반이 없어야 한다.
+  describe("a11y", () => {
+    it("NoSession fallback 상태에 a11y 위반이 없다", async () => {
+      const { container } = renderWithQueryClient(<RecommendPage />);
+      expect(
+        screen.getByRole("heading", {
+          name: /음역대가 아직 등록되지 않았습니다/,
+        }),
+      ).toBeInTheDocument();
+      await expectNoA11yViolations(container);
+    });
+
+    it("카드 리스트 렌더 상태에 a11y 위반이 없다", async () => {
+      sessionMock.set({ sessionId: "sess-a11y", voiceRangeId: 1 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 1,
+        sessionId: "sess-a11y",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValue({
+        requestId: 1,
+        recommendations: [
+          {
+            rankPosition: 1,
+            score: 0.9,
+            matchReason: "음역 매칭",
+            song: {
+              id: 1,
+              title: "a11y 곡",
+              artist: "a11y 가수",
+              releaseYear: 2024,
+              keyOriginal: "C_MAJOR",
+              bpm: 110,
+              mood: "UPBEAT",
+              language: "ko",
+              genre: "POP",
+              tjNumber: "T-1",
+              kyNumber: "K-1",
+              metadataSource: "MANUAL_SEED",
+            },
+          },
+        ],
+      });
+
+      const { container } = renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("a11y 곡")).toBeInTheDocument();
+      });
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("빈 응답 fallback 상태에 a11y 위반이 없다", async () => {
+      sessionMock.set({ sessionId: "sess-empty-a11y", voiceRangeId: 9 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 9,
+        sessionId: "sess-empty-a11y",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce({
+        requestId: 1,
+        recommendations: [],
+      });
+
+      const { container } = renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/더 이상 추천할 곡이 없어요/),
+        ).toBeInTheDocument();
+      });
+
+      await expectNoA11yViolations(container);
+    });
+  });
+
+  it("응답 곡 수가 0이면 fallback UX를 노출하고 '다른 곡 추천받기' 버튼은 숨긴다", async () => {
+    sessionMock.set({ sessionId: "sess-empty", voiceRangeId: 33 });
+    wireAppendExcluded();
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 33,
+      sessionId: "sess-empty",
+      lowestNoteMidi: 52,
+      highestNoteMidi: 67,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+
+    createRecommendationMock.mockResolvedValueOnce({
+      requestId: 999,
+      recommendations: [],
+    });
+
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /더 이상 추천할 곡이 없어요\. 음역대를 다시 입력해 보세요\./,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    // 버튼은 숨김 + 음역대 재입력 CTA가 노출 (헤더 링크 + fallback CTA 모두 포함).
+    expect(
+      screen.queryByRole("button", { name: "다른 곡 추천받기" }),
+    ).not.toBeInTheDocument();
+    const cta = screen.getAllByRole("link", { name: "음역대 다시 입력" });
+    expect(cta.length).toBeGreaterThanOrEqual(1);
   });
 });

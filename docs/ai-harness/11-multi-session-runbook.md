@@ -24,6 +24,10 @@
 - `--no-verify`로 hook 우회 금지
 - 보호 영역 변경 시 `needs-human-review` 라벨 부여
 
+> 위 5줄 공통 룰은 매번 반복하지 말고 prompt에 다음 한 줄만 박는다:
+> `공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.`
+> 역할별 추가 룰(워크트리 경로, 작업 가능 경로, 품질 게이트)도 그 문서에 정리되어 있다.
+
 **언제 쓰나**: 사용자가 백로그를 본진에 풀어놓고 한 자리에서 운영하고 싶을 때. 대부분의 경우.
 
 ### 0-2) 수동 터미널 (대체)
@@ -40,6 +44,67 @@
 ### 0-3) 모드 전환
 
 같은 사이클 중간에 모드 전환은 피한다. 한 사이클(이슈→PR→머지)은 한 모드로 끝내고, 다음 사이클부터 바꾼다. 강제 전환이 필요하면 진행 중 서브에이전트를 정리(`TaskStop` 등) 후 수동 터미널로.
+
+### 0-4) 사이클 명명
+
+본진 task list에서 사이클을 부를 때 **도메인별 카운트**를 유지한다. 단순함 우선.
+
+- `be 사이클 N`, `fe 사이클 N`, `rev 사이클 N`, `plan 사이클 N` (각자 1부터 카운트)
+- 도메인 간 비교가 필요하면 PR 번호(`#76`, `#81`)로 지칭. 사이클 번호는 본진 내부 task tracking 용도.
+- 통합 카운트(예: "전체 사이클 12")는 쓰지 않는다. 도메인이 달라 의미 약함.
+- 표기 패턴: `<도메인> 사이클 <N> (#<PR>) <작업 한 줄>` — 예: `be 사이클 5 (#74) excludeSongIds 영속화`. task list/사용자 보고/PR 본문 일관 적용.
+
+### 0-5) idle 사이클 룰
+
+세션이 idle 상태(의존 PR 머지 대기, 머지된 PR 없음 등)일 때 본진은 다음 백로그를 자체 진행하도록 지시한다:
+
+| 세션 | idle 조건 | 자체 백로그 |
+|---|---|---|
+| **be** | 의존 ADR/spec 머지 대기 | 작은 nit/refactor (Lombok 정리, final 누락 보완, 메서드 네이밍), 백엔드 테스트 회귀 보강(BDD 스타일 누락 케이스) |
+| **fe** | API 의존 또는 디자인 결정 대기 | 컴포넌트 테스트 보강, UX 다듬기(loading/error state), a11y 점검 |
+| **rev** | 머지된 PR 없음 / 리뷰 큐 빔 | `develop` 전체 QA — BE 회귀(`./gradlew test`), FE 게이트(`npm run lint/typecheck/test/build`), 통합 시나리오(`docker compose up` + bootRun + dev), 발견 시 본진에 보고 |
+| **plan** | 사이클 작업 완료 후 idle | 다음 ADR/spec 후보 발굴, 메모리 → 코드 promote 검토(반복 패턴/preference 코드화), 문서 stale 점검 |
+
+idle 룰 적용 기준:
+- be/fe가 의존성 대기로 30분+ idle이면 본진이 위 백로그 중 하나를 launch
+- rev는 머지 즉시 트리거가 기본이지만, 머지된 PR이 1시간+ 없으면 자체 QA 사이클 launch
+- plan은 사용자가 운영 사이클 종료를 명시할 때까지 백로그 발굴 진행
+
+### 0-6) 사용자 결정 묶음 질문 패턴
+
+본진이 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스위칭 비용을 줄인다.
+
+**즉시 묻기 (interrupt-driven)**:
+- PR 머지 / `develop → main` 릴리즈 머지
+- 보호 영역 변경의 사후 리뷰
+- 사이클 step change (다음 백로그 우선순위 재정렬)
+- 코드/기획 충돌로 사람만 풀 수 있는 결정
+
+**묶어 묻기 (batched)**:
+- 작은 의사결정(naming, 사소한 UX 선택, 비기능 옵션 default) 5건 이상 누적 시 한 번에 모아 질문
+- 묶음 형식 예시:
+  ```
+  결정 묶음 4건:
+  1. ADR 0006 제목 — "추천 결정성 정책" vs "추천 결정성 + 다양성 정책"?
+  2. fe 사이클 9 — 에러 boundary fallback 카피 "다시 시도" vs "재시도"?
+  3. ...
+  답을 한 번에 주면 본진이 일괄 적용.
+  ```
+- 사용자 부재 시: 사용자가 돌아오기 전까지 본진이 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
+
+### 0-7) 사이클 완료 후 워크트리 정리
+
+PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 본진은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
+
+```bash
+./scripts/post-merge-cleanup.sh
+```
+
+동작:
+- 본진 + be/fe/rev/plan 워크트리에서 `git fetch origin develop` + `git checkout --detach origin/develop`
+- 본진에서 `origin/develop`에 머지된 로컬 branch 일괄 삭제 (develop/main 제외, 다른 워크트리 사용 중인 branch는 skip)
+
+수동으로 본진에서 `git -C ../mobruji-be reset --hard origin/develop` 호출하던 패턴을 대체한다. 사이클 종료 직후 1번만 호출하면 다음 사이클을 clean 상태에서 시작할 수 있다.
 
 ## 1) 셋업 (최초 1회)
 

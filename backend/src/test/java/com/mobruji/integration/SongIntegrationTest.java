@@ -13,11 +13,12 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 
-import com.mobruji.song.MetadataSource;
-import com.mobruji.song.Mood;
-import com.mobruji.song.MusicalKey;
-import com.mobruji.song.Song;
-import com.mobruji.song.SongRepository;
+import com.mobruji.song.domain.Difficulty;
+import com.mobruji.song.domain.MetadataSource;
+import com.mobruji.song.domain.Mood;
+import com.mobruji.song.domain.MusicalKey;
+import com.mobruji.song.domain.Song;
+import com.mobruji.song.infrastructure.SongRepository;
 
 import io.restassured.RestAssured;
 
@@ -40,12 +41,14 @@ class SongIntegrationTest {
                 .keyOriginal(MusicalKey.A_MAJOR).bpm(132).mood(Mood.EMOTIONAL)
                 .language("ko").genre("발라드").tjNumber("60540")
                 .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(57).highMidi(76)
                 .build());
         songRepository.save(Song.builder()
                 .title("Dynamite").artist("BTS").releaseYear(2020)
                 .keyOriginal(MusicalKey.E_MAJOR).bpm(114).mood(Mood.UPBEAT)
                 .language("en").genre("댄스").tjNumber("29062")
                 .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(59).highMidi(78)
                 .build());
     }
 
@@ -94,5 +97,46 @@ class SongIntegrationTest {
                 .get("/api/v1/songs/999999")
                 .then()
                 .statusCode(HttpStatus.NOT_FOUND.value());
+    }
+
+    @Test
+    @DisplayName("E2E: 응답에 difficulty + lowestNoteName/highestNoteName 포함")
+    void e2e_responseIncludesDifficultyAndNoteNames() {
+        // given: 벚꽃 엔딩(highMidi=76)은 HARD, 노트명은 A3 ~ E5
+        final Long id = songRepository.findAll().stream()
+                .filter(song -> "벚꽃 엔딩".equals(song.getTitle()))
+                .findFirst().orElseThrow().getId();
+
+        // when/then
+        given()
+                .when()
+                .get("/api/v1/songs/" + id)
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .body("difficulty", equalTo(Difficulty.HARD.name()))
+                .body("lowMidi", equalTo(57))
+                .body("highMidi", equalTo(76))
+                .body("lowestNoteName", equalTo("A3"))
+                .body("highestNoteName", equalTo("E5"));
+    }
+
+    @Test
+    @DisplayName("Repository 라운드트립: lowMidi/highMidi/difficulty 영속")
+    void persist_roundTrip_preservesDifficultyAndMidi() {
+        // given
+        final Song song = songRepository.save(Song.builder()
+                .title("Test Song").artist("Test Artist")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(78)
+                .build());
+
+        // when
+        final Song reloaded = songRepository.findById(song.getId()).orElseThrow();
+
+        // then
+        org.assertj.core.api.Assertions.assertThat(reloaded.getLowMidi()).isEqualTo(60);
+        org.assertj.core.api.Assertions.assertThat(reloaded.getHighMidi()).isEqualTo(78);
+        org.assertj.core.api.Assertions.assertThat(reloaded.getDifficulty()).isEqualTo(Difficulty.HARD);
     }
 }

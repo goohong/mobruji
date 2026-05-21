@@ -1,11 +1,18 @@
 /**
- * 추천 곡 카드 컴포넌트.
+ * 곡 카드 컴포넌트.
  *
  * 이슈 #75 / PR #76: 추천 결과 페이지에서 곡 1개를 표현. 음역대 막대 그래프 대신
  * **가창 난이도 라벨 + 최고음**을 핵심 정보로 노출한다.
  *
+ * 이슈 #91 #92 / PR #93: 곡 검색 페이지(`/songs`)에서도 동일한 카드 룩앤필을 사용한다.
+ * 추천 컨텍스트(`item`)와 검색 컨텍스트(`song`) 둘 다 지원하도록 props가 분기된다.
+ *
+ * 이슈 #100 / PR #101: `href` prop을 지원해 카드 전체를 곡 상세 페이지로 가는
+ * 링크로 만든다. href가 주어지면 카드 표면 전체가 `next/link`의 `<Link>`로 감싸지며,
+ * 키보드 포커스/엔터/스페이스 활성화는 next/link의 기본 동작을 사용한다.
+ *
  * 표시 정보:
- *   - rank position (#1, #2 ...)
+ *   - rank position (#1, #2 ...) — 추천 컨텍스트에서만
  *   - 제목 (큰 글씨)
  *   - 아티스트 (작게)
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
@@ -14,15 +21,22 @@
  *   - 최고음 음표명 (예: F#5) — `midiToNoteName(highMidi)`
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
- *   - matchReason 한 줄
+ *   - matchReason 한 줄 — 추천 컨텍스트에서만
  *   - 키(키 원본) 라벨
+ *   - score — 추천 컨텍스트에서만
  *
  * 호버/포커스 상태는 ring/shadow 변화로 표현. 모바일 우선.
  */
 
 "use client";
 
-import type { RecommendedSongResponse } from "@/lib/api/recommendation";
+import Link from "next/link";
+import type { ReactNode } from "react";
+
+import type {
+  RecommendedSongResponse,
+  SongResponse,
+} from "@/lib/api/recommendation";
 import {
   deriveDifficulty,
   difficultyLabel,
@@ -30,12 +44,23 @@ import {
 } from "@/lib/difficulty";
 import { midiToNoteName } from "@/lib/notes";
 
-type SongCardProps = {
-  item: RecommendedSongResponse;
-};
+/**
+ * Props 분기:
+ *   - `item: RecommendedSongResponse` — 추천 결과 카드. rank/score/matchReason 노출.
+ *   - `song: SongResponse` — 검색 결과 카드. 추천 컨텍스트 필드는 모두 숨김.
+ *
+ * 두 모드 모두 동일한 시각 표현(난이도/최고음/장르/키)을 공유하며, 옵셔널 `href`로
+ * 카드 전체를 클릭 가능한 링크로 만들 수 있다.
+ */
+type SongCardProps =
+  | { item: RecommendedSongResponse; song?: never; href?: string }
+  | { song: SongResponse; item?: never; href?: string };
 
-export function SongCard({ item }: SongCardProps) {
-  const { song } = item;
+export function SongCard(props: SongCardProps) {
+  const song: SongResponse = "item" in props && props.item ? props.item.song : props.song!;
+  const item: RecommendedSongResponse | null =
+    "item" in props && props.item ? props.item : null;
+  const href: string | undefined = props.href;
   const keyLabel = formatMusicalKey(song.keyOriginal);
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
@@ -43,16 +68,15 @@ export function SongCard({ item }: SongCardProps) {
   const lowestNoteName =
     typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
 
-  return (
-    <li
-      tabIndex={0}
-      className="group flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500"
-    >
+  const body: ReactNode = (
+    <>
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            #{item.rankPosition}
-          </p>
+          {item ? (
+            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              #{item.rankPosition}
+            </p>
+          ) : null}
           <h2 className="truncate text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             {song.title}
           </h2>
@@ -104,14 +128,43 @@ export function SongCard({ item }: SongCardProps) {
               {song.genre}
             </span>
           ) : null}
-          <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-            {item.matchReason}
-          </span>
+          {item ? (
+            <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+              {item.matchReason}
+            </span>
+          ) : null}
         </div>
-        <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-          score {item.score.toFixed(2)}
-        </span>
+        {item ? (
+          <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+            score {item.score.toFixed(2)}
+          </span>
+        ) : null}
       </div>
+    </>
+  );
+
+  // href가 있으면 카드 전체를 링크로 감싼다. <li>는 그대로 두고, 내부 <a>가
+  // 클릭/포커스를 흡수한다. <a>는 카드 전체 영역을 차지하도록 grid 형태로 배치.
+  if (href) {
+    return (
+      <li className="group rounded-2xl bg-white ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
+        <Link
+          href={href}
+          aria-label={`${song.title} 상세 보기`}
+          className="flex flex-col gap-3 rounded-2xl p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+        >
+          {body}
+        </Link>
+      </li>
+    );
+  }
+
+  return (
+    <li
+      tabIndex={0}
+      className="group flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500"
+    >
+      {body}
     </li>
   );
 }
