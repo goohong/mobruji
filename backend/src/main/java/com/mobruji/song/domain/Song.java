@@ -216,4 +216,58 @@ public class Song {
         }
         return changed;
     }
+
+    /**
+     * Python audio analysis tool 산출값으로 lowMidi/highMidi 를 **갱신** 한다. {@link #backfillMissingFields}
+     * 가 "null 만 채움" 이라면 본 메서드는 "신뢰도 충족 시 기존 값을 덮어쓰기".
+     *
+     * <p>spec {@code audio-tooling-bootstrap.md} PR C — 시드 30곡의 수기 음역대를 audio 분석값으로 정확화.
+     * 다음 정책:
+     *
+     * <ul>
+     * <li>{@code result.confidence() < threshold} → no-op (수기 값 보존, false 반환).</li>
+     * <li>임계 통과 시 lowMidi/highMidi 를 결과로 갱신, {@link Difficulty} 를 재계산, {@link MetadataSource}
+     * 를 {@link MetadataSource#AUDIO_ANALYSIS} 로 갱신.</li>
+     * </ul>
+     *
+     * <p>본 메서드는 추천 알고리즘(점수 계산) 입력 데이터만 바꿀 뿐, 알고리즘 코드 자체에는 영향이 없다 — 결정성 회귀 없음.
+     *
+     * @param result              Python tool 산출 결과
+     * @param confidenceThreshold 적용 임계 (0.0~1.0). 작업 지시 기본값 0.6.
+     * @return 실제로 한 필드라도 변경됐는지 여부
+     */
+    public boolean backfillFromAudioAnalysis(
+            final AudioAnalysisResult result,
+            final double confidenceThreshold) {
+        Objects.requireNonNull(result, "result must not be null");
+        if (confidenceThreshold < 0.0 || confidenceThreshold > 1.0) {
+            throw new IllegalArgumentException(
+                    "confidenceThreshold out of [0.0, 1.0]: " + confidenceThreshold);
+        }
+        if (result.confidence() < confidenceThreshold) {
+            return false;
+        }
+        boolean changed = false;
+        if (this.lowMidi == null || this.lowMidi != result.lowMidi()) {
+            this.lowMidi = result.lowMidi();
+            changed = true;
+        }
+        if (this.highMidi == null || this.highMidi != result.highMidi()) {
+            this.highMidi = result.highMidi();
+            changed = true;
+        }
+        final Difficulty newDifficulty = deriveDifficulty(this.lowMidi, this.highMidi);
+        if (this.difficulty != newDifficulty) {
+            this.difficulty = newDifficulty;
+            changed = true;
+        }
+        if (this.metadataSource != MetadataSource.AUDIO_ANALYSIS) {
+            this.metadataSource = MetadataSource.AUDIO_ANALYSIS;
+            changed = true;
+        }
+        if (changed) {
+            this.updatedAt = LocalDateTime.now();
+        }
+        return changed;
+    }
 }
