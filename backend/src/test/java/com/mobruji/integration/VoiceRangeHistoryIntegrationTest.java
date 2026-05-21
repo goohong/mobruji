@@ -24,6 +24,9 @@ import io.restassured.RestAssured;
  * GET /api/v1/sessions/{sessionId}/voice-range-history E2E (PR C of #220).
  *
  * <p>spec: docs/features/voice-range-progress.md §5-2, §7. 같은 sessionId로 측정 3회 누적 → 시계열을 measuredAt 오름차순으로 조회.
+ *
+ * <p>rev 16(#238): {@code X-Session-Id} 헤더 인증 게이트. path sessionId 와 일치하는 헤더 필수.
+ * 누락/불일치 → 401.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -57,6 +60,7 @@ class VoiceRangeHistoryIntegrationTest {
 
         // when / then
         given()
+                .header("X-Session-Id", sessionId)
                 .when()
                 .get("/api/v1/sessions/{sessionId}/voice-range-history", sessionId)
                 .then()
@@ -78,9 +82,10 @@ class VoiceRangeHistoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E: snapshot 없는 sessionId → 200 + 빈 배열")
+    @DisplayName("E2E: snapshot 없는 sessionId → 200 + 빈 배열 (인증 통과 시)")
     void e2e_history_unknownSession_returnsEmptyList() {
         given()
+                .header("X-Session-Id", "no-such-session")
                 .when()
                 .get("/api/v1/sessions/{sessionId}/voice-range-history", "no-such-session")
                 .then()
@@ -95,12 +100,47 @@ class VoiceRangeHistoryIntegrationTest {
         postVoiceRange("session-B", 55, 78, "SELF_REPORT");
 
         given()
+                .header("X-Session-Id", "session-A")
                 .when()
                 .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("voiceRangeSnapshotResponses", hasSize(1))
                 .body("voiceRangeSnapshotResponses[0].lowMidi", equalTo(48));
+    }
+
+    @Test
+    @DisplayName("E2E (#238): X-Session-Id 헤더 누락 → 401")
+    void e2e_history_missingHeader_returns401() {
+        given()
+                .when()
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
+
+    @Test
+    @DisplayName("E2E (#238): X-Session-Id 헤더가 path sessionId 와 다르면 → 401")
+    void e2e_history_mismatchedHeader_returns401() {
+        postVoiceRange("session-A", 48, 69, "OCTAVE_PICK");
+
+        given()
+                .header("X-Session-Id", "session-B")
+                .when()
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
+
+    @Test
+    @DisplayName("E2E (#238): X-Session-Id 헤더 blank → 401")
+    void e2e_history_blankHeader_returns401() {
+        given()
+                .header("X-Session-Id", "")
+                .when()
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
 
     private void postVoiceRange(final String sessionId, final int lowMidi, final int highMidi,
