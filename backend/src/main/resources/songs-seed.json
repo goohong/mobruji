@@ -9,7 +9,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "60540",
-    "kyNumber": "84226"
+    "kyNumber": "84226",
+    "lowMidi": 57,
+    "highMidi": 76
   },
   {
     "title": "Dynamite",
@@ -21,7 +23,9 @@
     "language": "en",
     "genre": "댄스",
     "tjNumber": "29062",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 59,
+    "highMidi": 78
   },
   {
     "title": "Spring Day",
@@ -33,7 +37,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "70146",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 51,
+    "highMidi": 75
   },
   {
     "title": "Through the Night",
@@ -45,7 +51,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "70200",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 79
   },
   {
     "title": "Cheer Up",
@@ -57,7 +65,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "67854",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 77
   },
   {
     "title": "How You Like That",
@@ -69,7 +79,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "28782",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 57,
+    "highMidi": 77
   },
   {
     "title": "Likey",
@@ -81,7 +93,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "71029",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 76
   },
   {
     "title": "Eight",
@@ -93,7 +107,9 @@
     "language": "ko",
     "genre": "팝",
     "tjNumber": "28570",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 64,
+    "highMidi": 76
   },
   {
     "title": "Lilac",
@@ -105,7 +121,9 @@
     "language": "ko",
     "genre": "팝",
     "tjNumber": "29655",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 62,
+    "highMidi": 78
   },
   {
     "title": "Celebrity",
@@ -117,7 +135,9 @@
     "language": "ko",
     "genre": "팝",
     "tjNumber": "29489",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 76
   },
   {
     "title": "Killing Me",
@@ -129,7 +149,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "71862",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 53,
+    "highMidi": 77
   },
   {
     "title": "Beautiful",
@@ -141,7 +163,9 @@
     "language": "ko",
     "genre": "R&B",
     "tjNumber": "68252",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 74
   },
   {
     "title": "Some",
@@ -153,7 +177,9 @@
     "language": "ko",
     "genre": "R&B",
     "tjNumber": "63041",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 74
   },
   {
     "title": "Gangnam Style",
@@ -165,7 +191,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "60681",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 72
   },
   {
     "title": "Heart Shaker",
@@ -177,7 +205,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "71309",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 76
   },
   {
     "title": "Hype Boy",
@@ -189,7 +219,9 @@
     "language": "ko",
     "genre": "팝",
     "tjNumber": "29917",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 73
   },
   {
     "title": "Ditto",
@@ -201,7 +233,9 @@
     "language": "ko",
     "genre": "팝",
     "tjNumber": "30236",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 73
   },
   {
     "title": "Super Shy",
@@ -213,7 +247,9 @@
     "language": "en",
     "genre": "팝",
     "tjNumber": "30421",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 62,
+    "highMidi": 73
   },
   {
     "title": "Love Dive",
@@ -225,7 +261,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "29870",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 57,
+    "highMidi": 76
   },
   {
     "title": "After Like",
@@ -237,7 +275,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "30058",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 79
   },
   {
     "title": "Tomboy",
@@ -249,7 +289,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "29799",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 55,
+    "highMidi": 75
   },
   {
     "title": "Antifragile",
@@ -261,7 +303,9 @@
     "language": "ko",
     "genre": "댄스",
     "tjNumber": "30181",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 77
   },
   {
     "title": "신호등",
@@ -273,7 +317,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "29632",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 58,
+    "highMidi": 72
   },
   {
     "title": "취중고백",
@@ -285,7 +331,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "29773",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 48,
+    "highMidi": 74
   },
   {
     "title": "헤어지자 말해요",
@@ -297,7 +345,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "30450",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 53,
+    "highMidi": 77
   },
   {
     "title": "사랑은 늘 도망가",
@@ -309,7 +359,9 @@
     "language": "ko",
     "genre": "트로트",
     "tjNumber": "29622",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 55,
+    "highMidi": 69
   },
   {
     "title": "Tears",
@@ -321,7 +373,9 @@
     "language": "ko",
     "genre": "발라드",
     "tjNumber": "311",
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 57,
+    "highMidi": 81
   },
   {
     "title": "Bad Guy",
@@ -333,7 +387,9 @@
     "language": "en",
     "genre": "팝",
     "tjNumber": null,
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 55,
+    "highMidi": 67
   },
   {
     "title": "Shape of You",
@@ -345,7 +401,9 @@
     "language": "en",
     "genre": "팝",
     "tjNumber": null,
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 58,
+    "highMidi": 73
   },
   {
     "title": "Perfect",
@@ -357,6 +415,8 @@
     "language": "en",
     "genre": "팝",
     "tjNumber": null,
-    "kyNumber": null
+    "kyNumber": null,
+    "lowMidi": 60,
+    "highMidi": 74
   }
 ]

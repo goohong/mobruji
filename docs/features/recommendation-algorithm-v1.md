@@ -166,3 +166,8 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **fetch=EAGER**: 곡 ID만 담는 작은 정수 컬렉션 + 요청과 의미적으로 한 묶음 + 다른 도메인 join도 application 레벨이라 트랜잭션 분리 이점이 없어 LAZY는 `LazyInitializationException` 리스크만 증가. EAGER로 두어 `findById` 단일 호출로 풀-로드.
   - **테스트**: 단위 라운드트립 1건(`RecommendationRequestEntityPersistenceTest`) + E2E 1건(`RecommendationExcludeSongIdsTest#excludeSongIds_persistedOnRequestEntity` — API 호출 → DB 영속 검증). 결정성/seed/필터링 회귀는 기존 4건이 가드.
   - **결정성 영향 없음**: `SeedDeriver` 입력은 그대로(파이프라인 sort/dedup만 사용). 영속된 컬럼은 분석·후속 기능용.
+- 2026-05-21: 추천 응답 UX 보강 — difficulty + 노트명 노출 (PR #96, closes #77, #95).
+  - **응답 필드 추가**: `RecommendedSongResponse.song`이 참조하는 `SongResponse`에 `difficulty: Difficulty`(EASY/NORMAL/HARD), `lowMidi`/`highMidi`(MIDI 정수), `lowestNoteName`/`highestNoteName`(예: "E5") 추가.
+  - **UX 배경**(이슈 #75/#77, 2026-05-21 사용자 결정): 추천 카드의 음역 막대 그래프를 폐기하고 "가창 난이도 라벨 + 최고음 표기"로 대체. 사람이 즉시 이해할 수 있는 표현 우선.
+  - **분류 룰**: fe(`web/lib/difficulty.ts`)와 1:1 일치. HARD: high≥76(E5) 또는 span≥17, NORMAL: 71~75, EASY: <71. 임계값 영속화는 ADR 0007 후보(본진 후속).
+  - **알고리즘 영향 없음**: 본 PR은 응답 표현만 추가. score 산식·다양성 후처리·결정성 어떤 것도 변경하지 않음. 기존 가드 테스트 모두 통과.

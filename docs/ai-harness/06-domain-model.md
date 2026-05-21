@@ -33,6 +33,8 @@
 | 곡 음역 | SongRange | 곡 자체의 음역 범위 |
 | 추천 | Recommendation | 사용자 컨텍스트 기반 곡 매칭 결과 |
 | 분위기 | Mood | 추천 입력 중 정성적 요소 (예: 신남, 잔잔함) |
+| 가창 난이도 | Difficulty | 곡을 부르기 어려운 정도 (EASY/NORMAL/HARD). 곡 음역(`lowMidi`/`highMidi`)으로 자동 분류 (PR #96, 이슈 #77) |
+| 음표명 | NoteName | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -70,11 +72,15 @@
 | `tjNumber` | String(16) | nullable | TJ 노래방 번호 |
 | `kyNumber` | String(16) | nullable | 금영 노래방 번호 |
 | `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED |
+| `lowMidi` | Integer | nullable | 곡 보컬 멜로디 최저음 (MIDI). 시드부터 적재. PR #96 |
+| `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
+| `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
 - 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
-- 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재.
-- `SongRange`는 본 PR에 없음 (spec Q3 보류 결정).
+- `Song.deriveDifficulty(int lowMidi, int highMidi)` static — fe `web/lib/difficulty.ts`와 1:1 룰 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
+- 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재. 시드 각 곡에 `lowMidi`/`highMidi`가 채워져 있어 적재 시 difficulty 자동 분류된다.
+- `SongRange`는 별 VO로 두지 않고 `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전).
 
 ### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
 
@@ -129,6 +135,9 @@ erDiagram
         varchar tj_number
         varchar ky_number
         varchar metadata_source
+        int low_midi
+        int high_midi
+        varchar difficulty
         datetime created_at
         datetime updated_at
     }

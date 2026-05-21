@@ -32,6 +32,8 @@ last_reviewed: 2026-05-21
 - [ ] 곡 음역(`SongRange`)을 곡당 1쌍(최저, 최고 MIDI note)으로 보관한다.
 - [ ] 메타데이터 출처(`source`) 및 신뢰도 표기를 곡 레코드에 남긴다 (`MANUAL`, `EXTERNAL_API`, `INFERRED` 등).
 - [ ] PoC 단계에선 신곡 추가/보정이 **DB 직접 또는 시드 SQL/JSON** 으로 가능하면 충분 (관리자 UI는 비범위).
+- [x] (PR #96, closes #77) 곡 음역(`lowMidi`/`highMidi`)으로부터 가창 난이도(EASY/NORMAL/HARD)를 자동 분류하여 영속하고 응답으로 노출. 분류 룰은 fe `web/lib/difficulty.ts`와 1:1 일치 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
+- [x] (PR #96) 응답에 `lowestNoteName`/`highestNoteName` 음표명 표기 노출 (예: "C4", "E5"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기).
 
 ### 비기능 요구사항
 - 외부 API 호출 시 키/토큰은 환경변수로만 (`docs/ai-harness/04-security-policy.md`).
@@ -57,9 +59,10 @@ last_reviewed: 2026-05-21
 
 ### 5-1) 도메인 모델
 - 신규: **`Song`** (Entity) — 카탈로그의 1행.
-  - 필드(잠정): `id`, `title`, `artist`, `releaseYear`, `keyOriginal`(곡 원곡 키), `songRangeLow`, `songRangeHigh`(MIDI), `bpm`, `mood`(enum, 다중), `language`, `genre`, `tjNumber`, `kyNumber`, `spotifyId`, `isrc`, `metadataSource`, `metadataConfidence`, `createdAt`, `updatedAt`.
-- 신규: **`SongRange`** (Value Object) — `(lowestNote, highestNote)` MIDI 표현. `VoiceRange`와 동일 표현 규약 사용해 매칭 비용 절감.
-- 도메인 모델 §4 유비쿼터스 랭귀지에 이미 등재된 용어: `Song`, `SongRange`, `Key`, `Mood`. 추가 후보: `MetadataSource`, `KaraokeNumber` (TJ/금영의 추상화).
+  - 필드(잠정): `id`, `title`, `artist`, `releaseYear`, `keyOriginal`(곡 원곡 키), `lowMidi`, `highMidi`(MIDI), `bpm`, `mood`(enum, 다중), `language`, `genre`, `tjNumber`, `kyNumber`, `spotifyId`, `isrc`, `metadataSource`, `metadataConfidence`, `difficulty`, `createdAt`, `updatedAt`.
+  - PR #96에서 `lowMidi`/`highMidi`/`difficulty`(enum EASY/NORMAL/HARD) 추가. `difficulty`는 `lowMidi`/`highMidi`로부터 `Song.deriveDifficulty(...)`가 자동 분류 (fe `web/lib/difficulty.ts`와 1:1 룰).
+- **`SongRange`** (별 VO) — PR #96 시점에 도입하지 않음. `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순 표현. `VoiceRange`와 동일 MIDI 표현 규약을 공유해 매칭 비용 절감 목표는 유지.
+- 도메인 모델 §4 유비쿼터스 랭귀지에 이미 등재된 용어: `Song`, `SongRange`, `Key`, `Mood`, `Difficulty`(PR #96), `NoteName`(PR #96). 추가 후보: `MetadataSource`, `KaraokeNumber` (TJ/금영의 추상화).
 
 ### 5-2) API 엔드포인트
 PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 admin 도구로.
@@ -138,3 +141,8 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
   - **분위기(Mood)는 단일 필드로 축소** — spec §5-1의 `mood(enum, 다중)`을 단일 `Mood` enum 1개로. v1 추천에서 단일 mood로 moodMatch가 충분히 작동하고, `@ElementCollection` 도입 복잡도 회피. 다중 분위기는 v2 spec에서 재검토.
   - **시드 30곡 (Q4의 100곡 → 30곡 축소)** — 1차 PoC는 30곡으로 추천 흐름 검증. 큐레이션 추가 작업은 별 PR로.
   - **Q1 MusicBrainz 보강은 본 PR에 없음** — 수기 시드 JSON만. 외부 API 보강은 후속.
+- 2026-05-21: `Difficulty` enum + `lowMidi`/`highMidi` 도입(PR #96, closes #77, #95).
+  - **`Song.lowMidi`/`highMidi`** — 곡 보컬 멜로디의 최저/최고음을 MIDI로 직접 저장 (Q3 보류 결정의 후속 진전). 별 `SongRange` VO는 도입하지 않음 — 30곡 시드 규모에선 두 필드로 충분.
+  - **`Difficulty` enum (EASY/NORMAL/HARD)** — fe(`web/lib/difficulty.ts`)와 1:1 동일 룰. 분류 임계값(HARD≥76 또는 span≥17, NORMAL 71~75, EASY <71)은 `Song`의 상수에 하드코딩. ADR 0007 후보(본진 후속).
+  - **응답 노출** — `SongResponse`에 `difficulty`, `lowestNoteName`, `highestNoteName` 추가. 노트명 변환은 `song.domain.NoteName` 유틸 (sharp 표기, fe와 일치).
+  - **시드 30곡 모두 `lowMidi`/`highMidi` 채움** — 합리적 추정값. 후속 큐레이션에서 정확도 향상 가능.
