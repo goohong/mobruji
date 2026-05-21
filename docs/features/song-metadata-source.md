@@ -1,12 +1,12 @@
 ---
 feature: 곡 메타데이터 출처 (song-metadata-source)
 slug: song-metadata-source
-status: approved
+status: implementing
 owner: "@goohong"
 scope: song
-related_issues: [3]
+related_issues: [3, 17]
 related_prs: [4]
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-21
 ---
 
 # 곡 메타데이터 출처 (song-metadata-source)
@@ -134,3 +134,7 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
   - **Q2 → (b) 수기 입력 (시드 100곡 대상)** — 크롤링은 법적 리스크 + 운영 부담으로 후순위.
   - **Q3 → (d) 본 단계 보류** — 1차 추천은 "사용자 음역대가 곡 원곡 키 ±3 semitone에 들어가는가" 규칙으로 단순화. 본격 `SongRange` 산정은 recommendation-algorithm 후속에서.
   - **Q4 → (b) 100곡, 발라드/댄스/팝 가중** — 적은 양으로도 추천 흐름 검증 가능 + 큐레이션 부담 합리적.
+- 2026-05-21: 첫 구현 PR, status=implementing. 출처: #17
+  - **분위기(Mood)는 단일 필드로 축소** — spec §5-1의 `mood(enum, 다중)`을 단일 `Mood` enum 1개로. v1 추천에서 단일 mood로 moodMatch가 충분히 작동하고, `@ElementCollection` 도입 복잡도 회피. 다중 분위기는 v2 spec에서 재검토.
+  - **시드 30곡 (Q4의 100곡 → 30곡 축소)** — 1차 PoC는 30곡으로 추천 흐름 검증. 큐레이션 추가 작업은 별 PR로.
+  - **Q1 MusicBrainz 보강은 본 PR에 없음** — 수기 시드 JSON만. 외부 API 보강은 후속.

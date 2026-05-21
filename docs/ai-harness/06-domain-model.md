@@ -40,7 +40,7 @@
 
 > 각 PR에서 신규 엔티티 도입 시 본 섹션과 §6 ERD를 같이 갱신한다.
 
-### 5-1) `VoiceRange` (PR #15, voice-range-input.md)
+### 5-1) `VoiceRange` (PR #16, voice-range-input.md)
 | 필드 | 타입 | 제약 | 설명 |
 |---|---|---|---|
 | `id` | Long | PK, autoIncrement | 내부 식별자 |
@@ -54,6 +54,27 @@
 - 불변식: `lowestNoteMidi ≤ highestNoteMidi`, MIDI 범위 [12, 119].
 - 도메인 메서드: `static create(...)`, `updateRange(...)`.
 - voice-range-input.md Q4 결정에 따라 sessionId 당 **최신 1건만** 보관(unique 제약 + service에서 createOrReplace).
+
+### 5-2) `Song` (PR #17, song-metadata-source.md)
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | |
+| `title` | String(200) | not null, not blank | |
+| `artist` | String(200) | not null, not blank | |
+| `releaseYear` | Integer | nullable | 출시 연도 |
+| `keyOriginal` | enum `MusicalKey` | not null | 메이저 12 + 마이너 12 + UNKNOWN |
+| `bpm` | Integer | nullable, 30~300 | |
+| `mood` | enum `Mood` | nullable | 단일 (v1). 다중은 v2 |
+| `language` | String(32) | nullable | ko/en/... |
+| `genre` | String(32) | nullable | |
+| `tjNumber` | String(16) | nullable | TJ 노래방 번호 |
+| `kyNumber` | String(16) | nullable | 금영 노래방 번호 |
+| `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED |
+| `createdAt`, `updatedAt` | LocalDateTime | not null | |
+
+- 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
+- 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재.
+- `SongRange`는 본 PR에 없음 (spec Q3 보류 결정).
 
 ## 6) Mermaid ERD
 
@@ -69,12 +90,29 @@ erDiagram
         datetime updated_at
     }
 
+    SONG {
+        bigint id PK
+        varchar title
+        varchar artist
+        int release_year
+        varchar key_original
+        int bpm
+        varchar mood
+        varchar language
+        varchar genre
+        varchar tj_number
+        varchar ky_number
+        varchar metadata_source
+        datetime created_at
+        datetime updated_at
+    }
+
     SONG ||--o{ RECOMMENDATION : "v1 미구현"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "v1 미구현"
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "v1: sessionId로 join (FK 없음)"
 ```
 
-- v1 단계: `VoiceRange` 만 구현. `Song`, `RecommendationRequest`, `Recommendation`은 후속 PR.
+- 현재 구현: `VoiceRange`, `Song`. `RecommendationRequest`, `Recommendation`은 다음 PR.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join.
 
 ## 7) 오픈 이슈
