@@ -4,10 +4,11 @@ slug: recommendation-history-and-feedback
 status: draft
 owner: @goohong
 scope: recommendation
-related_issues: [160]
-related_prs: [161]
-last_reviewed: 2026-05-21
-status_pr_c: in-progress (#237)
+related_issues: [160, 238, 261]
+related_prs: [161, 237, 244]
+last_reviewed: 2026-05-22
+status_pr_c: shipped (#237)
+status_pr_f: pending (#261)
 ---
 
 # 추천 히스토리 백엔드 동기화 & 좋아요/북마크 피드백
@@ -98,18 +99,28 @@ status_pr_c: in-progress (#237)
 
 #### 5-2-1) 인증/인가 (session-bound)
 
-본 spec 의 모든 endpoint 는 **session-bound endpoint** 분류에 속한다. 정책 출처는 **ADR-0011 — Session-Bound Endpoint 인증 정책**, 구현은 `com.mobruji.auth.SessionAuthGuard` (#244 — recommendation-history 적용 완료, like/bookmark/POST 계열은 후속 PR F).
+본 spec 의 모든 endpoint 는 **session-bound endpoint** 분류에 속한다. 정책 출처는 **ADR-0011 — Session-Bound Endpoint 인증 정책** (§Decision "적용 범위 (HTTP method 별 매핑 규칙)" 절은 POST/PUT/PATCH/DELETE 도 본 ADR 의 적용 대상임을 명시), 구현은 `com.mobruji.auth.SessionAuthGuard` (#244 — recommendation-history 적용 완료, like/bookmark POST/DELETE/GET 계열은 후속 PR F).
 
-- 호출자는 path/body 의 `sessionId` 와 동일한 sessionId 를 **호출자 자신이 보유함**을 증명해야 한다 (= "본인 sessionId 의 like/bookmark/추천 히스토리만 본인이 조회·수정 가능").
+- 호출자는 path/body/query 의 `sessionId` 와 동일한 sessionId 를 **호출자 자신이 보유함**을 증명해야 한다 (= "본인 sessionId 의 like/bookmark/추천 히스토리만 본인이 조회·수정 가능").
 - 증명 방식:
   - 클라이언트는 `X-Session-Id` 헤더(또는 동등한 cookie — fe 결정에 위임)로 자신의 sessionId 를 함께 전달한다.
-  - 서버는 다음 중 한 가지로 인가한다.
-    - GET `/api/v1/sessions/{sessionId}/...`: path `{sessionId}` 와 헤더 sessionId 가 **상수시간 비교(`MessageDigest.isEqual`)** 로 일치
-    - POST/DELETE `/api/v1/likes` `/api/v1/bookmarks`: request body 의 `sessionId` 와 헤더 sessionId 가 일치
+  - 서버는 다음 매핑으로 인가한다 (ADR-0011 §Decision "적용 범위" 절 그대로):
+
+    | Endpoint | sessionId 위치 | 검증 대상 |
+    |---|---|---|
+    | `GET /api/v1/sessions/{sessionId}/likes` | path | path vs header |
+    | `GET /api/v1/sessions/{sessionId}/bookmarks` | path | path vs header |
+    | `GET /api/v1/sessions/{sessionId}/recommendation-history` | path | path vs header |
+    | `POST /api/v1/likes` | body `{sessionId, songId}` | body vs header |
+    | `DELETE /api/v1/likes` | body `{sessionId, songId}` 또는 path/query (§8 Q6) | body 우선, 없으면 query |
+    | `POST /api/v1/bookmarks` | body `{sessionId, songId}` | body vs header |
+    | `DELETE /api/v1/bookmarks` | body `{sessionId, songId}` 또는 path/query (§8 Q6) | body 우선, 없으면 query |
+
+  - 상수시간 비교: `MessageDigest.isEqual(byte[], byte[])` — string `.equals()` 금지 (timing attack 회피, admin gate #229 와 동일 패턴).
 - 상태 코드 매핑 (ADR-0011 §Decision 에 따라 401 통일):
   - `X-Session-Id` 헤더 누락 / blank → **401 Unauthorized** ("missing session id")
-  - 헤더와 path/body sessionId 불일치 → **401 Unauthorized** ("session id mismatch") — 403 이 아닌 이유는 ADR-0011 §Alternatives (D)
-  - 정상 → **200/201/204** (해당 sessionId 의 리소스가 0건이어도 빈 배열/페이지 반환, 404 아님)
+  - 헤더와 path/body/query sessionId 불일치 → **401 Unauthorized** ("session id mismatch") — 403 이 아닌 이유는 ADR-0011 §Alternatives (D)
+  - 정상 → **200/201/204** (해당 sessionId 의 리소스가 0건이어도 빈 배열/페이지 반환, 404 아님). POST 멱등 케이스(같은 (session, song) 중복) 는 200 + 기존 리소스.
 - 로그 정책: sessionId 원문은 로그/예외 메시지/응답에 노출하지 않는다. 디버깅용으로는 prefix 8 자만 노출. `04-security-policy.md §3` 준수.
 - admin 인증(#229 — `X-Admin-Token`)과는 **별 트랙**이다. 한 endpoint 가 두 인증을 동시에 요구하지 않는다.
 - 향후 정식 인증(Spring Security 도입) 시에는 본 절을 ADR-0011 후속 결정으로 대체한다.
@@ -163,7 +174,7 @@ sequenceDiagram
 - [x] **PR C** (be, scope:recommendation, #237): `RecommendationResultEntry` 영속화(기존 `Recommendation` 엔티티에 매핑 — 신설 없음) + `GET /api/v1/sessions/{sid}/recommendation-history` API + V6 보조 인덱스.
 - [ ] **PR D** (fe, scope:web): SongCard 좋아요/북마크 버튼 + `/history` backend 우선 전환.
 - [ ] **PR E** (optional, scope:infra): 관측성 metric — `like.created` 등 카운터 등록.
-- [ ] **PR F** (be, scope:recommendation, ADR-0011 후속): like/bookmark POST/DELETE/GET endpoint 에 session-bound 인증 게이트 적용 (§5-2-1). recommendation-history GET 은 이미 #244 에서 적용됨. 동일 `SessionAuthGuard` 컴포넌트 재사용.
+- [ ] **PR F** (be, scope:recommendation, ADR-0011 후속, **트래커 #261**): like/bookmark POST/DELETE/GET endpoint 에 session-bound 인증 게이트 적용 (§5-2-1). recommendation-history GET 은 이미 #244 에서 적용됨. 동일 `SessionAuthGuard` 컴포넌트 재사용. 검증 매핑: GET → path, POST → body, DELETE → body 우선/없으면 query. E2E case 1~5 (§7) 추가.
 
 > PR 사이즈 가이드(03-quality-gates §PR 사이즈)에 따라 PR B는 Like만, Bookmark는 별도 PR로 쪼갤 수 있다. 구현 시 판단.
 
@@ -198,6 +209,7 @@ sequenceDiagram
 | Q4 | 익명 sessionId 다기기 공유 메커니즘 | (a) QR 페어링 / (b) URL 토큰 / (c) v0.2에서는 단일 디바이스 한정으로 두고 spec에서 제외 | @goohong / 2026-06-11 |
 | Q5 | 익명 sessionId 만료 정책 | (a) 무기한 / (b) 30일 미접속 시 만료 + 데이터 soft delete / (c) 90일 | @goohong / 2026-06-11 |
 | Q6 | DELETE API의 식별자 전달 방식 | (a) `DELETE /api/v1/likes` body / (b) `DELETE /api/v1/likes/{songId}?sessionId=...` path+query | @goohong / 2026-06-04 |
+| Q7 | `POST /api/v1/recommendations` (persistence-write) 에도 session-bound 게이트 적용? | (a) 적용 (body sessionId 위조 차단, 타인 sessionId 로 위조 추천 inject 방지) / (b) 미적용 (request 자체는 익명 OK, 다른 sessionId 의 데이터 누설은 아님 — ADR-0011 적용 범위 §Decision 의 "반대 사례" 참조) | @goohong / 2026-06-04 |
 
 ## 9) 결정 로그
 
@@ -205,3 +217,4 @@ sequenceDiagram
 - **2026-05-21 (PR C, #237)**: spec 용어 `RecommendationResultEntry` 는 PR C 구현 시점 기존 엔티티 `Recommendation`(테이블 `recommendation`) 가 동일 schema 를 가지므로 신설 없이 매핑. history 엔드포인트 경로는 voice-range-progress 와 일관성 위해 `/recommendation-history` 로 확정 (spec 표의 `/recommendations` 보다 의도 명확). V6 는 `recommendation_request(session_id, created_at)` 보조 인덱스 추가만 수행 (보호 영역 → needs-human-review).
 - **2026-05-22 (be 27, #244 closes #238)**: `recommendation-history` GET endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가. `SessionAuthGuard` (admin gate #229 와 동일 상수시간 비교 패턴) 가 path sessionId 와 헤더 값을 비교, 누락/blank/불일치 모두 401. like/bookmark/POST 계열 인증 게이트는 후속 PR F 로 분리.
 - **2026-05-22 (plan 27, ADR-0011 영속화)**: session-bound 인증 정책을 ADR-0011 로 형식화 (정책 출처를 spec 본문에서 ADR 로 이동). §5-2-1 에 상세 절 추가, 상태 코드 매핑 401 통일(#244 구현 정합), admin 트랙(#229)과 별 트랙임을 명시. 후속 like/bookmark endpoint 도 본 ADR 패턴 강제.
+- **2026-05-22 (plan 29, 본 PR)**: §5-2-1 에 endpoint × sessionId 위치 매핑 표 추가 (GET=path, POST=body, DELETE=body 우선/없으면 query). ADR-0011 §Decision 에 "적용 범위 (HTTP method 별 매핑 규칙)" 절을 추가해 like/bookmark POST/DELETE 가 본 ADR 의 적용 대상임을 명문화. PR F 항목에 검증 매핑 + E2E case 1~5 작업 범위 추가. Q7 신설 — `POST /api/v1/recommendations` (persistence-write) 의 적용 여부 결정 대기. 후속 구현 이슈 **#261** 등록 (`feat(feedback): like/bookmark POST endpoints SessionAuthGuard 적용 — ADR-0011 후속`).

@@ -21,6 +21,21 @@ v0.3 P1 진입 시점에 익명 sessionId 기반 endpoint 가 늘었다 — `GET
 - 구현은 공용 컴포넌트 `com.mobruji.auth.SessionAuthGuard` (#244 신설) 하나로 모든 session-bound endpoint 가 공유한다. admin 트랙(#229 `com.mobruji.admin.AdminTokenVerifier`)과 동일한 패턴(검증기) 으로 두되 **별 트랙**으로 둔다 — 한 endpoint 가 admin 과 session 두 인증을 동시에 요구하지 않는다.
 - 본 결정은 Spring Security 정식 도입 전까지의 **임시 게이트**다. Security 도입 시 새 ADR 로 본 결정을 superseded 처리한다.
 
+### Decision — 적용 범위 (HTTP method 별 매핑 규칙)
+
+본 ADR 은 GET endpoint 에서 출발했지만, **HTTP method 와 무관하게** 다음 조건을 만족하는 endpoint 는 모두 session-bound 분류에 속한다 — POST/PUT/PATCH/DELETE 포함.
+
+> **분류 기준**: endpoint 가 path 또는 request body 의 `sessionId` 만으로 특정 sessionId 의 데이터 (음역 / 추천 히스토리 / 좋아요 / 북마크 / voice-range snapshot 등) 를 조회·생성·수정·삭제할 수 있다면 session-bound 다.
+
+- **GET `/api/v1/sessions/{sessionId}/...`** — path `{sessionId}` vs `X-Session-Id` 헤더 일치. (#244 적용 완료)
+- **POST/PUT/PATCH** with body `sessionId` — request body 의 `sessionId` (DTO 필드) vs `X-Session-Id` 헤더 일치. **예: `POST /api/v1/likes` `POST /api/v1/bookmarks` (body 의 `{sessionId, songId}`).**
+- **DELETE** with body `sessionId` 또는 path `sessionId` — 동일 규칙 (body 우선, body 없으면 path).
+- **DELETE `/api/v1/{resource}/{songId}?sessionId=...`** 형태 (query string sessionId) — query 의 `sessionId` vs 헤더 일치. (path 의 두번째 segment 가 sessionId 가 아닌 경우, request body 가 없으면 query 로 fallback.)
+
+이 규칙은 like/bookmark POST/DELETE endpoint 에도 그대로 적용된다 — 후속 PR (recommendation-history-and-feedback spec §6 PR F) 가 동일 `SessionAuthGuard` 컴포넌트를 재사용해 1 라인 호출로 게이트한다.
+
+> **반대 사례**: `POST /api/v1/recommendations` 는 body 에 `sessionId` 가 있어 익명 sessionId 단위 추천 요청을 만들지만, 결과 곡 리스트는 sessionId 의 기존 데이터를 외부에 누설하지 않는다 (요청·응답이 같은 요청 내에서만 결합). **단**, recommendation 결과가 `Recommendation` 엔티티에 persistence 되어 후속 `GET /sessions/{id}/recommendation-history` 로 조회되는 흐름이라면 — `POST /recommendations` 도 body sessionId 의 진위성을 검증해야 타인의 sessionId 로 위조 데이터를 inject 할 수 없다. 본 ADR 은 **persistence 가 발생하는 POST** 는 session-bound 로 강제하기로 한다 — recommendation-create 도 후속 spec 에서 적용 범위에 포함시킬지 결정 (현재 P2, `recommendation-history-and-feedback.md §8 Q7` 신설 후보).
+
 ## Consequences
 ### 긍정적
 - 타 sessionId 의 음역/추천/좋아요 데이터를 외부에서 임의 조회·수정할 수 없게 됨 (#238 해소).
@@ -45,4 +60,7 @@ v0.3 P1 진입 시점에 익명 sessionId 기반 endpoint 가 늘었다 — `GET
 - PR #229 — admin endpoint `X-Admin-Token` 게이트 (별 트랙 참조 구현)
 - 정책 문서: `docs/ai-harness/04-security-policy.md`
 - Feature Spec: `docs/features/voice-range-progress.md §5-2-1`, `docs/features/recommendation-history-and-feedback.md §5-2-1`
-- 후속: #209 (sessionId TTL/회전), like/bookmark endpoint 에 본 ADR 패턴 적용 PR, v0.3 P3 Spring Security 도입 후보
+- 후속: #209 (sessionId TTL/회전), like/bookmark POST/DELETE/GET endpoint 적용 PR (recommendation-history-and-feedback spec PR F), `POST /api/v1/recommendations` persistence-write 적용 검토 (recommendation-history-and-feedback §8 Q7 신설), v0.3 P3 Spring Security 도입 후보
+
+## Changelog
+- **2026-05-22 (plan 28, 본 PR)**: §Decision 에 "적용 범위 (HTTP method 별 매핑 규칙)" 절 추가 — POST/PUT/PATCH/DELETE 까지 본 ADR 의 적용 대상임을 명시하고, body/path/query 세 위치의 sessionId 검증 매핑을 명문화. like/bookmark POST/DELETE 가 후속 PR F (recommendation-history-and-feedback §6) 에서 동일 컴포넌트로 게이트됨을 References 에 반영. persistence-write POST (예: `POST /api/v1/recommendations`) 의 적용 여부를 후속 spec Q7 로 분리.
