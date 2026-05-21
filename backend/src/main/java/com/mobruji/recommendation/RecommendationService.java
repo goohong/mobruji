@@ -41,7 +41,7 @@ public class RecommendationService {
                         recommendationCreateRequest.mood()));
 
         final List<Song> allSongs = songRepository.findAll();
-        final Random random = new Random();
+        final Random random = buildRandom(savedRequest);
         final List<ScoredSong> scoredSongs = allSongs.stream()
                 .map(song -> {
                     final ScoreBreakdown breakdown = recommendationScorer.score(
@@ -93,6 +93,25 @@ public class RecommendationService {
                         recommendation.getRankPosition()))
                 .toList();
         return new RecommendationResponse(savedRequest.getId(), recommendations);
+    }
+
+    /**
+     * jitter용 {@link Random}을 생성한다.
+     *
+     * <p>{@code seedStrategy=DERIVED}(기본)이면 요청 파라미터 해시를 seed로 사용해
+     * 같은 입력에 대해 같은 결과를 보장한다 (spec §3 비기능 — 결정성).
+     * {@code RANDOM}이면 디버깅 목적 비결정 변주.
+     */
+    private Random buildRandom(final RecommendationRequestEntity savedRequest) {
+        if (recommendationProperties.seedStrategy() == RecommendationProperties.SeedStrategy.RANDOM) {
+            return new Random();
+        }
+        final long seed = SeedDeriver.derive(
+                savedRequest.getSessionId(),
+                savedRequest.getVoiceRangeLow(),
+                savedRequest.getVoiceRangeHigh(),
+                savedRequest.getMood());
+        return new Random(seed);
     }
 
     private RecommendationResponse toResponse(

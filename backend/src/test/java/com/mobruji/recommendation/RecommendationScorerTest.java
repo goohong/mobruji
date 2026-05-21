@@ -23,7 +23,7 @@ class RecommendationScorerTest {
     private static RecommendationProperties defaultProperties() {
         return new RecommendationProperties(
                 new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1),
-                DEFAULT_DIVERSITY, 10, 0.01);
+                DEFAULT_DIVERSITY, 10, 0.01, RecommendationProperties.SeedStrategy.DERIVED);
     }
 
     private static RecommendationScorer scorer(final RecommendationProperties properties) {
@@ -96,7 +96,8 @@ class RecommendationScorerTest {
         final Song moodOnly = buildSong(MusicalKey.UNKNOWN, Mood.UPBEAT); // voiceFit=0.5(중립)
         final RecommendationProperties voiceHeavy = new RecommendationProperties(
                 new RecommendationProperties.Weights(0.8, 0.0, 0.1, 0.0),
-                DEFAULT_DIVERSITY, 10, 0.0); // jitter 0 → 결정적
+                DEFAULT_DIVERSITY, 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED); // jitter 0 → 결정적
         // when
         final double voiceScore = scorer(voiceHeavy)
                 .score(voiceOnly, 50, 80, Mood.UPBEAT, new Random(0)).total();
@@ -114,7 +115,8 @@ class RecommendationScorerTest {
         final Song moodOnly = buildSong(MusicalKey.UNKNOWN, Mood.UPBEAT);
         final RecommendationProperties moodHeavy = new RecommendationProperties(
                 new RecommendationProperties.Weights(0.1, 0.0, 0.8, 0.0),
-                DEFAULT_DIVERSITY, 10, 0.0);
+                DEFAULT_DIVERSITY, 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final double voiceScore = scorer(moodHeavy)
                 .score(voiceOnly, 50, 80, Mood.UPBEAT, new Random(0)).total();

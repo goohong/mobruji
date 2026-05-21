@@ -22,18 +22,34 @@ public record RecommendationProperties(
         Weights weights,
         Diversity diversity,
         int resultCount,
-        double jitterMagnitude
+        double jitterMagnitude,
+        SeedStrategy seedStrategy
 ) {
 
     public RecommendationProperties {
         Objects.requireNonNull(weights, "weights must not be null");
         Objects.requireNonNull(diversity, "diversity must not be null");
+        Objects.requireNonNull(seedStrategy, "seedStrategy must not be null");
         if (resultCount <= 0) {
             throw new IllegalArgumentException("resultCount must be > 0: " + resultCount);
         }
         if (jitterMagnitude < 0) {
             throw new IllegalArgumentException("jitterMagnitude must be >= 0: " + jitterMagnitude);
         }
+    }
+
+    /**
+     * jitter용 {@link java.util.Random} 시드 전략.
+     *
+     * <ul>
+     * <li>{@link #DERIVED}: 요청 파라미터 해시에서 seed 도출. 같은 입력 → 같은 결과. spec §3 비기능 기본값.</li>
+     * <li>{@link #RANDOM}: seed 없는 {@code new Random()}. 결정성을 깨고 매 호출마다 변주가 필요한
+     * 디버깅·관찰용. 운영 기본값으로는 쓰지 않는다.</li>
+     * </ul>
+     */
+    public enum SeedStrategy {
+        DERIVED,
+        RANDOM
     }
 
     public record Weights(
