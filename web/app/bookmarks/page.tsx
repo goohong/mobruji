@@ -1,22 +1,15 @@
 "use client";
 
 /**
- * 좋아요한 곡 페이지 (`/likes`, closes #176 + BE 연동 #184).
+ * 북마크한 곡 페이지 (`/bookmarks`, closes #184, spec PR D).
  *
- * 데이터 흐름:
- *   1. `useSessionStore.ensureSessionId()` 로 sessionId 확보.
- *   2. React Query `['likes', sessionId]` 로 `readLikesBySessionId` 호출 — source of truth.
- *   3. 응답 수신 시 `useLikesStore.setLikedSongIds` 로 zustand 캐시 동기화
- *      (SongCard의 낙관적 업데이트 기준이 BE와 일치하도록).
- *   4. songId 목록만 받으므로 곡 메타데이터는 `useQueries`로 `readSongById` N건 일괄 페치.
+ * 구조는 `/likes` 와 거의 동일 — source of truth는 BE
+ * (`GET /api/v1/sessions/{id}/bookmarks`). React Query → zustand 동기화 → useQueries
+ * 로 곡 메타데이터 페치 → SongCard.
  *
- * 결정 배경:
- *  - spec §5-6 은 v0.2 에서 `/likes` 전용 페이지를 만들지 않고 `/history` 탭으로만 두기로
- *    제안했지만, 백엔드 연동 검증을 빠르게 하려면 독립 라우트가 진입 동선이 명확하다.
- *    spec Q2 결론에 따라 `/history` 탭으로 흡수 또는 유지 결정 (별도 PR).
- *  - 곡 메타데이터는 좋아요 store에 보관하지 않는다 (PII 분리/store 최소화).
- *
- * 보안: sessionId는 PII이므로 화면에 노출 금지, 로그는 `safeLog` 사용.
+ * 좋아요와 북마크를 별도 페이지로 두는 이유:
+ *   - 좋아요는 "감정적 호불호", 북마크는 "다시 부를 곡 메모" 라는 의미 분리.
+ *   - 한 화면에 섞으면 카테고리가 흐려진다. spec PR D 결정.
  */
 
 import { useEffect } from "react";
@@ -25,16 +18,17 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { SongCard } from "@/app/recommend/components/SongCard";
 import { ApiError } from "@/lib/api/client";
-import { readLikesBySessionId } from "@/lib/api/feedback";
+import { readBookmarksBySessionId } from "@/lib/api/feedback";
 import { readSongById, type SongResponse } from "@/lib/api/song";
-import { useLikesStore } from "@/store/likes";
+import { useBookmarksStore } from "@/store/bookmarks";
 import { useSessionStore } from "@/store/session";
 
-export default function LikesPage() {
+export default function BookmarksPage() {
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
-  const setLikedSongIds = useLikesStore((state) => state.setLikedSongIds);
+  const setBookmarkedSongIds = useBookmarksStore(
+    (state) => state.setBookmarkedSongIds,
+  );
 
-  // 페이지 진입 시 sessionId 확보 — 미생성이면 즉시 생성.
   const sessionId = useSessionStore((state) => state.sessionId);
   useEffect(() => {
     if (!sessionId) {
@@ -42,48 +36,47 @@ export default function LikesPage() {
     }
   }, [sessionId, ensureSessionId]);
 
-  const likesQuery = useQuery({
-    queryKey: ["likes", sessionId],
+  const bookmarksQuery = useQuery({
+    queryKey: ["bookmarks", sessionId],
     queryFn: ({ signal }) =>
-      readLikesBySessionId(sessionId as string, signal),
+      readBookmarksBySessionId(sessionId as string, signal),
     enabled: Boolean(sessionId),
     staleTime: 30_000,
   });
 
-  // BE 응답 → zustand store 동기화. SongCard의 낙관적 업데이트가 BE 기준에서 출발하도록.
   useEffect(() => {
-    if (likesQuery.data) {
-      setLikedSongIds(likesQuery.data.map((entry) => entry.songId));
+    if (bookmarksQuery.data) {
+      setBookmarkedSongIds(bookmarksQuery.data.map((entry) => entry.songId));
     }
-  }, [likesQuery.data, setLikedSongIds]);
+  }, [bookmarksQuery.data, setBookmarkedSongIds]);
 
-  if (likesQuery.isPending && Boolean(sessionId)) {
-    return <LoadingLikes />;
+  if (bookmarksQuery.isPending && Boolean(sessionId)) {
+    return <LoadingBookmarks />;
   }
 
-  const likedSongIds = (likesQuery.data ?? []).map((entry) => entry.songId);
+  const bookmarkedSongIds = (bookmarksQuery.data ?? []).map(
+    (entry) => entry.songId,
+  );
 
-  if (likedSongIds.length === 0) {
-    return <EmptyLikes />;
+  if (bookmarkedSongIds.length === 0) {
+    return <EmptyBookmarks />;
   }
 
-  return <LikesContent likedSongIds={likedSongIds} />;
+  return <BookmarksContent bookmarkedSongIds={bookmarkedSongIds} />;
 }
 
-type LikesContentProps = {
-  likedSongIds: number[];
+type BookmarksContentProps = {
+  bookmarkedSongIds: number[];
 };
 
-function LikesContent({ likedSongIds }: LikesContentProps) {
+function BookmarksContent({ bookmarkedSongIds }: BookmarksContentProps) {
   const results = useQueries({
-    queries: likedSongIds.map((songId) => ({
+    queries: bookmarkedSongIds.map((songId) => ({
       queryKey: ["song", songId],
       queryFn: ({ signal }: { signal?: AbortSignal }) =>
         readSongById(songId, signal),
-      // 메타데이터는 자주 바뀌지 않음 — 좋아요 페이지 재진입 시 캐시 우선.
       staleTime: 60_000,
       retry: (failureCount: number, error: Error) => {
-        // 404는 곡이 삭제됐을 가능성 — 재시도 무의미.
         if (error instanceof ApiError && error.status === 404) {
           return false;
         }
@@ -97,13 +90,12 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
   let pendingCount = 0;
 
   results.forEach((result, index) => {
-    const songId = likedSongIds[index];
+    const songId = bookmarkedSongIds[index];
     if (result.isPending) {
       pendingCount += 1;
       return;
     }
     if (result.isError) {
-      // 404 ↔ 그 외 오류 분리: 404 는 "삭제된 곡" 안내, 그 외는 단순 누락 처리.
       missingSongIds.push(songId);
       return;
     }
@@ -117,19 +109,19 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-            Likes
+            Bookmarks
           </p>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-            좋아한 곡
+            북마크한 곡
           </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            총 {likedSongIds.length}곡을 좋아했어요.
+            총 {bookmarkedSongIds.length}곡을 북마크했어요.
             {pendingCount > 0 ? ` (불러오는 중 ${pendingCount}곡)` : null}
           </p>
         </header>
 
         {songs.length > 0 ? (
-          <ul aria-label="좋아한 곡 목록" className="flex flex-col gap-2">
+          <ul aria-label="북마크한 곡 목록" className="flex flex-col gap-2">
             {songs.map((song) => (
               <SongCard
                 key={song.id}
@@ -143,7 +135,7 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
             role="status"
             className="rounded-2xl border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
           >
-            좋아한 곡 정보를 불러올 수 없어요. 잠시 후 다시 시도해주세요.
+            북마크한 곡 정보를 불러올 수 없어요. 잠시 후 다시 시도해주세요.
           </p>
         ) : null}
 
@@ -157,29 +149,29 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
   );
 }
 
-function LoadingLikes() {
+function LoadingBookmarks() {
   return (
     <main
       role="status"
-      aria-label="좋아한 곡 불러오는 중"
+      aria-label="북마크한 곡 불러오는 중"
       className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950"
     >
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        좋아한 곡을 불러오는 중…
+        북마크한 곡을 불러오는 중…
       </p>
     </main>
   );
 }
 
-function EmptyLikes() {
+function EmptyBookmarks() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 text-center dark:bg-zinc-950">
       <div className="w-full max-w-md flex flex-col items-center gap-4">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          아직 좋아한 곡이 없어요
+          아직 북마크한 곡이 없어요
         </h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          추천 결과나 곡 검색에서 ❤️ 를 눌러 좋아한 곡을 모아보세요.
+          추천 결과나 곡 검색에서 🔖 를 눌러 다시 부르고 싶은 곡을 모아보세요.
         </p>
         <div className="flex flex-col gap-2 w-full">
           <Link

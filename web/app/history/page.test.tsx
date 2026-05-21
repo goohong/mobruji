@@ -10,7 +10,9 @@
  *  - a11y 위반 없음.
  */
 
+import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -20,6 +22,23 @@ import type {
   RecommendationHistoryEntry,
   RecommendationHistoryInput,
 } from "@/store/history";
+
+// SongCard가 React Query mutation을 사용하므로 QueryClientProvider 래핑이 필요.
+// HistoryPage가 미리보기 카드 안에 SongCard를 렌더.
+function renderWithQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+  }
+  return render(ui, { wrapper: Wrapper });
+}
 
 const { historyMock } = await vi.hoisted(async () => {
   const helper = await import("@/lib/test-helpers/mock-history-store");
@@ -81,7 +100,7 @@ afterEach(() => {
 
 describe("HistoryPage", () => {
   it("빈 상태에서 안내 문구와 음역대 입력 CTA를 렌더한다", () => {
-    render(<HistoryPage />);
+    renderWithQueryClient(<HistoryPage />);
 
     expect(
       screen.getByRole("heading", { name: /아직 받은 추천이 없어요/ }),
@@ -98,7 +117,7 @@ describe("HistoryPage", () => {
       recommendations: [buildEntry("e-1", tenMinutesAgo, [10, 20, 30, 40, 50])],
     });
 
-    render(<HistoryPage />);
+    renderWithQueryClient(<HistoryPage />);
 
     // 시간 라벨 — 10분 전.
     expect(screen.getByText(/10분 전/)).toBeInTheDocument();
@@ -121,7 +140,7 @@ describe("HistoryPage", () => {
     });
     const user = userEvent.setup();
 
-    render(<HistoryPage />);
+    renderWithQueryClient(<HistoryPage />);
 
     expect(screen.queryByText("곡-40")).not.toBeInTheDocument();
 
@@ -144,7 +163,7 @@ describe("HistoryPage", () => {
     });
     const user = userEvent.setup();
 
-    render(<HistoryPage />);
+    renderWithQueryClient(<HistoryPage />);
 
     const removeBtn = screen.getByRole("button", { name: /추천 삭제/ });
     await user.click(removeBtn);
@@ -164,7 +183,7 @@ describe("HistoryPage", () => {
     vi.stubGlobal("confirm", confirmMock);
     const user = userEvent.setup();
 
-    render(<HistoryPage />);
+    renderWithQueryClient(<HistoryPage />);
     await user.click(screen.getByRole("button", { name: "전체 삭제" }));
 
     expect(confirmMock).toHaveBeenCalled();
@@ -182,7 +201,7 @@ describe("HistoryPage", () => {
     vi.stubGlobal("confirm", confirmMock);
     const user = userEvent.setup();
 
-    render(<HistoryPage />);
+    renderWithQueryClient(<HistoryPage />);
     await user.click(screen.getByRole("button", { name: "전체 삭제" }));
 
     expect(historyMock.state().clearHistory).not.toHaveBeenCalled();
@@ -192,7 +211,7 @@ describe("HistoryPage", () => {
 
   describe("a11y", () => {
     it("빈 상태에 a11y 위반이 없다", async () => {
-      const { container } = render(<HistoryPage />);
+      const { container } = renderWithQueryClient(<HistoryPage />);
       await expectNoA11yViolations(container);
     });
 
@@ -212,7 +231,7 @@ describe("HistoryPage", () => {
         ],
       });
 
-      const { container } = render(<HistoryPage />);
+      const { container } = renderWithQueryClient(<HistoryPage />);
       await expectNoA11yViolations(container);
     });
   });

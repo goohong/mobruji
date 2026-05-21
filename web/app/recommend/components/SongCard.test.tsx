@@ -6,14 +6,43 @@
  * - 최고음/최저음 음표명, 장르 칩, score, matchReason이 노출된다.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongCard } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
+import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
+import { useSessionStore } from "@/store/session";
+
+vi.mock("@/lib/api/feedback", () => ({
+  toggleLike: vi.fn(),
+  toggleBookmark: vi.fn(),
+}));
+
+import { toggleBookmark, toggleLike } from "@/lib/api/feedback";
+
+const toggleLikeMock = vi.mocked(toggleLike);
+const toggleBookmarkMock = vi.mocked(toggleBookmark);
+
+function renderWithQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+  }
+  return render(ui, { wrapper: Wrapper });
+}
 
 function buildItem(
   overrides: Partial<RecommendedSongResponse["song"]> = {},
@@ -43,11 +72,24 @@ function buildItem(
 }
 
 beforeEach(() => {
-  // 좋아요 store 격리 — persist localStorage 영향 제거.
+  // 좋아요/북마크/세션 store 격리 — persist localStorage 영향 제거.
   useLikesStore.setState({ likedSongIds: [] });
+  useBookmarksStore.setState({ bookmarkedSongIds: [] });
+  useSessionStore.setState({
+    sessionId: "test-session-id",
+    voiceRangeId: null,
+    excludedSongIds: [],
+  });
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem("mobruji-likes");
+    localStorage.removeItem("mobruji-bookmarks");
+    localStorage.removeItem("mobruji-session");
   }
+  toggleLikeMock.mockReset();
+  toggleBookmarkMock.mockReset();
+  // 기본 응답 — 테스트별로 mockResolvedValue로 override.
+  toggleLikeMock.mockResolvedValue({ liked: true, songId: 1 });
+  toggleBookmarkMock.mockResolvedValue({ bookmarked: true, songId: 1 });
 });
 
 afterEach(() => {
@@ -57,7 +99,7 @@ afterEach(() => {
 describe("SongCard", () => {
   it("BE 응답에 difficulty가 있으면 그 값을 라벨로 노출한다", () => {
     const item = buildItem({ difficulty: "HARD" });
-    render(
+    renderWithQueryClient(
       <ul>
         <SongCard item={item} />
       </ul>,
@@ -74,7 +116,7 @@ describe("SongCard", () => {
   it("difficulty가 없고 lowMidi/highMidi만 있으면 client-side 계산 라벨을 노출한다", () => {
     // highMidi=77(F5) → HARD
     const item = buildItem({ lowMidi: 55, highMidi: 77 });
-    render(
+    renderWithQueryClient(
       <ul>
         <SongCard item={item} />
       </ul>,
@@ -90,7 +132,7 @@ describe("SongCard", () => {
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
     const item = buildItem();
-    render(
+    renderWithQueryClient(
       <ul>
         <SongCard item={item} />
       </ul>,
@@ -105,7 +147,7 @@ describe("SongCard", () => {
   // rank/score/matchReason은 숨기고 곡 정보만 노출한다.
   it("song prop만 받으면 rank/score/matchReason은 숨기고 곡 정보만 보여준다", () => {
     const item = buildItem({ lowMidi: 48, highMidi: 78 }); // HARD
-    render(
+    renderWithQueryClient(
       <ul>
         <SongCard song={item.song} />
       </ul>,
@@ -122,7 +164,7 @@ describe("SongCard", () => {
   // closes #100 — href가 주어지면 카드 전체가 곡 상세 페이지로 가는 링크가 된다.
   it("href가 주어지면 카드 전체를 상세 페이지 링크로 감싼다", () => {
     const item = buildItem({ difficulty: "NORMAL" });
-    render(
+    renderWithQueryClient(
       <ul>
         <SongCard item={item} href="/songs/1" />
       </ul>,
@@ -138,7 +180,7 @@ describe("SongCard", () => {
   describe("matchReason expander (closes #141)", () => {
     it("접힘 상태에서 '자세히 보기' 버튼이 보이고 breakdown 패널은 숨겨진다", () => {
       const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
-      render(
+      renderWithQueryClient(
         <ul>
           <SongCard item={item} userVoiceRange={{ lowMidi: 48, highMidi: 67 }} />
         </ul>,
@@ -152,7 +194,7 @@ describe("SongCard", () => {
     it("클릭하면 breakdown 항목(키 매칭/장르/음역 적합)이 노출된다", async () => {
       const user = userEvent.setup();
       const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
-      render(
+      renderWithQueryClient(
         <ul>
           <SongCard item={item} userVoiceRange={{ lowMidi: 48, highMidi: 67 }} />
         </ul>,
@@ -175,7 +217,7 @@ describe("SongCard", () => {
     it("토글 클릭으로 aria-expanded가 false ↔ true 사이를 오간다", async () => {
       const user = userEvent.setup();
       const item = buildItem({ difficulty: "NORMAL" });
-      render(
+      renderWithQueryClient(
         <ul>
           <SongCard item={item} />
         </ul>,
@@ -193,12 +235,13 @@ describe("SongCard", () => {
     });
   });
 
-  // closes #176 — 좋아요 토글 (spec PR D 일부, client-side stub).
-  describe("좋아요 토글 (closes #176)", () => {
-    it("버튼 클릭 시 aria-pressed가 토글되고 store에 반영된다", async () => {
+  // closes #176 — 좋아요 토글. closes #184 — BE 연동 mutation flow.
+  describe("좋아요 토글 (closes #176 + #184)", () => {
+    it("버튼 클릭 시 낙관적으로 store가 즉시 갱신되고 BE mutation이 호출된다", async () => {
       const user = userEvent.setup();
+      toggleLikeMock.mockResolvedValue({ liked: true, songId: 1 });
       const item = buildItem({ difficulty: "EASY" }); // song.id = 1
-      render(
+      renderWithQueryClient(
         <ul>
           <SongCard item={item} />
         </ul>,
@@ -210,14 +253,85 @@ describe("SongCard", () => {
 
       await user.click(button);
 
+      // 낙관적 UI — BE 응답 대기 없이 토글됨.
       const toggled = screen.getByRole("button", {
         name: /테스트 곡 좋아요 취소/,
       });
       expect(toggled).toHaveAttribute("aria-pressed", "true");
       expect(useLikesStore.getState().likedSongIds).toEqual([1]);
 
+      // BE 호출 검증 — sessionId+songId 전달.
+      await waitFor(() => {
+        expect(toggleLikeMock).toHaveBeenCalledWith({
+          sessionId: "test-session-id",
+          songId: 1,
+        });
+      });
+
+      // 두 번째 클릭은 BE가 liked=false 응답을 줘서 낙관값과 일치 — store 비어있어야.
+      toggleLikeMock.mockResolvedValueOnce({ liked: false, songId: 1 });
       await user.click(toggled);
-      expect(useLikesStore.getState().likedSongIds).toEqual([]);
+      await waitFor(() => {
+        expect(useLikesStore.getState().likedSongIds).toEqual([]);
+      });
+    });
+
+    it("BE mutation 실패 시 낙관적 변경을 롤백한다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+
+      // 실패 후 store는 원상복귀.
+      await waitFor(() => {
+        expect(useLikesStore.getState().likedSongIds).toEqual([]);
+      });
+      // 버튼 라벨도 원상복귀.
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 좋아요$/ }),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
+  // closes #184 — 북마크 토글.
+  describe("북마크 토글 (closes #184)", () => {
+    it("버튼 클릭 시 북마크 store가 갱신되고 BE mutation이 호출된다", async () => {
+      const user = userEvent.setup();
+      toggleBookmarkMock.mockResolvedValue({ bookmarked: true, songId: 1 });
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", {
+        name: /테스트 곡 북마크$/,
+      });
+      expect(button).toHaveAttribute("aria-pressed", "false");
+      expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([]);
+
+      await user.click(button);
+
+      const toggled = screen.getByRole("button", {
+        name: /테스트 곡 북마크 해제/,
+      });
+      expect(toggled).toHaveAttribute("aria-pressed", "true");
+      expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([1]);
+
+      await waitFor(() => {
+        expect(toggleBookmarkMock).toHaveBeenCalledWith({
+          sessionId: "test-session-id",
+          songId: 1,
+        });
+      });
     });
   });
 
@@ -226,7 +340,7 @@ describe("SongCard", () => {
   describe("a11y", () => {
     it("추천 컨텍스트 카드는 a11y 위반이 없다 (item + difficulty)", async () => {
       const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
-      const { container } = render(
+      const { container } = renderWithQueryClient(
         <ul>
           <SongCard item={item} />
         </ul>,
@@ -236,7 +350,7 @@ describe("SongCard", () => {
 
     it("검색 컨텍스트 카드는 a11y 위반이 없다 (song prop)", async () => {
       const item = buildItem({ difficulty: "NORMAL" });
-      const { container } = render(
+      const { container } = renderWithQueryClient(
         <ul>
           <SongCard song={item.song} />
         </ul>,
@@ -246,7 +360,7 @@ describe("SongCard", () => {
 
     it("href 링크 카드는 a11y 위반이 없다", async () => {
       const item = buildItem({ difficulty: "EASY" });
-      const { container } = render(
+      const { container } = renderWithQueryClient(
         <ul>
           <SongCard item={item} href="/songs/1" />
         </ul>,
@@ -256,7 +370,7 @@ describe("SongCard", () => {
 
     it("난이도 정보가 없는 카드도 a11y 위반이 없다", async () => {
       const item = buildItem();
-      const { container } = render(
+      const { container } = renderWithQueryClient(
         <ul>
           <SongCard item={item} />
         </ul>,

@@ -69,6 +69,28 @@ describe("useLikesStore.clearLikes", () => {
   });
 });
 
+// closes #184 — BE 응답 hydration용 액션.
+describe("useLikesStore.setLikedSongIds", () => {
+  it("BE 응답 배열로 store를 덮어쓴다 (기존 값 무시)", () => {
+    const { toggleLike, setLikedSongIds } = useLikesStore.getState();
+    toggleLike(1);
+    toggleLike(2);
+
+    setLikedSongIds([100, 200, 300]);
+
+    expect(useLikesStore.getState().likedSongIds).toEqual([100, 200, 300]);
+  });
+
+  it("빈 배열을 받으면 store도 비운다", () => {
+    const { toggleLike, setLikedSongIds } = useLikesStore.getState();
+    toggleLike(42);
+
+    setLikedSongIds([]);
+
+    expect(useLikesStore.getState().likedSongIds).toEqual([]);
+  });
+});
+
 describe("useLikesStore persist 라운드트립", () => {
   it("localStorage에 직렬화되며 JSON 라운드트립 시 동일 데이터를 보존한다", () => {
     const { toggleLike } = useLikesStore.getState();
