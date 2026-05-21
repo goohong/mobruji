@@ -153,7 +153,7 @@ public static Song create(final String title, final String artist, final VoiceRa
 - URL 상태: Next.js 라우터 + searchParams
 
 ### B-4) API 호출
-- 모든 API 호출은 `web/src/lib/api/` 한 곳에서 집중 관리
+- 모든 API 호출은 `web/lib/api/` 한 곳에서 집중 관리
 - fetch wrapper 또는 axios 인스턴스 1개. 컴포넌트가 직접 `fetch` 호출 금지.
 - 응답 타입은 backend DTO와 1:1 매핑 (수동 동기화 또는 추후 OpenAPI 생성기)
 

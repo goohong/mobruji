@@ -21,7 +21,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
-import { midiToNoteName, octaveAnchorMidis } from "@/lib/notes";
+import { midiToNoteName, octaveRangeMidis } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 
 const DEFAULT_LOW_MIDI = 48; // C3
@@ -38,7 +38,7 @@ export default function VoiceRangePage() {
     DEFAULT_HIGH_MIDI,
   );
 
-  const noteOptions = useMemo(() => octaveAnchorMidis(), []);
+  const noteOptions = useMemo(() => octaveRangeMidis(), []);
 
   const mutation = useMutation<
     VoiceRangeResponse,

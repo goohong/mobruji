@@ -2,7 +2,7 @@
  * 음역대 입력 페이지 렌더 테스트.
  *
  * - next/navigation, @tanstack/react-query, zustand store, API 호출을 mock.
- * - 노트 옵션이 octaveAnchorMidis() 범위(C2~C6)로 렌더되는지 확인.
+ * - 노트 옵션이 octaveRangeMidis() 범위(C2~C6)로 렌더되는지 확인.
  * - 기본값(최저음 C3, 최고음 A4) 표기 확인.
  */
 
