@@ -34,7 +34,7 @@ last_reviewed: 2026-05-21
 
 ### 비기능 요구사항
 - **결정성 보존** — `SeedDeriver.derive()` 입력에 `preferredBpm`(정규화된 int, null이면 -1)을 포함해 같은 입력 → 같은 결과. 회귀 가드 테스트로 보장.
-- **p95 200ms 유지** — 신호 2개 추가의 in-memory 계산 비용은 무시 가능. 카탈로그 수백 곡 가정.
+- **p95 200ms 유지** — 신호 2개 추가의 in-memory 계산 비용은 무시 가능. 카탈로그 수백 곡 가정. **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3**. 회귀 가드는 k6 + GH Actions.
 - **하위 호환** — `preferredBpm` 미입력 v1 클라이언트는 그대로 동작 (mood 매핑 또는 중립 fallback).
 - **영속화는 본 spec 범위 밖** — `RecommendationRequestEntity`에 `preferredBpm` 컬럼 추가는 후속 PR. v2 한정 요청 시점 입력만 파이프라인·seed에 반영.
 
