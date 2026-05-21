@@ -134,6 +134,71 @@ public static Song create(final String title, final String artist, final VoiceRa
 - **Service/Controller 생성자의 DI 주입 의존성**에도 `Objects.requireNonNull` 가드를 두지 않는다.
 - **`@ConfigurationProperties` 바인딩 레코드의 필드**는 `@Validated` + `@NotBlank`/`@NotNull` 등 Bean Validation 어노테이션으로 선언적으로 검증.
 
+### A-7) 패키지 구조 & 계층 의존
+
+ADR 0005에 따라 모든 BoundedContext(BC)는 다음 4계층 패키지를 갖는다.
+
+```
+com.mobruji.<bc>.{domain, application, infrastructure, api}
+```
+
+현재 BC 목록: `voice`, `song`, `recommendation`. 횡단 코드가 생기면 `com.mobruji.common.*`을 BC 외부에 추가한다(현재는 두지 않음).
+
+#### 계층별 책임
+
+| 계층 | 담당 | 대표 클래스 |
+|---|---|---|
+| `domain` | 엔티티, 값 객체, 도메인 예외, 도메인 서비스 (순수 자바 우선) | `Song`, `VoiceRange`, `Mood`, `MusicalKey`, `Recommendation`, `*NotFoundException` |
+| `application` | 유스케이스 서비스(`@Service`/`@Transactional`), properties, 시드 로더, 도메인 서비스 컴포넌트 | `RecommendationService`, `RecommendationProperties`, `RecommendationScorer`, `SongSeedLoader` |
+| `infrastructure` | Spring Data JPA Repository, 외부 시스템 어댑터, 영속 매핑 보조 | `*Repository` (인터페이스 = JPA), `MusicalKeyMidiResolver` (영속/메타 매핑 보조) |
+| `api` | Controller, request/response DTO, `@RestControllerAdvice` | `*Controller`, `*Request`, `*Response` |
+
+> v0.x 한정 완화: JPA 어노테이션이 붙은 엔티티는 `domain`에 둔다. "POJO 도메인 모델 + 별도 ORM 매핑 클래스" 분리는 BC 수가 늘거나 NoSQL 등 영속 다양화 욕구가 생길 때 별도 ADR로 재논의.
+
+#### 의존 방향
+
+```
+       api  ───────►  application  ─────►  domain  ◄─────  infrastructure
+```
+
+- `domain`은 **어떤 계층도 의존하지 않는다**. `com.mobruji.<other-bc>.domain`은 의존 가능 (같은 레이어이므로).
+- `application`은 `domain`과 `infrastructure`에 의존한다 (포트 분리 안 한 v0.x 단축형).
+- `api`는 `application`과 (응답 DTO 매핑을 위해) `domain`에만 의존한다. `infrastructure`/`*Repository` 직접 참조 금지.
+- `infrastructure`는 `domain`에 의존한다 (반환 타입이 도메인 엔티티). `application`/`api`를 의존하지 않는다.
+
+#### 위반 예시
+
+```java
+// 위반 1) api → infrastructure 직접 호출 (계층 침범)
+@RestController
+@RequiredArgsConstructor
+class SongController {
+    private final SongRepository songRepository; // BAD — Service를 거쳐야 함
+}
+
+// 위반 2) domain → infrastructure 의존 (역방향 의존)
+package com.mobruji.song.domain;
+import com.mobruji.song.infrastructure.SongRepository; // BAD — domain은 순수해야 함
+class Song {
+    private SongRepository repository;
+}
+
+// 위반 3) domain → application 의존
+package com.mobruji.song.domain;
+import com.mobruji.song.application.SongService; // BAD — application은 domain을 알 뿐 그 반대 아님
+```
+
+#### Cross-BC 의존 (v0.x 허용 범위)
+
+- `application` 계층에서 다른 BC의 `infrastructure.*Repository`를 주입해 사용해도 된다. 예: `RecommendationService`가 `com.mobruji.song.infrastructure.SongRepository`를 주입하는 현재 패턴.
+- `application`이 다른 BC의 `domain` 엔티티를 직접 사용해도 된다. 예: `RecommendationScorer.score(Song song, ...)`.
+- `api`/`domain`이 다른 BC의 `infrastructure`를 참조하는 것은 **금지**.
+- 미래에 BC가 5개 이상이거나 외부 ML 시스템 연동이 생기면 Port-Adapter/anti-corruption layer 도입을 별도 ADR로 결정.
+
+#### 자동 검증 (미래)
+
+ArchUnit 또는 Spring Modulith로 위 규칙을 테스트 코드로 강제하는 안을 별도 이슈로 추진(ADR 0005 마이그레이션 머지 후).
+
 ---
 
 ## B. Frontend (Next.js / TypeScript)
