@@ -31,7 +31,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type MouseEvent, type ReactNode } from "react";
 
 import type {
   RecommendedSongResponse,
@@ -48,6 +48,7 @@ import {
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
+import { useLikesStore } from "@/store/likes";
 
 /**
  * Props 분기:
@@ -115,6 +116,7 @@ export function SongCard(props: SongCardProps) {
         </div>
       </div>
 
+
       {(highestNoteName || lowestNoteName) && (
         <div className="flex items-baseline gap-3">
           {highestNoteName ? (
@@ -173,8 +175,14 @@ export function SongCard(props: SongCardProps) {
     <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
   ) : null;
 
-  // href가 있으면 본문(body)만 링크로 감싸고, breakdownPanel은 링크 외부에 둔다.
-  // 이렇게 하면 펼침 버튼 클릭이 페이지 이동을 트리거하지 않으면서도 본문 클릭은
+  // 좋아요 버튼(closes #176) — 추천/검색 두 컨텍스트 모두 노출. href 모드에서는
+  // <a> 안에 button을 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
+  const likePanel = (
+    <LikeButton songId={song.id} songTitle={song.title} />
+  );
+
+  // href가 있으면 본문(body)만 링크로 감싸고, footer(breakdown + like)는 링크 외부에 둔다.
+  // 이렇게 하면 펼침/좋아요 버튼 클릭이 페이지 이동을 트리거하지 않으면서도 본문 클릭은
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
@@ -186,11 +194,10 @@ export function SongCard(props: SongCardProps) {
         >
           {body}
         </Link>
-        {breakdownPanel ? (
-          <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
-            {breakdownPanel}
-          </div>
-        ) : null}
+        <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+          {breakdownPanel}
+          {likePanel}
+        </div>
       </li>
     );
   }
@@ -202,7 +209,55 @@ export function SongCard(props: SongCardProps) {
     >
       {body}
       {breakdownPanel}
+      {likePanel}
     </li>
+  );
+}
+
+/**
+ * 좋아요 토글 버튼 (closes #176, spec PR D 일부).
+ *
+ * - aria-pressed로 토글 상태 노출 — 스크린 리더가 "눌림/안 눌림"으로 읽는다.
+ * - 텍스트 라벨도 "좋아요" / "좋아요 취소"로 바뀌어 시각 사용자에게도 명확.
+ * - 클릭 이벤트의 preventDefault/stopPropagation은 부모 링크가 없으므로 불필요하지만
+ *   미래 변경에 대비해 명시적으로 가두어 둔다. (href 모드에서는 link 외부에 있어
+ *   실제로는 새 나갈 일이 없다.)
+ * - 백엔드 미구현 상태이므로 zustand persist store만 갱신 (낙관적 업데이트 아닌
+ *   "유일한 source of truth"). 백엔드 PR B 머지 후에는 React Query mutation으로
+ *   대체될 예정 — 본 store는 오프라인 fallback으로 격하된다.
+ */
+type LikeButtonProps = {
+  songId: number;
+  songTitle: string;
+};
+
+function LikeButton({ songId, songTitle }: LikeButtonProps) {
+  const liked = useLikesStore((state) => state.likedSongIds.includes(songId));
+  const toggleLike = useLikesStore((state) => state.toggleLike);
+
+  function handleClick(event: MouseEvent<HTMLButtonElement>) {
+    // href 모드에서 link 외부 footer에 있긴 하지만, 만약 미래에 위치가 바뀌어도
+    // 안전하도록 명시적으로 부모 click 전파를 막는다.
+    event.preventDefault();
+    event.stopPropagation();
+    toggleLike(songId);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-pressed={liked}
+      aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+        liked
+          ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
+          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      }`}
+    >
+      <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
+      <span>{liked ? "좋아요 취소" : "좋아요"}</span>
+    </button>
   );
 }
 

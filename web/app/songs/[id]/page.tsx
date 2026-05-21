@@ -42,6 +42,7 @@ import {
   type Difficulty,
 } from "@/lib/difficulty";
 import { midiToNoteName } from "@/lib/notes";
+import { useLikesStore } from "@/store/likes";
 
 export default function SongDetailPage() {
   const params = useParams<{ id: string }>();
@@ -136,6 +137,9 @@ function SongDetailView({ song }: SongDetailViewProps) {
         <p className="text-base text-zinc-600 dark:text-zinc-300">
           {song.artist}
         </p>
+        <div className="pt-1">
+          <DetailLikeButton songId={song.id} songTitle={song.title} />
+        </div>
       </header>
 
       <section
@@ -213,6 +217,40 @@ function SongDetailView({ song }: SongDetailViewProps) {
         </Link>
       </div>
     </Shell>
+  );
+}
+
+/**
+ * 곡 상세 페이지의 좋아요 버튼 (closes #176, spec PR D 일부).
+ *
+ * SongCard 내부 LikeButton과 동일한 시그널(aria-pressed + 좋아요 토글)이지만,
+ * 상세 페이지에서는 더 큰 hit target/시인성을 위해 별도 스타일을 둔다.
+ * 백엔드 PR B 머지 후에는 React Query mutation으로 교체 예정.
+ */
+type DetailLikeButtonProps = {
+  songId: number;
+  songTitle: string;
+};
+
+function DetailLikeButton({ songId, songTitle }: DetailLikeButtonProps) {
+  const liked = useLikesStore((state) => state.likedSongIds.includes(songId));
+  const toggleLike = useLikesStore((state) => state.toggleLike);
+
+  return (
+    <button
+      type="button"
+      onClick={() => toggleLike(songId)}
+      aria-pressed={liked}
+      aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+        liked
+          ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
+          : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+      }`}
+    >
+      <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
+      <span>{liked ? "좋아요 취소" : "좋아요"}</span>
+    </button>
   );
 }
 
