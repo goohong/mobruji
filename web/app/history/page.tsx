@@ -23,10 +23,13 @@ import Link from "next/link";
 
 import { SongCard } from "@/app/recommend/components/SongCard";
 import { formatRelativeKorean } from "@/lib/relativeTime";
+import { extractVoiceRangeProgress } from "@/lib/voiceRangeProgress";
 import {
   useHistoryStore,
   type RecommendationHistoryEntry,
 } from "@/store/history";
+
+import { VoiceRangeProgressCard } from "./components/VoiceRangeProgressCard";
 
 const PREVIEW_COUNT = 3;
 
@@ -51,6 +54,15 @@ export default function HistoryPage() {
     }
   };
 
+  // 음역 발전 추적(closes #170) — entries 가 2건 이상이고 MIDI 스냅샷이 있는 경우만 표시.
+  // 1건 이하인 경우는 카드 자리에 "더 측정해보세요" CTA 를 노출 (사용자 동기부여).
+  const progressSummary = extractVoiceRangeProgress(recommendations);
+  const measuredCount = recommendations.filter(
+    (entry) =>
+      typeof entry.voiceRangeLowMidi === "number" &&
+      typeof entry.voiceRangeHighMidi === "number",
+  ).length;
+
   return (
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
       <div className="w-full max-w-2xl flex flex-col gap-6">
@@ -65,6 +77,12 @@ export default function HistoryPage() {
             최근 {recommendations.length}건의 추천을 기록해두었어요. 최대 20건까지 보관됩니다.
           </p>
         </header>
+
+        {progressSummary ? (
+          <VoiceRangeProgressCard summary={progressSummary} />
+        ) : measuredCount <= 1 ? (
+          <ProgressEmptyCta />
+        ) : null}
 
         <ul aria-label="추천 히스토리" className="flex flex-col gap-3">
           {recommendations.map((entry) => (
@@ -155,6 +173,35 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
         </p>
       )}
     </li>
+  );
+}
+
+function ProgressEmptyCta() {
+  // 음역 발전 추적은 datapoint 2개 이상 필요 — 1건 이하인 경우 동기부여 CTA.
+  // 빈 상태 페이지(`EmptyHistory`)와 다른 점: 여기는 이미 추천 1건은 받았지만 음역 측정이
+  // 부족한 케이스. 사용자가 다른 측정 방식(자동 마이크 등)으로 한 번 더 측정하도록 유도.
+  return (
+    <section
+      aria-labelledby="voice-range-progress-empty-heading"
+      className="flex flex-col gap-3 rounded-2xl border border-dashed border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
+    >
+      <h2
+        id="voice-range-progress-empty-heading"
+        className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+      >
+        음역 발전 그래프는 측정 2번부터
+      </h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        같은 음역으로 두 번 이상 추천을 받으면 측정값의 변화를 그래프로 보여드릴게요.
+        자동 측정을 한 번 더 시도해보세요.
+      </p>
+      <Link
+        href="/voice-range/auto"
+        className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+      >
+        더 측정해보기
+      </Link>
+    </section>
   );
 }
 

@@ -95,6 +95,11 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       // 추천 히스토리(closes #134)에 누적. 빈 응답은 히스토리에 남기지 않는다 —
       // 사용자가 "다시 보기"를 눌렀을 때 빈 카드만 보는 의미 없는 항목이 쌓이지 않게.
       if (data.recommendations.length > 0) {
+        // 음역 발전 추적 카드(closes #170)용으로 추천 시점의 lowest/highest MIDI를
+        // 함께 보관한다. voiceRangeQuery.data 가 onSuccess 시점에 정의돼 있을
+        // 가능성이 매우 높지만 (이 mutation 은 voice-range 가 성공해야만 호출됨),
+        // 방어적으로 optional 로 spread 한다.
+        const snapshot = voiceRangeQuery.data;
         appendHistory({
           requestId: data.requestId,
           voiceRangeId: voiceRangeIdFromStore,
@@ -102,6 +107,9 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           // 이 추천을 만든 시점의 누적 제외 셋 스냅샷. variables 에 담겨 들어온 값
           // (호출 시점 store snapshot)이라 호출 후 store 변경에 영향받지 않는다.
           excludedSongIds: variables.excludeSongIds,
+          voiceRangeLowMidi: variables.voiceRangeLow,
+          voiceRangeHighMidi: variables.voiceRangeHigh,
+          voiceRangeSourceMethod: snapshot?.sourceMethod,
         });
       }
     },
