@@ -31,6 +31,7 @@ import userEvent from "@testing-library/user-event";
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import { createRecommendation } from "@/lib/api/recommendation";
+import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 const { sessionMock } = await vi.hoisted(async () => {
   const helper = await import("@/lib/test-helpers/mock-session-store");
@@ -515,6 +516,92 @@ describe("RecommendPage", () => {
       voiceRangeLow: 48,
       voiceRangeHigh: 72,
       excludeSongIds: [100, 200, 300, 400],
+    });
+  });
+
+  // closes #107 — 추천 결과 페이지는 NoSession fallback, 카드 리스트, 빈 결과 fallback
+  // 세 상태가 모두 노출 가능하다. 각 상태에 대해 a11y 위반이 없어야 한다.
+  describe("a11y", () => {
+    it("NoSession fallback 상태에 a11y 위반이 없다", async () => {
+      const { container } = renderWithQueryClient(<RecommendPage />);
+      expect(
+        screen.getByRole("heading", {
+          name: /음역대가 아직 등록되지 않았습니다/,
+        }),
+      ).toBeInTheDocument();
+      await expectNoA11yViolations(container);
+    });
+
+    it("카드 리스트 렌더 상태에 a11y 위반이 없다", async () => {
+      sessionMock.set({ sessionId: "sess-a11y", voiceRangeId: 1 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 1,
+        sessionId: "sess-a11y",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValue({
+        requestId: 1,
+        recommendations: [
+          {
+            rankPosition: 1,
+            score: 0.9,
+            matchReason: "음역 매칭",
+            song: {
+              id: 1,
+              title: "a11y 곡",
+              artist: "a11y 가수",
+              releaseYear: 2024,
+              keyOriginal: "C_MAJOR",
+              bpm: 110,
+              mood: "UPBEAT",
+              language: "ko",
+              genre: "POP",
+              tjNumber: "T-1",
+              kyNumber: "K-1",
+              metadataSource: "MANUAL_SEED",
+            },
+          },
+        ],
+      });
+
+      const { container } = renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("a11y 곡")).toBeInTheDocument();
+      });
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("빈 응답 fallback 상태에 a11y 위반이 없다", async () => {
+      sessionMock.set({ sessionId: "sess-empty-a11y", voiceRangeId: 9 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 9,
+        sessionId: "sess-empty-a11y",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce({
+        requestId: 1,
+        recommendations: [],
+      });
+
+      const { container } = renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/더 이상 추천할 곡이 없어요/),
+        ).toBeInTheDocument();
+      });
+
+      await expectNoA11yViolations(container);
     });
   });
 
