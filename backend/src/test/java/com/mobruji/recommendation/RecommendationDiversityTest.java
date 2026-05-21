@@ -21,7 +21,8 @@ class RecommendationDiversityTest {
                 new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1),
                 new RecommendationProperties.Diversity(maxSameArtist, maxSameGenre),
                 10,
-                0.01);
+                0.01,
+                RecommendationProperties.SeedStrategy.DERIVED);
         return new DiversityPostProcessor(properties);
     }
 
