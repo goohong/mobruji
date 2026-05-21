@@ -1,0 +1,12 @@
+# Python audio analysis tooling (spec: docs/features/audio-tooling-bootstrap.md)
+# 의존성 핀은 부트스트랩 시점 기준이며, PR B에서 spleeter/demucs 도입 시 재조정.
+yt-dlp==2025.1.15
+librosa==0.10.2.post1
+numpy==1.26.4
+soundfile==0.12.1
+
+# 테스트
+pytest==8.3.4
+
+# 옵션 (보컬 stem 분리). Python 3.10 호환성 + TF 의존성 무거움 → PR B에서 검토.
+# spleeter==2.4.0

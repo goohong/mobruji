@@ -1,9 +1,10 @@
 /**
- * 좋아한 곡 페이지 테스트 (closes #176, spec PR D 일부).
+ * 좋아한 곡 페이지 테스트 (closes #176 + BE 연동 #184).
  *
  * 시나리오:
- *  - 빈 상태: 좋아요가 0건일 때 안내 + CTA 노출, readSongById 호출 없음.
- *  - 좋아요가 있으면 readSongById 가 N번 호출되고 카드 리스트가 렌더된다.
+ *  - 빈 상태: BE가 빈 배열 응답 시 안내 + CTA 노출, readSongById 호출 없음.
+ *  - BE GET이 N건을 반환하면 readSongById가 N번 호출되고 카드 리스트가 렌더된다.
+ *  - BE 응답은 zustand store(`useLikesStore`)와 동기화된다.
  */
 
 import { ReactNode } from "react";
@@ -12,8 +13,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import LikesPage from "./page";
+import { readLikesBySessionId, type LikeResponse } from "@/lib/api/feedback";
 import { readSongById, type SongResponse } from "@/lib/api/song";
 import { useLikesStore } from "@/store/likes";
+import { useSessionStore } from "@/store/session";
 
 vi.mock("@/lib/api/song", async () => {
   const actual =
@@ -24,7 +27,15 @@ vi.mock("@/lib/api/song", async () => {
   };
 });
 
+vi.mock("@/lib/api/feedback", () => ({
+  readLikesBySessionId: vi.fn(),
+  toggleLike: vi.fn(),
+  toggleBookmark: vi.fn(),
+  readBookmarksBySessionId: vi.fn(),
+}));
+
 const readSongByIdMock = vi.mocked(readSongById);
+const readLikesMock = vi.mocked(readLikesBySessionId);
 
 function buildSong(id: number): SongResponse {
   return {
@@ -43,6 +54,15 @@ function buildSong(id: number): SongResponse {
   };
 }
 
+function buildLike(songId: number): LikeResponse {
+  return {
+    id: songId * 10,
+    sessionId: "test-session-id",
+    songId,
+    createdAt: "2026-05-20T12:00:00",
+  };
+}
+
 function renderWithQueryClient(ui: ReactNode) {
   const client = new QueryClient({
     defaultOptions: {
@@ -58,9 +78,16 @@ function renderWithQueryClient(ui: ReactNode) {
 
 beforeEach(() => {
   readSongByIdMock.mockReset();
+  readLikesMock.mockReset();
   useLikesStore.setState({ likedSongIds: [] });
+  useSessionStore.setState({
+    sessionId: "test-session-id",
+    voiceRangeId: null,
+    excludedSongIds: [],
+  });
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem("mobruji-likes");
+    localStorage.removeItem("mobruji-session");
   }
 });
 
@@ -69,12 +96,16 @@ afterEach(() => {
 });
 
 describe("/likes 페이지", () => {
-  it("좋아요가 0건이면 빈 상태 CTA를 노출하고 readSongById 호출 없음", () => {
+  it("BE가 빈 배열을 반환하면 빈 상태 CTA를 노출하고 readSongById 호출 없음", async () => {
+    readLikesMock.mockResolvedValue([]);
+
     renderWithQueryClient(<LikesPage />);
 
-    expect(
-      screen.getByRole("heading", { name: /아직 좋아한 곡이 없어요/ }),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /아직 좋아한 곡이 없어요/ }),
+      ).toBeInTheDocument();
+    });
     expect(
       screen.getByRole("link", { name: /추천 받으러 가기/ }),
     ).toHaveAttribute("href", "/recommend");
@@ -82,10 +113,15 @@ describe("/likes 페이지", () => {
       screen.getByRole("link", { name: /곡 검색하기/ }),
     ).toHaveAttribute("href", "/songs");
     expect(readSongByIdMock).not.toHaveBeenCalled();
+    // BE는 sessionId를 받아 호출됐다.
+    expect(readLikesMock).toHaveBeenCalledWith(
+      "test-session-id",
+      expect.anything(),
+    );
   });
 
-  it("좋아요한 곡 메타데이터를 페치해서 카드 리스트로 렌더한다", async () => {
-    useLikesStore.setState({ likedSongIds: [42, 99] });
+  it("BE GET 응답으로 곡 메타데이터를 페치해서 카드 리스트로 렌더하고 store를 동기화한다", async () => {
+    readLikesMock.mockResolvedValue([buildLike(42), buildLike(99)]);
     readSongByIdMock.mockImplementation(async (id) => buildSong(id));
 
     renderWithQueryClient(<LikesPage />);
@@ -103,5 +139,7 @@ describe("/likes 페이지", () => {
     expect(
       screen.getByRole("link", { name: /좋아요-곡-42 상세 보기/ }),
     ).toHaveAttribute("href", "/songs/42");
+    // zustand store가 BE 응답과 동기화돼야 함.
+    expect(useLikesStore.getState().likedSongIds).toEqual([42, 99]);
   });
 });

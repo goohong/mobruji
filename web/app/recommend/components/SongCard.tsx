@@ -32,7 +32,13 @@
 
 import Link from "next/link";
 import { useId, useState, type MouseEvent, type ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import {
+  toggleBookmark as toggleBookmarkApi,
+  toggleLike as toggleLikeApi,
+} from "@/lib/api/feedback";
+import { safeLog } from "@/lib/logging";
 import type {
   RecommendedSongResponse,
   SongResponse,
@@ -48,7 +54,10 @@ import {
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
+import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
+import { useSessionStore } from "@/store/session";
+import { Chip } from "@/components/ui";
 
 /**
  * Props 분기:
@@ -147,11 +156,7 @@ export function SongCard(props: SongCardProps) {
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          {song.genre ? (
-            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-              {song.genre}
-            </span>
-          ) : null}
+          {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {item ? (
             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {item.matchReason}
@@ -175,14 +180,17 @@ export function SongCard(props: SongCardProps) {
     <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
   ) : null;
 
-  // 좋아요 버튼(closes #176) — 추천/검색 두 컨텍스트 모두 노출. href 모드에서는
-  // <a> 안에 button을 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
-  const likePanel = (
-    <LikeButton songId={song.id} songTitle={song.title} />
+  // 좋아요 + 북마크 버튼(closes #176 + #184) — 추천/검색 두 컨텍스트 모두 노출.
+  // href 모드에서는 <a> 안에 button을 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
+  const feedbackPanel = (
+    <div className="flex flex-wrap items-center gap-2">
+      <LikeButton songId={song.id} songTitle={song.title} />
+      <BookmarkButton songId={song.id} songTitle={song.title} />
+    </div>
   );
 
-  // href가 있으면 본문(body)만 링크로 감싸고, footer(breakdown + like)는 링크 외부에 둔다.
-  // 이렇게 하면 펼침/좋아요 버튼 클릭이 페이지 이동을 트리거하지 않으면서도 본문 클릭은
+  // href가 있으면 본문(body)만 링크로 감싸고, footer(breakdown + 피드백)는 링크 외부에 둔다.
+  // 이렇게 하면 펼침/좋아요/북마크 버튼 클릭이 페이지 이동을 트리거하지 않으면서도 본문 클릭은
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
@@ -196,7 +204,7 @@ export function SongCard(props: SongCardProps) {
         </Link>
         <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
           {breakdownPanel}
-          {likePanel}
+          {feedbackPanel}
         </div>
       </li>
     );
@@ -209,22 +217,29 @@ export function SongCard(props: SongCardProps) {
     >
       {body}
       {breakdownPanel}
-      {likePanel}
+      {feedbackPanel}
     </li>
   );
 }
 
 /**
- * 좋아요 토글 버튼 (closes #176, spec PR D 일부).
+ * 좋아요 토글 버튼 (closes #176, BE 연동 #184).
  *
- * - aria-pressed로 토글 상태 노출 — 스크린 리더가 "눌림/안 눌림"으로 읽는다.
- * - 텍스트 라벨도 "좋아요" / "좋아요 취소"로 바뀌어 시각 사용자에게도 명확.
- * - 클릭 이벤트의 preventDefault/stopPropagation은 부모 링크가 없으므로 불필요하지만
- *   미래 변경에 대비해 명시적으로 가두어 둔다. (href 모드에서는 link 외부에 있어
- *   실제로는 새 나갈 일이 없다.)
- * - 백엔드 미구현 상태이므로 zustand persist store만 갱신 (낙관적 업데이트 아닌
- *   "유일한 source of truth"). 백엔드 PR B 머지 후에는 React Query mutation으로
- *   대체될 예정 — 본 store는 오프라인 fallback으로 격하된다.
+ * UX:
+ *   - aria-pressed로 토글 상태 노출 — 스크린 리더가 "눌림/안 눌림"으로 읽는다.
+ *   - 텍스트 라벨도 "좋아요" / "좋아요 취소"로 바뀌어 시각 사용자에게도 명확.
+ *   - mutation 진행 중에는 `aria-busy`, `disabled` 활성화 — 중복 클릭 방지.
+ *
+ * 동기화 흐름:
+ *   1. onClick → useSessionStore.ensureSessionId() 로 sessionId 확보.
+ *   2. mutation.mutate 호출 — onMutate에서 zustand store를 즉시 토글(낙관).
+ *   3. BE 응답 도착 후 onSuccess: 응답의 `liked` 값으로 store를 한 번 더 보정
+ *      (낙관값과 BE 응답이 다를 수 있는 race 상황 안전망).
+ *   4. onError: 낙관 변경을 롤백 + safeLog.error로 PII 마스킹 후 보고.
+ *   5. ['likes', sessionId] 쿼리 invalidate — `/likes` 페이지가 자동 재페치.
+ *
+ * 보안:
+ *   - sessionId는 PII로 분류 (logging.ts §SENSITIVE_KEYS) — safeLog 사용 필수.
  */
 type LikeButtonProps = {
   songId: number;
@@ -234,22 +249,58 @@ type LikeButtonProps = {
 function LikeButton({ songId, songTitle }: LikeButtonProps) {
   const liked = useLikesStore((state) => state.likedSongIds.includes(songId));
   const toggleLike = useLikesStore((state) => state.toggleLike);
+  const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: ({ sessionId }: { sessionId: string }) =>
+      toggleLikeApi({ sessionId, songId }),
+    onMutate: () => {
+      // 낙관적 토글 — UI 응답성 우선.
+      toggleLike(songId);
+      // 롤백 시 다시 토글하면 원상복귀되므로 별도 snapshot 불필요.
+      return { rolledBack: false };
+    },
+    onSuccess: async (response, { sessionId }) => {
+      // BE 응답이 낙관값과 일치하지 않으면 보정.
+      const currentlyLiked = useLikesStore
+        .getState()
+        .likedSongIds.includes(songId);
+      if (currentlyLiked !== response.liked) {
+        toggleLike(songId);
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["likes", sessionId],
+      });
+    },
+    onError: (error) => {
+      // 낙관 변경 롤백.
+      toggleLike(songId);
+      safeLog.error("[SongCard] 좋아요 토글 실패", error);
+    },
+  });
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {
-    // href 모드에서 link 외부 footer에 있긴 하지만, 만약 미래에 위치가 바뀌어도
-    // 안전하도록 명시적으로 부모 click 전파를 막는다.
     event.preventDefault();
     event.stopPropagation();
-    toggleLike(songId);
+    if (mutation.isPending) {
+      return;
+    }
+    const sessionId = ensureSessionId();
+    mutation.mutate({ sessionId });
   }
+
+  const busy = mutation.isPending;
 
   return (
     <button
       type="button"
       onClick={handleClick}
+      disabled={busy}
       aria-pressed={liked}
+      aria-busy={busy}
       aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
         liked
           ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
           : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
@@ -257,6 +308,82 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
     >
       <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
       <span>{liked ? "좋아요 취소" : "좋아요"}</span>
+    </button>
+  );
+}
+
+/**
+ * 북마크 토글 버튼 (closes #184).
+ *
+ * 동작은 LikeButton과 동일 — 별도 store/엔드포인트만 사용.
+ * 시각적으로는 🔖 + amber 톤으로 구분.
+ */
+type BookmarkButtonProps = {
+  songId: number;
+  songTitle: string;
+};
+
+function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
+  const bookmarked = useBookmarksStore((state) =>
+    state.bookmarkedSongIds.includes(songId),
+  );
+  const toggleBookmark = useBookmarksStore((state) => state.toggleBookmark);
+  const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: ({ sessionId }: { sessionId: string }) =>
+      toggleBookmarkApi({ sessionId, songId }),
+    onMutate: () => {
+      toggleBookmark(songId);
+    },
+    onSuccess: async (response, { sessionId }) => {
+      const currentlyBookmarked = useBookmarksStore
+        .getState()
+        .bookmarkedSongIds.includes(songId);
+      if (currentlyBookmarked !== response.bookmarked) {
+        toggleBookmark(songId);
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["bookmarks", sessionId],
+      });
+    },
+    onError: (error) => {
+      toggleBookmark(songId);
+      safeLog.error("[SongCard] 북마크 토글 실패", error);
+    },
+  });
+
+  function handleClick(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (mutation.isPending) {
+      return;
+    }
+    const sessionId = ensureSessionId();
+    mutation.mutate({ sessionId });
+  }
+
+  const busy = mutation.isPending;
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={busy}
+      aria-pressed={bookmarked}
+      aria-busy={busy}
+      aria-label={
+        bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
+      }
+      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+        bookmarked
+          ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
+          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      }`}
+    >
+      <span aria-hidden="true">🔖</span>
+      <span>{bookmarked ? "북마크 해제" : "북마크"}</span>
     </button>
   );
 }

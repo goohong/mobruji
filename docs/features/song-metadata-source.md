@@ -61,6 +61,7 @@ last_reviewed: 2026-05-21
 - 신규: **`Song`** (Entity) — 카탈로그의 1행.
   - 필드(잠정): `id`, `title`, `artist`, `releaseYear`, `keyOriginal`(곡 원곡 키), `lowMidi`, `highMidi`(MIDI), `bpm`, `mood`(enum, 다중), `language`, `genre`, `tjNumber`, `kyNumber`, `spotifyId`, `isrc`, `metadataSource`, `metadataConfidence`, `difficulty`, `createdAt`, `updatedAt`.
   - PR #96에서 `lowMidi`/`highMidi`/`difficulty`(enum EASY/NORMAL/HARD) 추가. `difficulty`는 `lowMidi`/`highMidi`로부터 `Song.deriveDifficulty(...)`가 자동 분류 (fe `web/lib/difficulty.ts`와 1:1 룰).
+  - **PR #204(closes #44, #203)에서 `isrc`(VARCHAR(12), nullable, UNIQUE) + `metadataConfidence`(DOUBLE, 0~1, default 1.0) 본진 컬럼으로 promote** — V3 마이그레이션. `metadataConfidence`는 `MANUAL_SEED`=1.0, `AUDIO_ANALYSIS` backfill 시 `result.confidence` 저장. 추천 알고리즘 입력 무관(결정성 회귀 없음). `spotifyId`는 외부 연동 spec까지 잠정 유지.
 - **`SongRange`** (별 VO) — PR #96 시점에 도입하지 않음. `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순 표현. `VoiceRange`와 동일 MIDI 표현 규약을 공유해 매칭 비용 절감 목표는 유지.
 - 도메인 모델 §4 유비쿼터스 랭귀지에 이미 등재된 용어: `Song`, `SongRange`, `Key`, `Mood`, `Difficulty`(PR #96), `NoteName`(PR #96). 추가 후보: `MetadataSource`, `KaraokeNumber` (TJ/금영의 추상화).
 

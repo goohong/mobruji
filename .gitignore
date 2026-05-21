@@ -60,3 +60,18 @@ web/pnpm-debug.log*
 
 ### Docker ###
 **/docker-data/
+
+### Python audio analysis (tools/audio-analysis/) ###
+tools/audio-analysis/.venv/
+tools/audio-analysis/__pycache__/
+tools/audio-analysis/.pytest_cache/
+tools/audio-analysis/cache/
+tools/audio-analysis/*.mp3
+tools/audio-analysis/*.wav
+tools/audio-analysis/*.m4a
+tools/audio-analysis/*.webm
+
+### Discord daemon (tools/discord-daemon/) ###
+tools/discord-daemon/venv/
+tools/discord-daemon/__pycache__/
+tools/discord-daemon/inbox.jsonl

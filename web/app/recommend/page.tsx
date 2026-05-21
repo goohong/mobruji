@@ -36,6 +36,7 @@ import { readVoiceRange, VoiceRangeResponse } from "@/lib/api/voice-range";
 import { midiToNoteName } from "@/lib/notes";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
+import { Button } from "@/components/ui";
 
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 
@@ -282,13 +283,14 @@ function RecommendationList({
             ? `${error.status}: ${error.message}`
             : error.message}
         </p>
-        <button
-          type="button"
+        <Button
+          variant="danger"
+          size="sm"
           onClick={onRetry}
-          className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+          className="self-start"
         >
           다시 시도
-        </button>
+        </Button>
       </div>
     );
   }
@@ -335,13 +337,14 @@ function RecommendationList({
         ))}
       </ul>
       <div className="flex flex-col items-stretch gap-1">
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="md"
           onClick={onRecommendAgain}
-          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="h-11"
         >
           다른 곡 추천받기
-        </button>
+        </Button>
         {excludedCount > 0 ? (
           <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
             이미 본 {excludedCount}곡은 제외하고 추천해요.

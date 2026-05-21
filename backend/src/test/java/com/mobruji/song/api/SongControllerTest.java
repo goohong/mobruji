@@ -18,6 +18,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.mobruji.song.application.SongService;
+import com.mobruji.song.application.SongStatsService;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -33,6 +34,9 @@ class SongControllerTest {
 
     @MockBean
     private SongService songService;
+
+    @MockBean
+    private SongStatsService songStatsService;
 
     @Test
     @DisplayName("GET /api/v1/songs/{id}: 200")
