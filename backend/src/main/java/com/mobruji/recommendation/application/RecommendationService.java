@@ -79,12 +79,18 @@ public class RecommendationService {
         final int resultCount = recommendationProperties.resultCount();
         final List<ScoredSong> diversified = diversityPostProcessor.apply(scoredSongs, resultCount);
 
-        final List<ScoredRecommendation> recommendations = new ArrayList<>();
+        // 결과 row를 개별 save 호출이 아닌 saveAll로 모아 영속한다.
+        // - IDENTITY 전략이라 Hibernate JDBC batch insert는 적용되지 않지만,
+        //   영속 컨텍스트 flush·dirty check를 결과 size만큼 반복하던 비용은 1회로 모인다.
+        // - rev 사이클 11 k6 첫 실행 p95 회귀(279.71ms / 임계 200ms) 회귀 fix.
+        //   spec §3 비기능 — p95 200ms.
+        final List<Recommendation> recommendationsToPersist = new ArrayList<>(diversified.size());
+        final List<ScoredRecommendation> recommendations = new ArrayList<>(diversified.size());
         for (int i = 0; i < diversified.size(); i++) {
             final ScoredSong scoredSong = diversified.get(i);
             final String matchReason = scoredSong.scored.toMatchReason(scoredSong.song, savedRequest.getMood());
             final int rankPosition = i + 1;
-            recommendationRepository.save(Recommendation.create(
+            recommendationsToPersist.add(Recommendation.create(
                     savedRequest.getId(),
                     scoredSong.song.getId(),
                     scoredSong.scored.total(),
@@ -97,6 +103,7 @@ public class RecommendationService {
                     rankPosition,
                     scoredSong.scored.breakdown()));
         }
+        recommendationRepository.saveAll(recommendationsToPersist);
 
         return new RecommendationResult(savedRequest.getId(), recommendations);
     }

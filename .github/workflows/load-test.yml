@@ -93,6 +93,12 @@ jobs:
           SPRING_PROFILES_ACTIVE: local
           MYSQL_USER: mobruji
           MYSQL_PASSWORD: mobruji
+          # rev 사이클 11 회귀 fix: local profile의 show-sql=true가 GH Actions runner stdout으로
+          # 부하 중 동기 IO 병목을 유발했다. 부하 측정 환경에서는 SQL 로깅을 강제로 비활성한다.
+          # 운영 측정 의도와도 부합(운영도 SQL 로그를 stdout에 흘리지 않는다).
+          SPRING_JPA_SHOW_SQL: 'false'
+          LOGGING_LEVEL_ORG_HIBERNATE_SQL: 'ERROR'
+          LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_BIND: 'ERROR'
         run: |
           set -euo pipefail
           JAR=$(ls build/libs/*.jar | grep -v plain | head -1)
