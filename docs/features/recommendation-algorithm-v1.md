@@ -1,11 +1,11 @@
 ---
 feature: 추천 알고리즘 v1 (recommendation-algorithm-v1)
 slug: recommendation-algorithm-v1
-status: implementing
+status: shipped
 owner: "@goohong"
 scope: recommendation
 related_issues: [5, 19]
-related_prs: [6]
+related_prs: [6, 20]
 last_reviewed: 2026-05-21
 ---
 

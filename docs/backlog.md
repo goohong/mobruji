@@ -14,20 +14,27 @@
 
 | Spec | Status | 첫 구현 PR |
 |------|--------|------------|
-| `voice-range-input` | implementing | PR #16 (머지됨) |
-| `song-metadata-source` | implementing | PR #18 (머지됨) |
-| `recommendation-algorithm-v1` | implementing | PR #19 (진행) |
+| `voice-range-input` | shipped (v0.1.0) | PR #16 |
+| `song-metadata-source` | shipped (v0.1.0) | PR #18 |
+| `recommendation-algorithm-v1` | shipped (v0.1.0) | PR #20 |
 
 ## 다음 PR 큐 (예정 순서)
 
-1. ~~PR `chore(infra)`: 백엔드 품질 게이트 wiring (#8)~~ ✓ 머지됨
-2. ~~PR `docs(infra)`: 정책 완화 + 다중 AI 룰 (#10)~~ ✓ 머지됨
-3. ~~PR `chore(infra)`: CI 자동화 워크플로우 (#12)~~ ✓ 머지됨
-4. ~~PR `chore(infra)`: H2 테스트 프로파일 (#14)~~ ✓ 머지됨
-5. **PR `feat(voice)`**: VoiceRange 엔티티 + 등록/조회/갱신 API (진행 중)
-6. **PR `feat(song)`**: Song 엔티티 + 시드 데이터 100곡 + 검색/조회 API
-7. **PR `feat(recommendation)`**: 추천 v1 score 함수 + API
-8. **PR `release`**: develop → main v0.1.0 (Merge commit)
+### v0.1.0 (완료)
+- ~~PR `chore(infra)`: 백엔드 품질 게이트 wiring (#8)~~ ✓
+- ~~PR `docs(infra)`: 정책 완화 + 다중 AI 룰 (#10)~~ ✓
+- ~~PR `chore(infra)`: CI 자동화 워크플로우 (#12)~~ ✓
+- ~~PR `chore(infra)`: H2 테스트 프로파일 (#14)~~ ✓
+- ~~PR `feat(voice)`: VoiceRange 엔티티 + 등록/조회/갱신 API (#16)~~ ✓
+- ~~PR `feat(song)`: Song + 시드 30곡 + 검색/조회 API (#18)~~ ✓
+- ~~PR `feat(recommendation)`: 추천 v1 점수 함수 + API (#20)~~ ✓
+- **PR `release`**: develop → main v0.1.0 (Merge commit) — 진행 중
+
+### v0.2 (후보)
+- 프론트엔드(Next.js) 화면 — voice 입력 / 추천 결과
+- 시드 데이터 30곡 → 100곡 큐레이션
+- MusicBrainz 보강(song-metadata-source Q1)
+- v2 추천 임베딩/LLM 검토
 
 ## 보류 / 미정
 
