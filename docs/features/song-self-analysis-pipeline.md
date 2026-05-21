@@ -89,7 +89,7 @@ last_reviewed: 2026-05-21
 | pitch detection | **Librosa** (`librosa.pyin`) | MIDI 변환은 후처리. |
 | key/tempo | **Librosa** chroma + beat tracker | |
 | 호스팅 | 로컬 batch (PoC) | Cloud 호스팅은 Q1. |
-| 호출 방식 | Python 별 worker | Spring batch에서 ProcessBuilder 호출 또는 별 microservice. Q2. |
+| 호출 방식 | Python 별 worker + Spring `ProcessBuilder` | ADR 0010. PoC 한정. microservice 분리는 v0.3 이상 재평가. |
 
 ### 5-4) 데이터 흐름 / 시퀀스
 ```
@@ -135,7 +135,7 @@ last_reviewed: 2026-05-21
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
 | Q1 | 분석 호스팅 위치 | (a) 로컬 batch, (b) GitHub Actions runner, (c) cloud(예: GCP Cloud Run Jobs) | @goohong / v0.2 착수 전 |
-| Q2 | JVM ↔ Python 통합 방식 | (a) Spring batch에서 ProcessBuilder, (b) 별 Python microservice, (c) 완전 분리 + 결과 ingest API | @goohong / PR B 직전 |
+| ~~Q2~~ | ~~JVM ↔ Python 통합 방식~~ | ADR 0010에서 (a) Python worker + Spring `ProcessBuilder`로 결정 (PoC 한정, v0.3 이상 microservice 재평가). | closed 2026-05-21 |
 | Q3 | 전체 audio vs vocal stem 분석 비교 | A/B 비교 측정 후 결정 | @goohong / PR F |
 | Q4 | 곡 → YouTube URL 매핑 자동화 여부 | (a) 100% 수기, (b) YouTube Data API 검색 + 수기 검수 | @goohong / PR D 직전 |
 
@@ -144,3 +144,4 @@ last_reviewed: 2026-05-21
 
 - 2026-05-21: 초안 작성 (status=draft). 자체 분석 pivot 확정, audio 출처 = YouTube extract (ADR 0006). v0.2 PoC 큐레이션 기준(§4-1) 합리적 default 제시. 출처: #99
 - 2026-05-21: 이슈 #67(외부 ingestion spec)을 본 spec으로 promote. 외부 메타 카탈로그 의존은 v0.x 한정 잔존, v0.2부터 자체 분석으로 전환. 출처: #99
+- 2026-05-21: Q2(JVM↔Python 통합 방식) 종결. ADR 0010에서 **Python worker + Spring `ProcessBuilder`**로 결정. monorepo 단일 배포 유지, microservice 분리는 v0.3 이상 재평가. 출처: #163
