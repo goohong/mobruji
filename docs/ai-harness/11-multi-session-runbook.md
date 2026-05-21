@@ -38,7 +38,13 @@ for w in be fe rev; do
 done
 ```
 
-⚠️ 두 세션이 동시에 같은 메모리 파일을 쓰면 race. 1인 1세션 직접 호출 패턴에서는 무해. 자동화 스케줄러로 동시 호출 시 충돌 위험 있음.
+> ⚠️ **메모리 race 주의**
+>
+> 본 symlink는 3개 세션이 **같은** 메모리 디렉토리(특히 `MEMORY.md`)를 공유하게 만든다. 두 세션이 동시에 같은 파일을 쓰면 마지막 write가 이전 write를 덮어쓴다.
+>
+> - **안전한 패턴**: 1인이 한 번에 1세션과만 대화 (사용자 입력 단위로 자연 직렬화).
+> - **위험한 패턴**: `/loop` 같은 자동 스케줄러로 여러 세션을 동시에 작업하게 둘 때, 또는 세 세션을 동시에 같은 토픽으로 직접 입력할 때.
+> - **회피책**: 메모리 갱신이 잦은 세션은 1개로 제한하거나, 세션별 memory 디렉토리를 분리(symlink 대신 별 디렉토리)해서 사용. 두 번째 패턴은 본진 메모리 공유 이점을 잃으므로 첫 번째를 권장.
 
 ### 1-3) 라벨 적용
 
@@ -100,18 +106,40 @@ gh project item-add 5 --owner goohong --url https://github.com/goohong/mobruji/p
 - `Session` 필드: 새 PR을 보드에 add 후 backend/frontend/review/infra/release 중 하나로 설정.
 - 자동 전이: 별 워크플로우 없음. 사람이 UI에서 드래그하거나 `gh project item-edit`로 갱신.
 
+### 1-5) rev 세션 push 차단 hook 설치
+
+`mobruji-rev` 워크트리는 리뷰 전용이라 코드를 push할 일이 없다. 실수로 변경 후 push하는 사고를 git hook 단에서 차단한다.
+
+```bash
+# 어느 워크트리에서 실행해도 됨. core.hooksPath는 모든 워크트리에 공유 적용된다.
+git config core.hooksPath scripts/git-hooks
+```
+
+확인:
+```bash
+cd ../mobruji-rev
+git commit --allow-empty -m "test" && git push 2>&1 | head -5
+# → [BLOCK] rev 세션 워크트리에서는 push 금지. ... 가 출력되고 push 차단됨
+```
+
+hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mobruji-rev`일 때만 차단하고, 본진/be/fe는 통과한다. 진짜 필요할 때만 `git push --no-verify`로 우회 가능(사후 보고 필요).
+
+> ⚠️ `core.hooksPath`를 바꾸면 기존 `.git/hooks/` 안의 hook은 더 이상 실행되지 않는다. 다른 hook을 쓰고 있었다면 `scripts/git-hooks/`로 옮긴다.
+
 ## 2) 세션별 역할
 
 | 세션 | 워크트리 | 역할 | 만질 수 있는 파일 | 금지 |
 |---|---|---|---|---|
+| **본진** | `mobruji` | develop 점유 + 공유 영역 관리 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
 | **be** | `mobruji-be` | 백엔드 구현 | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치 |
 | **fe** | `mobruji-fe` | 프론트엔드 구현 | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치 |
-| **rev** | `mobruji-rev` | 리뷰 전용 (read + PR 코멘트만) | (없음 — 코드/문서 직접 수정 금지) | 모든 직접 수정 |
+| **rev** | `mobruji-rev` | 리뷰 전용 (read + PR 코멘트만) | (없음 — 코드/문서 직접 수정 금지, `pre-push` hook으로 push 차단됨) | 모든 직접 수정 |
 
 **공통 룰**:
-- 모든 세션은 `develop`에서 분기.
+- be/fe 세션은 `origin/develop`에서 분기 (워크트리는 detached HEAD라 develop을 체크아웃하지 않는다).
 - 한 세션의 브랜치에 다른 세션이 직접 push 금지.
-- 공유 영역(`CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/`, root 설정) 변경은 사용자가 본진에서 직접 또는 rev 세션이 사용자와 합의 후.
+- 공유 영역(`CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/`, root 설정) 변경은 본진에서 처리.
+- 본진은 항상 `develop` 브랜치에 머물러야 한다. 본진에서 다른 세션 브랜치를 체크아웃하면 develop 점유가 해제돼 다른 세션이 stale 참조하는 사고가 생긴다. 본진에서 일회성 PR을 만들어야 할 때는 임시 브랜치 분기 후 머지 즉시 `develop`으로 복귀.
 
 ## 3) 새 작업 시작 (be/fe 세션)
 
@@ -126,9 +154,9 @@ gh project item-add 5 --owner goohong --url https://github.com/goohong/mobruji/p
 ```
 
 스크립트가 한 번에:
-1. `develop` 동기화 (`git pull --ff-only`)
+1. `origin/develop` 동기화 (`git fetch origin develop` — 워크트리는 detached HEAD라 `git pull`을 쓰지 않는다)
 2. 이슈 생성 (라벨: task, type:*, scope:*, ai-generated, ai:claude, session:*)
-3. 브랜치 분기 (`<branch_type>/<slug>-#<issue_num>`)
+3. 브랜치 분기 (`<branch_type>/<slug>-#<issue_num>`, `origin/develop` 기준)
 4. 빈 스캐폴드 커밋 + push
 5. Draft PR 생성 + 라벨 부여
 
@@ -167,8 +195,11 @@ gh pr ready <PR번호>   # draft → ready for review
 
 ### 자연스러운 동기화
 - 모든 세션은 GitHub state(PR/이슈/라벨)를 같은 source로 봄.
-- 작업 시작 직전 항상 `git pull --ff-only`.
-- 머지 후 다른 세션도 `git checkout develop && git pull --ff-only`로 동기화.
+- be/fe 워크트리는 detached HEAD 상태이므로 **`git checkout develop`을 쓰지 않는다.** develop은 본진이 점유 중이라 다른 워크트리에서 체크아웃하면 충돌한다.
+- 작업 시작 직전: 해당 워크트리에서 `git fetch origin develop` → `new-session-branch.sh`가 `origin/develop` 기준으로 새 브랜치를 만든다.
+- 머지 후 동기화:
+  - **본진** 워크트리: `git pull --ff-only`로 develop 최신화.
+  - **be/fe** 워크트리: `git fetch origin develop`만. 이미 작업 브랜치에서 작업 중이라면 필요 시 `git rebase origin/develop`.
 
 ### 자동 충돌 감지
 `.github/workflows/session-collision-check.yml`이 PR 열릴 때:
