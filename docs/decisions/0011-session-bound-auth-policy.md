@@ -44,7 +44,7 @@ v0.3 P1 진입 시점에 익명 sessionId 기반 endpoint 가 늘었다 — `GET
 
 ### 부정적
 - `X-Session-Id` 는 client 가 자칭하는 값이라 **위조 가능** — 다른 사람의 sessionId 를 안다면 우회 가능. 본질적 해결은 서버 발급 토큰(Spring Security) 도입이며, 본 결정은 "URL 추측만으로는 막힌다" 수준의 1차 방어선이다.
-- sessionId TTL/회전 (#209) 이 미정인 상태라, 만료된 sessionId 로 무한 접근 가능. #209 결정 후 본 ADR 갱신 또는 후속 ADR 필요.
+- ~~sessionId TTL/회전 (#209) 이 미정인 상태라, 만료된 sessionId 로 무한 접근 가능.~~ **해소: ADR-0013 (`sessionid-ttl-rotation`, plan 33) 이 180일 inactive TTL + cascade-delete 를 결정. 만료 sessionId 거부는 `SessionAuthGuard` 확장 (`anonymous-session-lifecycle.md` 구현 spec) 으로 처리.**
 - fe 모든 호출에 헤더 부착 작업 필요 (axios interceptor 1회 등록으로 처리 권장).
 
 ## Alternatives (considered)
@@ -60,7 +60,8 @@ v0.3 P1 진입 시점에 익명 sessionId 기반 endpoint 가 늘었다 — `GET
 - PR #229 — admin endpoint `X-Admin-Token` 게이트 (별 트랙 참조 구현)
 - 정책 문서: `docs/ai-harness/04-security-policy.md`
 - Feature Spec: `docs/features/voice-range-progress.md §5-2-1`, `docs/features/recommendation-history-and-feedback.md §5-2-1`
-- 후속: #209 (sessionId TTL/회전), like/bookmark POST/DELETE/GET endpoint 적용 PR (recommendation-history-and-feedback spec PR F), `POST /api/v1/recommendations` persistence-write 적용 검토 (recommendation-history-and-feedback §8 Q7 신설), v0.3 P3 Spring Security 도입 후보
+- 후속: ~~#209 (sessionId TTL/회전)~~ → ADR-0013 (`docs/decisions/0013-sessionid-ttl-rotation.md`) 로 결정 완료 + `docs/features/anonymous-session-lifecycle.md` 구현 spec. like/bookmark POST/DELETE/GET endpoint 적용 PR (recommendation-history-and-feedback spec PR F), `POST /api/v1/recommendations` persistence-write 적용 검토 (recommendation-history-and-feedback §8 Q7 신설), v0.3 P3 Spring Security 도입 후보
 
 ## Changelog
-- **2026-05-22 (plan 28, 본 PR)**: §Decision 에 "적용 범위 (HTTP method 별 매핑 규칙)" 절 추가 — POST/PUT/PATCH/DELETE 까지 본 ADR 의 적용 대상임을 명시하고, body/path/query 세 위치의 sessionId 검증 매핑을 명문화. like/bookmark POST/DELETE 가 후속 PR F (recommendation-history-and-feedback §6) 에서 동일 컴포넌트로 게이트됨을 References 에 반영. persistence-write POST (예: `POST /api/v1/recommendations`) 의 적용 여부를 후속 spec Q7 로 분리.
+- **2026-05-22 (plan 28)**: §Decision 에 "적용 범위 (HTTP method 별 매핑 규칙)" 절 추가 — POST/PUT/PATCH/DELETE 까지 본 ADR 의 적용 대상임을 명시하고, body/path/query 세 위치의 sessionId 검증 매핑을 명문화. like/bookmark POST/DELETE 가 후속 PR F (recommendation-history-and-feedback §6) 에서 동일 컴포넌트로 게이트됨을 References 에 반영. persistence-write POST (예: `POST /api/v1/recommendations`) 의 적용 여부를 후속 spec Q7 로 분리.
+- **2026-05-22 (plan 33)**: §Consequences 부정 #2 (만료 sessionId 무한 접근) 가 ADR-0013 (`sessionid-ttl-rotation`) 로 해소됐음을 strikethrough + 인용 표기. References 의 #209 항목을 ADR-0013 + `anonymous-session-lifecycle.md` 로 갱신. 본 ADR 의 결정 자체는 변경 없음 — 만료 게이트는 `SessionAuthGuard` 확장으로 처리되어 본 ADR 의 컴포넌트 트랙 안에 머무름.

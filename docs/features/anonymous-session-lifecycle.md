@@ -1,0 +1,288 @@
+---
+feature: 익명 sessionId 라이프사이클 (TTL 만료 + 사용자 회전 + 머지)
+slug: anonymous-session-lifecycle
+status: draft
+owner: @goohong
+scope: infra
+related_issues: [209, 238, 242, 243]
+related_prs: []
+last_reviewed: 2026-05-22
+---
+
+# 익명 sessionId 라이프사이클 (TTL 만료 + 사용자 회전 + 머지)
+
+## 1) 개요 (What / Why)
+
+- ADR-0013 (`sessionid-ttl-rotation`) 이 익명 sessionId 의 TTL/회전/데이터 라이프사이클 정책을 단일 진실로 결정했다. 본 spec 은 그 정책을 v0.3 ~ v0.4 안에 코드로 구현하기 위한 **작업 분할 + DB 마이그레이션 + 관측성 + 스케줄러 운영 가이드**다.
+- 대상 액터: 백엔드 (스케줄러/`SessionAuthGuard` 확장), 인프라 (systemd timer 또는 Spring `@Scheduled` 운영), 사용자 (v0.3 후반 fe "세션 초기화" UX).
+- 본 spec 은 ADR-0013 의 §D-1~D-5 를 1:1 으로 구현 항목으로 매핑한다. 정책 결정이 필요한 항목은 모두 §8 오픈 질문이 아니라 ADR-0013 에서 닫혔다 — 본 spec 의 오픈 질문은 **구현 옵션** 수준에 한정.
+
+## 2) 사용자 시나리오
+
+- (S1) **자연 만료**: 사용자 A 가 2026-05-22 에 마지막으로 노래방 검색 후 6개월 + 1일 (181 일) 후 재방문 → 같은 sessionId 쿠키로 첫 요청 시 `SessionAuthGuard` 가 만료 판정 → 401 + "session expired" → fe 가 새 sessionId 발급 후 onboarding 재진입. 이전 voice-range/like/bookmark 는 cascade-delete 됨.
+- (S2) **사용자 트리거 회전**: 사용자 B 가 가족과 공유한 디바이스에서 본인 데이터를 분리하고 싶다 → fe 의 "고급 설정 > 세션 초기화" 클릭 → `POST /api/v1/sessions/rotate` 호출 → 새 sessionId 발급 + 기존 sessionId 의 데이터 cascade-delete (또는 anonymize 옵션 선택) → fe 가 새 sessionId 로 쿠키 갱신.
+- (S3) **v0.4 계정 머지**: 사용자 C 가 anonymous sessionId 로 like 50개 + voice-range snapshot 10개를 누적한 상태에서 v0.4 Google OAuth 로그인 → 백엔드가 해당 sessionId 의 모든 데이터를 `user_id` 로 owner 치환 + sessionId 를 revoke → fe 가 로그인 후 history 페이지에서 머지된 데이터 표시.
+- (S4) **만료 batch 운영자 관측**: 운영자가 매일 자정 cascade-delete batch 실행 후 Discord webhook 으로 "오늘 만료된 sessionId N개, 삭제된 행 M개" 알림 수신 → Grafana 대시보드에서 `mobruji.session.expired{reason="ttl"}` 카운터 추이 확인.
+
+## 3) 요구사항
+
+### 기능 요구사항
+
+- [ ] **AnonymousSession 엔티티 신설** (§5-1): `sessionId` (PK, 외부 노출 식별자) + `firstSeenAt` + `lastSeenAt` + `revokedAt` (nullable) + `revokedReason` (enum: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE`).
+- [ ] **`SessionAuthGuard` 만료 게이트 확장** (§5-2): 매 요청 진입 시 `AnonymousSession.lastSeenAt + 180일 > now()` 검증. 만료 시 **401 + body `{"error": "session expired"}`** 반환 (ADR-0011 의 다른 401 케이스와 본문으로 구분 — 응답 헤더 추가 검토는 §8 Q1).
+- [ ] **`lastSeenAt` 갱신 정책**: 매 요청마다 DB write 는 부담이므로 **5분 윈도우 캐시** (in-memory `ConcurrentHashMap<sessionId, Instant>`) → 5분 경과 시 batch flush. 캐시 손실 허용 (만료 판정 정밀도가 5분 단위로 떨어지지만 180일 TTL 에서 무시 가능).
+- [ ] **TTL 만료 batch** (§5-3): 매일 1회 (운영 시간 외, e.g., KST 04:00) `lastSeenAt + 180일 < now()` AND `revokedAt IS NULL` 인 sessionId 를 일괄 revoke + cascade-delete.
+  - cascade-delete 대상: `voice_range`, `voice_range_snapshot`, `like`, `bookmark`, `recommendation`, `recommendation_result_entry` — 모두 FK on `sessionId` (혹은 의미상 FK).
+  - 한 batch 당 최대 10,000 sessionId 처리 (초과 시 다음 날로 미룸 — 부하 분산).
+- [ ] **사용자 회전 endpoint** (§5-4): `POST /api/v1/sessions/rotate` — body `{ "currentSessionId": "...", "dataMode": "DELETE" | "ANONYMIZE" }`. 헤더 `X-Session-Id` 와 body `currentSessionId` 일치 검증 (`SessionAuthGuard` 재사용). 응답 `{ "newSessionId": "..." }`. v0.3 P3 에 endpoint 만 노출, fe UI 는 v0.4 spec (#243) 에서 결정.
+- [ ] **v0.4 계정 머지 endpoint** (§5-5): `POST /api/v1/sessions/merge-to-account` (v0.4 spec 에서 정식 명세). 본 spec 은 endpoint placeholder 와 머지 시 trigger 되는 데이터 이전 트랜잭션 골격만 정의.
+- [ ] **관측성 카운터** (§5-6): `mobruji.session.expired{reason}`, `mobruji.session.rotated`, `mobruji.session.merged` 신설. observability-baseline.md §5-3 표 갱신 PR 동반.
+- [ ] **만료 batch Discord 알림**: batch 1회 종료 시 `mobruji.session.expired` 증분 + 삭제된 row 합계를 `MOBRUJI_ALERT_WEBHOOK_URL` 로 통지 (sessionId 원문 미노출).
+
+### 비기능 요구사항
+
+- **결정성**: TTL 180일 / cascade-delete / 회전 endpoint 모두 ADR-0013 단일 진실. 변경은 ADR-0013 갱신 후 본 spec 후속.
+- **응답시간 영향**: `SessionAuthGuard` 만료 판정은 in-memory 캐시 hit 시 < 1ms, miss 시 DB select 1회 + < 5ms. p95 영향 추정 +3ms 이내. observability-baseline.md §5-4 p95 매트릭스에 영향 없도록 가드.
+- **설정 외부화**: TTL 일수 (`mobruji.session.ttl-days`, default 180), batch cron (`mobruji.session.cleanup-cron`, default `0 0 4 * * *` KST), batch 최대 처리 건수 (`mobruji.session.cleanup-max-per-run`, default 10000) 모두 `application.yml` 외부화. 기본값 미설정 시 부트 fail-fast 가 아닌 default fallback 허용 (운영 fail-fast 는 webhook URL 같은 정말 중요한 것만).
+- **관측성**: §5-6 카운터 + Grafana 대시보드 1개 panel (sessionId 수명 분포 — v0.4 후보, 본 spec 은 카운터까지만).
+- **보안**: sessionId 원문은 로그/응답/webhook 어디에도 노출하지 않음 — ADR-0011 §Decision + 04-security-policy.md §3 + ADR-0013 §D-5. prefix 8 자 마스킹만 허용. 만료 응답 본문에 `expiredAt` 같은 시각 정보 미노출 (sessionId enumeration 방어).
+- **트랜잭션 안전성**: cascade-delete 는 단일 트랜잭션 — sessionId 1개씩 처리. 다중 sessionId 를 한 트랜잭션에 묶으면 락 범위 확대 + rollback 부담. batch loop 안에서 sessionId 별 독립 트랜잭션.
+
+## 4) 범위 / 비범위
+
+### 포함
+
+- AnonymousSession 엔티티 + Flyway 마이그레이션
+- `SessionAuthGuard` 만료 게이트 확장 (ADR-0011 의 컴포넌트 재사용)
+- TTL 만료 batch 스케줄러 + cascade-delete 트랜잭션 골격
+- 사용자 회전 endpoint (`POST /api/v1/sessions/rotate`)
+- 관측성 카운터 3종 + observability-baseline.md §5-3 표 갱신
+- 만료 batch Discord 알림 (observability-baseline.md §5-6 알림 4 규칙에 1개 추가)
+- 운영 런북 (batch 운영, 만료/회전 트러블슈팅, 관측 panel 가이드)
+
+### 제외 (Out of Scope)
+
+- **v0.4 계정 시스템 자체 (#243)**: 본 spec 은 anonymous-session 한정. 머지 endpoint 의 정식 명세는 v0.4 spec 에서.
+- **opt-in anonymize 의 상세 구현**: ADR-0013 §D-3 의 `anonymous_session_aggregate` 별 테이블은 본 spec 범위 외 (v0.4 ML 추천 spec 의 학습 데이터 요구사항에 따라 결정).
+- **데이터 백업/내보내기 UX**: 사용자가 만료 전에 자기 데이터를 내려받는 fe UX — v0.4 후보, 본 spec 범위 외.
+- **sessionId 수명 분포 histogram**: ADR-0013 §C 의 "운영 데이터로 sessionId 수명 분포 측정" — 카운터만 본 spec 에서 도입, histogram 은 v0.4 후보.
+- **HMAC 서명 sessionId / JWT 전환**: ADR-0013 §Alternatives (F) 거절. 정식 인증은 v0.4 계정 시스템.
+- **다중 디바이스 sessionId 동기화 (cross-device)**: ADR-0011 §Alternatives 및 recommendation-history-and-feedback spec §8 Q4. 본 spec 은 동일 sessionId 가 여러 디바이스에서 공유되는 경우는 그대로 허용 (위조 가능성과 동일 트레이드오프).
+
+## 5) 설계
+
+### 5-1) 도메인 모델
+
+신규 엔티티 1개:
+
+```
+AnonymousSession
+├─ sessionId        : VARCHAR(64), PK
+├─ firstSeenAt      : TIMESTAMP NOT NULL
+├─ lastSeenAt       : TIMESTAMP NOT NULL, INDEX
+├─ revokedAt        : TIMESTAMP NULL
+└─ revokedReason    : VARCHAR(32) NULL (enum: TTL / USER_ROTATE / ACCOUNT_MERGE)
+```
+
+- 기존 엔티티 (`voice_range`, `voice_range_snapshot`, `like`, `bookmark`, `recommendation`, `recommendation_result_entry`) 의 `sessionId` 컬럼은 **FK 추가 없음** — soft reference. cascade-delete 는 application 로직에서 명시적 DELETE. 이유: ADR-0011 시점에 이미 FK 없이 운영 중이고, Flyway 마이그레이션으로 FK 추가 시 운영 락 부담 + revoke 후에도 데이터가 잠시 남아있을 수 있는 trace window 필요.
+- `06-domain-model.md §4` 유비쿼터스 랭귀지 등재: `AnonymousSession`, `SessionRevocation`, `SessionRotation`, `AccountMerge`. 본 spec 머지 PR 에 동반 갱신.
+- `06-domain-model.md §5` 엔티티 표에 `AnonymousSession` 행 추가.
+- `06-domain-model.md §6` Mermaid ERD 에 `AnonymousSession` 노드 추가 (다른 엔티티의 sessionId 컬럼이 의미상 참조).
+
+### 5-2) `SessionAuthGuard` 만료 게이트 확장
+
+기존 (ADR-0011 / #244):
+```
+1. X-Session-Id 헤더 추출 → 누락/blank 401
+2. path/body/query sessionId 와 헤더 상수시간 비교 → 불일치 401
+3. 통과 → 다음 필터
+```
+
+확장 후 (본 spec):
+```
+1. X-Session-Id 헤더 추출 → 누락/blank 401
+2. path/body/query sessionId 와 헤더 상수시간 비교 → 불일치 401
+3. NEW: AnonymousSession.findBySessionId(headerSessionId) 조회
+   ├─ 없음 → 401 (sessionId 가 한번도 등록 안 됨 — 위조 시도 또는 첫 호출 후 DB write 누락)
+   ├─ revokedAt != null → 401 + body { error: "session revoked", reason: revokedReason }
+   ├─ lastSeenAt + TTL < now() → 401 + body { error: "session expired" }
+   └─ OK → in-memory 캐시에 lastSeenAt = now() 마킹 (5분 윈도우)
+4. 통과 → 다음 필터
+```
+
+- 첫 호출 시 `AnonymousSession` row 가 없는 문제: §5-5 의 "session bootstrap" 처리 — 첫 호출 시 자동 생성 또는 명시적 `POST /api/v1/sessions/bootstrap` endpoint. §8 Q2 에서 결정.
+- in-memory 캐시는 Spring Bean (`SessionActivityTracker`) 으로 분리, 5분마다 `@Scheduled` 가 DB UPDATE batch flush.
+
+### 5-3) TTL 만료 batch 스케줄러
+
+```java
+@Scheduled(cron = "${mobruji.session.cleanup-cron:0 0 4 * * *}")
+@Transactional(propagation = NOT_SUPPORTED) // 외부 트랜잭션, 각 sessionId 별 독립 tx
+public void expireInactiveSessions() {
+    final var cutoff = Instant.now().minus(ttlDays, DAYS);
+    final var maxPerRun = props.cleanupMaxPerRun();
+    final var sessionIds = anonymousSessionRepository
+        .findIdsByLastSeenBeforeAndRevokedAtIsNull(cutoff, maxPerRun);
+
+    var deletedRows = 0L;
+    for (final var sessionId : sessionIds) {
+        deletedRows += cascadeDeleteOne(sessionId); // 각자 @Transactional
+    }
+
+    meterRegistry.counter("mobruji.session.expired", "reason", "ttl")
+        .increment(sessionIds.size());
+    discordAlerter.notifyExpired(sessionIds.size(), deletedRows);
+}
+```
+
+- `cascadeDeleteOne`: 한 sessionId 의 모든 데이터 DELETE → `AnonymousSession.revokedAt = now()` + `revokedReason = TTL` UPDATE. 단일 트랜잭션.
+- batch loop 가 maxPerRun 도달 시 종료 — 다음 batch 가 나머지 처리. 부하 분산.
+
+### 5-4) 사용자 회전 endpoint
+
+```
+POST /api/v1/sessions/rotate
+Headers:
+  X-Session-Id: <current>
+Body:
+  {
+    "currentSessionId": "<current>",
+    "dataMode": "DELETE" | "ANONYMIZE"   // ANONYMIZE 는 v0.4 후속, v0.3 은 DELETE only
+  }
+Response 200:
+  {
+    "newSessionId": "<freshly generated>"
+  }
+Errors:
+  401 — SessionAuthGuard 일반 케이스 (헤더 누락 / 불일치 / 만료 / revoked)
+  400 — dataMode unsupported (v0.3 에서 ANONYMIZE 요청 시)
+```
+
+- 새 sessionId 발급은 UUIDv4. fe 가 응답 받은 후 쿠키/LocalStorage 갱신.
+- ANONYMIZE 모드는 v0.4 까지 400 반환. v0.4 에서 별 PR 로 활성화.
+
+### 5-5) v0.4 계정 머지 (placeholder)
+
+본 spec 은 endpoint placeholder + 데이터 이전 트랜잭션 골격만:
+
+```
+POST /api/v1/sessions/merge-to-account     (v0.4 spec 에서 정식 명세)
+Body:
+  {
+    "sessionId": "...",
+    "userId": "..."   // 이미 인증된 user
+  }
+```
+
+- 트랜잭션: `voice_range.sessionId → null + userId 컬럼 신설 + userId 값 set` (또는 dual write — v0.4 spec 에서 결정). 마지막에 `AnonymousSession.revokedAt = now() + revokedReason = ACCOUNT_MERGE`.
+- v0.4 spec (#243) 머지 시 본 spec 의 §5-5 가 그 spec 으로 이관 또는 cross-reference.
+
+### 5-5-1) Session bootstrap
+
+- 옵션 (a): **자동 부트스트랩** — 첫 요청 시 `AnonymousSession` row 가 없으면 즉시 생성 후 검증 통과 (sessionId 가 헤더에 있으면 우선 신뢰).
+- 옵션 (b): **명시적 endpoint** — `POST /api/v1/sessions/bootstrap` 호출 후에야 정상 sessionId 로 인정.
+- §8 Q2 에서 결정. 1차 추천: (a) — fe 워크플로우 변경 최소화. 단점: 위조 sessionId 가 자동 등록되어 무한 누적 위험 → batch 가 만료 처리하므로 180일 후 자동 삭제, 즉시 위협은 ADR-0011 의 위조 sessionId 위협과 동일.
+
+### 5-6) 관측성 카운터
+
+observability-baseline.md §5-3 표에 신규 행 3개:
+
+| Metric | Type | 라벨 | 의미 | 신설/기존 |
+|---|---|---|---|---|
+| `mobruji.session.expired` | counter | `reason` (`ttl`/`user_rotate`/`account_merge`) | sessionId revoke 1건 | 신설 (본 spec) |
+| `mobruji.session.rotated` | counter | — | 사용자 트리거 회전 1건 | 신설 (본 spec) |
+| `mobruji.session.merged` | counter | — | v0.4 계정 머지 1건 | 신설 (본 spec) |
+
+라벨 화이트리스트 (observability-baseline.md §5-7) 의 `reason` enum 에 `ttl`, `user_rotate`, `account_merge` 3 값 추가 — 사전 정의 enum 룰 준수.
+
+알림 규칙 1개 추가 (observability-baseline.md §5-6):
+
+| 규칙 | 트리거 | 채널 | 우선순위 |
+|---|---|---|---|
+| TTL batch 종료 통지 | `mobruji.session.expired{reason="ttl"}` 일별 batch 종료 시 | Discord webhook | P3 (정보성) |
+
+### 5-7) DB 마이그레이션 (Flyway)
+
+```
+V<next>__create_anonymous_session.sql
+  CREATE TABLE anonymous_session (
+    session_id        VARCHAR(64) NOT NULL PRIMARY KEY,
+    first_seen_at     TIMESTAMP   NOT NULL,
+    last_seen_at      TIMESTAMP   NOT NULL,
+    revoked_at        TIMESTAMP   NULL,
+    revoked_reason    VARCHAR(32) NULL,
+    INDEX idx_last_seen_at (last_seen_at),
+    INDEX idx_revoked_at (revoked_at)
+  );
+
+V<next+1>__backfill_anonymous_session.sql
+  -- 기존 sessionId 들 (like/bookmark/voice_range/recommendation 에서 distinct) 을
+  -- AnonymousSession 으로 backfill. first_seen_at = MIN(createdAt), last_seen_at = MAX(createdAt).
+  INSERT INTO anonymous_session (session_id, first_seen_at, last_seen_at)
+  SELECT s.session_id, MIN(s.created_at), MAX(s.created_at)
+  FROM (
+    SELECT session_id, created_at FROM voice_range_snapshot
+    UNION ALL
+    SELECT session_id, created_at FROM `like`
+    UNION ALL
+    SELECT session_id, created_at FROM bookmark
+    UNION ALL
+    SELECT session_id, created_at FROM recommendation
+  ) s
+  GROUP BY s.session_id;
+```
+
+- backfill 마이그레이션은 운영 데이터 양에 따라 분리 PR 권장 (PR D 별 분리).
+
+### 5-8) `application.yml` 변경
+
+```yaml
+mobruji:
+  session:
+    ttl-days: ${MOBRUJI_SESSION_TTL_DAYS:180}
+    cleanup-cron: ${MOBRUJI_SESSION_CLEANUP_CRON:0 0 4 * * *}
+    cleanup-max-per-run: ${MOBRUJI_SESSION_CLEANUP_MAX:10000}
+    activity-flush-interval: ${MOBRUJI_SESSION_ACTIVITY_FLUSH_INTERVAL:PT5M}
+```
+
+- `application.yml` 은 CLAUDE.md §4 의 보호 영역 — 본 spec 의 PR B 가 `needs-human-review` 라벨.
+
+## 6) 작업 분할 (예상 PR 리스트)
+
+- [ ] **PR 1 (현 PR, plan 33)**: ADR-0013 + 본 spec(`anonymous-session-lifecycle.md`) + voice-range-progress / recommendation-history-and-feedback cross-reference 갱신. **본 PR**.
+- [ ] **PR 2 (be)**: `AnonymousSession` 엔티티 + repository + Flyway V<next> + V<next+1> (backfill) + `application.yml` 환경변수. 보호 영역 변경(`application.yml` + Flyway) → `needs-human-review` 라벨.
+- [ ] **PR 3 (be)**: `SessionAuthGuard` 만료/revoke 게이트 확장 + `SessionActivityTracker` (in-memory 캐시 + 5분 flush). 기존 ADR-0011 컴포넌트 확장.
+- [ ] **PR 4 (be)**: TTL 만료 batch (`@Scheduled` + cascade-delete 트랜잭션 + Discord 알림). 관측성 카운터 신설 + observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 같이.
+- [ ] **PR 5 (be)**: `POST /api/v1/sessions/rotate` endpoint + session bootstrap (§5-5-1 Q2 결정 따라 옵션 (a) 자동 또는 (b) endpoint).
+- [ ] **PR 6 (plan)**: v0.4 계정 시스템 spec (#243) 머지 시 본 spec 의 §5-5 placeholder 를 그 spec 으로 이관 + 본 spec `last_reviewed` 갱신.
+- [ ] **PR 7 (fe, v0.3 후반 또는 v0.4)**: "고급 설정 > 세션 초기화" UX 노출 + 만료 시 onboarding redirect 처리.
+
+## 7) 테스트 전략
+
+- **단위**:
+  - `SessionAuthGuard` 만료/revoke 분기 (각 401 케이스).
+  - `SessionActivityTracker` 5분 윈도우 캐시 동작 (캐시 hit/miss/flush).
+  - cascade-delete 트랜잭션의 모든 테이블 DELETE 검증.
+- **통합**:
+  - Flyway V<next+1> backfill 마이그레이션이 기존 sessionId 를 `AnonymousSession` 으로 정확히 이전.
+  - TTL batch 가 만료 sessionId 만 처리 (활성 sessionId 보호).
+- **E2E (RestAssured)**:
+  - `POST /api/v1/sessions/rotate` 성공 케이스 1건 — 새 sessionId 발급 + 기존 sessionId 후속 호출 시 401 revoked.
+  - 만료 sessionId 로 voice-range-history 호출 시 401 + body `{"error": "session expired"}`.
+- **부하**:
+  - TTL batch 가 10,000 sessionId 처리 시 cascade-delete 트랜잭션 합 < 5분.
+  - `SessionAuthGuard` 만료 판정 p95 < 5ms (`SimpleMeterRegistry` 측정).
+
+## 8) 오픈 질문
+
+| # | 질문 | 선택지 | 담당/기한 |
+|---|---|---|---|
+| Q1 | 만료 401 응답을 다른 401(헤더 누락/불일치)과 응답 헤더로 구분? | (a) `X-Session-Status: expired` 헤더 추가 / (b) body 만으로 구분 (현재 default) | @goohong / PR 3 |
+| Q2 | Session bootstrap 옵션 | (a) 자동 부트스트랩 (첫 요청 시 자동 등록) / (b) 명시적 endpoint (`POST /api/v1/sessions/bootstrap` 호출 필수) | @goohong / PR 3 |
+| Q3 | `lastSeenAt` 갱신 캐시 윈도우 | (a) 5분 (default) / (b) 1분 (정밀도 우선) / (c) 환경변수만 두고 default 5분 | @goohong / PR 3 |
+| Q4 | backfill 마이그레이션 V<next+1> 을 PR 2 와 분리? | (a) 같은 PR (운영 데이터 양 적으면) / (b) 분리 PR (운영 락 부담 측정 후) | @goohong / PR 2 |
+| Q5 | 회전 endpoint 의 ANONYMIZE 모드를 v0.3 에 활성화? | (a) v0.4 까지 400 (default) / (b) v0.3 후반에 별 PR 로 활성화 | @goohong / v0.4 진입 시 |
+
+## 9) 결정 로그
+
+- **2026-05-22 (plan 33, 본 PR)**: 초안 작성 (status=draft). ADR-0013 의 §D-1~D-5 를 1:1 구현 항목으로 매핑. 7개 PR 로 분할 (엔티티/마이그레이션 → 가드 확장 → batch → 회전 endpoint → v0.4 spec 이관 → fe UX). 관측성 카운터 3종 신설 → observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 동반 필요. 첫 호출 시 AnonymousSession bootstrap 정책은 Q2 (PR 3 결정).
