@@ -25,6 +25,7 @@
 - `docs/ai-harness/07-testing-guide.md` — 레이어별 테스트 전략, BDD 스타일, E2E 필수 룰
 - `docs/ai-harness/08-code-conventions.md` — 코드 컨벤션 (final/DTO/엔티티/Lombok/null 검증)
 - `docs/ai-harness/10-observability.md` — 로깅/메트릭/트레이싱 룰
+- `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션(be/fe/rev) 셋업·운영 런북
 - `docs/decisions/` — ADR (횡단 결정의 영속 이력)
 - `docs/features/` — Feature Spec (기능 단위 living 명세서)
 
@@ -91,7 +92,7 @@ cd web && npm run lint && npm run typecheck && npm test
 **Frontend**
 - 컴포넌트는 함수형 + 명시적 props 타입
 - 서버 상태는 React Query, 클라이언트 상태는 Zustand/Jotai 등 (스택 확정 시 ADR 추가)
-- API 호출은 `web/src/lib/api/` 한 곳에서 집중 관리
+- API 호출은 `web/lib/api/` 한 곳에서 집중 관리
 - 환경변수는 `NEXT_PUBLIC_*` 또는 서버 전용 명확히 구분
 
 **테스트**
@@ -147,11 +148,12 @@ gh pr merge <num> --squash --delete-branch
 ### 7-1) 구현 완료 후, PR 생성 전 (필수)
 Feature Spec(`docs/features/*.md`)이 있는 기능이면, PR을 만들기 **전에** 다음을 수행한다:
 1. Feature Spec의 `§3 기능 요구사항` 체크박스를 **한 줄씩** 읽는다.
-2. 각 항목에 대해 **구현 코드가 존재하는지** 확인한다 (파일명/메서드명 수준).
-3. 구현이 누락된 항목이 있으면:
+2. **§3 비기능 요구사항(결정성·응답시간·설정 외부화·관측성 등)도 같은 방식으로 한 줄씩 읽는다.** 비기능은 기능보다 누락 빈도가 높다.
+3. 각 항목에 대해 **구현 코드가 존재하는지** 확인한다 (파일명/메서드명 수준).
+4. 구현이 누락된 항목이 있으면:
    - 의존성 부재(엔티티/테이블 미존재 등)로 불가능한 경우 → **사용자에게 보고**하고 스펙 수정 또는 구현 방향을 확인받는다.
    - 단순 누락이면 → 구현을 완료한다.
-4. **하드코딩/stub으로 대체하여 "일단 넘어가기" 금지.** 스펙과 코드가 1:1 대응되지 않으면 PR을 만들지 않는다.
+5. **하드코딩/stub으로 대체하여 "일단 넘어가기" 금지.** 스펙과 코드가 1:1 대응되지 않으면 PR을 만들지 않는다.
 
 ### 7-2) PR 생성 직후
 PR을 만든 직후 다음을 떠올려라. 떠올리지 않았다면 PR 생성이 끝난 것이 아니다.

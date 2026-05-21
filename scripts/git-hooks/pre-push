@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# 공유 pre-push hook. 모든 워크트리에 적용되지만, 실제로 차단하는 건 rev 세션 워크트리뿐.
+#
+# 설치(최초 1회, 어느 워크트리에서 실행해도 됨):
+#   git config core.hooksPath scripts/git-hooks
+#
+# 동작:
+#   현재 워크트리 경로가 .../mobruji-rev 로 끝나면 push 강제 차단.
+#   그 외 워크트리(본진/be/fe)는 통과.
+#
+# Why: rev 세션은 리뷰 전용(코드/문서 수정 금지). 사용자/AI 실수로 rev 워크트리에서
+#      코드 변경 후 push 하는 사고를 hook 단에서 차단한다.
+#      `docs/ai-harness/11-multi-session-runbook.md §2` 참고.
+
+set -e
+
+toplevel="$(git rev-parse --show-toplevel)"
+basename="$(basename "$toplevel")"
+
+if [[ "$basename" == "mobruji-rev" ]]; then
+    echo "" >&2
+    echo "  ┌──────────────────────────────────────────────────────────────────┐" >&2
+    echo "  │ [BLOCK] rev 세션 워크트리에서는 push 금지.                       │" >&2
+    echo "  │                                                                  │" >&2
+    echo "  │ 리뷰 세션은 코드/문서를 수정하지 않는다.                         │" >&2
+    echo "  │ 정상 흐름: gh pr review / gh pr comment 만 사용.                 │" >&2
+    echo "  │                                                                  │" >&2
+    echo "  │ 실수로 변경한 게 있다면 되돌리기:                                │" >&2
+    echo "  │   git restore .                                                  │" >&2
+    echo "  │   git clean -fd      # untracked 파일 제거                       │" >&2
+    echo "  │                                                                  │" >&2
+    echo "  │ 진짜 hotfix로 rev에서 push가 필요하다면 사용자 합의 후           │" >&2
+    echo "  │ --no-verify 로 우회. 단, 런북 §2 위반이므로 사후 보고 필요.      │" >&2
+    echo "  └──────────────────────────────────────────────────────────────────┘" >&2
+    echo "" >&2
+    exit 1
+fi
+
+exit 0

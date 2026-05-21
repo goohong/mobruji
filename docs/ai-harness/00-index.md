@@ -18,6 +18,7 @@
 - `docs/ai-harness/07-testing-guide.md`: 레이어별 테스트 전략 및 필수 기준
 - `docs/ai-harness/08-code-conventions.md`: 코드 컨벤션 (final/어노테이션/DTO/엔티티/Lombok/null 검증 등)
 - `docs/ai-harness/10-observability.md`: 관측성 (Actuator + Micrometer) — 현재 backend endpoint만 노출, 시각화는 추후
+- `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev) 셋업·운영 런북
 
 > `09-notion-api-spec.md`는 추후 Notion API 명세 DB 연동 시 추가.
 

@@ -24,11 +24,11 @@ last_reviewed: 2026-05-21
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] 입력: `VoiceRange`(필수) + `gender`(선택) + `Mood[]`(선택, 0~2개) + `excludeSongIds`(재추천 시).
-- [ ] 출력: `RecommendationResponse` — `List<RecommendedSong>` (곡 + score + matchReason 텍스트) + `requestId`.
-- [ ] 결과 곡 수: 기본 10곡(설정 가능).
-- [ ] 매칭 근거(`matchReason`)는 한 줄 한국어 문장으로 사용자에게 노출 가능한 수준이어야 한다 (예: "원곡 키가 사용자 음역대 안에 있음").
-- [ ] `RecommendationRequest`와 결과는 영속화한다(이력/분석).
+- [x] 입력: `VoiceRange`(필수) + ~~`gender`(선택)~~ + `mood`(선택, v1 단일 값) + `excludeSongIds`(재추천 시). gender/moods[] 는 §9 결정 로그에 따라 v1에서 제외, `mood`는 단일 enum으로 축소.
+- [x] 출력: `RecommendationResponse` — `List<RecommendedSong>` (곡 + score + matchReason 텍스트) + `requestId`.
+- [x] 결과 곡 수: 기본 10곡(설정 가능). `recommendation.result-count` 프로퍼티.
+- [x] 매칭 근거(`matchReason`)는 한 줄 한국어 문장으로 사용자에게 노출 가능한 수준이어야 한다 (예: "원곡 키가 사용자 음역대 안에 있음").
+- [x] `RecommendationRequest`와 결과는 영속화한다(이력/분석). `excludeSongIds`는 별 join table `recommendation_request_exclude_song`에 영속(PR #74, closes #72/#73).
 
 ### 비기능 요구사항
 - p95 응답 200ms 이내 (DB 100~수백곡 카탈로그 가정).
@@ -150,3 +150,19 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **`popularityPrior` 컴포넌트 사실상 비활성** — 모든 곡 popularity=1.0 (시드 데이터에 없음). 가중치만 보존, ranking 영향 없음.
   - **유효 점수식: `score = 0.5 * voiceRangeFit + 0.2 * moodMatch + jitter`** — Q2 가중치 중 voice/mood만 의미 있음.
   - **`voiceRangeFit` 구체 산식**: `MusicalKeyMidiResolver`로 곡 키 → root MIDI 매핑, 곡 음역 = root±7 semitones, overlap/songSpan으로 0~1 점수.
+- 2026-05-21: `excludeSongIds` 입력 도입. 출처: #45 #63 (PR #64)
+  - **API 입력 확장**: `RecommendationCreateRequest.excludeSongIds: List<Long>` 추가 (nullable, JSON 생략 가능 → 빈 리스트로 정규화).
+  - **파이프라인**: `SongRepository.findAll()` 결과에서 제외 ID를 점수 계산 전에 필터링. 다양성 후처리(아티스트≤2/장르≤4)와 fallback 모두 제외 후 카탈로그 위에서 정상 작동.
+  - **🔴 누적 패턴**: `SeedDeriver.derive()` 입력에 정렬·중복 제거된 `excludeSongIds`를 포함. 같은 voiceRange/sessionId라도 제외 곡 셋이 바뀌면 다른 seed → 다른 jitter → 다른 결과. rev 사이클 3 누적 경고 ("다시 버튼이 같은 결과 반환") 회귀 가드.
+  - **영속화 보류**: `RecommendationRequestEntity`에 `excludeSongIds` 컬럼 추가는 별도 PR. 본 PR은 요청 시점 입력만으로 파이프라인·seed에 반영하여 보호 영역(application.yml 스키마) 변경을 피한다. spec §5-1 도메인 모델의 `excludeSongIds` 필드는 후속 PR에서 영속화.
+- 2026-05-21: `excludeSongIds` 영속화 완료. 출처: #72 #73 (PR #74)
+  - **저장 위치**: 별 join table `recommendation_request_exclude_song(recommendation_request_id, song_id)`. JPA `@ElementCollection` + `@CollectionTable`.
+  - **직렬화 방식 결정 근거**:
+    - **선택: 별 join table** — 정규형 + 곡 ID별 row → 향후 분석 쿼리(어떤 곡이 자주 제외되는지 등) 용이.
+    - JSON column 후보: MySQL 8.4는 지원하나 테스트 H2(MODE=MySQL)와의 호환·인덱싱 비용이 있어 보류.
+    - comma-string 후보: 가장 단순하나 정규형 위반 + 분석 쿼리 어려움 → 기각.
+  - **스키마 관리**: 본 레포는 Flyway/schema.sql 미도입 상태. 다른 엔티티들과 동일하게 JPA ddl-auto(`local`=update, `test`=create-drop)가 join table을 자동 생성한다. 운영(`validate`)에서 스키마 도구를 본격 도입하는 시점에 모든 테이블을 한꺼번에 마이그레이션으로 베이스라인화하는 별도 작업이 필요(현재 미해결 — `RecommendationRequestEntity`/`Recommendation`도 같은 상황).
+  - **저장 로직**: `RecommendationService.create`에서 `RecommendationRequestEntity.create(..., excludeSongIds)`로 같이 저장. 입력 리스트는 엔티티 생성 시 방어적 복사로 캡슐화.
+  - **fetch=EAGER**: 곡 ID만 담는 작은 정수 컬렉션 + 요청과 의미적으로 한 묶음 + 다른 도메인 join도 application 레벨이라 트랜잭션 분리 이점이 없어 LAZY는 `LazyInitializationException` 리스크만 증가. EAGER로 두어 `findById` 단일 호출로 풀-로드.
+  - **테스트**: 단위 라운드트립 1건(`RecommendationRequestEntityPersistenceTest`) + E2E 1건(`RecommendationExcludeSongIdsTest#excludeSongIds_persistedOnRequestEntity` — API 호출 → DB 영속 검증). 결정성/seed/필터링 회귀는 기존 4건이 가드.
+  - **결정성 영향 없음**: `SeedDeriver` 입력은 그대로(파이프라인 sort/dedup만 사용). 영속된 컬럼은 분석·후속 기능용.
