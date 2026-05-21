@@ -34,6 +34,7 @@ import {
 } from "@/lib/api/recommendation";
 import { readVoiceRange, VoiceRangeResponse } from "@/lib/api/voice-range";
 import { midiToNoteName } from "@/lib/notes";
+import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
@@ -68,7 +69,9 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   };
 
   const excludedSongIds = useSessionStore((state) => state.excludedSongIds);
+  const voiceRangeIdFromStore = useSessionStore((state) => state.voiceRangeId);
   const appendExcluded = useSessionStore((state) => state.appendExcluded);
+  const appendHistory = useHistoryStore((state) => state.appendRecommendation);
 
   const recommendationMutation = useMutation<
     RecommendationResponse,
@@ -82,12 +85,24 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
         voiceRangeHigh: input.voiceRangeHigh,
         excludeSongIds: input.excludeSongIds,
       }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       // 다음 "다시 추천" 호출에 누적 전달되도록 결과 곡 ID들을 store에 push.
       // 빈 응답이라도 호출에 문제는 없지만 빈 ids는 store 내부에서 no-op.
       const ids = data.recommendations.map((rec) => rec.song.id);
       if (ids.length > 0) {
         appendExcluded(ids);
+      }
+      // 추천 히스토리(closes #134)에 누적. 빈 응답은 히스토리에 남기지 않는다 —
+      // 사용자가 "다시 보기"를 눌렀을 때 빈 카드만 보는 의미 없는 항목이 쌓이지 않게.
+      if (data.recommendations.length > 0) {
+        appendHistory({
+          requestId: data.requestId,
+          voiceRangeId: voiceRangeIdFromStore,
+          songs: data.recommendations,
+          // 이 추천을 만든 시점의 누적 제외 셋 스냅샷. variables 에 담겨 들어온 값
+          // (호출 시점 store snapshot)이라 호출 후 store 변경에 영향받지 않는다.
+          excludedSongIds: variables.excludeSongIds,
+        });
       }
     },
   });
