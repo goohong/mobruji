@@ -7,6 +7,7 @@ scope: recommendation
 related_issues: [160]
 related_prs: [161]
 last_reviewed: 2026-05-21
+status_pr_c: in-progress (#237)
 ---
 
 # 추천 히스토리 백엔드 동기화 & 좋아요/북마크 피드백
@@ -37,8 +38,8 @@ last_reviewed: 2026-05-21
 - [ ] `POST /api/v1/bookmarks`, `DELETE /api/v1/bookmarks` — 동일 패턴
 - [ ] `GET /api/v1/sessions/{sessionId}/likes` — 해당 세션의 좋아요 목록 (Song 페이로드 join)
 - [ ] `GET /api/v1/sessions/{sessionId}/bookmarks` — 동일 패턴
-- [ ] **추천 히스토리 백엔드 영속화**: `RecommendationRequest`(기존)에 더해 응답 결과(추천된 곡 리스트)를 `RecommendationResultEntry`로 저장한다.
-- [ ] `GET /api/v1/sessions/{sessionId}/recommendations` — 해당 세션의 추천 요청 + 결과 목록 (최신순, 페이지네이션)
+- [x] **추천 히스토리 백엔드 영속화**: `RecommendationRequest`(기존)에 더해 응답 결과(추천된 곡 리스트)를 영속 저장한다. spec 용어 `RecommendationResultEntry` 는 코드 상 기존 엔티티 `com.mobruji.recommendation.domain.Recommendation`(테이블 `recommendation`) 에 매핑됨 — V1 부터 (id, recommendation_request_id, song_id, score, match_reason, rank_position, created_at) 컬럼 전부 존재. (구현: PR #237)
+- [x] `GET /api/v1/sessions/{sessionId}/recommendation-history` — 해당 세션의 추천 요청 + 결과 목록 (최신순). 페이지네이션은 응답 wrapper `RecommendationHistoryListResponse` 로 향후 추가 가능하도록 여지를 둔다. (구현: PR #237. spec 표의 `/recommendations` 경로 명을 voice-range-progress 의 `/voice-range-history` 와 일관되게 `/recommendation-history` 로 확정.)
 - [ ] **fe 통합**: SongCard에 좋아요 버튼 추가, `/history` 페이지는 backend 우선, fallback으로 localStorage 사용.
 
 ### 비기능 요구사항
@@ -73,7 +74,7 @@ last_reviewed: 2026-05-21
 - **신규 엔티티(Recommendation context)**
   - `Like` — `(id PK, sessionId, songId, createdAt)`. Unique constraint: `(sessionId, songId)`.
   - `Bookmark` — `(id PK, sessionId, songId, createdAt)`. Unique constraint: `(sessionId, songId)`.
-  - `RecommendationResultEntry` — `(id PK, recommendationRequestId FK, songId, rank, score, createdAt)`. 한 요청 ↔ N개 결과.
+  - `RecommendationResultEntry` — spec 용어. **PR C 구현 시점(2026-05-21)** 기존 엔티티 `com.mobruji.recommendation.domain.Recommendation`(테이블 `recommendation`) 가 이미 동일 schema(`id PK, recommendation_request_id, song_id, rank_position, score, match_reason, created_at`) 를 가지므로 별도 엔티티/테이블 신설 없이 기존 엔티티에 매핑하여 의미를 부여한다. 한 요청 ↔ N개 결과.
 - **유비쿼터스 랭귀지 추가어** (06-domain-model.md §4 갱신 필요, PR B에서)
   - "좋아요(Like)": 사용자가 곡에 대해 긍정 시그널을 남긴 행위. **v0.2에서는 추천 가중치 비영향**.
   - "북마크(Bookmark)": 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. (Q1에서 Like와의 차이 확정)
@@ -89,7 +90,7 @@ last_reviewed: 2026-05-21
 | POST   | /api/v1/bookmarks                                 | 북마크 생성(멱등)          | sessionId | `BookmarkCreateRequest`         | `BookmarkResponse`                        |
 | DELETE | /api/v1/bookmarks                                 | 북마크 제거                | sessionId | `BookmarkDeleteRequest`         | 204 No Content                            |
 | GET    | /api/v1/sessions/{sessionId}/bookmarks            | 세션의 북마크 목록         | sessionId | (query: page, size)              | `Page<BookmarkWithSongResponse>`         |
-| GET    | /api/v1/sessions/{sessionId}/recommendations      | 세션의 추천 히스토리       | sessionId | (query: page, size)              | `Page<RecommendationHistoryResponse>`    |
+| GET    | /api/v1/sessions/{sessionId}/recommendation-history | 세션의 추천 히스토리     | sessionId | (v0.2: 무페이징, 최신순 전체)    | `RecommendationHistoryListResponse`       |
 
 - 인증: 별도 토큰 없이 sessionId(쿠키 또는 헤더 `X-Session-Id`) 검증만. 추후 인증 ADR이 도입되면 갱신.
 - DTO 명명: CLAUDE.md 8) 코드 컨벤션 — API별 분리, 리스트 응답 변수명 `responses`.
@@ -123,9 +124,9 @@ sequenceDiagram
 
 ### 5-5) DB 마이그레이션
 
-- 신규 테이블: `likes`, `bookmarks`, `recommendation_result_entry`.
+- 신규 테이블: `likes`, `bookmarks` (PR B). `RecommendationResultEntry` 는 PR C 구현 시점에 기존 `recommendation` 테이블이 동일 schema 를 가지므로 별도 테이블 신설 없이 매핑. (V6 는 history 조회용 보조 인덱스 `ix_recommendation_request_session_created` 만 추가)
 - `likes`, `bookmarks`: `UNIQUE (session_id, song_id)`, `INDEX (session_id, created_at DESC)`.
-- `recommendation_result_entry`: `FK recommendation_request_id`, `INDEX (recommendation_request_id, rank)`.
+- 기존 `recommendation`: V1 에 `INDEX (recommendation_request_id, rank_position)` 보유. 추가 변경 없음.
 - 마이그레이션 도구: ADR-0009 준수.
 - `06-domain-model.md` §5 엔티티 / §6 ERD를 **PR B와 같은 PR에서** 갱신.
 
@@ -140,7 +141,7 @@ sequenceDiagram
 
 - [x] **PR A** (본 PR, #161): Feature Spec 초안 작성, `06-domain-model.md` §4 유비쿼터스 랭귀지 후보어 메모.
 - [ ] **PR B** (be, scope:recommendation): `Like`, `Bookmark` 엔티티 + CRUD API + E2E. 06-domain-model.md §4/§5/§6 갱신.
-- [ ] **PR C** (be, scope:recommendation): `RecommendationResultEntry` 추가 + 추천 응답 저장 로직 + `GET /api/v1/sessions/{sid}/recommendations` API.
+- [x] **PR C** (be, scope:recommendation, #237): `RecommendationResultEntry` 영속화(기존 `Recommendation` 엔티티에 매핑 — 신설 없음) + `GET /api/v1/sessions/{sid}/recommendation-history` API + V6 보조 인덱스.
 - [ ] **PR D** (fe, scope:web): SongCard 좋아요/북마크 버튼 + `/history` backend 우선 전환.
 - [ ] **PR E** (optional, scope:infra): 관측성 metric — `like.created` 등 카운터 등록.
 
@@ -174,3 +175,4 @@ sequenceDiagram
 ## 9) 결정 로그
 
 - **2026-05-21**: Feature Spec 초안 작성 (status=draft). 출처: plan 15 (#160 / PR #161). v0.2 추천 알고리즘 출력에는 좋아요/북마크가 영향을 주지 않음을 명시(가중치 도입은 v0.3+ 별도 ADR로 다룸).
+- **2026-05-21 (PR C, #237)**: spec 용어 `RecommendationResultEntry` 는 PR C 구현 시점 기존 엔티티 `Recommendation`(테이블 `recommendation`) 가 동일 schema 를 가지므로 신설 없이 매핑. history 엔드포인트 경로는 voice-range-progress 와 일관성 위해 `/recommendation-history` 로 확정 (spec 표의 `/recommendations` 보다 의도 명확). V6 는 `recommendation_request(session_id, created_at)` 보조 인덱스 추가만 수행 (보호 영역 → needs-human-review).

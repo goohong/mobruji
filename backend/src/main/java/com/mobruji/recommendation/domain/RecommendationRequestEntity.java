@@ -36,7 +36,7 @@ import lombok.NoArgsConstructor;
  */
 @Getter
 @Entity
-@Table(name = "recommendation_request")
+@Table(name = "recommendation_request", indexes = @Index(name = "ix_recommendation_request_session_created", columnList = "session_id, created_at"))
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RecommendationRequestEntity {

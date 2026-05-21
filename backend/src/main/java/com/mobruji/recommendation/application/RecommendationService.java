@@ -110,6 +110,74 @@ public class RecommendationService {
         return new RecommendationResult(savedRequest.getId(), recommendations);
     }
 
+    /**
+     * 세션별 추천 히스토리(요청 + 결과 곡 리스트)를 최신순으로 반환한다.
+     *
+     * <p>spec: docs/features/recommendation-history-and-feedback.md §5-2 — GET
+     * {@code /api/v1/sessions/{sessionId}/recommendation-history} 백킹.
+     *
+     * <p>구현 메모:
+     * <ul>
+     * <li>요청-결과 join 을 N+1 없이 처리하기 위해 (a) 요청을 1쿼리로 가져온 뒤 (b) 결과를 IN-쿼리 1회로 묶어 fetch.</li>
+     * <li>곡 메타데이터도 결과 row 전체의 songId 를 모아 1쿼리(`findAllById`) 로 조회.</li>
+     * <li>결정성에는 영향 없음 (read-side 전용). 영속된 row 의 rank/score 를 그대로 노출한다.</li>
+     * </ul>
+     */
+    @Transactional(readOnly = true)
+    public List<RecommendationHistorySnapshot> readHistoryBySessionId(final String sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        final List<RecommendationRequestEntity> requests = recommendationRequestRepository
+                .findBySessionIdOrderByCreatedAtDescIdDesc(sessionId);
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+
+        final List<Long> requestIds = requests.stream().map(RecommendationRequestEntity::getId).toList();
+        final List<Recommendation> allEntries = recommendationRepository.findByRecommendationRequestIdIn(requestIds);
+        final Map<Long, List<Recommendation>> entriesByRequestId = new HashMap<>();
+        for (final Recommendation entry : allEntries) {
+            entriesByRequestId
+                    .computeIfAbsent(entry.getRecommendationRequestId(), key -> new ArrayList<>())
+                    .add(entry);
+        }
+        entriesByRequestId.values()
+                .forEach(list -> list.sort(Comparator.comparingInt(Recommendation::getRankPosition)));
+
+        final List<Long> allSongIds = allEntries.stream().map(Recommendation::getSongId).distinct().toList();
+        final Map<Long, Song> songsById = new HashMap<>();
+        if (!allSongIds.isEmpty()) {
+            songRepository.findAllById(allSongIds).forEach(song -> songsById.put(song.getId(), song));
+        }
+
+        final List<RecommendationHistorySnapshot> snapshots = new ArrayList<>(requests.size());
+        for (final RecommendationRequestEntity request : requests) {
+            final List<Recommendation> entries = entriesByRequestId.getOrDefault(request.getId(), List.of());
+            // 영속된 곡이 (예: 시드 재구성으로) 사라진 경우의 안전망: 해당 entry 는 응답에서 제외.
+            // history 의도(=다른 기기에서 같은 결과 보기)에 비추어 곡 메타가 없는 row 를 노출하는 것보다는
+            // 누락 표시 없이 skip 하는 편이 UX 가 안전하다고 판단. (spec §3 비기능 — 결정성과 무관.)
+            final List<ScoredRecommendation> scored = entries.stream()
+                    .filter(entry -> songsById.get(entry.getSongId()) != null)
+                    .map(entry -> new ScoredRecommendation(
+                            songsById.get(entry.getSongId()),
+                            entry.getScore(),
+                            entry.getMatchReason(),
+                            entry.getRankPosition()))
+                    .toList();
+            snapshots.add(new RecommendationHistorySnapshot(request, new RecommendationResult(request.getId(),
+                    scored)));
+        }
+        return snapshots;
+    }
+
+    /**
+     * history GET 응답 1건의 도메인 표현 (요청 엔티티 + 결과). DTO 매핑을 위해 controller 측이 함께 쓰는 값 객체.
+     */
+    public record RecommendationHistorySnapshot(
+            RecommendationRequestEntity request,
+            RecommendationResult result
+    ) {
+    }
+
     @Transactional(readOnly = true)
     public RecommendationResult readById(final Long requestId) {
         final RecommendationRequestEntity savedRequest = recommendationRequestRepository.findById(requestId)
