@@ -298,6 +298,48 @@ describe("SongCard", () => {
         screen.getByRole("button", { name: /테스트 곡 좋아요$/ }),
       ).toHaveAttribute("aria-pressed", "false");
     });
+
+    // closes #257 — 실패 시 카드 내 인라인 안내 (role="alert") 가 노출되고,
+    // 재시도(다시 클릭) 시 즉시 제거된다.
+    it("BE mutation 실패 시 인라인 alert 메시지가 노출된다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/좋아요 처리에 실패했어요/);
+    });
+
+    it("재시도 클릭 시 이전 실패 안내가 즉시 사라진다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      // 두 번째 시도는 성공으로 둬서 mutation 진행 중에도 alert가 즉시 사라지는지 검증.
+      toggleLikeMock.mockResolvedValueOnce({ liked: true, songId: 1 });
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+      await screen.findByRole("alert");
+
+      // 재시도.
+      await user.click(button);
+      await waitFor(() => {
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      });
+    });
   });
 
   // closes #184 — 북마크 토글.
