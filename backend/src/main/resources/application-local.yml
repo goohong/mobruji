@@ -16,3 +16,9 @@ spring:
     # 기존 로컬 DB(ddl-auto=update로 만들어진)에 Flyway를 처음 도입하는 경우 대비.
     baseline-on-migrate: true
     baseline-version: 0
+
+# 로컬 개발자 worktree 별로 절대경로가 달라 기본값은 상대경로 (../tools/audio-analysis).
+# venv 사용 시 AUDIO_ANALYSIS_PYTHON_CMD 환경변수로 override 권장.
+audio:
+  analysis:
+    tool-dir: ${AUDIO_ANALYSIS_TOOL_DIR:../tools/audio-analysis}
