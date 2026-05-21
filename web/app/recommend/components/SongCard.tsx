@@ -31,7 +31,13 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -58,6 +64,13 @@ import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
 import { Chip } from "@/components/ui";
+
+/**
+ * 인터랙션 실패(좋아요/북마크) 인라인 안내 자동 dismiss 지속 시간 (closes #257).
+ * 너무 짧으면 사용자가 읽기 전에 사라지고, 너무 길면 다음 카드 탐색을 가린다.
+ * 카드 내부 한 줄 메시지라 3초가 적정.
+ */
+const INTERACTION_FEEDBACK_DURATION_MS = 3000;
 
 /**
  * Props 분기:
@@ -251,6 +264,23 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
   const toggleLike = useLikesStore((state) => state.toggleLike);
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const queryClient = useQueryClient();
+  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257). safeLog만으로는 사용자가
+  // 토글 버튼이 원상복귀된 이유를 알 수 없어 가시 피드백을 더한다.
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // 3초 뒤 자동 dismiss. 다음 클릭 시 즉시 클리어되므로 사용자가 새 시도를 해도
+  // 이전 메시지가 남아 혼란을 주지 않는다.
+  useEffect(() => {
+    if (!errorMessage) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setErrorMessage(null);
+    }, INTERACTION_FEEDBACK_DURATION_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorMessage]);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -277,6 +307,7 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
       // 낙관 변경 롤백.
       toggleLike(songId);
       safeLog.error("[SongCard] 좋아요 토글 실패", error);
+      setErrorMessage("좋아요 처리에 실패했어요. 다시 시도해 주세요.");
     },
   });
 
@@ -286,6 +317,8 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
     if (mutation.isPending) {
       return;
     }
+    // 새 시도 시작 시 이전 에러 안내 즉시 제거 — alert 잔존으로 인한 혼란 방지.
+    setErrorMessage(null);
     const sessionId = ensureSessionId();
     mutation.mutate({ sessionId });
   }
@@ -293,22 +326,32 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
   const busy = mutation.isPending;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      aria-pressed={liked}
-      aria-busy={busy}
-      aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
-        liked
-          ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      }`}
-    >
-      <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
-      <span>{liked ? "좋아요 취소" : "좋아요"}</span>
-    </button>
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        aria-pressed={liked}
+        aria-busy={busy}
+        aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+          liked
+            ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
+            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        }`}
+      >
+        <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
+        <span>{liked ? "좋아요 취소" : "좋아요"}</span>
+      </button>
+      {errorMessage ? (
+        <p
+          role="alert"
+          className="text-xs text-rose-700 dark:text-rose-300"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -330,6 +373,20 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
   const toggleBookmark = useBookmarksStore((state) => state.toggleBookmark);
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const queryClient = useQueryClient();
+  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257).
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!errorMessage) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setErrorMessage(null);
+    }, INTERACTION_FEEDBACK_DURATION_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorMessage]);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -351,6 +408,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
     onError: (error) => {
       toggleBookmark(songId);
       safeLog.error("[SongCard] 북마크 토글 실패", error);
+      setErrorMessage("북마크 처리에 실패했어요. 다시 시도해 주세요.");
     },
   });
 
@@ -360,6 +418,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
     if (mutation.isPending) {
       return;
     }
+    setErrorMessage(null);
     const sessionId = ensureSessionId();
     mutation.mutate({ sessionId });
   }
@@ -367,24 +426,34 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
   const busy = mutation.isPending;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      aria-pressed={bookmarked}
-      aria-busy={busy}
-      aria-label={
-        bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
-      }
-      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
-        bookmarked
-          ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      }`}
-    >
-      <span aria-hidden="true">🔖</span>
-      <span>{bookmarked ? "북마크 해제" : "북마크"}</span>
-    </button>
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        aria-pressed={bookmarked}
+        aria-busy={busy}
+        aria-label={
+          bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
+        }
+        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+          bookmarked
+            ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
+            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        }`}
+      >
+        <span aria-hidden="true">🔖</span>
+        <span>{bookmarked ? "북마크 해제" : "북마크"}</span>
+      </button>
+      {errorMessage ? (
+        <p
+          role="alert"
+          className="text-xs text-amber-700 dark:text-amber-300"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -419,7 +488,7 @@ function MatchReasonExpander({
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="inline-flex items-center gap-1 self-start rounded-full px-2 py-1 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+        className="inline-flex min-h-11 items-center gap-1 self-start rounded-full px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
       >
         <span>{expanded ? "접기" : "자세히 보기"}</span>
         <ChevronDownIcon expanded={expanded} />
