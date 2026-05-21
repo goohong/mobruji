@@ -44,7 +44,8 @@ public class RecommendationService {
                         recommendationCreateRequest.sessionId(),
                         recommendationCreateRequest.voiceRangeLow(),
                         recommendationCreateRequest.voiceRangeHigh(),
-                        recommendationCreateRequest.mood()));
+                        recommendationCreateRequest.mood(),
+                        excludeSongIds));
 
         // 후보 곡 단계에서 excludeSongIds 필터링.
         // spec §3 기능 요구사항: "이미 들었어요" → 결과에서 제외.
