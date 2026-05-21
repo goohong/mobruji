@@ -163,7 +163,7 @@ sequenceDiagram
 - [x] **PR C** (be, scope:recommendation, #237): `RecommendationResultEntry` 영속화(기존 `Recommendation` 엔티티에 매핑 — 신설 없음) + `GET /api/v1/sessions/{sid}/recommendation-history` API + V6 보조 인덱스.
 - [ ] **PR D** (fe, scope:web): SongCard 좋아요/북마크 버튼 + `/history` backend 우선 전환.
 - [ ] **PR E** (optional, scope:infra): 관측성 metric — `like.created` 등 카운터 등록.
-- [ ] **PR F** (be, scope:recommendation, ADR-0011 후속): like/bookmark POST/DELETE/GET endpoint 에 session-bound 인증 게이트 적용 (§5-2-1). recommendation-history GET 은 이미 #244 에서 적용됨. 동일 `SessionAuthGuard` 컴포넌트 재사용.
+- [~] **PR F** (be, scope:recommendation, ADR-0011 후속, #256 진행): like/bookmark POST/DELETE/GET endpoint 에 session-bound 인증 게이트 적용 (§5-2-1). recommendation-history GET 은 이미 #244 에서 적용됨. 동일 `SessionAuthGuard` 컴포넌트 재사용. **이번 라운드 범위(#256)**: GET 두 endpoint 만 — `SessionAuthGuard` + `LikeWithSongResponse`/`BookmarkWithSongResponse` (Song join) + offset 페이지네이션. POST/DELETE 의 body sessionId 검증은 후속 분리(body 기반 검증 패턴 별도).
 
 > PR 사이즈 가이드(03-quality-gates §PR 사이즈)에 따라 PR B는 Like만, Bookmark는 별도 PR로 쪼갤 수 있다. 구현 시 판단.
 
@@ -205,3 +205,4 @@ sequenceDiagram
 - **2026-05-21 (PR C, #237)**: spec 용어 `RecommendationResultEntry` 는 PR C 구현 시점 기존 엔티티 `Recommendation`(테이블 `recommendation`) 가 동일 schema 를 가지므로 신설 없이 매핑. history 엔드포인트 경로는 voice-range-progress 와 일관성 위해 `/recommendation-history` 로 확정 (spec 표의 `/recommendations` 보다 의도 명확). V6 는 `recommendation_request(session_id, created_at)` 보조 인덱스 추가만 수행 (보호 영역 → needs-human-review).
 - **2026-05-22 (be 27, #244 closes #238)**: `recommendation-history` GET endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가. `SessionAuthGuard` (admin gate #229 와 동일 상수시간 비교 패턴) 가 path sessionId 와 헤더 값을 비교, 누락/blank/불일치 모두 401. like/bookmark/POST 계열 인증 게이트는 후속 PR F 로 분리.
 - **2026-05-22 (plan 27, ADR-0011 영속화)**: session-bound 인증 정책을 ADR-0011 로 형식화 (정책 출처를 spec 본문에서 ADR 로 이동). §5-2-1 에 상세 절 추가, 상태 코드 매핑 401 통일(#244 구현 정합), admin 트랙(#229)과 별 트랙임을 명시. 후속 like/bookmark endpoint 도 본 ADR 패턴 강제.
+- **2026-05-22 (be 30, PR F 부분 — #256)**: `GET /api/v1/sessions/{id}/likes`, `/bookmarks` 에 `SessionAuthGuard` 적용 + 응답을 `Page<LikeWithSongResponse>`/`Page<BookmarkWithSongResponse>` 형태(Song join + offset 페이지네이션 wrapper)로 확정. fe `/likes`, `/bookmarks` 가시 페이지의 N+1 회피 + 응답 안정성 확보. POST/DELETE 계열 SessionAuthGuard 는 body sessionId 검증 패턴이 별도라 후속 분리. 기존 `LikeResponse`/`BookmarkResponse` 평면 DTO 는 사용처 없어 삭제 (배포 전 호환성: fe 아직 미사용).
