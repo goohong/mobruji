@@ -15,13 +15,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 
-import com.mobruji.recommendation.RecommendationRepository;
-import com.mobruji.recommendation.RecommendationRequestRepository;
-import com.mobruji.song.MetadataSource;
-import com.mobruji.song.Mood;
-import com.mobruji.song.MusicalKey;
-import com.mobruji.song.Song;
-import com.mobruji.song.SongRepository;
+import com.mobruji.recommendation.infrastructure.RecommendationRepository;
+import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
+import com.mobruji.song.domain.MetadataSource;
+import com.mobruji.song.domain.Mood;
+import com.mobruji.song.domain.MusicalKey;
+import com.mobruji.song.domain.Song;
+import com.mobruji.song.infrastructure.SongRepository;
 
 import io.restassured.RestAssured;
 
