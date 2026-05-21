@@ -21,6 +21,12 @@
  *     하므로 같은 voiceRange/sessionId라도 매번 다른 결과를 결정성 있게 반환한다.
  *   - 응답 곡 수가 0인 경우(이미 누적 셋이 카탈로그를 다 덮은 경우) "더 이상
  *     추천할 곡이 없어요" fallback을 노출하고 다시 버튼은 숨긴다.
+ *
+ * 이슈 #282 (2026-05-22):
+ *   - 헤더에 voice-range source method 뱃지(MIC/OCTAVE/SELF) 노출.
+ *   - MIC_MEASURE 소스일 때만 "마이크로 다시 측정" 1차 액션 링크 강조.
+ *   - voice-range mutation onSuccess 가 react-query 캐시에 응답을 prime 하므로
+ *     이 페이지의 useQuery 는 캐시 히트로 즉시 추천 mutation 발화.
  */
 
 import { useEffect } from "react";
@@ -32,7 +38,11 @@ import {
   createRecommendation,
   RecommendationResponse,
 } from "@/lib/api/recommendation";
-import { readVoiceRange, VoiceRangeResponse } from "@/lib/api/voice-range";
+import {
+  readVoiceRange,
+  VoiceRangeResponse,
+  VoiceRangeSourceMethod,
+} from "@/lib/api/voice-range";
 import { midiToNoteName } from "@/lib/notes";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
@@ -204,11 +214,25 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             추천 결과
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            내 음역대: {midiToNoteName(voiceRange.lowestNoteMidi)} ~{" "}
-            {midiToNoteName(voiceRange.highestNoteMidi)}
-          </p>
-          <div className="pt-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              내 음역대: {midiToNoteName(voiceRange.lowestNoteMidi)} ~{" "}
+              {midiToNoteName(voiceRange.highestNoteMidi)}
+            </p>
+            <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
+            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
+                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
+                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
+            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
+              <Link
+                href="/voice-range/auto"
+                className="text-sm font-medium text-zinc-900 underline-offset-4 hover:underline dark:text-zinc-50"
+              >
+                마이크로 다시 측정
+              </Link>
+            ) : null}
             <Link
               href="/voice-range"
               className="text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
@@ -401,4 +425,53 @@ function NoSessionFallback() {
       ctaLabel="음역대 입력하러 가기"
     />
   );
+}
+
+type SourceMethodBadgeProps = {
+  sourceMethod: VoiceRangeSourceMethod;
+};
+
+/**
+ * 추천 결과 헤더에 노출하는 음역대 측정 소스 뱃지 (closes #282).
+ *
+ * "내 음역대가 어떻게 측정된 결과인지" 를 한눈에 보여줘서 사용자가
+ * 이 추천 결과를 어떤 입력값과 연결할지 추론할 수 있게 한다.
+ *  - MIC_MEASURE → 마이크 측정 (emerald — 정확도 신호)
+ *  - OCTAVE_PICK → 직접 선택 (zinc — 중립)
+ *  - SELF_REPORT → 자가 보고 (zinc — 중립)
+ */
+function SourceMethodBadge({ sourceMethod }: SourceMethodBadgeProps) {
+  const { label, tone } = describeSourceMethod(sourceMethod);
+  return (
+    <span
+      data-testid="voice-range-source-badge"
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function describeSourceMethod(sourceMethod: VoiceRangeSourceMethod): {
+  label: string;
+  tone: string;
+} {
+  switch (sourceMethod) {
+    case "MIC_MEASURE":
+      return {
+        label: "마이크 측정",
+        tone:
+          "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200",
+      };
+    case "OCTAVE_PICK":
+      return {
+        label: "직접 선택",
+        tone: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+      };
+    case "SELF_REPORT":
+      return {
+        label: "자가 보고",
+        tone: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+      };
+  }
 }

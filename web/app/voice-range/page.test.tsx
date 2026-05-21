@@ -73,6 +73,23 @@ function renderWithQueryClient(ui: ReactNode) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
+/**
+ * cache prime 검증용 — 호출자가 client 인스턴스를 직접 들고 setQueryData 가
+ * 일어났는지 확인할 수 있게 한다.
+ */
+function renderWithExposedQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const rendered = render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+  return { ...rendered, client };
+}
+
 beforeEach(() => {
   sessionMock.reset();
   pushMock.mockReset();
@@ -203,6 +220,39 @@ describe("VoiceRangePage 제출 흐름", () => {
     expect(screen.getByText(/500: internal server boom/)).toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
     expect(sessionMock.state().setVoiceRangeId).not.toHaveBeenCalled();
+  });
+
+  // (closes #282) /recommend 진입 시 voice-range GET 왕복을 제거하기 위해
+  // mutation onSuccess 가 react-query 캐시에 응답을 prime 한다. 같은 sessionId
+  // 키로 useQuery 가 즉시 캐시 히트하는지 검증한다.
+  it("성공 시 응답을 react-query 캐시에 prime 한다 (#282)", async () => {
+    const user = userEvent.setup();
+    const response = {
+      id: 88,
+      sessionId: "test-session-id",
+      lowestNoteMidi: 50,
+      highestNoteMidi: 65,
+      sourceMethod: "OCTAVE_PICK" as const,
+      createdAt: "2026-05-22T00:00:00Z",
+      updatedAt: "2026-05-22T00:00:00Z",
+    };
+    createVoiceRangeMock.mockResolvedValueOnce(response);
+
+    const { client } = renderWithExposedQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    await user.selectOptions(lowSelect, "50");
+    await user.selectOptions(highSelect, "65");
+    await user.click(screen.getByRole("button", { name: /추천 받기/ }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/recommend");
+    });
+
+    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+      response,
+    );
   });
 
   it("최저음이 최고음보다 높으면 validation 메시지를 보여주고 제출하지 않는다", async () => {

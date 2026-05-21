@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
   createVoiceRange,
@@ -85,6 +85,7 @@ export default function AutoVoiceRangePage({
   deps = defaultDeps,
 }: AutoVoiceRangePageProps = {}) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const setVoiceRangeId = useSessionStore((state) => state.setVoiceRangeId);
 
@@ -202,6 +203,13 @@ export default function AutoVoiceRangePage({
       }),
     onSuccess: (data) => {
       setVoiceRangeId(data.id);
+      // (closes #282) /recommend 진입 시 voice-range GET 왕복 제거.
+      // 방금 저장한 응답을 react-query 캐시에 prime → 자동 측정 → 추천 흐름의
+      // 이중 로딩(POST 응답 후 또 GET) 제거.
+      queryClient.setQueryData<VoiceRangeResponse>(
+        ["voice-range", data.sessionId],
+        data,
+      );
       router.push("/recommend");
     },
   });
