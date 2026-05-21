@@ -79,7 +79,14 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
      * @return 처리 요약
      */
     BackfillSummary runBackfill(final double confidenceThreshold) {
-        final List<Song> songs = songRepository.findAll();
+        return runBackfill(songRepository.findAll(), confidenceThreshold);
+    }
+
+    /**
+     * 임의 곡 집합에 대해 backfill 실행 — 정기 batch ({@code AudioAnalysisScheduledBackfill}) 가 분석 대상
+     * 곡을 selective 하게 결정해 호출할 수 있도록 노출한다.
+     */
+    BackfillSummary runBackfill(final List<Song> songs, final double confidenceThreshold) {
         int analyzed = 0;
         int successful = 0;
         int updated = 0;
