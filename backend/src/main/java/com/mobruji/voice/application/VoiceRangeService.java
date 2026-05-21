@@ -1,5 +1,7 @@
 package com.mobruji.voice.application;
 
+import java.util.List;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +44,11 @@ public class VoiceRangeService {
     public VoiceRange readBySessionId(final String sessionId) {
         return voiceRangeRepository.findBySessionId(sessionId)
                 .orElseThrow(() -> new VoiceRangeNotFoundException(sessionId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<VoiceRangeSnapshot> readHistoryBySessionId(final String sessionId) {
+        return voiceRangeSnapshotRepository.findBySessionIdOrderByMeasuredAtAsc(sessionId);
     }
 
     public VoiceRange updateBySessionId(
