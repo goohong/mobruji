@@ -41,6 +41,12 @@ export default function Home() {
           >
             좋아한 곡 보기
           </Link>
+          <Link
+            href="/bookmarks"
+            className="inline-flex h-11 w-full items-center justify-center rounded-full px-6 text-sm font-medium text-zinc-700 transition-colors hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-50"
+          >
+            북마크한 곡 보기
+          </Link>
         </div>
 
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
