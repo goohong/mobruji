@@ -1,0 +1,170 @@
+name: Discord Notify
+
+# PR/이슈/릴리즈 이벤트를 Discord 채널로 push.
+# 본진 세션이 닫혀있을 때 사용자가 모바일 Discord 알림으로 사이클 진행을 확인하기 위함.
+# secret `DISCORD_WEBHOOK_URL` 없으면 workflow는 살아있으되 step은 skip (auto-add 패턴).
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, closed]
+  issues:
+    types: [opened, closed]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-22.04
+    # secret 부재 시 graceful skip. job 자체가 secret expression을 if에 직접 못 쓰므로
+    # env로 옮긴 뒤 step level if에서 평가한다.
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+    steps:
+      - name: Skip notice (no webhook secret)
+        if: env.DISCORD_WEBHOOK_URL == ''
+        run: |
+          echo "DISCORD_WEBHOOK_URL secret이 등록되어 있지 않습니다. 알림을 skip합니다."
+          echo "셋업: docs/ai-harness/14-discord-notify-setup.md"
+
+      - name: Build payload (pull_request)
+        if: env.DISCORD_WEBHOOK_URL != '' && github.event_name == 'pull_request'
+        id: pr_payload
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$PR_ACTION" = "opened" ]; then
+            EMOJI="🟦"
+            STATE="opened"
+            COLOR=3447003
+          elif [ "$PR_ACTION" = "ready_for_review" ]; then
+            EMOJI="🟢"
+            STATE="ready"
+            COLOR=3066993
+          elif [ "$PR_ACTION" = "closed" ] && [ "$PR_MERGED" = "true" ]; then
+            EMOJI="✅"
+            STATE="merged"
+            COLOR=10181046
+          else
+            EMOJI="❌"
+            STATE="closed"
+            COLOR=15158332
+          fi
+          {
+            echo "emoji=$EMOJI"
+            echo "state=$STATE"
+            echo "color=$COLOR"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Discord (pull_request)
+        if: env.DISCORD_WEBHOOK_URL != '' && github.event_name == 'pull_request'
+        env:
+          EMOJI: ${{ steps.pr_payload.outputs.emoji }}
+          STATE: ${{ steps.pr_payload.outputs.state }}
+          COLOR: ${{ steps.pr_payload.outputs.color }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          jq -n \
+            --arg title "$EMOJI [$STATE] #$PR_NUMBER $PR_TITLE" \
+            --arg url "$PR_URL" \
+            --arg author "$PR_USER" \
+            --argjson color "$COLOR" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                color: $color,
+                fields: [
+                  { name: "author", value: $author, inline: true }
+                ]
+              }]
+            }' > payload.json
+          curl -sS -H "Content-Type: application/json" \
+            -X POST -d @payload.json "$DISCORD_WEBHOOK_URL"
+
+      - name: Build payload (issues)
+        if: env.DISCORD_WEBHOOK_URL != '' && github.event_name == 'issues'
+        id: issue_payload
+        env:
+          ISSUE_ACTION: ${{ github.event.action }}
+        run: |
+          if [ "$ISSUE_ACTION" = "opened" ]; then
+            EMOJI="⚪"
+            STATE="issue opened"
+            COLOR=9807270
+          else
+            EMOJI="⚫"
+            STATE="issue closed"
+            COLOR=5198940
+          fi
+          {
+            echo "emoji=$EMOJI"
+            echo "state=$STATE"
+            echo "color=$COLOR"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Discord (issues)
+        if: env.DISCORD_WEBHOOK_URL != '' && github.event_name == 'issues'
+        env:
+          EMOJI: ${{ steps.issue_payload.outputs.emoji }}
+          STATE: ${{ steps.issue_payload.outputs.state }}
+          COLOR: ${{ steps.issue_payload.outputs.color }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
+        run: |
+          LABELS=$(echo "$ISSUE_LABELS" | jq -r 'join(", ")')
+          [ -z "$LABELS" ] && LABELS="(none)"
+          jq -n \
+            --arg title "$EMOJI [$STATE] #$ISSUE_NUMBER $ISSUE_TITLE" \
+            --arg url "$ISSUE_URL" \
+            --arg labels "$LABELS" \
+            --argjson color "$COLOR" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                color: $color,
+                fields: [
+                  { name: "labels", value: $labels, inline: true }
+                ]
+              }]
+            }' > payload.json
+          curl -sS -H "Content-Type: application/json" \
+            -X POST -d @payload.json "$DISCORD_WEBHOOK_URL"
+
+      - name: Notify Discord (release)
+        if: env.DISCORD_WEBHOOK_URL != '' && github.event_name == 'release'
+        env:
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          # release body가 길면 Discord embed description 2048자 제한에 걸릴 수 있어 자른다.
+          BODY=$(printf '%s' "$RELEASE_BODY" | head -c 1800)
+          jq -n \
+            --arg title "🚀 release ${RELEASE_TAG:-$RELEASE_NAME}" \
+            --arg url "$RELEASE_URL" \
+            --arg body "$BODY" \
+            '{
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $body,
+                color: 15844367
+              }]
+            }' > payload.json
+          curl -sS -H "Content-Type: application/json" \
+            -X POST -d @payload.json "$DISCORD_WEBHOOK_URL"

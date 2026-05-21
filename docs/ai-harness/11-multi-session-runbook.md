@@ -92,6 +92,10 @@ idle 룰 적용 기준:
   ```
 - 사용자 부재 시: 사용자가 돌아오기 전까지 본진이 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
 
+### 0-6-1) 본진 닫혀있을 때 모바일 모니터링
+
+본진 Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
+
 ### 0-7) 사이클 완료 후 워크트리 정리
 
 PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 본진은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
