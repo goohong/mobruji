@@ -1,0 +1,176 @@
+name: Discord Periodic Summary
+
+# 정해진 주기(기본 6시간)마다 활동 누적 요약을 Discord 채널로 push.
+# discord-notify.yml이 "즉시 이벤트 push"라면 이쪽은 "자고 일어났을 때 한 눈에 보는 다이제스트".
+# secret `DISCORD_WEBHOOK_URL` 없으면 graceful skip (auto-add 패턴).
+# 수동 트리거: `gh workflow run discord-periodic-summary.yml` (since 시간 조절 input 제공).
+
+on:
+  schedule:
+    # 매 6시간(UTC 00,06,12,18 → KST 09,15,21,03). 변경 시 docs/ai-harness/14-discord-notify-setup.md §주기 요약 갱신.
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      since_hours:
+        description: '몇 시간 이전부터 집계할지 (기본 6)'
+        required: false
+        default: '6'
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-22.04
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      GH_TOKEN: ${{ github.token }}
+      SINCE_HOURS: ${{ github.event.inputs.since_hours || '6' }}
+    steps:
+      - name: Skip notice (no webhook secret)
+        if: env.DISCORD_WEBHOOK_URL == ''
+        run: |
+          echo "DISCORD_WEBHOOK_URL secret이 등록되어 있지 않습니다. 요약을 skip합니다."
+          echo "셋업: docs/ai-harness/14-discord-notify-setup.md"
+
+      - name: Compute time window
+        if: env.DISCORD_WEBHOOK_URL != ''
+        id: window
+        run: |
+          # GitHub search API는 ISO 8601 UTC 시각을 요구한다 (예: 2026-05-21T00:00:00Z).
+          SINCE=$(date -u -d "${SINCE_HOURS} hours ago" +"%Y-%m-%dT%H:%M:%SZ")
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SINCE_KST=$(TZ=Asia/Seoul date -d "${SINCE_HOURS} hours ago" +"%Y-%m-%d %H:%M KST")
+          NOW_KST=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M KST")
+          {
+            echo "since=$SINCE"
+            echo "now=$NOW"
+            echo "since_kst=$SINCE_KST"
+            echo "now_kst=$NOW_KST"
+          } >> "$GITHUB_OUTPUT"
+          echo "window: $SINCE_KST ~ $NOW_KST (UTC since=$SINCE)"
+
+      - name: Collect activity
+        if: env.DISCORD_WEBHOOK_URL != ''
+        id: collect
+        env:
+          SINCE: ${{ steps.window.outputs.since }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+
+          # 머지된 PR (since 이후)
+          gh pr list --repo "$REPO" --state merged --limit 50 \
+            --search "merged:>$SINCE" \
+            --json number,title,url,mergedAt,author > merged_prs.json
+
+          # 신규 이슈 (created:>SINCE) — 머지 PR과 달리 PR도 search에 섞이므로 is:issue로 필터
+          gh issue list --repo "$REPO" --state all --limit 50 \
+            --search "created:>$SINCE is:issue" \
+            --json number,title,url,createdAt,labels > new_issues.json
+
+          # 닫힌 이슈 (closed:>SINCE)
+          gh issue list --repo "$REPO" --state closed --limit 50 \
+            --search "closed:>$SINCE is:issue" \
+            --json number,title,url,closedAt > closed_issues.json
+
+          # release published (since 이후 publishedAt)
+          gh release list --repo "$REPO" --limit 10 \
+            --json name,tagName,url,publishedAt \
+            --jq "map(select(.publishedAt >= \"$SINCE\"))" > releases.json
+
+          MERGED_N=$(jq 'length' merged_prs.json)
+          NEW_N=$(jq 'length' new_issues.json)
+          CLOSED_N=$(jq 'length' closed_issues.json)
+          RELEASE_N=$(jq 'length' releases.json)
+
+          {
+            echo "merged_n=$MERGED_N"
+            echo "new_n=$NEW_N"
+            echo "closed_n=$CLOSED_N"
+            echo "release_n=$RELEASE_N"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "merged=$MERGED_N, new_issues=$NEW_N, closed_issues=$CLOSED_N, releases=$RELEASE_N"
+
+      - name: Build embed payload
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          SINCE_KST: ${{ steps.window.outputs.since_kst }}
+          NOW_KST: ${{ steps.window.outputs.now_kst }}
+          MERGED_N: ${{ steps.collect.outputs.merged_n }}
+          NEW_N: ${{ steps.collect.outputs.new_n }}
+          CLOSED_N: ${{ steps.collect.outputs.closed_n }}
+          RELEASE_N: ${{ steps.collect.outputs.release_n }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 상위 5개만 노출, 초과분은 "+N more" 꼬리표.
+          render_top5() {
+            local file="$1" key="$2"
+            jq -r --arg key "$key" '
+              .[:5]
+              | map("• #\(.number) \(.title)")
+              | join("\n")
+            ' "$file"
+          }
+
+          MERGED_LIST=$(render_top5 merged_prs.json title)
+          NEW_LIST=$(render_top5 new_issues.json title)
+          CLOSED_LIST=$(render_top5 closed_issues.json title)
+          RELEASE_LIST=$(jq -r '.[:5] | map("• \(.tagName // .name)") | join("\n")' releases.json)
+
+          tail_more() {
+            local n="$1"
+            if [ "$n" -gt 5 ]; then echo "\n…그 외 $((n-5))건"; else echo ""; fi
+          }
+          MERGED_LIST="${MERGED_LIST}$(tail_more "$MERGED_N")"
+          NEW_LIST="${NEW_LIST}$(tail_more "$NEW_N")"
+          CLOSED_LIST="${CLOSED_LIST}$(tail_more "$CLOSED_N")"
+
+          # 비어있는 필드는 "(없음)"으로 채워서 embed field value가 empty가 되지 않게.
+          [ -z "$MERGED_LIST" ] && MERGED_LIST="(없음)"
+          [ -z "$NEW_LIST" ] && NEW_LIST="(없음)"
+          [ -z "$CLOSED_LIST" ] && CLOSED_LIST="(없음)"
+          [ -z "$RELEASE_LIST" ] && RELEASE_LIST="(없음)"
+
+          TOTAL=$((MERGED_N + NEW_N + CLOSED_N + RELEASE_N))
+          if [ "$TOTAL" -eq 0 ]; then
+            DESC="이번 구간 활동 없음. (조용한 사이클)"
+          else
+            DESC="구간: ${SINCE_KST} ~ ${NOW_KST}"
+          fi
+
+          # 활동 없는 구간에도 알림을 보낸다 ("정상적으로 조용함" 신호. 노이즈 우려 시 후속 ADR에서 조절).
+          jq -n \
+            --arg title "📊 ${REPO} 주기 요약" \
+            --arg desc "$DESC" \
+            --arg merged "🟢 머지된 PR: ${MERGED_N}건\n${MERGED_LIST}" \
+            --arg new "⚪ 신규 이슈: ${NEW_N}건\n${NEW_LIST}" \
+            --arg closed "✅ 닫힌 이슈: ${CLOSED_N}건\n${CLOSED_LIST}" \
+            --arg release "🚀 release: ${RELEASE_N}건\n${RELEASE_LIST}" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                color: 5814783,
+                fields: [
+                  { name: "머지", value: $merged, inline: false },
+                  { name: "신규 이슈", value: $new, inline: false },
+                  { name: "닫힌 이슈", value: $closed, inline: false },
+                  { name: "릴리즈", value: $release, inline: false }
+                ]
+              }]
+            }' > payload.json
+
+          # Discord field value는 1024자 제한. 안전망: 각 필드 자르기.
+          jq '.embeds[0].fields |= map(.value = (.value | if length > 1000 then .[:997] + "…" else . end))' \
+            payload.json > payload.trimmed.json
+          mv payload.trimmed.json payload.json
+
+      - name: Send to Discord
+        if: env.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -sS -H "Content-Type: application/json" \
+            -X POST -d @payload.json "$DISCORD_WEBHOOK_URL"
