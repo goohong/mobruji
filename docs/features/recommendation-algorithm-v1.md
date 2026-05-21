@@ -6,7 +6,7 @@ owner: "@goohong"
 scope: recommendation
 related_issues: [5, 19]
 related_prs: [6, 20]
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-22
 ---
 
 # 추천 알고리즘 v1 (recommendation-algorithm-v1)
@@ -33,7 +33,11 @@ last_reviewed: 2026-05-21
 
 ### 비기능 요구사항
 - p95 응답 200ms 이내 (DB 100~수백곡 카탈로그 가정). **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3**. 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
-- 결정 가능성: 같은 입력 → 같은 결과 (재추천 제외). 디버깅·이슈 재현용.
+- **결정성 (단일 진실)** — 같은 입력 → 같은 결과 (추천 후보 ID 순서 + top score 동일). 디버깅·이슈 재현용. 단 "재추천" 흐름은 `excludeSongIds`가 입력에 포함되므로 같은 입력으로 간주되지 않는다.
+  - **seed 계약**: `SeedDeriver.derive(sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds)` 입력에 결정성에 영향을 주는 **모든** 요청 필드가 포함되어야 한다 (PR #48 / #64 / #74 / #223). 새 입력 필드 추가 시 SeedDeriver 입력 시그니처도 같은 PR에서 확장한다. 누락 = "다시 버튼이 같은 결과 반환" 회귀.
+  - **비결정 호출 금지**: 추천 파이프라인(`com.mobruji.recommendation.application.*`) 내부에서 `new Random()`(seed 없음), `Instant.now()`, `UUID.randomUUID()` 직접 호출 금지. 자세한 룰은 `08-code-conventions.md §A-8 결정성 패턴` 참조. 자동 강제는 ArchUnit으로 추진(이슈 #61).
+  - **결정성 회귀 가드 (테스트 단정)**: `RecommendationDeterminismTest` 단정은 (a) 같은 입력 → 곡 ID 순서·top score 동일, (b) 입력 1비트라도 변경(sessionId/preferredBpm/excludeSongIds 등) → seed 변경 → `SeedDeriverTest`에서 long seed 값 자체가 달라짐, 두 축으로 분리한다. E2E에서 "다른 sessionId → 다른 순서" 단정은 가중치/시드 데이터 미세 변경에 flaky하므로 entropy 단정의 단일 진실은 **단위 (SeedDeriver) 레이어**가 진다. E2E는 안정 케이스(같은 입력 회귀)만 단정한다 (#59 후속).
+  - **결정성 관측성**: 추천 호출당 입력 해시(SHA-256 hex 첫 16자)와 seed(long)를 INFO 로그 1줄로 남겨 운영 디버깅에서 결과 차이를 재현 가능하게 한다 (`event=recommendation.created request.input.hash=… seed=… algoVersion=v1|v2`). 입출력 PII는 hash·count로만 남기고 원문 음역대 수치도 노출하지 않는다 (관측성 baseline `10-observability.md` 정합).
 - 외부 API 호출 없음(v1 한정). 내부 DB 질의만으로 완결.
 - 매칭 점수 계산식이 코드 한 군데에 모여 있어야 하고, 가중치는 설정으로 빼야 한다.
 
@@ -125,7 +129,10 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
 - **단위(다양성)**: 같은 아티스트 N곡일 때 결과에 최대 2곡만 포함되는지.
 - **통합/Repository**: 시드 100곡 위에서 추천 1회 호출 → top-10 결과 검증.
 - **E2E (필수)**: POST → 결과 N개 + matchReason 비어있지 않음 + GET으로 재조회 일치.
-- **회귀**: "같은 요청 → 같은 결과" 결정성 테스트(jitter는 seed 고정).
+- **회귀(결정성, 단일 진실)**:
+  - E2E (`RecommendationDeterminismTest`): 같은 입력 두 번 → 곡 ID 순서 + top score 동일. "다른 입력 → 다른 순서" 단정은 곡 시드/가중치에 결합돼 flaky하므로 두지 않는다.
+  - 단위 (`SeedDeriverTest`): 같은 입력 → 같은 long seed. 입력 필드 하나라도 다르면 long seed 자체가 다름(필드별 회귀 케이스). entropy 단정의 단일 진실 레이어.
+  - 단위 (`RecommendationScorerTest`): 점수 산식 결정성. 가중치·다양성 후처리 변경 시 같은 후보 집합에 대해 같은 점수.
 
 ## 8) 오픈 질문
 > 모든 항목 해소. 본 spec은 `approved`. 새 질문이 생기면 본 테이블에 추가.
@@ -151,6 +158,11 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **`popularityPrior` 컴포넌트 사실상 비활성** — 모든 곡 popularity=1.0 (시드 데이터에 없음). 가중치만 보존, ranking 영향 없음.
   - **유효 점수식: `score = 0.5 * voiceRangeFit + 0.2 * moodMatch + jitter`** — Q2 가중치 중 voice/mood만 의미 있음.
   - **`voiceRangeFit` 구체 산식**: `MusicalKeyMidiResolver`로 곡 키 → root MIDI 매핑, 곡 음역 = root±7 semitones, overlap/songSpan으로 0~1 점수.
+- 2026-05-21: **결정성 복원 — `SeedDeriver` 도입** (PR #48, closes #42).
+  - **AS-IS**: `RecommendationService` 가 `new Random()`(seed 없음)으로 jitter 적용. 같은 입력에도 호출마다 결과 순서가 흔들려 §3 비기능 결정성 위반. rev 사이클 1 🔴 (https://github.com/goohong/mobruji/pull/20#issuecomment-4504853584).
+  - **TO-BE**: `SeedDeriver.derive(...)` — 요청 입력 필드를 정규화 직렬화 → SHA-256 → 상위 8바이트 long seed. JDK 표준 `MessageDigest`만 사용, 외부 의존성 0. `RecommendationProperties.seedStrategy = derived`(기본) / `random`(디버깅용 비결정) 분기. `Random` 인스턴스는 **요청 단위로 새로 생성** (Spring DI로 빈 등록 시 결정성 깨짐).
+  - **회귀 가드**: `SeedDeriverTest`(결정성/entropy/null mood) + `RecommendationDeterminismTest`(E2E — 같은 입력 두 번 → 같은 순서).
+  - **누적 패턴 (영구 명문화)**: 추천 파이프라인에서 비결정 호출(`new Random()`/`Instant.now()`/`UUID.randomUUID()`)을 직접 사용하지 않는다. 결정성에 영향을 주는 모든 요청 입력은 `SeedDeriver.derive(...)` 시그니처에 포함시켜야 한다. 자동 강제는 ArchUnit 별도 이슈(#61).
 - 2026-05-21: `excludeSongIds` 입력 도입. 출처: #45 #63 (PR #64)
   - **API 입력 확장**: `RecommendationCreateRequest.excludeSongIds: List<Long>` 추가 (nullable, JSON 생략 가능 → 빈 리스트로 정규화).
   - **파이프라인**: `SongRepository.findAll()` 결과에서 제외 ID를 점수 계산 전에 필터링. 다양성 후처리(아티스트≤2/장르≤4)와 fallback 모두 제외 후 카탈로그 위에서 정상 작동.
@@ -197,3 +209,13 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **영속화**: `recommendation_request.preferred_bpm INTEGER NULL` 컬럼 추가(V4 migration). 보호 영역 (`needs-human-review` 라벨). `RecommendationRequestEntity` 에 nullable `preferredBpm` 필드.
   - **테스트**: tempoMatch 단위 7건(정확/거리감쇠/tolerance 초과/mood default/preferredBpm 우선/null song bpm/target 없음/fallback) + ScoreBreakdown 6번째 필드 단위 + SeedDeriver preferredBpm 회귀 2건 + 영속 라운드트립 2건 + E2E breakdown.tempoMatch 노출 + E2E 결정성 회귀 2건. 기존 23 테스트 시그니처 마이그레이션.
   - **DiversityPostProcessor / matchReason 무변경**: tempoMatch 는 가중 합산 score 에만 영향, top 신호 분기는 rangeFit/moodMatch 기반 유지.
+- 2026-05-22: **결정성 spec 정합화 — 로그 / 테스트 단정 / excludeSongIds seed 연계 명문화** (closes #59, 본 docs PR).
+  - **배경**: PR #48 결정성 복원 사후 감사(rev 사이클 3, https://github.com/goohong/mobruji/pull/48#issuecomment-4504980667)에서 발견된 🟡 3건을 spec에 영구히 박는다. PR #48 결정 로그 라인(§9, 2026-05-21)이 본 정합화에 의해 새로 추가됐다.
+  - **§3 비기능 결정성 절 신설**: (a) seed 계약(SeedDeriver 입력 시그니처가 결정성 단일 진실), (b) 비결정 호출 금지(컨벤션 §A-8 + ArchUnit #61), (c) 테스트 단정 레이어 분리, (d) 결정성 관측성 로그 1줄 — 4축으로 정리.
+  - **§7 테스트 전략 정합**: "다른 입력 → 다른 순서" entropy 단정의 단일 진실을 단위 `SeedDeriverTest`로 옮기고 E2E는 안정 케이스(같은 입력 회귀)만 단정 — `RecommendationDeterminismTest.determinism_differentInput_yieldsDifferentOrder` 단정 약화 후보. 가중치/시드 데이터 미세 변경에 flaky한 단정을 회피한다.
+  - **excludeSongIds seed 연계 (영구 명문화)**: §3 비기능 결정성 절에 "결정성에 영향을 주는 모든 요청 입력은 SeedDeriver 입력에 포함" 룰을 박았다. PR #74에서 이미 영속화·seed 연계 완료. 새 입력 필드 추가 시 동일 PR에서 SeedDeriver 시그니처도 확장.
+  - **구현 이슈 분할** (be 세션 위임):
+    - **PR A** (`feat:observability`): 결정성 관측성 로그 — 추천 호출당 `event=recommendation.created request.input.hash=<sha256-16> seed=<long> algoVersion=<v1|v2>` INFO 1줄. PII 원문 미노출.
+    - **PR B** (`test:recommendation`): `RecommendationDeterminismTest.determinism_differentInput_yieldsDifferentOrder` 단정 안정화 — entropy 단정은 `SeedDeriverTest`로 이동, E2E는 같은 입력 회귀만.
+    - **PR C** (`test:infra`): ArchUnit 룰 — `com.mobruji..application..` 패키지에서 `java.util.Random`/`java.time.Instant.now()`/`java.util.UUID.randomUUID()` 직접 호출 금지 (#61 묶음).
+  - **결정성 영향 없음 (본 docs PR)**: 코드 변경 0. spec 정합화만.
