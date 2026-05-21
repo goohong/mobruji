@@ -13,11 +13,11 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 
-import com.mobruji.song.MetadataSource;
-import com.mobruji.song.Mood;
-import com.mobruji.song.MusicalKey;
-import com.mobruji.song.Song;
-import com.mobruji.song.SongRepository;
+import com.mobruji.song.domain.MetadataSource;
+import com.mobruji.song.domain.Mood;
+import com.mobruji.song.domain.MusicalKey;
+import com.mobruji.song.domain.Song;
+import com.mobruji.song.infrastructure.SongRepository;
 
 import io.restassured.RestAssured;
 
