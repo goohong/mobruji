@@ -257,8 +257,38 @@ gh project item-add 5 --owner goohong --url https://github.com/goohong/mobruji/p
 
 #### Status / Session 필드 운영
 - 기본 `Status`: Todo / In Progress / Done. UI에서 칸반 보드로 자동 표시.
-- `Session` 필드: 새 PR을 보드에 add 후 backend/frontend/review/infra/release 중 하나로 설정.
-- 자동 전이: 별 워크플로우 없음. 사람이 UI에서 드래그하거나 `gh project item-edit`로 갱신.
+- `Session` 필드: backend / frontend / review / infra / release 중 하나로 분류.
+- 자동 전이:
+  - `Status`는 `auto-update-project-status.yml`이 PR ready/draft/issue reopen 이벤트로 전이.
+  - `Session`은 `auto-set-session-on-project.yml`이 PR/이슈 open/reopen/labeled 이벤트로 분류 시도.
+
+##### auto-set-session 매핑 룰
+신규 PR/이슈가 보드에 add되면 (`auto-add-to-project.yml`이 먼저 add) workflow가 다음 순서로 Session을 자동 설정한다:
+
+1. `session:backend|frontend|review` 라벨이 있으면 그 값 (rev 세션이 이슈 등록 시 명시하는 패턴 우선).
+2. 라벨이 없으면 폴백:
+   - PR 제목이 `release:`로 시작 → `release`
+   - 라벨 `scope:web` → `frontend`
+   - 라벨 `scope:song|voice|recommendation` → `backend`
+   - 라벨 `scope:infra` → `infra`
+3. 위 어느 룰에도 걸리지 않으면 Session은 빈 상태로 둔다(manual 분류 필요).
+
+PROJECT_TOKEN secret 미설정 시 graceful skip한다(`auto-add-to-project.yml`와 동일 패턴). 즉 보드 셋업 전이거나 토큰을 회수해도 workflow는 살아 있다.
+
+##### 수동 분류가 필요한 경우
+auto-set-session이 매핑에 실패해 Session 필드가 비어 있는 카드는 보드 UI에서 직접 옵션을 선택하거나 다음 명령으로 갱신:
+
+```bash
+gh project item-edit \
+  --project-id PVT_kwHOBRYNe84BYVlg \
+  --field-id PVTSSF_lAHOBRYNe84BYVlgzhTcJwU \
+  --id <project-item-id> \
+  --single-select-option-id <option-id>
+```
+
+옵션 ID: backend `aabcec2d`, frontend `0c6191d7`, review `bf8ab92d`, infra `c697cb09`, release `41252f0d`.
+
+`<project-item-id>`는 `gh api graphql` projectItems 쿼리 또는 UI의 카드 상세에서 확인. 일반적으로는 적절한 `session:*` 또는 `scope:*` 라벨을 PR/이슈에 부여하면 workflow가 다시 트리거되어 자동 분류된다(라벨 추가 → labeled 이벤트). 라벨로 표현 가능한 케이스는 라벨을 먼저 시도하고, 표현 불가한 경우만 직접 옵션 설정으로 처리한다.
 
 ### 1-5) rev 세션 push 차단 hook 설치
 

@@ -1,0 +1,193 @@
+name: Auto Set Session on Project
+
+# PR/이슈가 보드에 등록된 뒤 Session 필드를 자동 분류한다.
+#
+# 매핑 룰 (2026-05-21 본진 일괄 분류 패턴과 동일):
+#   1) 라벨 session:backend|frontend|review 우선 → 해당 Session
+#   2) 라벨 없으면 — 폴백:
+#      - PR 제목 prefix "release:" → release
+#      - 라벨 scope:web → frontend
+#      - 라벨 scope:song|voice|recommendation → backend
+#      - 라벨 scope:infra → infra
+#      - 그 외 → 설정 안 함 (manual)
+#
+# 필요한 secrets/vars:
+#   - vars.PROJECT_URL: 보드 URL (auto-add workflow와 공유)
+#   - secrets.PROJECT_TOKEN: repo + project scope의 Classic PAT (user-owned project 필수)
+#
+# PROJECT_TOKEN 없거나 보드 item이 아직 add되지 않았으면 graceful skip.
+#
+# 보호 영역(.github/workflows/**) — 변경 시 needs-human-review 라벨 필수.
+
+on:
+  pull_request:
+    types: [opened, reopened, labeled]
+  issues:
+    types: [opened, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  set-session:
+    runs-on: ubuntu-22.04
+    if: vars.PROJECT_URL != ''
+    continue-on-error: true
+
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      # Project + Session 필드 메타데이터 (mobruji 보드 기준, hard-coded).
+      # 갱신이 필요하면 다음 쿼리로 재확인:
+      #   gh project field-list 5 --owner goohong --format json
+      PROJECT_ID: PVT_kwHOBRYNe84BYVlg
+      SESSION_FIELD_ID: PVTSSF_lAHOBRYNe84BYVlgzhTcJwU
+      OPTION_BACKEND: aabcec2d
+      OPTION_FRONTEND: 0c6191d7
+      OPTION_REVIEW: bf8ab92d
+      OPTION_INFRA: c697cb09
+      OPTION_RELEASE: 41252f0d
+
+    steps:
+      - name: Guard PROJECT_TOKEN
+        id: guard
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          if [[ -z "${PROJECT_TOKEN}" ]]; then
+            echo "PROJECT_TOKEN secret 미설정. user-owned project Session 업데이트 불가. graceful skip."
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Determine target session
+        id: target
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const event = context.eventName;
+            const payload = context.payload;
+
+            const isPR = event === 'pull_request';
+            const obj = isPR ? payload.pull_request : payload.issue;
+            if (!obj) {
+              core.info('no pull_request/issue payload, skip.');
+              core.setOutput('option_id', '');
+              return;
+            }
+
+            const labels = (obj.labels || []).map(l => (typeof l === 'string' ? l : l.name));
+            const title = obj.title || '';
+
+            const options = {
+              backend: process.env.OPTION_BACKEND,
+              frontend: process.env.OPTION_FRONTEND,
+              review: process.env.OPTION_REVIEW,
+              infra: process.env.OPTION_INFRA,
+              release: process.env.OPTION_RELEASE,
+            };
+
+            // 1) session:* 라벨 우선
+            if (labels.includes('session:backend')) {
+              core.setOutput('option_id', options.backend);
+              core.setOutput('reason', 'label session:backend');
+              return;
+            }
+            if (labels.includes('session:frontend')) {
+              core.setOutput('option_id', options.frontend);
+              core.setOutput('reason', 'label session:frontend');
+              return;
+            }
+            if (labels.includes('session:review')) {
+              core.setOutput('option_id', options.review);
+              core.setOutput('reason', 'label session:review');
+              return;
+            }
+
+            // 2) 폴백
+            if (isPR && /^release:/i.test(title)) {
+              core.setOutput('option_id', options.release);
+              core.setOutput('reason', 'PR title prefix release:');
+              return;
+            }
+            if (labels.includes('scope:web')) {
+              core.setOutput('option_id', options.frontend);
+              core.setOutput('reason', 'label scope:web');
+              return;
+            }
+            if (labels.includes('scope:song') || labels.includes('scope:voice') || labels.includes('scope:recommendation')) {
+              core.setOutput('option_id', options.backend);
+              core.setOutput('reason', 'label scope:song|voice|recommendation');
+              return;
+            }
+            if (labels.includes('scope:infra')) {
+              core.setOutput('option_id', options.infra);
+              core.setOutput('reason', 'label scope:infra');
+              return;
+            }
+
+            core.info('no matching mapping rule, leave Session unset (manual classification).');
+            core.setOutput('option_id', '');
+
+      - name: Resolve content node id
+        id: content
+        if: steps.guard.outputs.skip == 'false' && steps.target.outputs.option_id != ''
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "node_id=${{ github.event.pull_request.node_id }}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "node_id=${{ github.event.issue.node_id }}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Find project item id
+        id: item
+        if: steps.guard.outputs.skip == 'false' && steps.target.outputs.option_id != ''
+        run: |
+          set -euo pipefail
+          content_id="${{ steps.content.outputs.node_id }}"
+
+          # 해당 PR/issue가 이미 보드에 add되어 있어야 한다. add는 auto-add-to-project.yml가 담당.
+          # 여기서는 projectItems 중 PROJECT_ID 매칭만 가져온다.
+          item_id=$(gh api graphql -f query='
+            query($id: ID!) {
+              node(id: $id) {
+                ... on PullRequest {
+                  projectItems(first: 20) { nodes { id project { id } } }
+                }
+                ... on Issue {
+                  projectItems(first: 20) { nodes { id project { id } } }
+                }
+              }
+            }
+          ' -F id="${content_id}" \
+            --jq ".data.node.projectItems.nodes[] | select(.project.id == \"${PROJECT_ID}\") | .id" \
+            || true)
+
+          if [[ -z "${item_id}" ]]; then
+            echo "no project item for this content in PROJECT_ID=${PROJECT_ID}. auto-add workflow가 먼저 돌아야 함. skip."
+            exit 0
+          fi
+
+          echo "item_id=${item_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update Session field
+        if: steps.guard.outputs.skip == 'false' && steps.item.outputs.item_id != ''
+        run: |
+          set -euo pipefail
+          echo "matched rule: ${{ steps.target.outputs.reason }}"
+          gh api graphql -f query='
+            mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $project,
+                itemId: $item,
+                fieldId: $field,
+                value: { singleSelectOptionId: $option }
+              }) { projectV2Item { id } }
+            }
+          ' \
+            -F project="${PROJECT_ID}" \
+            -F item="${{ steps.item.outputs.item_id }}" \
+            -F field="${SESSION_FIELD_ID}" \
+            -F option="${{ steps.target.outputs.option_id }}"
