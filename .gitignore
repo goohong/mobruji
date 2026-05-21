@@ -70,3 +70,8 @@ tools/audio-analysis/*.mp3
 tools/audio-analysis/*.wav
 tools/audio-analysis/*.m4a
 tools/audio-analysis/*.webm
+
+### Discord daemon (tools/discord-daemon/) ###
+tools/discord-daemon/venv/
+tools/discord-daemon/__pycache__/
+tools/discord-daemon/inbox.jsonl

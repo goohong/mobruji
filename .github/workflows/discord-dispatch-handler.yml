@@ -1,0 +1,41 @@
+name: discord-dispatch-handler
+
+# Discord daemon(tools/discord-daemon/bot.py)이 repository_dispatch 로
+# 전달한 메시지를 받는다. 현 단계는 echo 로그 + 사후 본진 자동 호출 hook.
+# 본진 작업은 후속 PR에서 이 workflow 에 step 을 추가하는 식으로 확장한다.
+
+on:
+  repository_dispatch:
+    types: [discord_message]
+
+permissions:
+  contents: read
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Echo received payload (no secrets)
+        env:
+          AUTHOR: ${{ github.event.client_payload.author }}
+          AUTHOR_NAME: ${{ github.event.client_payload.author_name }}
+          TS: ${{ github.event.client_payload.ts }}
+          MESSAGE_ID: ${{ github.event.client_payload.message_id }}
+          CHANNEL_ID: ${{ github.event.client_payload.channel_id }}
+          TEXT: ${{ github.event.client_payload.text }}
+        run: |
+          echo "::group::discord_message received"
+          echo "author=${AUTHOR}"
+          echo "author_name=${AUTHOR_NAME}"
+          echo "ts=${TS}"
+          echo "message_id=${MESSAGE_ID}"
+          echo "channel_id=${CHANNEL_ID}"
+          # 메시지 본문은 길이만 노출. 필요 시 후속 step 에서 별도 처리.
+          echo "text_length=${#TEXT}"
+          echo "::endgroup::"
+
+      - name: Placeholder for future routing
+        run: |
+          echo "TODO: 후속 PR 에서 명령 prefix (do/fix/status/branch) 라우팅 추가"
+          echo "TODO: Discord 채널에 결과 회신 (webhook 또는 bot.py 측 followup)"
