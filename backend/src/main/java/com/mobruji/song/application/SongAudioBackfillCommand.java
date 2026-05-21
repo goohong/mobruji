@@ -1,7 +1,9 @@
 package com.mobruji.song.application;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +56,15 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
     static final double DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
 
     private static final Logger LOG = LoggerFactory.getLogger(SongAudioBackfillCommand.class);
+
+    /**
+     * 마지막으로 backfill batch 가 완료된 시각. in-memory atomic — admin 통계 API
+     * ({@code GET /api/v1/songs/stats}) 가 noop 으로 조회한다. KVStore/DB 미사용 — 재기동 시 null.
+     *
+     * <p>spec rev 14 후속(#208/#212): 통계 화면에서 "최근 batch 시각" 노출용. 정확한 historical
+     * audit 가 필요해지면 별도 테이블로 승격한다 (오픈 이슈).
+     */
+    private static final AtomicReference<Instant> LAST_BACKFILL_COMPLETED_AT = new AtomicReference<>();
 
     private final SongRepository songRepository;
     private final AudioAnalysisRunner audioAnalysisRunner;
@@ -134,7 +145,15 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
         LOG.info(
                 "audio backfill done analyzed={} successful={} updated={} skipped_low_confidence={} failed={}",
                 analyzed, successful, updated, skippedLowConfidence, failed);
+        LAST_BACKFILL_COMPLETED_AT.set(Instant.now());
         return new BackfillSummary(analyzed, successful, updated, skippedLowConfidence, failed);
+    }
+
+    /**
+     * 마지막 backfill 완료 시각 — 아직 한 번도 실행되지 않았으면 {@code null}. 재기동 시 초기화된다.
+     */
+    public static Instant getLastBackfillCompletedAt() {
+        return LAST_BACKFILL_COMPLETED_AT.get();
     }
 
     private static boolean isOptionTrue(final ApplicationArguments args) {
