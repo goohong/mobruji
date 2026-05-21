@@ -14,7 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 
-import com.mobruji.voice.VoiceRangeRepository;
+import com.mobruji.voice.infrastructure.VoiceRangeRepository;
 
 import io.restassured.RestAssured;
 
