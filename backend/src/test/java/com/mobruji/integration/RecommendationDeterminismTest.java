@@ -114,6 +114,65 @@ class RecommendationDeterminismTest {
     }
 
     @Test
+    @DisplayName("v2 결정성 (#218): 같은 preferredBpm 두 번 → 같은 결과 (seed 안정성)")
+    void determinism_samePreferredBpm_yieldsSameOrder() {
+        // given
+        final String payload = """
+                {
+                  "sessionId": "v2-bpm-stable",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "preferredBpm": 128
+                }
+                """;
+        // when
+        final List<Integer> firstOrder = postAndExtractSongIds(payload);
+        final List<Integer> secondOrder = postAndExtractSongIds(payload);
+        // then
+        assertThat(firstOrder).isEqualTo(secondOrder);
+    }
+
+    @Test
+    @DisplayName("v2 entropy (#218): 다른 preferredBpm → 적어도 순서/점수가 달라진다 (tempoMatch 입력 영향)")
+    void determinism_differentPreferredBpm_yieldsDifferentScore() {
+        // given: 같은 sessionId/voiceRange, preferredBpm 만 다름
+        final String payloadFast = """
+                {
+                  "sessionId": "v2-bpm-entropy",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "preferredBpm": 130
+                }
+                """;
+        final String payloadSlow = """
+                {
+                  "sessionId": "v2-bpm-entropy",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "preferredBpm": 60
+                }
+                """;
+        // when
+        final Float fastTop = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(payloadFast)
+                .when().post("/api/v1/recommendations")
+                .then().statusCode(HttpStatus.CREATED.value())
+                .extract().jsonPath().getFloat("recommendations[0].breakdown.tempoMatch");
+        final Float slowTop = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(payloadSlow)
+                .when().post("/api/v1/recommendations")
+                .then().statusCode(HttpStatus.CREATED.value())
+                .extract().jsonPath().getFloat("recommendations[0].breakdown.tempoMatch");
+        // then: 곡 BPM 120 시드 — fast(130) 거리 10 → 0.75, slow(60) 거리 60 → 0.0 (tolerance 40 초과)
+        assertThat(fastTop).isNotEqualTo(slowTop);
+    }
+
+    @Test
     @DisplayName("entropy 보존: 다른 sessionId → 적어도 한 자리에서 순서가 달라진다")
     void determinism_differentInput_yieldsDifferentOrder() {
         // given: sessionId만 다르고 나머지는 동일 → jitter seed가 달라져야 함

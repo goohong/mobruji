@@ -26,7 +26,7 @@ class RecommendationResponseTest {
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .lowMidi(60).highMidi(72)
                 .build();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.95, 0.0, 1.0, 1.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.95, 0.0, 1.0, 1.0, 0.8);
         final RecommendationResult recommendationResult = new RecommendationResult(
                 42L,
                 List.of(new ScoredRecommendation(song, 0.87, "음역 적합", 1, breakdown)));
@@ -42,13 +42,14 @@ class RecommendationResponseTest {
         assertThat(recommendedSongResponse.score()).isEqualTo(0.87);
         assertThat(recommendedSongResponse.matchReason()).isEqualTo("음역 적합");
         assertThat(recommendedSongResponse.rankPosition()).isEqualTo(1);
-        // breakdown 5신호가 그대로 노출되어야 함 (fe 14 matchReason 펼침 UX)
+        // breakdown 6신호가 그대로 노출되어야 함 (fe 14 matchReason 펼침 UX, v2 tempoMatch 포함)
         assertThat(recommendedSongResponse.breakdown()).isNotNull();
         assertThat(recommendedSongResponse.breakdown().keyMatch()).isEqualTo(1.0);
         assertThat(recommendedSongResponse.breakdown().rangeFit()).isEqualTo(0.95);
         assertThat(recommendedSongResponse.breakdown().genreMatch()).isEqualTo(0.0);
         assertThat(recommendedSongResponse.breakdown().moodMatch()).isEqualTo(1.0);
         assertThat(recommendedSongResponse.breakdown().popularity()).isEqualTo(1.0);
+        assertThat(recommendedSongResponse.breakdown().tempoMatch()).isEqualTo(0.8);
     }
 
     @Test

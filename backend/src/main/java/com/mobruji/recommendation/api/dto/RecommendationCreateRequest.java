@@ -20,12 +20,16 @@ import com.mobruji.song.domain.Mood;
  * null 허용(JSON에서 필드 자체를 생략 가능). 서비스 레이어에서 null→empty로 정규화한다.
  * 결정성을 위해 본 값은 {@code SeedDeriver}의 입력에도 포함되며,
  * 같은 음역대라도 excludeSongIds가 다르면 jitter seed가 달라져 결과 변주가 발생한다.
+ *
+ * <p>{@code preferredBpm}은 v2(#218)에서 추가된 사용자 선호 BPM 입력(옵션). null이면 mood 기반 default BPM 적용.
+ * 결정성 보장을 위해 {@code SeedDeriver}의 입력에도 포함된다.
  */
 public record RecommendationCreateRequest(
         @NotBlank String sessionId,
         @NotNull @Min(12) @Max(119) Integer voiceRangeLow,
         @NotNull @Min(12) @Max(119) Integer voiceRangeHigh,
         Mood mood,
+        @Min(30) @Max(300) Integer preferredBpm,
         List<Long> excludeSongIds
 ) {
 
@@ -38,6 +42,6 @@ public record RecommendationCreateRequest(
 
     public CreateRecommendationCommand toCommand() {
         return new CreateRecommendationCommand(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, excludeSongIdsOrEmpty());
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIdsOrEmpty());
     }
 }

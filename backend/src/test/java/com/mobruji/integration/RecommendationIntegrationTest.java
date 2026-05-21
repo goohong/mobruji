@@ -100,6 +100,34 @@ class RecommendationIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E (v2 #218): 응답 breakdown.tempoMatch가 [0,1] 범위 내 노출된다")
+    void e2e_tempoMatchInResponse() {
+        // given: preferredBpm 입력. 시드 곡 BPM은 buildSong 에서 120 (UPBEAT default와 비슷한 영역).
+        final String createBody = """
+                {
+                  "sessionId": "rec-e2e-tempo",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "preferredBpm": 120
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].breakdown.tempoMatch", notNullValue())
+                .body("recommendations[0].breakdown.tempoMatch",
+                        org.hamcrest.Matchers.greaterThanOrEqualTo(0.0f))
+                .body("recommendations[0].breakdown.tempoMatch",
+                        org.hamcrest.Matchers.lessThanOrEqualTo(1.0f));
+    }
+
+    @Test
     @DisplayName("E2E: 없는 추천 ID는 404")
     void e2e_notFound() {
         given()

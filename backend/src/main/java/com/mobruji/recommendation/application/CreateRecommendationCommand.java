@@ -11,12 +11,16 @@ import com.mobruji.song.domain.Mood;
  *
  * <p>{@code excludeSongIds}는 null이 아닌 빈 리스트로 정규화된 값을 받는다 (api.dto의
  * {@code excludeSongIdsOrEmpty()} 호출 결과 등).
+ *
+ * <p>{@code preferredBpm}은 v2(#218)에서 도입된 사용자 선호 BPM 입력(옵션, nullable).
+ * null이면 mood 기반 default BPM으로 폴백한다 ({@code RecommendationProperties.Tempo.moodDefaultBpm}).
  */
 public record CreateRecommendationCommand(
         String sessionId,
         int voiceRangeLow,
         int voiceRangeHigh,
         Mood mood,
+        Integer preferredBpm,
         List<Long> excludeSongIds
 ) {
 
@@ -24,5 +28,9 @@ public record CreateRecommendationCommand(
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(excludeSongIds, "excludeSongIds must not be null");
         excludeSongIds = List.copyOf(excludeSongIds);
+        if (preferredBpm != null && (preferredBpm < 30 || preferredBpm > 300)) {
+            throw new IllegalArgumentException(
+                    "preferredBpm out of plausible range [30, 300]: " + preferredBpm);
+        }
     }
 }

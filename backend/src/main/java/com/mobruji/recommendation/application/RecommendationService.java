@@ -49,6 +49,7 @@ public class RecommendationService {
                         createRecommendationCommand.voiceRangeLow(),
                         createRecommendationCommand.voiceRangeHigh(),
                         createRecommendationCommand.mood(),
+                        createRecommendationCommand.preferredBpm(),
                         excludeSongIds));
 
         // 후보 곡 단계에서 excludeSongIds 필터링.
@@ -70,6 +71,7 @@ public class RecommendationService {
                             savedRequest.getVoiceRangeLow(),
                             savedRequest.getVoiceRangeHigh(),
                             savedRequest.getMood(),
+                            savedRequest.getPreferredBpm(),
                             random);
                     return new ScoredSong(song, scored);
                 })
@@ -149,6 +151,7 @@ public class RecommendationService {
                 savedRequest.getVoiceRangeLow(),
                 savedRequest.getVoiceRangeHigh(),
                 savedRequest.getMood(),
+                savedRequest.getPreferredBpm(),
                 excludeSongIds);
         return new Random(seed);
     }
