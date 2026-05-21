@@ -71,6 +71,15 @@ vi.mock("@/lib/api/voiceRangeHistory", () => ({
   readVoiceRangeHistory: readVoiceRangeHistoryMock,
 }));
 
+// recommendation-history API mock (closes #263 — PR D).
+// 기본은 빈 배열(BE 가 있어도 store fallback 으로 흐름이 결정되도록).
+const { readRecommendationHistoryMock } = vi.hoisted(() => ({
+  readRecommendationHistoryMock: vi.fn(),
+}));
+vi.mock("@/lib/api/recommendationHistory", () => ({
+  readRecommendationHistory: readRecommendationHistoryMock,
+}));
+
 function buildEntry(
   id: string,
   requestedAt: string,
@@ -113,6 +122,11 @@ beforeEach(() => {
   // 기본은 빈 시계열 (BE 호출이 일어나도 카드가 store fallback 으로 결정되도록).
   readVoiceRangeHistoryMock.mockResolvedValue({
     voiceRangeSnapshotResponses: [],
+  });
+  readRecommendationHistoryMock.mockReset();
+  // 기본은 빈 BE 히스토리 — 기존 테스트들이 localStorage fallback 경로를 그대로 타도록.
+  readRecommendationHistoryMock.mockResolvedValue({
+    recommendationHistoryResponses: [],
   });
 });
 
@@ -332,6 +346,193 @@ describe("HistoryPage", () => {
       expect(
         await screen.findByRole("heading", { name: /\+6 반음 넓어졌어요/ }),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("recommendation-history backend source-of-truth (spec PR D)", () => {
+    it("sessionId 가 있고 BE 응답이 1건 이상이면 BE entry 가 카드 리스트에 노출되고, localStorage entry 는 가린다", async () => {
+      // given: localStorage 에는 곡-A 가 있지만 BE 에는 곡-100 만 있다.
+      const tenMinutesAgo = new Date(
+        Date.now() - 10 * 60 * 1000,
+      ).toISOString();
+      historyMock.set({
+        recommendations: [buildEntry("local-1", tenMinutesAgo, [1])],
+      });
+      sessionMock.set({ sessionId: "sess-be" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: 9001,
+            sessionId: "sess-be",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: "UPBEAT",
+            preferredBpm: 120,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 100,
+                  title: "BE곡-100",
+                  artist: "BE가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: 120,
+                  mood: "UPBEAT",
+                  language: "ko",
+                  genre: "POP",
+                  tjNumber: "T100",
+                  kyNumber: "K100",
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.95,
+                matchReason: "음역 일치",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE 응답 곡명이 화면에 보이고 localStorage 곡명은 가려져야 한다.
+      expect(await screen.findByText("BE곡-100")).toBeInTheDocument();
+      expect(screen.queryByText("곡-1")).not.toBeInTheDocument();
+      // 헤더 문구도 BE source 표기로 바뀐다.
+      expect(
+        screen.getByText(/세션 ID 기준 1건의 추천을 서버에서 불러왔어요/),
+      ).toBeInTheDocument();
+      expect(readRecommendationHistoryMock).toHaveBeenCalledWith(
+        "sess-be",
+        expect.anything(),
+      );
+    });
+
+    it("BE entry 카드는 삭제 버튼을 노출하지 않는다 (BE mutation API 미구현, PR F 대기)", async () => {
+      sessionMock.set({ sessionId: "sess-be" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: 1,
+            sessionId: "sess-be",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: null,
+            preferredBpm: null,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 200,
+                  title: "BE곡-200",
+                  artist: "BE가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: null,
+                  mood: null,
+                  language: "ko",
+                  genre: "POP",
+                  tjNumber: "T200",
+                  kyNumber: "K200",
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.9,
+                matchReason: "음역 일치",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      await screen.findByText("BE곡-200");
+      // 카드 안에 "삭제" 버튼 없음. (전체 삭제 버튼은 별도 — 항상 노출.)
+      expect(
+        screen.queryByRole("button", { name: /추천 삭제/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("BE 응답이 비었으면 localStorage entry 가 그대로 노출된다 (fallback)", async () => {
+      const tenMinutesAgo = new Date(
+        Date.now() - 10 * 60 * 1000,
+      ).toISOString();
+      historyMock.set({
+        recommendations: [buildEntry("local-1", tenMinutesAgo, [42])],
+      });
+      sessionMock.set({ sessionId: "sess-empty" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // localStorage 곡명이 그대로 나와야 한다.
+      expect(await screen.findByText("곡-42")).toBeInTheDocument();
+    });
+
+    it("BE 호출이 에러여도 localStorage entry 가 있으면 fallback 으로 렌더한다", async () => {
+      const tenMinutesAgo = new Date(
+        Date.now() - 10 * 60 * 1000,
+      ).toISOString();
+      historyMock.set({
+        recommendations: [buildEntry("local-1", tenMinutesAgo, [77])],
+      });
+      sessionMock.set({ sessionId: "sess-401" });
+      readRecommendationHistoryMock.mockRejectedValue(
+        new Error("session id mismatch"),
+      );
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE 가 실패해도 localStorage 곡명이 즉시 보여야 한다 (offline-first).
+      expect(await screen.findByText("곡-77")).toBeInTheDocument();
+    });
+
+    it("BE entry 의 mood/preferredBpm 메타가 부제목에 노출된다", async () => {
+      sessionMock.set({ sessionId: "sess-meta" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: 1,
+            sessionId: "sess-meta",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: "CALM",
+            preferredBpm: 85,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 300,
+                  title: "BE곡-300",
+                  artist: "가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: 85,
+                  mood: "CALM",
+                  language: "ko",
+                  genre: "BALLAD",
+                  tjNumber: null,
+                  kyNumber: null,
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.8,
+                matchReason: "분위기 매칭",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      await screen.findByText("BE곡-300");
+      // "잔잔한 · 85 BPM" 형태 — 정확한 문구가 카드 부제목에 등장한다.
+      expect(screen.getByText(/잔잔한.*85 BPM/)).toBeInTheDocument();
     });
   });
 
