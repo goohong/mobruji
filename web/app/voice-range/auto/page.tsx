@@ -97,13 +97,36 @@ export default function AutoVoiceRangePage({
   const [lowMidi, setLowMidi] = useState<number>(48);
   const [highMidi, setHighMidi] = useState<number>(69);
   const streamRef = useRef<MediaStream | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 컴포넌트 언마운트 시 마이크 stream 정리(privacy / 권한 빨간 점 제거).
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      if (fallbackTimerRef.current !== null) {
+        clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
     };
+  }, []);
+
+  const goToManualFallback = useCallback(() => {
+    if (fallbackTimerRef.current !== null) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+    router.push("/voice-range");
+  }, [router]);
+
+  const handleRetry = useCallback(() => {
+    // 결과 → 재측정. 상태 초기화 후 다시 PERMISSION 단계로.
+    setLowResult(null);
+    setHighResult(null);
+    setCurrentSample(null);
+    setElapsedMs(0);
+    setPermissionError(null);
+    setStep("PERMISSION");
   }, []);
 
   const handleStart = useCallback(async () => {
@@ -154,8 +177,14 @@ export default function AutoVoiceRangePage({
           ? "마이크 권한이 거부되었습니다. 수동 입력으로 이동합니다."
           : "마이크를 사용할 수 없습니다. 수동 입력으로 이동합니다.",
       );
-      // 1초 안에 fallback (spec §3 비기능).
-      setTimeout(() => router.push("/voice-range"), 1200);
+      // 1.2초 안에 자동 fallback (spec §3 비기능). 사용자가 즉시 이동 버튼을 누르면 cancel.
+      if (fallbackTimerRef.current !== null) {
+        clearTimeout(fallbackTimerRef.current);
+      }
+      fallbackTimerRef.current = setTimeout(() => {
+        fallbackTimerRef.current = null;
+        router.push("/voice-range");
+      }, 1200);
     }
   }, [deps, router]);
 
@@ -222,6 +251,7 @@ export default function AutoVoiceRangePage({
             <PermissionStep
               onStart={handleStart}
               permissionError={permissionError}
+              onManualFallback={goToManualFallback}
             />
           ) : null}
           {step === "MEASURE_LOW" || step === "MEASURE_HIGH" ? (
@@ -243,6 +273,7 @@ export default function AutoVoiceRangePage({
               saving={mutation.isPending}
               validationError={validationError}
               submitError={submitError}
+              onRetry={handleRetry}
             />
           ) : null}
         </section>
@@ -258,9 +289,14 @@ function clampMidi(value: number): number {
 interface PermissionStepProps {
   onStart: () => void;
   permissionError: string | null;
+  onManualFallback: () => void;
 }
 
-function PermissionStep({ onStart, permissionError }: PermissionStepProps) {
+function PermissionStep({
+  onStart,
+  permissionError,
+  onManualFallback,
+}: PermissionStepProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-zinc-700 dark:text-zinc-300">
@@ -276,12 +312,22 @@ function PermissionStep({ onStart, permissionError }: PermissionStepProps) {
         측정 시작
       </Button>
       {permissionError ? (
-        <p
-          role="alert"
-          className="text-sm text-red-600 dark:text-red-400"
-        >
-          {permissionError}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p
+            role="alert"
+            className="text-sm text-red-600 dark:text-red-400"
+          >
+            {permissionError}
+          </p>
+          <Button
+            variant="secondary"
+            size="md"
+            fullWidth
+            onClick={onManualFallback}
+          >
+            지금 수동 입력으로 이동
+          </Button>
+        </div>
       ) : null}
     </div>
   );
@@ -297,6 +343,14 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
   const phaseLabel = phase === "low" ? "가장 낮은 음" : "가장 높은 음";
   const remainingMs = Math.max(0, MEASUREMENT_DURATION_MS - elapsedMs);
   const remainingSec = Math.ceil(remainingMs / 1000);
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, (elapsedMs / MEASUREMENT_DURATION_MS) * 100),
+  );
+  // clarity(0~1) 를 마이크 레벨 막대 폭으로 사용. 0.05 미만이면 거의 무음으로 간주.
+  const clarity = sample?.clarity ?? 0;
+  const levelPercent = Math.min(100, Math.max(0, clarity * 100));
+  const hasSignal = clarity >= 0.05;
 
   return (
     <div className="flex flex-col gap-4">
@@ -307,7 +361,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         편한 모음(예: &quot;아&quot;) 으로 길게 내주세요.
       </p>
       <div
-        className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
+        className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
         aria-live="polite"
       >
         <div className="flex items-center justify-between">
@@ -337,13 +391,67 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               : "발성 대기"}
           </span>
         </div>
+        <div
+          className="flex flex-col gap-1"
+          aria-label="마이크 입력 레벨"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              마이크 입력
+            </span>
+            <span
+              data-testid="signal-status"
+              className={
+                hasSignal
+                  ? "text-xs text-emerald-700 dark:text-emerald-300"
+                  : "text-xs text-zinc-500"
+              }
+            >
+              {hasSignal ? "감지 중" : "신호 없음"}
+            </span>
+          </div>
+          <div
+            className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
+            role="meter"
+            aria-label="마이크 입력 레벨"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(levelPercent)}
+          >
+            <div
+              data-testid="mic-level-bar"
+              className={
+                sample?.isStable
+                  ? "h-full bg-emerald-500 transition-[width] duration-100"
+                  : "h-full bg-amber-500 transition-[width] duration-100"
+              }
+              style={{ width: `${levelPercent}%` }}
+            />
+          </div>
+        </div>
       </div>
-      <p
-        className="text-center text-sm text-zinc-600 dark:text-zinc-400"
-        aria-live="polite"
-      >
-        남은 시간 {remainingSec}초
-      </p>
+      <div className="flex flex-col gap-1">
+        <div
+          className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
+          role="progressbar"
+          aria-label={`${phaseLabel} 측정 진행률`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progressPercent)}
+        >
+          <div
+            data-testid="measure-progress-bar"
+            className="h-full bg-zinc-900 transition-[width] duration-100 dark:bg-zinc-50"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+        <p
+          className="text-center text-sm text-zinc-600 dark:text-zinc-400"
+          aria-live="polite"
+        >
+          남은 시간 {remainingSec}초
+        </p>
+      </div>
     </div>
   );
 }
@@ -359,6 +467,7 @@ interface ResultStepProps {
   saving: boolean;
   validationError: string | null;
   submitError: string | null;
+  onRetry: () => void;
 }
 
 function ResultStep({
@@ -372,6 +481,7 @@ function ResultStep({
   saving,
   validationError,
   submitError,
+  onRetry,
 }: ResultStepProps) {
   return (
     <div className="flex flex-col gap-6">
@@ -380,7 +490,8 @@ function ResultStep({
           측정 결과
         </h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          필요하면 슬라이더로 ±보정 후 저장하세요.
+          필요하면 슬라이더로 ±보정 후 저장하세요. 결과가 마음에 안 들면 다시
+          측정할 수 있어요.
         </p>
       </div>
 
@@ -410,16 +521,27 @@ function ResultStep({
         </p>
       ) : null}
 
-      <Button
-        variant="primary"
-        size="lg"
-        fullWidth
-        onClick={onSave}
-        loading={saving}
-        disabled={validationError !== null}
-      >
-        {saving ? "저장 중..." : "추천 받기"}
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          onClick={onSave}
+          loading={saving}
+          disabled={validationError !== null}
+        >
+          {saving ? "저장 중..." : "추천 받기"}
+        </Button>
+        <Button
+          variant="secondary"
+          size="lg"
+          fullWidth
+          onClick={onRetry}
+          disabled={saving}
+        >
+          다시 측정하기
+        </Button>
+      </div>
     </div>
   );
 }
