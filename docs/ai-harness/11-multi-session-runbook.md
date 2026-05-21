@@ -1,6 +1,6 @@
 # Multi-Session Runbook
 
-> Claude/Codex를 여러 세션 동시에 돌릴 때의 셋업·운영 룬북.
+> Claude/Codex를 여러 세션 동시에 돌릴 때의 셋업·운영 런북.
 > `docs/ai-harness/02-agent-workflow.md §10`(다중 AI 운영 룰)을 실행 가능한 형태로 풀어 적은 문서.
 
 ## 1) 셋업 (최초 1회)
