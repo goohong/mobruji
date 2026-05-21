@@ -153,6 +153,81 @@ describe("AutoVoiceRangePage 권한 / 안내", () => {
       { timeout: 2500 },
     );
   });
+
+  it("권한 거부 후 '지금 수동 입력으로 이동' 버튼 클릭 시 즉시 /voice-range로 push 한다", async () => {
+    const user = userEvent.setup();
+    const notAllowed = Object.assign(new Error("denied"), {
+      name: "NotAllowedError",
+    });
+    const deps = buildDeps({
+      requestMic: vi.fn().mockRejectedValue(notAllowed),
+    });
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    const manualBtn = await screen.findByRole("button", {
+      name: /지금 수동 입력으로 이동/,
+    });
+    await user.click(manualBtn);
+
+    // setTimeout(1.2s) 만료 전에 즉시 push 가 호출되었는지 확인.
+    expect(pushMock).toHaveBeenCalledWith("/voice-range");
+  });
+});
+
+describe("AutoVoiceRangePage 측정 중 UI", () => {
+  it("측정 중 progress bar 와 마이크 레벨 meter 가 표시된다", async () => {
+    const user = userEvent.setup();
+    // low phase 를 일부러 미해결 promise 로 두어 측정 중 화면을 유지.
+    let resolveLow: (result: MeasurementResult) => void = () => {};
+    const deps = buildDeps({
+      runPhase: vi.fn().mockImplementation((phase, _stream, onSample) => {
+        if (phase === "low") {
+          return new Promise<MeasurementResult>((resolve) => {
+            // 2.5s 경과 시점의 샘플을 1회 흘려보낸다 — progress 50% / clarity 0.95.
+            onSample({
+              elapsedMs: 2500,
+              frequencyHz: 130.81,
+              clarity: 0.95,
+              isStable: true,
+              midi: 48,
+            });
+            resolveLow = resolve;
+          });
+        }
+        return Promise.resolve<MeasurementResult>({
+          midi: 69,
+          confirmed: true,
+          stableSampleCount: 5,
+          totalSampleCount: 5,
+        });
+      }),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // 측정 중 화면 → progressbar 와 meter 가 함께 보인다.
+    const progressBar = await screen.findByRole("progressbar", {
+      name: /가장 낮은 음 측정 진행률/,
+    });
+    expect(progressBar).toHaveAttribute("aria-valuenow", "50");
+
+    const levelMeter = screen.getByRole("meter", {
+      name: /마이크 입력 레벨/,
+    });
+    expect(levelMeter).toHaveAttribute("aria-valuenow", "95");
+    expect(screen.getByTestId("signal-status")).toHaveTextContent(/감지 중/);
+
+    // 측정을 마무리해 테스트가 매달리지 않게 한다.
+    resolveLow({
+      midi: 48,
+      confirmed: true,
+      stableSampleCount: 5,
+      totalSampleCount: 5,
+    });
+  });
 });
 
 describe("AutoVoiceRangePage 측정 흐름", () => {
@@ -171,6 +246,29 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
     // 측정 결과: low=48(C3), high=69(A4) 가 슬라이더 표시값에 반영.
     expect(screen.getByText(/C3 \(MIDI 48\)/)).toBeInTheDocument();
     expect(screen.getByText(/A4 \(MIDI 69\)/)).toBeInTheDocument();
+  });
+
+  it("결과 화면의 '다시 측정하기' 버튼을 누르면 PERMISSION 단계로 돌아간다", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /다시 측정하기/ }));
+
+    // PERMISSION 단계 표지인 "측정 시작" 버튼이 다시 나타난다.
+    expect(
+      screen.getByRole("button", { name: /측정 시작/ }),
+    ).toBeInTheDocument();
+    // 결과 헤딩은 사라진다.
+    expect(
+      screen.queryByRole("heading", { name: /측정 결과/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("수동 보정 슬라이더로 lowMidi 값을 조정할 수 있다", async () => {
