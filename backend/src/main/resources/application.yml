@@ -45,3 +45,14 @@ recommendation:
   # derived(기본): 요청 파라미터 해시에서 seed 도출.
   # random: 디버깅용 비결정 변주(운영 사용 금지).
   seed-strategy: derived
+
+# Python audio analysis tool (tools/audio-analysis/analyze.py) 호출 설정.
+# spec: docs/features/audio-tooling-bootstrap.md §3
+# - python-cmd: 실행 명령. 로컬 venv 사용 시 절대경로 또는 환경변수로 override.
+# - tool-dir:  analyze.py 가 위치한 디렉터리. 운영/컨테이너에서는 마운트 경로로 override.
+# - timeout:   외부 process 최대 대기 시간. 곡당 분석 목표 30s + 마진.
+audio:
+  analysis:
+    python-cmd: ${AUDIO_ANALYSIS_PYTHON_CMD:python3}
+    tool-dir: ${AUDIO_ANALYSIS_TOOL_DIR:../tools/audio-analysis}
+    timeout: 60s
