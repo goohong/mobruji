@@ -1,0 +1,380 @@
+"use client";
+
+/**
+ * 곡 상세 페이지 (`/songs/[id]`).
+ *
+ * 이슈 #100 / PR #101:
+ *   - 검색(`/songs`) 또는 추천(`/recommend`)에서 곡 카드 클릭 시 진입한다.
+ *   - 곡 1개에 대해 카드보다 자세한 정보를 한 화면에 보여준다.
+ *
+ * 노출 정보:
+ *   - 제목(크게) / 아티스트
+ *   - 가창 난이도 라벨 (`difficulty.ts` 재사용, BE 필드 우선 → 없으면 lowMidi/highMidi 기반)
+ *   - 최고음/최저음 음표명 (notes.ts MIDI → 음표 변환)
+ *   - 키, 장르 칩, mood
+ *   - 발매 연도, 언어, BPM, ISRC/TJ/KY 번호, 메타데이터 출처
+ *
+ * 데이터 로딩:
+ *   - `readSongById(id)` (GET /api/v1/songs/{id})를 React Query로 호출.
+ *   - 로딩 중: skeleton 표시.
+ *   - 404 (`ApiError.status === 404`): "곡을 찾을 수 없습니다" + 검색 페이지 CTA.
+ *   - 그 외 오류: 에러 메시지 + "검색으로 돌아가기" CTA.
+ *
+ * 라우팅:
+ *   - 동적 라우트(App Router `[id]`). `generateStaticParams`는 사용하지 않는다 — 곡 카탈로그가
+ *     서버에서 변할 수 있으므로 항상 dynamic으로 처리한다.
+ *   - 잘못된 id(숫자가 아닌 값)는 BE에 그대로 넘기지 않고 클라이언트에서 404 분기로 처리한다.
+ *
+ * CTA:
+ *   - "추천 받기": 추천 페이지로 이동(`/recommend`). 음역대 미입력이면 추천 페이지 내부
+ *     fallback이 음역대 입력 화면으로 안내한다.
+ */
+
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+
+import { ApiError } from "@/lib/api/client";
+import { readSongById, type SongResponse } from "@/lib/api/song";
+import {
+  deriveDifficulty,
+  difficultyLabel,
+  type Difficulty,
+} from "@/lib/difficulty";
+import { midiToNoteName } from "@/lib/notes";
+
+export default function SongDetailPage() {
+  const params = useParams<{ id: string }>();
+  const rawId = params?.id;
+  const songId = parseSongId(rawId);
+
+  if (songId === null) {
+    return <NotFoundView />;
+  }
+
+  return <SongDetailContent songId={songId} />;
+}
+
+type SongDetailContentProps = {
+  songId: number;
+};
+
+function SongDetailContent({ songId }: SongDetailContentProps) {
+  const query = useQuery<SongResponse, Error>({
+    queryKey: ["song", songId],
+    queryFn: ({ signal }) => readSongById(songId, signal),
+    retry: (failureCount, error) => {
+      // 404는 재시도 의미 없음. 그 외 일시 오류는 1회만 재시도.
+      if (error instanceof ApiError && error.status === 404) {
+        return false;
+      }
+      return failureCount < 1;
+    },
+  });
+
+  if (query.isPending) {
+    return <SongDetailSkeleton />;
+  }
+
+  if (query.isError) {
+    if (query.error instanceof ApiError && query.error.status === 404) {
+      return <NotFoundView />;
+    }
+    return (
+      <Shell>
+        <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
+          <p className="text-sm text-red-700 dark:text-red-200">
+            곡 정보를 불러오지 못했습니다.{" "}
+            {query.error instanceof ApiError
+              ? `${query.error.status}: ${query.error.message}`
+              : query.error.message}
+          </p>
+          <Link
+            href="/songs"
+            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+          >
+            검색으로 돌아가기
+          </Link>
+        </div>
+      </Shell>
+    );
+  }
+
+  return <SongDetailView song={query.data} />;
+}
+
+type SongDetailViewProps = {
+  song: SongResponse;
+};
+
+function SongDetailView({ song }: SongDetailViewProps) {
+  const difficulty = resolveDifficulty(song);
+  const highestNoteName =
+    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+  const lowestNoteName =
+    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+  const keyLabel = formatMusicalKey(song.keyOriginal);
+
+  return (
+    <Shell>
+      <nav aria-label="이전" className="mb-2">
+        <Link
+          href="/songs"
+          className="text-sm text-zinc-500 underline-offset-4 hover:underline dark:text-zinc-400"
+        >
+          ← 검색으로 돌아가기
+        </Link>
+      </nav>
+
+      <header className="flex flex-col gap-2">
+        <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          Song detail
+        </p>
+        <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
+          {song.title}
+        </h1>
+        <p className="text-base text-zinc-600 dark:text-zinc-300">
+          {song.artist}
+        </p>
+      </header>
+
+      <section
+        aria-label="가창 정보"
+        className="flex flex-col gap-4 rounded-2xl bg-white p-5 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          {difficulty ? (
+            <DifficultyBadge difficulty={difficulty} />
+          ) : (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              가창 난이도 정보가 아직 없어요
+            </span>
+          )}
+          <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+            키 {keyLabel}
+          </span>
+          {song.genre ? (
+            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+              {song.genre}
+            </span>
+          ) : null}
+          {song.mood ? (
+            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+              {song.mood}
+            </span>
+          ) : null}
+        </div>
+
+        {highestNoteName || lowestNoteName ? (
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {highestNoteName ? (
+              <NoteCell label="최고음" value={highestNoteName} />
+            ) : null}
+            {lowestNoteName ? (
+              <NoteCell label="최저음" value={lowestNoteName} />
+            ) : null}
+          </dl>
+        ) : (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            이 곡의 음역 정보(최고음/최저음)는 아직 등록되지 않았어요.
+          </p>
+        )}
+      </section>
+
+      <section
+        aria-label="메타 정보"
+        className="flex flex-col gap-3 rounded-2xl bg-white p-5 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+      >
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          메타 정보
+        </h2>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+          <MetaCell label="발매 연도" value={song.releaseYear ?? null} />
+          <MetaCell label="BPM" value={song.bpm ?? null} />
+          <MetaCell label="언어" value={song.language ?? null} />
+          <MetaCell label="TJ 번호" value={song.tjNumber ?? null} />
+          <MetaCell label="KY 번호" value={song.kyNumber ?? null} />
+          <MetaCell label="출처" value={song.metadataSource} />
+        </dl>
+      </section>
+
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/recommend"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          비슷한 곡 추천 받기
+        </Link>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 px-5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          음역대 입력하기
+        </Link>
+      </div>
+    </Shell>
+  );
+}
+
+type NoteCellProps = {
+  label: string;
+  value: string;
+};
+
+function NoteCell({ label, value }: NoteCellProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dd
+        aria-label={`${label} ${value}`}
+        className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50"
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+type MetaCellProps = {
+  label: string;
+  value: string | number | null;
+};
+
+function MetaCell({ label, value }: MetaCellProps) {
+  const display: string =
+    value === null || value === undefined || value === "" ? "-" : String(value);
+  return (
+    <div className="flex flex-col gap-1">
+      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dd className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+        {display}
+      </dd>
+    </div>
+  );
+}
+
+type DifficultyBadgeProps = {
+  difficulty: Difficulty;
+};
+
+function DifficultyBadge({ difficulty }: DifficultyBadgeProps) {
+  const tone = difficultyTone(difficulty);
+  return (
+    <span
+      aria-label={`가창 난이도 ${difficultyLabel(difficulty)}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}
+    >
+      {difficultyLabel(difficulty)}
+    </span>
+  );
+}
+
+function difficultyTone(difficulty: Difficulty): string {
+  switch (difficulty) {
+    case "EASY":
+      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
+    case "NORMAL":
+      return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
+    case "HARD":
+      return "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
+  }
+}
+
+type ShellProps = {
+  children: React.ReactNode;
+};
+
+function Shell({ children }: ShellProps) {
+  return (
+    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+      <div className="flex w-full max-w-2xl flex-col gap-6">{children}</div>
+    </main>
+  );
+}
+
+function SongDetailSkeleton() {
+  return (
+    <Shell>
+      <div
+        role="status"
+        aria-busy="true"
+        aria-label="곡 정보를 불러오는 중"
+        className="flex flex-col gap-4"
+      >
+        <div className="h-3 w-16 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-8 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-4 w-1/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+        <div className="mt-2 h-32 w-full animate-pulse rounded-2xl bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-32 w-full animate-pulse rounded-2xl bg-zinc-200 dark:bg-zinc-800" />
+      </div>
+    </Shell>
+  );
+}
+
+function NotFoundView() {
+  return (
+    <Shell>
+      <div className="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-zinc-300 bg-white p-6 dark:border-zinc-700 dark:bg-zinc-900">
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+          곡을 찾을 수 없습니다
+        </h1>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          요청하신 곡이 카탈로그에 없어요. 검색에서 다시 찾아보세요.
+        </p>
+        <Link
+          href="/songs"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          검색으로 가기
+        </Link>
+      </div>
+    </Shell>
+  );
+}
+
+/**
+ * URL param의 id를 양수 정수로 파싱. 비숫자/0 이하/NaN은 null로 떨어뜨려 NotFoundView로 보낸다.
+ * (BE는 음수/0에 대해 404를 던지지만 네트워크 호출 없이 즉시 NotFound로 보내는 편이 UX상 빠르다.)
+ */
+function parseSongId(raw: string | string[] | undefined): number | null {
+  if (raw === undefined) {
+    return null;
+  }
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * SongCard와 동일한 난이도 우선순위: BE 응답 difficulty → client-side derive → null.
+ */
+function resolveDifficulty(song: SongResponse): Difficulty | null {
+  if (song.difficulty) {
+    return song.difficulty;
+  }
+  if (typeof song.lowMidi === "number" && typeof song.highMidi === "number") {
+    return deriveDifficulty(song.lowMidi, song.highMidi);
+  }
+  return null;
+}
+
+/**
+ * SongCard와 동일한 키 표기: `C_SHARP_MAJOR` → `C# Major`, `UNKNOWN` → `Unknown`.
+ */
+function formatMusicalKey(key: string): string {
+  if (key === "UNKNOWN") {
+    return "Unknown";
+  }
+  return key
+    .replace(/_SHARP/g, "#")
+    .replace(/_/g, " ")
+    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
+      return `${head}${tail.toLowerCase()}`;
+    });
+}

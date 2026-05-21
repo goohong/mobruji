@@ -290,7 +290,11 @@ function RecommendationList({
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-3">
         {data.recommendations.map((item) => (
-          <SongCard key={item.song.id} item={item} />
+          <SongCard
+            key={item.song.id}
+            item={item}
+            href={`/songs/${item.song.id}`}
+          />
         ))}
       </ul>
       <div className="flex flex-col items-stretch gap-1">

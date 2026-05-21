@@ -1,13 +1,15 @@
 /**
- * 곡 검색 API 클라이언트 단위 테스트.
+ * 곡 검색/단건 API 클라이언트 단위 테스트.
  *
  * - URL 구성: keyword 인코딩, 빈 keyword 시 쿼리 생략.
  * - fetch 응답을 그대로 SongResponse[]로 반환.
+ * - 단건 조회(readSongById): id를 path로 전달, 404 시 ApiError를 던진다.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { searchSongs } from "./song";
+import { ApiError } from "./client";
+import { readSongById, searchSongs } from "./song";
 
 const fetchMock = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -79,5 +81,51 @@ describe("searchSongs", () => {
 
     const result = await searchSongs("hello");
     expect(result).toEqual(songs);
+  });
+});
+
+describe("readSongById", () => {
+  it("id를 path에 끼워 GET 호출하고 SongResponse를 그대로 돌려준다", async () => {
+    const song = {
+      id: 42,
+      title: "Hello",
+      artist: "Adele",
+      releaseYear: 2015,
+      keyOriginal: "F_MINOR",
+      bpm: 79,
+      mood: "EMOTIONAL",
+      language: "en",
+      genre: "POP",
+      tjNumber: "12345",
+      kyNumber: "54321",
+      metadataSource: "MANUAL_SEED",
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(song));
+
+    const result = await readSongById(42);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/songs\/42$/);
+    expect((init as RequestInit).method).toBe("GET");
+    expect(result).toEqual(song);
+  });
+
+  it("미존재 id에 대해 404가 오면 ApiError(status=404)를 던진다", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "song not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    let caught: unknown = null;
+    try {
+      await readSongById(9999);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(404);
   });
 });
