@@ -122,6 +122,23 @@ Usage: post-merge-cleanup.sh [--force]
 
 본진이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
 
+#### fe 워크트리 `node_modules` 동기화
+
+`post-merge-cleanup.sh`는 `node_modules`를 **건드리지 않는다** (의도적). git이 추적하지 않는 디렉토리라 detach/reset 영향 밖이고, 매 사이클마다 재설치하면 wall-clock 손해가 크다.
+
+다만 다음 상황에서 `node_modules`가 stale 상태가 된다:
+- fe 사이클이 처음 launch될 때 워크트리에 `node_modules`가 아예 없음
+- web deps를 추가한 PR이 머지된 직후 (예: PR #150 `pitchy`, PR #194 PWA service-worker)
+- `package.json` / `package-lock.json`이 develop에서 갱신되었는데 fe 워크트리의 설치본은 이전 버전
+
+이 경우 fe 세션은 작업 시작 전에 다음을 1회 실행한다:
+
+```bash
+cd web && npm install
+```
+
+본진이 fe sub-agent를 launch할 때 prompt에 "직전 사이클에서 web deps 변경 PR(예: #N)이 머지됐다면 `cd web && npm install` 1회 실행"이라고 명시하면 자율적으로 처리한다. 변경이 없는 사이클에서는 생략해도 무방.
+
 ### 0-8) 통지 우선 처리
 
 본진은 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
