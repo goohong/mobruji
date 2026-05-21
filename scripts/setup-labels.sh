@@ -37,7 +37,9 @@ create "scope:infra"          "EDEDED" "도메인: infra (CI/CD/배포/DB/모노
 create "scope:web"            "EDEDED" "도메인: web (Next.js 프론트엔드)"
 
 # AI 운영
-create "ai-generated"       "8A2BE2" "AI 보조/생성으로 작성된 PR"
-create "needs-human-review" "B60205" "보호 영역(마이그레이션/시크릿/CI/빌드) 변경 PR"
+create "ai-generated"       "8A2BE2" "AI 보조/생성으로 작성된 PR (우산 라벨)"
+create "ai:claude"          "5A2BC0" "Claude가 작성한 PR"
+create "ai:codex"           "10A37E" "Codex가 작성한 PR"
+create "needs-human-review" "B60205" "보호 영역 변경 PR (사람 사후 리뷰 권장)"
 
 echo "완료."
