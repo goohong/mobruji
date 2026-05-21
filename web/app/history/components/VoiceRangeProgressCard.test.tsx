@@ -45,6 +45,9 @@ function buildSummary(
     latestSpanSemitones: 24,
     earliestSpanSemitones: 18,
     spanDeltaSemitones: 6,
+    // earliest 52~70 → latest 50~74: lowMidi -2(낮아짐), highMidi +4(높아짐).
+    lowMidiDeltaSemitones: -2,
+    highMidiDeltaSemitones: 4,
     ...overrides,
   };
 }

@@ -18,6 +18,7 @@
  */
 
 import type { RecommendationHistoryEntry } from "@/store/history";
+import type { VoiceRangeSnapshotResponse } from "@/lib/api/voiceRangeHistory";
 
 export type VoiceRangeProgressPoint = {
   /** entry.id — React key 로 그대로 사용. */
@@ -46,6 +47,16 @@ export type VoiceRangeProgressSummary = {
   earliestSpanSemitones: number;
   /** 음역폭의 변화 (latest - earliest). 양수면 넓어진 것. */
   spanDeltaSemitones: number;
+  /**
+   * 첫 측정 대비 최신 측정의 lowMidi delta(반음 단위).
+   * 양수면 최저음이 높아진 것(=음역 하단이 좁아짐). spec §3.
+   */
+  lowMidiDeltaSemitones: number;
+  /**
+   * 첫 측정 대비 최신 측정의 highMidi delta(반음 단위).
+   * 양수면 최고음이 더 높아진 것(=음역 상단이 넓어짐). spec §3.
+   */
+  highMidiDeltaSemitones: number;
 };
 
 /**
@@ -105,5 +116,69 @@ export function extractVoiceRangeProgress(
     latestSpanSemitones: latestSpan,
     earliestSpanSemitones: earliestSpan,
     spanDeltaSemitones: latestSpan - earliestSpan,
+    lowMidiDeltaSemitones: latest.lowMidi - earliest.lowMidi,
+    highMidiDeltaSemitones: latest.highMidi - earliest.highMidi,
+  };
+}
+
+/**
+ * BE `/api/v1/sessions/{id}/voice-range-history` 응답에서 시계열 summary 를 추출한다.
+ *
+ * spec: docs/features/voice-range-progress.md §3 — `/history` 페이지가 backend 데이터를
+ * source-of-truth 로 사용. 본 함수는 BE 응답(`voiceRangeSnapshotResponses`, measuredAt
+ * 오름차순)을 `VoiceRangeProgressSummary` 로 변환해 기존 `VoiceRangeProgressCard` 가
+ * 그대로 받아 렌더할 수 있게 한다.
+ *
+ * 정책:
+ *   - BE 응답은 이미 measuredAt 오름차순이라고 가정한다(spec §5-2). 만약 다르더라도
+ *     입력 순서를 보존하고 별도 정렬하지 않는다 — 정렬 책임은 BE가 진다.
+ *   - snapshot 이 2개 미만이면 null (호출 측이 빈 상태/CTA 분기).
+ *   - `voiceRangeId` 는 BE 스냅샷에 없으므로 null 로 둔다 — UI는 voiceRangeId 를 그룹화
+ *     키로만 쓰는데, BE 시계열에서는 그룹화 의미가 사라진다(snapshot id 가 unique).
+ *
+ * @param snapshots BE 시계열 응답 (measuredAt 오름차순).
+ * @returns snapshot ≥ 2 이면 summary, 아니면 null.
+ */
+export function extractVoiceRangeProgressFromSnapshots(
+  snapshots: readonly VoiceRangeSnapshotResponse[],
+): VoiceRangeProgressSummary | null {
+  if (snapshots.length < 2) {
+    return null;
+  }
+
+  const points: VoiceRangeProgressPoint[] = snapshots.map((snapshot) => ({
+    id: `snapshot-${snapshot.id}`,
+    requestedAt: snapshot.measuredAt,
+    lowMidi: snapshot.lowMidi,
+    highMidi: snapshot.highMidi,
+    voiceRangeId: null,
+    sourceMethod: snapshot.sourceMethod,
+  }));
+
+  let minLowMidi = points[0].lowMidi;
+  let maxHighMidi = points[0].highMidi;
+  for (const point of points) {
+    if (point.lowMidi < minLowMidi) {
+      minLowMidi = point.lowMidi;
+    }
+    if (point.highMidi > maxHighMidi) {
+      maxHighMidi = point.highMidi;
+    }
+  }
+
+  const earliest = points[0];
+  const latest = points[points.length - 1];
+  const earliestSpan = earliest.highMidi - earliest.lowMidi;
+  const latestSpan = latest.highMidi - latest.lowMidi;
+
+  return {
+    points,
+    minLowMidi,
+    maxHighMidi,
+    latestSpanSemitones: latestSpan,
+    earliestSpanSemitones: earliestSpan,
+    spanDeltaSemitones: latestSpan - earliestSpan,
+    lowMidiDeltaSemitones: latest.lowMidi - earliest.lowMidi,
+    highMidiDeltaSemitones: latest.highMidi - earliest.highMidi,
   };
 }

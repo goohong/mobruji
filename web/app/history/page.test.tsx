@@ -40,9 +40,13 @@ function renderWithQueryClient(ui: ReactNode) {
   return render(ui, { wrapper: Wrapper });
 }
 
-const { historyMock } = await vi.hoisted(async () => {
-  const helper = await import("@/lib/test-helpers/mock-history-store");
-  return { historyMock: helper.buildHistoryStoreMock() };
+const { historyMock, sessionMock } = await vi.hoisted(async () => {
+  const historyHelper = await import("@/lib/test-helpers/mock-history-store");
+  const sessionHelper = await import("@/lib/test-helpers/mock-session-store");
+  return {
+    historyMock: historyHelper.buildHistoryStoreMock(),
+    sessionMock: sessionHelper.buildSessionStoreMock(),
+  };
 });
 
 vi.mock("@/store/history", async () => {
@@ -53,6 +57,19 @@ vi.mock("@/store/history", async () => {
     useHistoryStore: historyMock.useHistoryStore,
   };
 });
+
+vi.mock("@/store/session", () => ({
+  useSessionStore: sessionMock.useSessionStore,
+}));
+
+// voice-range-history API mock — 기본 동작은 BE 호출 비활성(sessionId=null)이지만,
+// sessionId 가 세팅된 케이스에선 이 mock 의 응답이 React Query 로 흘러간다.
+const { readVoiceRangeHistoryMock } = vi.hoisted(() => ({
+  readVoiceRangeHistoryMock: vi.fn(),
+}));
+vi.mock("@/lib/api/voiceRangeHistory", () => ({
+  readVoiceRangeHistory: readVoiceRangeHistoryMock,
+}));
 
 function buildEntry(
   id: string,
@@ -91,6 +108,12 @@ function buildEntry(
 
 beforeEach(() => {
   historyMock.reset();
+  sessionMock.reset();
+  readVoiceRangeHistoryMock.mockReset();
+  // 기본은 빈 시계열 (BE 호출이 일어나도 카드가 store fallback 으로 결정되도록).
+  readVoiceRangeHistoryMock.mockResolvedValue({
+    voiceRangeSnapshotResponses: [],
+  });
 });
 
 afterEach(() => {
@@ -207,6 +230,109 @@ describe("HistoryPage", () => {
     expect(historyMock.state().clearHistory).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();
+  });
+
+  describe("voice-range-progress (spec PR D)", () => {
+    it("sessionId 가 있고 BE 시계열이 2건 이상이면 BE 응답 기반 카드(헤드라인 + delta)를 노출한다", async () => {
+      // given: 세션 + 추천 1건(empty progress) + BE 시계열 2건.
+      const tenMinutesAgo = new Date(
+        Date.now() - 10 * 60 * 1000,
+      ).toISOString();
+      historyMock.set({
+        recommendations: [buildEntry("e-1", tenMinutesAgo, [1])],
+      });
+      sessionMock.set({ sessionId: "sess-be" });
+      readVoiceRangeHistoryMock.mockResolvedValueOnce({
+        voiceRangeSnapshotResponses: [
+          {
+            id: 11,
+            lowMidi: 52,
+            highMidi: 70,
+            lowestNoteName: "E3",
+            highestNoteName: "A4",
+            sourceMethod: "SELF_REPORT",
+            measuredAt: "2026-05-21T08:00:00",
+          },
+          {
+            id: 22,
+            lowMidi: 50,
+            highMidi: 74,
+            lowestNoteName: "D3",
+            highestNoteName: "D5",
+            sourceMethod: "MIC_MEASURE",
+            measuredAt: "2026-05-21T12:00:00",
+          },
+        ],
+      });
+
+      // when:
+      renderWithQueryClient(<HistoryPage />);
+
+      // then: BE 호출이 발생하고 카드가 spanDelta=+6 헤드라인을 표시한다.
+      expect(
+        await screen.findByRole("heading", { name: /\+6 반음 넓어졌어요/ }),
+      ).toBeInTheDocument();
+      // 첫 측정 대비 lowMidi/highMidi delta 메타도 노출(spec §3).
+      expect(
+        screen.getByText(/저음 -2 반음.*고음 \+4 반음/),
+      ).toBeInTheDocument();
+      expect(readVoiceRangeHistoryMock).toHaveBeenCalledWith(
+        "sess-be",
+        expect.anything(),
+      );
+    });
+
+    it("sessionId 없으면 BE 호출을 건너뛰고 localStorage(useHistoryStore) 만으로 카드를 결정한다", () => {
+      // given: sessionId 없음 + store entries 2건(BE 없이도 카드 그려질 만큼).
+      const t1 = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      const t2 = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      historyMock.set({
+        recommendations: [
+          buildEntry("e-newer", t2, [10], {
+            voiceRangeLowMidi: 50,
+            voiceRangeHighMidi: 74,
+          }),
+          buildEntry("e-older", t1, [20], {
+            voiceRangeLowMidi: 52,
+            voiceRangeHighMidi: 70,
+          }),
+        ],
+      });
+      // sessionMock.set 으로 sessionId 지정 안함 → enabled=false → BE 호출 0회.
+
+      renderWithQueryClient(<HistoryPage />);
+
+      expect(
+        screen.getByRole("heading", { name: /\+6 반음 넓어졌어요/ }),
+      ).toBeInTheDocument();
+      expect(readVoiceRangeHistoryMock).not.toHaveBeenCalled();
+    });
+
+    it("BE 호출이 에러여도 localStorage entries 가 충분하면 graceful fallback 으로 카드를 그린다", async () => {
+      const t1 = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      const t2 = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      historyMock.set({
+        recommendations: [
+          buildEntry("e-newer", t2, [10], {
+            voiceRangeLowMidi: 50,
+            voiceRangeHighMidi: 74,
+          }),
+          buildEntry("e-older", t1, [20], {
+            voiceRangeLowMidi: 52,
+            voiceRangeHighMidi: 70,
+          }),
+        ],
+      });
+      sessionMock.set({ sessionId: "sess-err" });
+      readVoiceRangeHistoryMock.mockRejectedValue(new Error("network down"));
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE 가 에러여도 store 기반으로 카드가 즉시 보여야 한다 (offline-first).
+      expect(
+        await screen.findByRole("heading", { name: /\+6 반음 넓어졌어요/ }),
+      ).toBeInTheDocument();
+    });
   });
 
   describe("a11y", () => {
