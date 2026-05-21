@@ -1,11 +1,14 @@
 /**
- * 추천 곡 카드 컴포넌트.
+ * 곡 카드 컴포넌트.
  *
  * 이슈 #75 / PR #76: 추천 결과 페이지에서 곡 1개를 표현. 음역대 막대 그래프 대신
  * **가창 난이도 라벨 + 최고음**을 핵심 정보로 노출한다.
  *
+ * 이슈 #91 #92 / PR #93: 곡 검색 페이지(`/songs`)에서도 동일한 카드 룩앤필을 사용한다.
+ * 추천 컨텍스트(`item`)와 검색 컨텍스트(`song`) 둘 다 지원하도록 props가 분기된다.
+ *
  * 표시 정보:
- *   - rank position (#1, #2 ...)
+ *   - rank position (#1, #2 ...) — 추천 컨텍스트에서만
  *   - 제목 (큰 글씨)
  *   - 아티스트 (작게)
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
@@ -14,15 +17,19 @@
  *   - 최고음 음표명 (예: F#5) — `midiToNoteName(highMidi)`
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
- *   - matchReason 한 줄
+ *   - matchReason 한 줄 — 추천 컨텍스트에서만
  *   - 키(키 원본) 라벨
+ *   - score — 추천 컨텍스트에서만
  *
  * 호버/포커스 상태는 ring/shadow 변화로 표현. 모바일 우선.
  */
 
 "use client";
 
-import type { RecommendedSongResponse } from "@/lib/api/recommendation";
+import type {
+  RecommendedSongResponse,
+  SongResponse,
+} from "@/lib/api/recommendation";
 import {
   deriveDifficulty,
   difficultyLabel,
@@ -30,12 +37,21 @@ import {
 } from "@/lib/difficulty";
 import { midiToNoteName } from "@/lib/notes";
 
-type SongCardProps = {
-  item: RecommendedSongResponse;
-};
+/**
+ * Props 분기:
+ *   - `item: RecommendedSongResponse` — 추천 결과 카드. rank/score/matchReason 노출.
+ *   - `song: SongResponse` — 검색 결과 카드. 추천 컨텍스트 필드는 모두 숨김.
+ *
+ * 두 모드 모두 동일한 시각 표현(난이도/최고음/장르/키)을 공유한다.
+ */
+type SongCardProps =
+  | { item: RecommendedSongResponse; song?: never }
+  | { song: SongResponse; item?: never };
 
-export function SongCard({ item }: SongCardProps) {
-  const { song } = item;
+export function SongCard(props: SongCardProps) {
+  const song: SongResponse = "item" in props && props.item ? props.item.song : props.song!;
+  const item: RecommendedSongResponse | null =
+    "item" in props && props.item ? props.item : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
@@ -50,9 +66,11 @@ export function SongCard({ item }: SongCardProps) {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            #{item.rankPosition}
-          </p>
+          {item ? (
+            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              #{item.rankPosition}
+            </p>
+          ) : null}
           <h2 className="truncate text-lg font-semibold text-zinc-900 dark:text-zinc-50">
             {song.title}
           </h2>
@@ -104,13 +122,17 @@ export function SongCard({ item }: SongCardProps) {
               {song.genre}
             </span>
           ) : null}
-          <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-            {item.matchReason}
-          </span>
+          {item ? (
+            <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+              {item.matchReason}
+            </span>
+          ) : null}
         </div>
-        <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-          score {item.score.toFixed(2)}
-        </span>
+        {item ? (
+          <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+            score {item.score.toFixed(2)}
+          </span>
+        ) : null}
       </div>
     </li>
   );
