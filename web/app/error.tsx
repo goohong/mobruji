@@ -14,6 +14,8 @@
 import { useEffect } from "react";
 import Link from "next/link";
 
+import { safeLog } from "@/lib/logging";
+
 type ErrorPageProps = {
   error: Error & { digest?: string };
   reset: () => void;
@@ -23,7 +25,8 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
   useEffect(() => {
     // 운영에서는 외부 로거로 보낼 자리. 본 단계에서는 콘솔로만 남긴다.
     // digest는 서버 사이드 에러 추적용 식별자.
-    console.error("[recommend] unhandled error", error);
+    // safeLog 가 PII 마스킹 + Error 평탄화를 처리한다 (PR #129).
+    safeLog.error("[recommend] unhandled error", error);
   }, [error]);
 
   return (
