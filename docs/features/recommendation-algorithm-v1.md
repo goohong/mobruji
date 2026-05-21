@@ -1,12 +1,12 @@
 ---
 feature: 추천 알고리즘 v1 (recommendation-algorithm-v1)
 slug: recommendation-algorithm-v1
-status: approved
+status: implementing
 owner: "@goohong"
 scope: recommendation
-related_issues: [5]
+related_issues: [5, 19]
 related_prs: [6]
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-21
 ---
 
 # 추천 알고리즘 v1 (recommendation-algorithm-v1)
@@ -145,3 +145,8 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **Q2 → (a) `w1=0.5, w2=0.2, w3=0.15, w4=0.15`** — 음역 적합이 1순위, 분위기·성별·인기는 보조.
   - **Q3 → (a) `w1`만 사용** — 단순함이 디버깅에 유리.
   - **Q4 → (c) 같은 아티스트 ≤ 2 + 같은 장르 ≤ 4 둘 다** — PoC 카탈로그가 작아 한 아티스트가 결과 도배할 위험 큼.
+- 2026-05-21: 첫 구현 PR, status=implementing. 출처: #19
+  - **`genderMatch` 컴포넌트 제거** — `Song`에 artistGender 필드 부재. v2에서 Song 필드 추가 시 재도입.
+  - **`popularityPrior` 컴포넌트 사실상 비활성** — 모든 곡 popularity=1.0 (시드 데이터에 없음). 가중치만 보존, ranking 영향 없음.
+  - **유효 점수식: `score = 0.5 * voiceRangeFit + 0.2 * moodMatch + jitter`** — Q2 가중치 중 voice/mood만 의미 있음.
+  - **`voiceRangeFit` 구체 산식**: `MusicalKeyMidiResolver`로 곡 키 → root MIDI 매핑, 곡 음역 = root±7 semitones, overlap/songSpan으로 0~1 점수.
