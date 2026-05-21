@@ -93,6 +93,31 @@ describe("VoiceRangePage 렌더", () => {
     expect(screen.getByRole("button", { name: /추천 받기/ })).toBeEnabled();
   });
 
+  // closes #166 — PR D: "자동 측정" CTA 카드를 페이지 상단에 노출하고
+  // /voice-range/auto 라우팅을 제공한다.
+  it("자동 측정 CTA 카드가 페이지 상단에 노출된다", () => {
+    renderWithQueryClient(<VoiceRangePage />);
+    expect(
+      screen.getByRole("heading", { name: /마이크로 자동 측정/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /자동으로 측정하기/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("자동 측정 CTA가 /voice-range/auto로 라우팅된다", () => {
+    renderWithQueryClient(<VoiceRangePage />);
+    const cta = screen.getByRole("link", { name: /자동으로 측정하기/ });
+    expect(cta).toHaveAttribute("href", "/voice-range/auto");
+  });
+
+  it("직접 선택 섹션이 폼 위에 헤딩으로 분리된다", () => {
+    renderWithQueryClient(<VoiceRangePage />);
+    expect(
+      screen.getByRole("heading", { name: /직접 선택/ }),
+    ).toBeInTheDocument();
+  });
+
   it("최저음 / 최고음 select에 C2~C6 옵션이 모두 렌더된다", () => {
     renderWithQueryClient(<VoiceRangePage />);
     const [lowSelect, highSelect] = screen.getAllByRole("combobox");
