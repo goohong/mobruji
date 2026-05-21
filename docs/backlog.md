@@ -14,19 +14,20 @@
 
 | Spec | Status | 첫 구현 PR |
 |------|--------|------------|
-| `voice-range-input` | approved | 대기 |
+| `voice-range-input` | implementing | PR #15 |
 | `song-metadata-source` | approved | 대기 |
 | `recommendation-algorithm-v1` | approved | 대기 |
 
 ## 다음 PR 큐 (예정 순서)
 
-1. **PR `chore(infra)`**: 백엔드 품질 게이트 wiring + RestAssured (PR #8 기존)
-2. **PR `chore(infra)`**: 4종 GitHub Actions (auto-label, auto-close issues, pr-size-check, spec-status-check)
-3. **PR `chore(infra)`**: H2 테스트 프로파일 + application-test.yml
-4. **PR `feat(voice)`**: VoiceRange 엔티티 + 익명 세션 등록/조회 API + 도메인 모델 §5/§6 갱신
-5. **PR `feat(song)`**: Song 엔티티 + 시드 데이터 100곡 + 검색/조회 API
-6. **PR `feat(recommendation)`**: 추천 v1 score 함수 + API
-7. **PR `release`**: develop → main v0.1.0 (Merge commit)
+1. ~~PR `chore(infra)`: 백엔드 품질 게이트 wiring (#8)~~ ✓ 머지됨
+2. ~~PR `docs(infra)`: 정책 완화 + 다중 AI 룰 (#10)~~ ✓ 머지됨
+3. ~~PR `chore(infra)`: CI 자동화 워크플로우 (#12)~~ ✓ 머지됨
+4. ~~PR `chore(infra)`: H2 테스트 프로파일 (#14)~~ ✓ 머지됨
+5. **PR `feat(voice)`**: VoiceRange 엔티티 + 등록/조회/갱신 API (진행 중)
+6. **PR `feat(song)`**: Song 엔티티 + 시드 데이터 100곡 + 검색/조회 API
+7. **PR `feat(recommendation)`**: 추천 v1 score 함수 + API
+8. **PR `release`**: develop → main v0.1.0 (Merge commit)
 
 ## 보류 / 미정
 
