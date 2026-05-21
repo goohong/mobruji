@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 
 import com.mobruji.recommendation.RecommendationService.ScoredSong;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * 점수 내림차순으로 정렬된 후보 리스트에 다양성 캡을 적용한다.
  *
@@ -21,13 +23,10 @@ import com.mobruji.recommendation.RecommendationService.ScoredSong;
  * spec에 명시된 fallback 룰은 없으나 "결과 개수가 요청 size에 못 미치면 보강" 의도를 반영해 두 단계로 분리했다.
  */
 @Component
+@RequiredArgsConstructor
 public class DiversityPostProcessor {
 
     private final RecommendationProperties recommendationProperties;
-
-    public DiversityPostProcessor(final RecommendationProperties recommendationProperties) {
-        this.recommendationProperties = recommendationProperties;
-    }
 
     /**
      * @param sortedCandidates 점수 내림차순으로 정렬된 후보.

@@ -8,6 +8,8 @@ import com.mobruji.song.Mood;
 import com.mobruji.song.MusicalKey;
 import com.mobruji.song.Song;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * v1 규칙 기반 점수 함수.
  *
@@ -25,13 +27,10 @@ import com.mobruji.song.Song;
  * <p>가중치는 {@link RecommendationProperties}로 외부화되어 튜닝 가능하다.
  */
 @Component
+@RequiredArgsConstructor
 public class RecommendationScorer {
 
     private final RecommendationProperties recommendationProperties;
-
-    public RecommendationScorer(final RecommendationProperties recommendationProperties) {
-        this.recommendationProperties = recommendationProperties;
-    }
 
     public ScoreBreakdown score(
             final Song song,

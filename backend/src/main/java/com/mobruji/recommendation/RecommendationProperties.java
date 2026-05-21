@@ -1,8 +1,12 @@
 package com.mobruji.recommendation;
 
-import java.util.Objects;
-
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 
 /**
  * 추천 v1 점수 가중치 / 다양성 후처리 / 결과 개수 설정.
@@ -16,27 +20,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <li>{@code mood}: 분위기 일치 시 1, 아니면 0</li>
  * <li>{@code popularity}: 시드 데이터에 popularity 필드 부재 → 신호값 1.0 고정. 가중치는 가산점으로만 작용.</li>
  * </ul>
+ *
+ * <p>검증 정책: 모든 필드 검증을 Bean Validation으로 통일한다 (PR #54). 바인딩 시점에 fail-fast.
+ * spec §6 운영 원칙: 도메인 객체는 {@code Objects.requireNonNull} 유지, properties는 어노테이션 일관화.
  */
+@Validated
 @ConfigurationProperties(prefix = "recommendation")
 public record RecommendationProperties(
-        Weights weights,
-        Diversity diversity,
-        int resultCount,
-        double jitterMagnitude,
-        SeedStrategy seedStrategy
+        @NotNull @Valid Weights weights,
+        @NotNull @Valid Diversity diversity,
+        @Min(1) int resultCount,
+        @DecimalMin("0.0") double jitterMagnitude,
+        @NotNull SeedStrategy seedStrategy
 ) {
-
-    public RecommendationProperties {
-        Objects.requireNonNull(weights, "weights must not be null");
-        Objects.requireNonNull(diversity, "diversity must not be null");
-        Objects.requireNonNull(seedStrategy, "seedStrategy must not be null");
-        if (resultCount <= 0) {
-            throw new IllegalArgumentException("resultCount must be > 0: " + resultCount);
-        }
-        if (jitterMagnitude < 0) {
-            throw new IllegalArgumentException("jitterMagnitude must be >= 0: " + jitterMagnitude);
-        }
-    }
 
     /**
      * jitter용 {@link java.util.Random} 시드 전략.
@@ -53,33 +49,16 @@ public record RecommendationProperties(
     }
 
     public record Weights(
-            double voiceFit,
-            double genre,
-            double mood,
-            double popularity
+            @DecimalMin("0.0") double voiceFit,
+            @DecimalMin("0.0") double genre,
+            @DecimalMin("0.0") double mood,
+            @DecimalMin("0.0") double popularity
     ) {
-
-        public Weights {
-            if (voiceFit < 0 || genre < 0 || mood < 0 || popularity < 0) {
-                throw new IllegalArgumentException(
-                        "weights must be >= 0 (voiceFit=" + voiceFit + ", genre=" + genre
-                                + ", mood=" + mood + ", popularity=" + popularity + ")");
-            }
-        }
     }
 
     public record Diversity(
-            int maxSameArtist,
-            int maxSameGenre
+            @Min(1) int maxSameArtist,
+            @Min(1) int maxSameGenre
     ) {
-
-        public Diversity {
-            if (maxSameArtist <= 0) {
-                throw new IllegalArgumentException("maxSameArtist must be > 0: " + maxSameArtist);
-            }
-            if (maxSameGenre <= 0) {
-                throw new IllegalArgumentException("maxSameGenre must be > 0: " + maxSameGenre);
-            }
-        }
     }
 }
