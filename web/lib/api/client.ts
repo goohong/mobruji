@@ -29,13 +29,19 @@ type RequestOptions = {
   method?: Method;
   body?: unknown;
   signal?: AbortSignal;
+  /**
+   * 추가 요청 헤더. 예: session-bound endpoint 의 `X-Session-Id` 헤더
+   * (PR #244 `SessionAuthGuard`). Accept/Content-Type 은 기본값이 덮어쓰지 않게
+   * 호출 측 헤더가 마지막에 spread 된다.
+   */
+  headers?: Record<string, string>;
 };
 
 export async function apiFetch<TResponse>(
   path: string,
   options: RequestOptions = {},
 ): Promise<TResponse> {
-  const { method = "GET", body, signal } = options;
+  const { method = "GET", body, signal, headers } = options;
 
   const url = `${API_BASE_URL}${path}`;
   const init: RequestInit = {
@@ -43,6 +49,7 @@ export async function apiFetch<TResponse>(
     headers: {
       Accept: "application/json",
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(headers ?? {}),
     },
     signal,
   };

@@ -20,14 +20,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 
 import { SongCard } from "@/app/recommend/components/SongCard";
 import { formatRelativeKorean } from "@/lib/relativeTime";
-import { extractVoiceRangeProgress } from "@/lib/voiceRangeProgress";
+import {
+  extractVoiceRangeProgress,
+  extractVoiceRangeProgressFromSnapshots,
+  type VoiceRangeProgressSummary,
+} from "@/lib/voiceRangeProgress";
+import {
+  readVoiceRangeHistory,
+  type VoiceRangeHistoryResponse,
+} from "@/lib/api/voiceRangeHistory";
 import {
   useHistoryStore,
   type RecommendationHistoryEntry,
 } from "@/store/history";
+import { useSessionStore } from "@/store/session";
 
 import { VoiceRangeProgressCard } from "./components/VoiceRangeProgressCard";
 
@@ -39,6 +49,21 @@ export default function HistoryPage() {
     (state) => state.removeRecommendation,
   );
   const clearHistory = useHistoryStore((state) => state.clearHistory);
+  // sessionId 는 zustand persist 로 hydration 후에야 truthy 가 된다. 없는 동안엔
+  // BE 시계열 호출을 건너뛰고 localStorage(useHistoryStore) 만으로 렌더한다.
+  const sessionId = useSessionStore((state) => state.sessionId);
+
+  // spec voice-range-progress §3 — BE 음역 시계열을 source-of-truth 로 사용한다.
+  // sessionId 가 없거나 호출이 실패하면 localStorage 기반(extractVoiceRangeProgress)
+  // 으로 graceful fallback 한다(spec §3: "LocalStorage 는 오프라인 fallback").
+  const voiceRangeHistoryQuery = useQuery<VoiceRangeHistoryResponse, Error>({
+    queryKey: ["voice-range-history", sessionId],
+    queryFn: ({ signal }) => readVoiceRangeHistory(sessionId!, signal),
+    enabled: Boolean(sessionId),
+    // 시계열은 자주 갱신될 필요가 없다(사용자 액션 한 번 = snapshot 한 건).
+    // 캐시는 React Query 기본 5분 유지 — 같은 페이지 재방문 시 즉시 표시.
+    retry: 1,
+  });
 
   if (recommendations.length === 0) {
     return <EmptyHistory />;
@@ -56,12 +81,15 @@ export default function HistoryPage() {
 
   // 음역 발전 추적(closes #170) — entries 가 2건 이상이고 MIDI 스냅샷이 있는 경우만 표시.
   // 1건 이하인 경우는 카드 자리에 "더 측정해보세요" CTA 를 노출 (사용자 동기부여).
-  const progressSummary = extractVoiceRangeProgress(recommendations);
-  const measuredCount = recommendations.filter(
-    (entry) =>
-      typeof entry.voiceRangeLowMidi === "number" &&
-      typeof entry.voiceRangeHighMidi === "number",
-  ).length;
+  const progressSummary = pickProgressSummary({
+    snapshots: voiceRangeHistoryQuery.data?.voiceRangeSnapshotResponses ?? null,
+    isBackendError: voiceRangeHistoryQuery.isError,
+    recommendations,
+  });
+  const measuredCount = countMeasuredEntries(
+    voiceRangeHistoryQuery.data?.voiceRangeSnapshotResponses ?? null,
+    recommendations,
+  );
 
   return (
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
@@ -106,6 +134,59 @@ export default function HistoryPage() {
       </div>
     </main>
   );
+}
+
+type PickProgressSummaryArgs = {
+  snapshots: ReadonlyArray<
+    VoiceRangeHistoryResponse["voiceRangeSnapshotResponses"][number]
+  > | null;
+  isBackendError: boolean;
+  recommendations: readonly RecommendationHistoryEntry[];
+};
+
+/**
+ * source-of-truth 우선순위 결정:
+ *   1. BE 시계열 응답이 있고 datapoint ≥ 2 → BE summary 사용 (spec §3).
+ *   2. BE 호출이 에러거나 응답이 empty/1건 → localStorage fallback (spec §3 fallback).
+ * 결과가 null 이면 호출 측이 "측정 더 해보세요" CTA / 카드 미노출로 분기한다.
+ */
+function pickProgressSummary({
+  snapshots,
+  isBackendError,
+  recommendations,
+}: PickProgressSummaryArgs): VoiceRangeProgressSummary | null {
+  if (snapshots && snapshots.length >= 2) {
+    const summary = extractVoiceRangeProgressFromSnapshots(snapshots);
+    if (summary) {
+      return summary;
+    }
+  }
+  // BE 응답이 있긴 하지만 1건 이하 → 신뢰값이므로 fallback 하지 않고 그대로 null.
+  // 단, BE 호출 자체가 실패한 경우엔 localStorage 로 graceful fallback.
+  if (snapshots && !isBackendError) {
+    return null;
+  }
+  return extractVoiceRangeProgress(recommendations);
+}
+
+/**
+ * "더 측정해보세요" CTA 표시 여부 판정에 쓰일 측정 횟수.
+ * BE 응답이 있으면 그 길이를, 없으면 localStorage entry 중 MIDI 가진 것 수를 센다.
+ */
+function countMeasuredEntries(
+  snapshots: ReadonlyArray<
+    VoiceRangeHistoryResponse["voiceRangeSnapshotResponses"][number]
+  > | null,
+  recommendations: readonly RecommendationHistoryEntry[],
+): number {
+  if (snapshots) {
+    return snapshots.length;
+  }
+  return recommendations.filter(
+    (entry) =>
+      typeof entry.voiceRangeLowMidi === "number" &&
+      typeof entry.voiceRangeHighMidi === "number",
+  ).length;
 }
 
 type HistoryCardProps = {

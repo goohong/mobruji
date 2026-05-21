@@ -48,6 +48,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
     maxHighMidi,
     latestSpanSemitones,
     spanDeltaSemitones,
+    lowMidiDeltaSemitones,
+    highMidiDeltaSemitones,
   } = summary;
 
   const yMin = minLowMidi - Y_AXIS_VERTICAL_PAD;
@@ -97,6 +99,15 @@ export function VoiceRangeProgressCard({ summary }: Props) {
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           최근 측정 {midiToNoteName(latest.lowMidi)} ~{" "}
           {midiToNoteName(latest.highMidi)} · {points.length}회 측정 기록
+        </p>
+        {/*
+         * 첫 측정 대비 lowMidi/highMidi delta — spec voice-range-progress §3.
+         * 양수=음(피치)이 높아진 방향(고음 확장 / 저음 좁아짐), 음수=낮아진 방향.
+         * 헤드라인(spanDelta)은 폭만 보여주므로 lower/upper bound 변화를 별도 표기.
+         */}
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          첫 측정 대비 저음 {formatSemitoneDelta(lowMidiDeltaSemitones)} · 고음{" "}
+          {formatSemitoneDelta(highMidiDeltaSemitones)}
         </p>
       </header>
 
@@ -180,6 +191,19 @@ export function VoiceRangeProgressCard({ summary }: Props) {
       </svg>
     </section>
   );
+}
+
+/**
+ * 반음 delta 값을 부호 포함 한국어 라벨로 포맷한다.
+ *   +3 → "+3 반음", -2 → "-2 반음", 0 → "변화 없음".
+ *   spec voice-range-progress §3 fe 표시 항목.
+ */
+function formatSemitoneDelta(delta: number): string {
+  if (delta === 0) {
+    return "변화 없음";
+  }
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${delta} 반음`;
 }
 
 function buildHeadline(delta: number, latestSpan: number): string {
