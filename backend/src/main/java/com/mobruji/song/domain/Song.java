@@ -172,4 +172,48 @@ public class Song {
         }
         return Difficulty.EASY;
     }
+
+    /**
+     * 시드 재적재용 partial update — **null인 필드만** 새 값으로 채운다. 이미 값이 있는 필드는 보존
+     * (운영 중 수정된 데이터를 덮지 않기 위함).
+     *
+     * <p>lowMidi/highMidi가 한 번이라도 채워진 후에는 difficulty도 자동 분류한다(둘 다 값이 있고
+     * difficulty가 여전히 null인 경우). difficulty 인자가 명시되면 그 값을 우선한다.
+     *
+     * <p>실제로 한 필드라도 변경됐을 때만 `updatedAt`을 갱신한다(불필요한 dirty checking 회피).
+     *
+     * @return 변경 발생 여부 — 호출 측 로깅에 사용
+     */
+    public boolean backfillMissingFields(
+            final Integer newLowMidi,
+            final Integer newHighMidi,
+            final Difficulty newDifficulty) {
+        boolean changed = false;
+        if (this.lowMidi == null && newLowMidi != null) {
+            this.lowMidi = newLowMidi;
+            changed = true;
+        }
+        if (this.highMidi == null && newHighMidi != null) {
+            this.highMidi = newHighMidi;
+            changed = true;
+        }
+        if (this.lowMidi != null && this.highMidi != null && this.lowMidi > this.highMidi) {
+            throw new IllegalArgumentException(
+                    "lowMidi must not exceed highMidi: lowMidi=" + this.lowMidi
+                            + ", highMidi=" + this.highMidi);
+        }
+        if (this.difficulty == null) {
+            if (newDifficulty != null) {
+                this.difficulty = newDifficulty;
+                changed = true;
+            } else if (this.lowMidi != null && this.highMidi != null) {
+                this.difficulty = deriveDifficulty(this.lowMidi, this.highMidi);
+                changed = true;
+            }
+        }
+        if (changed) {
+            this.updatedAt = LocalDateTime.now();
+        }
+        return changed;
+    }
 }

@@ -171,4 +171,100 @@ class SongTest {
         assertThat(song.getLowMidi()).isNull();
         assertThat(song.getHighMidi()).isNull();
     }
+
+    @Test
+    @DisplayName("backfillMissingFields: null 필드를 채우고 difficulty 자동 분류")
+    void backfill_fillsNullFields_andDerivesDifficulty() {
+        // given: MIDI/difficulty 미지정 상태
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+        assertThat(song.getDifficulty()).isNull();
+
+        // when: lowMidi/highMidi 백필 (difficulty는 자동 분류 위임)
+        final boolean changed = song.backfillMissingFields(60, 78, null);
+
+        // then
+        assertThat(changed).isTrue();
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isEqualTo(78);
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.HARD);
+    }
+
+    @Test
+    @DisplayName("backfillMissingFields: 이미 값이 있는 필드는 보존")
+    void backfill_preservesExistingValues() {
+        // given: lowMidi/highMidi 모두 채워진 상태 (difficulty도 자동 분류됨)
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(57).highMidi(76) // 사용자 수정값 가정
+                .build();
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.HARD);
+
+        // when: 다른 값으로 backfill 시도
+        final boolean changed = song.backfillMissingFields(50, 80, Difficulty.EASY);
+
+        // then: 원래 값 유지, 변경 없음
+        assertThat(changed).isFalse();
+        assertThat(song.getLowMidi()).isEqualTo(57);
+        assertThat(song.getHighMidi()).isEqualTo(76);
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.HARD);
+    }
+
+    @Test
+    @DisplayName("backfillMissingFields: 일부만 null이면 그 필드만 채움")
+    void backfill_partialNull_fillsOnlyNullField() {
+        // given: lowMidi만 null, highMidi/difficulty는 있음 (드문 케이스지만 도메인은 방어해야)
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+        // when: lowMidi만 백필
+        final boolean changed = song.backfillMissingFields(60, null, null);
+
+        // then
+        assertThat(changed).isTrue();
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isNull();
+        // lowMidi/highMidi 둘 다 채워지지 않아 difficulty는 여전히 null
+        assertThat(song.getDifficulty()).isNull();
+    }
+
+    @Test
+    @DisplayName("backfillMissingFields: 모든 인자 null이면 no-op")
+    void backfill_allNull_isNoop() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        final boolean changed = song.backfillMissingFields(null, null, null);
+
+        assertThat(changed).isFalse();
+        assertThat(song.getLowMidi()).isNull();
+    }
+
+    @Test
+    @DisplayName("backfillMissingFields: difficulty 명시되면 자동 분류보다 우선")
+    void backfill_explicitDifficulty_takesPrecedence() {
+        // given: MIDI 없이 difficulty만 명시 백필
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        // when
+        final boolean changed = song.backfillMissingFields(null, null, Difficulty.NORMAL);
+
+        // then
+        assertThat(changed).isTrue();
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.NORMAL);
+    }
 }
