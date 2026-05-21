@@ -29,6 +29,13 @@
 - `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/task.md`: PR/이슈 템플릿
 - `docs/features/`: 기능 단위 living 명세서 (Feature Spec). 프로세스는 `02-agent-workflow.md §9`
 - `docs/decisions/`: Architecture Decision Records (ADR). 횡단 결정의 영속 이력
+  - `0001-tech-stack-and-monorepo.md` — Spring Boot + Next.js 모노레포
+  - `0002-license-agpl-3-0.md` — AGPL-3.0 라이선스
+  - `0003-test-db-strategy.md` — 테스트 DB 전략
+  - `0004-frontend-state-and-fetching.md` — 프론트 상태 관리/페칭
+  - `0005-package-structure.md` — 백엔드 패키지 구조 (+ `0005-package-structure-migration.md`)
+  - `0006-audio-source-youtube.md` — PoC 단계 audio 출처 = YouTube extract
+  - `0007-vocal-difficulty-classification.md` — 곡 난이도 분류 (EASY/NORMAL/HARD)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
 - `CLAUDE.md`: Claude Code 세션 자동 로드 룰 요약
 
