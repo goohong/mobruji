@@ -33,10 +33,15 @@
   - `**/db/migration/**`, `**/resources/db/**`
   - `**/application*.yml`, `**/application*.properties`, `.env*`
   - `backend/build.gradle*`, `backend/settings.gradle*`, `backend/gradle/**`
-  - `web/next.config.*`, `web/package.json`, `web/pnpm-lock.yaml`, `web/package-lock.json`
+  - `web/next.config.*`, `web/package.json`, **lockfile 전체**(`web/pnpm-lock.yaml`, `web/package-lock.json`, `web/yarn.lock` 등) — devDep만 추가된 lockfile-only diff도 보호 영역
   - `Dockerfile`, `docker-compose*.yml`
   - `LICENSE`
 - 상세: `CLAUDE.md §4 AI 작업 보호 영역`
+
+#### 보호 영역 라벨 drift 가드 (사이클 9 retro, #124)
+- `needs-human-review` 라벨은 머지 시까지 **유지**한다. 임의로 떼지 말 것.
+- `.github/workflows/auto-label.yml`이 `opened|edited|synchronize|reopened|ready_for_review|unlabeled` 이벤트마다 보호 영역을 재평가해 라벨을 재부착하며, 부착 실패 시 워크플로우 자체를 실패시켜(빨간 체크) 머지를 차단한다.
+- lockfile 변경(devDep 추가, transitive 업데이트)도 보호 영역이다. "package.json 본문은 안 건드렸으니 괜찮다"는 가정 금지.
 
 ### 기획/이슈 등록
 - be/fe/rev는 **이슈 등록 금지** (본진에 보고만). 기능/스펙 의사결정은 본진이 한다.
@@ -178,3 +183,4 @@ PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서
 
 - 2026-05-21 — 최초 작성 (be/fe/rev/plan 4역할, 공통 룰 추출).
 - 2026-05-21 — rev §E-1 추가: 비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 표 / 결론 헤더 폐기 (이슈 #104, PR #109).
+- 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
