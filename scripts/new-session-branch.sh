@@ -40,10 +40,9 @@ case "$session" in
         ;;
 esac
 
-# 0) develop 동기화
+# 0) develop 동기화 (detached worktree 친화: origin/develop로 직접 작업)
 echo "[1/5] sync develop"
-git checkout develop
-git pull --ff-only
+git fetch origin develop
 
 # 1) 이슈 생성
 echo "[2/5] create issue"
@@ -63,8 +62,9 @@ case "$type" in
     feat) branch_type="feature" ;;
 esac
 branch="${branch_type}/${slug}-#${issue_num}"
-echo "[3/5] branch $branch"
-git checkout -b "$branch"
+echo "[3/5] branch $branch (from origin/develop)"
+# -B로 강제 reset, origin/develop를 기준점으로. detached/branch 상태 무관하게 동작.
+git checkout -B "$branch" origin/develop
 
 # 3) 빈 commit으로 PR 생성을 위한 first push (draft PR은 commit 1개 필요)
 echo "[4/5] empty placeholder commit + push"

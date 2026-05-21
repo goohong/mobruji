@@ -9,18 +9,20 @@
 
 ```bash
 # 본진은 ~/workspace/github/mobruji 그대로
-git worktree add ../mobruji-be develop
-git worktree add ../mobruji-fe develop
-git worktree add ../mobruji-rev develop
+git worktree add --detach ../mobruji-be
+git worktree add --detach ../mobruji-fe
+git worktree add --detach ../mobruji-rev
 ```
+
+`--detach`인 이유: git은 같은 브랜치(develop)를 여러 워크트리에서 동시에 체크아웃 못 함. detached로 만들면 각 세션에서 `new-session-branch.sh`가 `origin/develop`을 기준으로 새 브랜치를 만들어 작업한다.
 
 확인:
 ```bash
 git worktree list
-# /Users/goohong/workspace/github/mobruji        <sha> [develop]
-# /Users/goohong/workspace/github/mobruji-be     <sha> [develop]
-# /Users/goohong/workspace/github/mobruji-fe     <sha> [develop]
-# /Users/goohong/workspace/github/mobruji-rev    <sha> [develop]
+# /Users/goohong/workspace/github/mobruji      <sha> [develop]
+# /Users/goohong/workspace/github/mobruji-be   <sha> (detached HEAD)
+# /Users/goohong/workspace/github/mobruji-fe   <sha> (detached HEAD)
+# /Users/goohong/workspace/github/mobruji-rev  <sha> (detached HEAD)
 ```
 
 ### 1-2) 메모리 디렉토리 공유 (선택)
