@@ -47,4 +47,7 @@ ADR 0005 §A-7은 `api → application → domain ← infrastructure` 4계층 �
 - PR #89 — 패키지 구조 마이그레이션. `application → api.dto` 위반 8건이 발견·수정된 사례. 본 ADR의 직접 동기.
 - PR #114 — be 사이클 8. ArchUnit 1.3.0 도입 + `LayerDependencyTest` 활성화 (본 ADR로 promote).
 - `backend/src/test/java/com/mobruji/architecture/LayerDependencyTest.java` — 룰 본체.
-- 후속 가능: cyclic dependency 금지, controller 어노테이션 검증, DTO 위치 검증 등은 같은 테스트 파일에서 룰 추가로 처리 (별도 ADR 없이).
+- 이슈 #112 — `..api.dto..` 명시적 anti-rule 3건 + `dto` 위치 검증 1건 추가. layered() 광범위 룰을 좁혀
+  위반 메시지가 즉시 "api.dto 회귀"임을 드러내고, `application.dto`/`domain.dto`처럼 가드를 우회하는
+  새 패키지 생성도 함께 차단한다. PR #89 회귀 직접 가드.
+- 후속 가능: cyclic dependency 금지, controller 어노테이션 검증 등은 같은 테스트 파일에서 룰 추가로 처리 (별도 ADR 없이).
