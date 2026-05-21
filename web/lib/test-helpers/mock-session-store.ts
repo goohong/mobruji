@@ -35,18 +35,30 @@ import { vi } from "vitest";
 export type MockSessionState = {
   sessionId: string | null;
   voiceRangeId: number | null;
+  excludedSongIds: number[];
   ensureSessionId: () => string;
   setVoiceRangeId: (id: number) => void;
+  appendExcluded: (ids: number[]) => void;
+  clearExcluded: () => void;
   reset: () => void;
 };
 
 type Selector<TResult> = (state: MockSessionState) => TResult;
 
+/**
+ * `useSessionStore`의 호출 시그니처 + zustand store가 노출하는 `.getState`까지
+ * 흉내내는 콜러블 객체. 컴포넌트가 `useSessionStore.getState()`로 selector 바깥에서
+ * 최신 상태를 읽는 경우(예: mutate 핸들러)에도 동작하도록 한다.
+ */
+export type MockUseSessionStore = (<TResult = MockSessionState>(
+  selector?: Selector<TResult>,
+) => TResult) & {
+  getState: () => MockSessionState;
+};
+
 export type SessionStoreMock = {
   /** 컴포넌트가 호출하는 훅 함수. selector(state)를 그대로 흉내낸다. */
-  useSessionStore: <TResult = MockSessionState>(
-    selector?: Selector<TResult>,
-  ) => TResult;
+  useSessionStore: MockUseSessionStore;
   /** 현재 mock 상태 스냅샷 반환. spy 호출 검증에 쓴다. */
   state: () => MockSessionState;
   /** 상태 일부를 갈아끼움. spy 함수 ref는 유지된다. */
@@ -59,8 +71,11 @@ function freshDefaults(): MockSessionState {
   return {
     sessionId: null,
     voiceRangeId: null,
+    excludedSongIds: [],
     ensureSessionId: vi.fn(() => "test-session-id"),
     setVoiceRangeId: vi.fn(),
+    appendExcluded: vi.fn(),
+    clearExcluded: vi.fn(),
     reset: vi.fn(),
   };
 }
@@ -77,15 +92,20 @@ export function buildSessionStoreMock(
 ): SessionStoreMock {
   let current: MockSessionState = { ...freshDefaults(), ...initialState };
 
+  function useSessionStore<TResult = MockSessionState>(
+    selector?: Selector<TResult>,
+  ): TResult {
+    if (selector) {
+      return selector(current);
+    }
+    return current as unknown as TResult;
+  }
+  // zustand store의 정적 `getState` 흉내 — 컴포넌트가 selector 바깥에서
+  // `useSessionStore.getState()`로 최신 상태를 읽는 경우를 지원한다.
+  (useSessionStore as MockUseSessionStore).getState = () => current;
+
   return {
-    useSessionStore<TResult = MockSessionState>(
-      selector?: Selector<TResult>,
-    ): TResult {
-      if (selector) {
-        return selector(current);
-      }
-      return current as unknown as TResult;
-    },
+    useSessionStore: useSessionStore as MockUseSessionStore,
     state: () => current,
     set: (partial) => {
       current = { ...current, ...partial };
