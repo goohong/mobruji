@@ -42,7 +42,7 @@
 - 리뷰 1명 승인 후 **Squash merge**. 단 `develop → main` 릴리즈는 **Merge commit** (§8 참조).
 
 ### AI 작업 보호 영역
-아래 경로 변경 시 사람 리뷰 필수(CODEOWNERS에 의해 자동 리뷰 요청). 가능하면 AI 단독 수정 금지.
+아래 경로 변경 시 **사람 사후 리뷰 권장**(필수 아님). AI도 self-merge 가능하되, `needs-human-review` 라벨로 가시화한다.
 - `.github/workflows/**`, `.github/CODEOWNERS`
 - `**/db/migration/**`, `**/resources/db/**`
 - `**/application*.yml`, `**/application*.properties`, `.env*`
@@ -50,6 +50,8 @@
 - `web/next.config.*`, `web/package.json`, `web/pnpm-lock.yaml`, `web/package-lock.json`
 - `Dockerfile`, `docker-compose*.yml`
 - `LICENSE`
+
+> **운영 원칙**: 보호 영역은 "잘못되면 영향이 큰 영역"이라 표시만 강제. 사람 머지를 기다리느라 흐름이 끊기는 비용이 더 크다고 판단해 권장 수준으로 둔다. 사후 리뷰는 PR 코멘트/사후 PR로 한다. 정말 사람만 만져야 하는 영역(예: 라이선스, CI/CD 시크릿)은 별도 룰로 분리한다.
 
 ### 품질 게이트
 
