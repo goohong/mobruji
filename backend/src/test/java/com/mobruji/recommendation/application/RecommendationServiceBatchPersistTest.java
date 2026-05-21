@@ -82,8 +82,8 @@ class RecommendationServiceBatchPersistTest {
                 buildSong(3L, "s3", "A3"));
         given(songRepository.findAll()).willReturn(catalog);
 
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0);
-        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any()))
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5);
+        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any()))
                 .willReturn(new Scored(0.9, breakdown));
 
         final List<ScoredSong> diversified = new ArrayList<>();
@@ -100,6 +100,7 @@ class RecommendationServiceBatchPersistTest {
                 48,
                 72,
                 Mood.UPBEAT,
+                null,
                 List.of());
 
         // when
@@ -120,7 +121,7 @@ class RecommendationServiceBatchPersistTest {
 
     private static RecommendationRequestEntity persistedRequestEntity() throws Exception {
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "session-abc", 48, 72, Mood.UPBEAT, List.of());
+                "session-abc", 48, 72, Mood.UPBEAT, null, List.of());
         // mock save 후 id 가 비어 있으면 Recommendation.create 가 NPE — 리플렉션으로 id 주입.
         final Field idField = RecommendationRequestEntity.class.getDeclaredField("id");
         idField.setAccessible(true);

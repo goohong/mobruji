@@ -14,10 +14,10 @@ import lombok.RequiredArgsConstructor;
 import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
 
 /**
- * v1 규칙 기반 점수 함수.
+ * v1/v2 규칙 기반 점수 함수.
  *
  * <p>{@code score = w_voiceFit * rangeFit + w_genre * genreMatch + w_mood * moodMatch
- *                 + w_popularity * popularityPrior + jitter}
+ *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + jitter}
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
@@ -25,6 +25,8 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * <li>genreMatch: v1에서 입력 필드 없음 → 0 고정 (가중치만 보존).</li>
  * <li>moodMatch: 일치 1.0 / 미입력·불일치 0.0.</li>
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
+ * <li>tempoMatch (v2 #218): {@code 1.0 - min(1.0, |songBpm - preferredBpm| / tolerance)}.
+ * 곡 BPM이 null이거나 사용자 선호 BPM이 결정될 수 없으면 0.5(중립).</li>
  * <li>jitter: 동순위 분산용. seed 고정으로 결정성 유지 가능.</li>
  * </ul>
  *
@@ -37,6 +39,12 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
 @RequiredArgsConstructor
 public class RecommendationScorer {
 
+    /**
+     * tempoMatch 신호 결정 불가(곡 BPM 또는 사용자 선호 BPM 부재) 시의 중립값.
+     * popularity와 동일한 1.0 가산 대신 0.5로 두어, "정보 없음"을 가중 합산에서 명시 차별화한다.
+     */
+    static final double TEMPO_MATCH_NEUTRAL = 0.5;
+
     private final RecommendationProperties recommendationProperties;
 
     public Scored score(
@@ -44,21 +52,26 @@ public class RecommendationScorer {
             final int voiceRangeLow,
             final int voiceRangeHigh,
             final Mood requestedMood,
+            final Integer preferredBpm,
             final Random random) {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
+        final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
         final double rangeFit = voiceRangeFit(song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
         final double genreMatch = genreMatch();
         final double moodMatch = moodMatch(song.getMood(), requestedMood);
         final double popularityPrior = popularityPrior(song);
+        final double tempoMatch = tempoMatch(song.getBpm(), preferredBpm, requestedMood, tempo);
         final double jitterMagnitude = recommendationProperties.jitterMagnitude();
         final double jitter = (random.nextDouble() * 2 - 1) * jitterMagnitude;
         final double total = weights.voiceFit() * rangeFit
                 + weights.genre() * genreMatch
                 + weights.mood() * moodMatch
                 + weights.popularity() * popularityPrior
+                + weights.tempoMatch() * tempoMatch
                 + jitter;
-        final ScoreBreakdown breakdown = new ScoreBreakdown(keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(
+                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch);
         return new Scored(total, breakdown);
     }
 
@@ -115,6 +128,48 @@ public class RecommendationScorer {
     }
 
     /**
+     * v2(#218) tempoMatch 신호.
+     *
+     * <p>산식: {@code 1.0 - min(1.0, |songBpm - target| / tolerance)} — target은 사용자 입력 {@code preferredBpm}
+     * 이 있으면 그 값, 없으면 mood 기반 default BPM. 곡 BPM이 null이거나 target이 결정될 수 없으면 {@link #TEMPO_MATCH_NEUTRAL}
+     * (정보 없음).
+     *
+     * <p>가중 합산에는 weights.tempoMatch로 들어가며, raw 신호는 ScoreBreakdown에 보존된다.
+     */
+    static double tempoMatch(
+            final Integer songBpm,
+            final Integer preferredBpm,
+            final Mood requestedMood,
+            final RecommendationProperties.Tempo tempo) {
+        if (songBpm == null) {
+            return TEMPO_MATCH_NEUTRAL;
+        }
+        final Integer target = resolveTargetBpm(preferredBpm, requestedMood, tempo);
+        if (target == null) {
+            return TEMPO_MATCH_NEUTRAL;
+        }
+        final double distance = Math.abs((double) songBpm - target);
+        final double normalized = Math.min(1.0, distance / tempo.distanceTolerance());
+        return 1.0 - normalized;
+    }
+
+    private static Integer resolveTargetBpm(
+            final Integer preferredBpm,
+            final Mood requestedMood,
+            final RecommendationProperties.Tempo tempo) {
+        if (preferredBpm != null) {
+            return preferredBpm;
+        }
+        if (requestedMood != null) {
+            final Integer moodDefault = tempo.moodDefaultBpm().get(requestedMood);
+            if (moodDefault != null) {
+                return moodDefault;
+            }
+        }
+        return tempo.fallbackBpm();
+    }
+
+    /**
      * 점수 계산 결과 — 가중 합산된 {@code total}과 raw 신호 분해를 함께 담는다.
      * 정렬·랭킹은 {@code total}만 사용하고, breakdown은 응답·로깅·디버깅용.
      */
@@ -129,6 +184,10 @@ public class RecommendationScorer {
 
         public double moodMatch() {
             return breakdown.moodMatch();
+        }
+
+        public double tempoMatch() {
+            return breakdown.tempoMatch();
         }
 
         /**

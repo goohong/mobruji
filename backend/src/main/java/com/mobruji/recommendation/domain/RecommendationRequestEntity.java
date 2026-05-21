@@ -58,6 +58,13 @@ public class RecommendationRequestEntity {
     @Column(name = "mood", length = 16)
     private Mood mood;
 
+    /**
+     * v2(#218)에서 추가된 사용자 선호 BPM. nullable — 미입력 시 mood 기반 default 사용.
+     * tempoMatch 신호 계산과 결정성 seed에 모두 영향.
+     */
+    @Column(name = "preferred_bpm")
+    private Integer preferredBpm;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -83,12 +90,17 @@ public class RecommendationRequestEntity {
             final int voiceRangeLow,
             final int voiceRangeHigh,
             final Mood mood,
+            final Integer preferredBpm,
             final List<Long> excludeSongIds) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(excludeSongIds, "excludeSongIds must not be null");
         if (voiceRangeLow > voiceRangeHigh) {
             throw new IllegalArgumentException(
                     "voiceRangeLow (" + voiceRangeLow + ") must be <= voiceRangeHigh (" + voiceRangeHigh + ")");
+        }
+        if (preferredBpm != null && (preferredBpm < 30 || preferredBpm > 300)) {
+            throw new IllegalArgumentException(
+                    "preferredBpm out of plausible range [30, 300]: " + preferredBpm);
         }
         // 입력 리스트의 외부 변형으로부터 엔티티 내부 상태를 보호하기 위해 방어적 복사.
         return new RecommendationRequestEntity(
@@ -97,6 +109,7 @@ public class RecommendationRequestEntity {
                 voiceRangeLow,
                 voiceRangeHigh,
                 mood,
+                preferredBpm,
                 LocalDateTime.now(),
                 new ArrayList<>(excludeSongIds));
     }

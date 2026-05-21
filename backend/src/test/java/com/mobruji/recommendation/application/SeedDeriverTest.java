@@ -17,6 +17,9 @@ import com.mobruji.song.domain.Mood;
  * <p>본 테스트는 결정성(동일 입력 → 동일 seed)과 entropy 보존(다른 입력 → 다른 seed)을
  * 모든 입력 필드에 대해 검증한다. excludeSongIds 입력 포함은 rev 사이클 3 누적 경고에
  * 대응하는 회귀 가드(재추천 변주 보존).
+ *
+ * <p>v2(#218)에서 preferredBpm 입력이 seed에 포함되어, 같은 voiceRange/sessionId라도
+ * 사용자 선호 BPM이 다르면 다른 결과를 보장한다.
  */
 class SeedDeriverTest {
 
@@ -28,10 +31,13 @@ class SeedDeriverTest {
         final int voiceRangeLow = 55;
         final int voiceRangeHigh = 75;
         final Mood mood = Mood.UPBEAT;
+        final Integer preferredBpm = 120;
         final List<Long> excludeSongIds = List.of(10L, 20L);
         // when
-        final long first = SeedDeriver.derive(sessionId, voiceRangeLow, voiceRangeHigh, mood, excludeSongIds);
-        final long second = SeedDeriver.derive(sessionId, voiceRangeLow, voiceRangeHigh, mood, excludeSongIds);
+        final long first = SeedDeriver.derive(
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds);
+        final long second = SeedDeriver.derive(
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds);
         // then
         assertThat(first).isEqualTo(second);
     }
@@ -40,8 +46,8 @@ class SeedDeriverTest {
     @DisplayName("다른 sessionId는 다른 seed (entropy 보존)")
     void derive_differentSession_returnsDifferentSeed() {
         // when
-        final long a = SeedDeriver.derive("session-a", 55, 75, Mood.UPBEAT, List.of());
-        final long b = SeedDeriver.derive("session-b", 55, 75, Mood.UPBEAT, List.of());
+        final long a = SeedDeriver.derive("session-a", 55, 75, Mood.UPBEAT, null, List.of());
+        final long b = SeedDeriver.derive("session-b", 55, 75, Mood.UPBEAT, null, List.of());
         // then
         assertThat(a).isNotEqualTo(b);
     }
@@ -50,8 +56,8 @@ class SeedDeriverTest {
     @DisplayName("다른 음역대는 다른 seed")
     void derive_differentVoiceRange_returnsDifferentSeed() {
         // when
-        final long a = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, List.of());
-        final long b = SeedDeriver.derive("s", 56, 75, Mood.UPBEAT, List.of());
+        final long a = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
+        final long b = SeedDeriver.derive("s", 56, 75, Mood.UPBEAT, null, List.of());
         // then
         assertThat(a).isNotEqualTo(b);
     }
@@ -60,9 +66,9 @@ class SeedDeriverTest {
     @DisplayName("다른 mood는 다른 seed (null vs 값 포함)")
     void derive_differentMood_returnsDifferentSeed() {
         // when
-        final long upbeat = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, List.of());
-        final long calm = SeedDeriver.derive("s", 55, 75, Mood.CALM, List.of());
-        final long none = SeedDeriver.derive("s", 55, 75, null, List.of());
+        final long upbeat = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
+        final long calm = SeedDeriver.derive("s", 55, 75, Mood.CALM, null, List.of());
+        final long none = SeedDeriver.derive("s", 55, 75, null, null, List.of());
         // then
         assertThat(upbeat).isNotEqualTo(calm);
         assertThat(upbeat).isNotEqualTo(none);
@@ -73,8 +79,8 @@ class SeedDeriverTest {
     @DisplayName("mood=null도 일관된 seed (호출마다 흔들리지 않음)")
     void derive_nullMood_isStable() {
         // when
-        final long first = SeedDeriver.derive("s", 55, 75, null, List.of());
-        final long second = SeedDeriver.derive("s", 55, 75, null, List.of());
+        final long first = SeedDeriver.derive("s", 55, 75, null, null, List.of());
+        final long second = SeedDeriver.derive("s", 55, 75, null, null, List.of());
         // then
         assertThat(first).isEqualTo(second);
     }
@@ -90,9 +96,9 @@ class SeedDeriverTest {
         // given
         final String sessionId = "same-session";
         // when
-        final long emptyExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, List.of());
-        final long oneExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, List.of(10L));
-        final long twoExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, List.of(10L, 20L));
+        final long emptyExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, List.of());
+        final long oneExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, List.of(10L));
+        final long twoExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, List.of(10L, 20L));
         // then
         assertThat(emptyExclude).isNotEqualTo(oneExclude);
         assertThat(oneExclude).isNotEqualTo(twoExclude);
@@ -107,9 +113,9 @@ class SeedDeriverTest {
     @DisplayName("excludeSongIds 순서/중복 차이는 같은 seed (정규화)")
     void derive_excludeSongIds_orderAndDuplicates_normalized() {
         // when
-        final long ascending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, List.of(10L, 20L, 30L));
-        final long descending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, List.of(30L, 20L, 10L));
-        final long withDuplicate = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, List.of(20L, 10L, 30L, 10L));
+        final long ascending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of(10L, 20L, 30L));
+        final long descending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of(30L, 20L, 10L));
+        final long withDuplicate = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of(20L, 10L, 30L, 10L));
         // then
         assertThat(ascending).isEqualTo(descending);
         assertThat(ascending).isEqualTo(withDuplicate);
@@ -122,9 +128,36 @@ class SeedDeriverTest {
     @DisplayName("excludeSongIds null과 빈 리스트는 같은 seed (의미 동등)")
     void derive_excludeSongIds_nullEqualsEmpty() {
         // when
-        final long nullList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null);
-        final long emptyList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, List.of());
+        final long nullList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null);
+        final long emptyList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
         // then
         assertThat(nullList).isEqualTo(emptyList);
+    }
+
+    /**
+     * v2(#218) 회귀 가드: 같은 음역/세션이라도 preferredBpm이 다르면 다른 seed.
+     * 사용자 선호 BPM 입력이 결과 변주에 영향을 주어야 한다.
+     */
+    @Test
+    @DisplayName("preferredBpm이 다르면 다른 seed (v2 #218)")
+    void derive_differentPreferredBpm_returnsDifferentSeed() {
+        // when
+        final long bpm120 = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        final long bpm140 = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 140, List.of());
+        final long bpmNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
+        // then
+        assertThat(bpm120).isNotEqualTo(bpm140);
+        assertThat(bpm120).isNotEqualTo(bpmNull);
+        assertThat(bpm140).isNotEqualTo(bpmNull);
+    }
+
+    @Test
+    @DisplayName("같은 preferredBpm은 같은 seed (v2 결정성)")
+    void derive_samePreferredBpm_isStable() {
+        // when
+        final long first = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        final long second = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        // then
+        assertThat(first).isEqualTo(second);
     }
 }
