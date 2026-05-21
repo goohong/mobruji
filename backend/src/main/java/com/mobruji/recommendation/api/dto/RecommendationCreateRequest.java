@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
+import com.mobruji.recommendation.application.CreateRecommendationCommand;
 import com.mobruji.song.domain.Mood;
 
 /**
@@ -17,7 +18,7 @@ import com.mobruji.song.domain.Mood;
  *
  * <p>{@code excludeSongIds}는 사용자가 "이미 들었어요/봤어요"로 결과에서 빼고 싶은 곡 ID 목록.
  * null 허용(JSON에서 필드 자체를 생략 가능). 서비스 레이어에서 null→empty로 정규화한다.
- * 결정성을 위해 본 값은 {@link com.mobruji.recommendation.SeedDeriver}의 입력에도 포함되며,
+ * 결정성을 위해 본 값은 {@code SeedDeriver}의 입력에도 포함되며,
  * 같은 음역대라도 excludeSongIds가 다르면 jitter seed가 달라져 결과 변주가 발생한다.
  */
 public record RecommendationCreateRequest(
@@ -33,5 +34,10 @@ public record RecommendationCreateRequest(
      */
     public List<Long> excludeSongIdsOrEmpty() {
         return excludeSongIds == null ? List.of() : excludeSongIds;
+    }
+
+    public CreateRecommendationCommand toCommand() {
+        return new CreateRecommendationCommand(
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, excludeSongIdsOrEmpty());
     }
 }

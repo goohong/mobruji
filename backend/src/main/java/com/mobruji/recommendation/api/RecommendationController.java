@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.mobruji.recommendation.api.dto.RecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.RecommendationResponse;
+import com.mobruji.recommendation.domain.RecommendationResult;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,12 +28,13 @@ public class RecommendationController {
     @PostMapping
     public ResponseEntity<RecommendationResponse> create(
             @Valid @RequestBody final RecommendationCreateRequest recommendationCreateRequest) {
-        final RecommendationResponse recommendationResponse = recommendationService.create(recommendationCreateRequest);
-        return ResponseEntity.status(HttpStatus.CREATED).body(recommendationResponse);
+        final RecommendationResult recommendationResult = recommendationService.create(
+                recommendationCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED).body(RecommendationResponse.from(recommendationResult));
     }
 
     @GetMapping("/{id}")
     public RecommendationResponse read(@PathVariable final Long id) {
-        return recommendationService.readById(id);
+        return RecommendationResponse.from(recommendationService.readById(id));
     }
 }

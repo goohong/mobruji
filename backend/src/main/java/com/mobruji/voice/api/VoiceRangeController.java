@@ -18,6 +18,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import com.mobruji.voice.application.VoiceRangeService;
+import com.mobruji.voice.domain.VoiceRange;
 
 @RestController
 @RequestMapping("/api/v1/voice-ranges")
@@ -29,19 +30,20 @@ public class VoiceRangeController {
     @PostMapping
     public ResponseEntity<VoiceRangeResponse> create(
             @Valid @RequestBody final VoiceRangeCreateRequest voiceRangeCreateRequest) {
-        final VoiceRangeResponse voiceRangeResponse = voiceRangeService.createOrReplace(voiceRangeCreateRequest);
-        return ResponseEntity.status(HttpStatus.CREATED).body(voiceRangeResponse);
+        final VoiceRange voiceRange = voiceRangeService.createOrReplace(voiceRangeCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED).body(VoiceRangeResponse.from(voiceRange));
     }
 
     @GetMapping("/{sessionId}")
     public VoiceRangeResponse read(@PathVariable final String sessionId) {
-        return voiceRangeService.readBySessionId(sessionId);
+        return VoiceRangeResponse.from(voiceRangeService.readBySessionId(sessionId));
     }
 
     @PutMapping("/{sessionId}")
     public VoiceRangeResponse update(
             @PathVariable final String sessionId,
             @Valid @RequestBody final VoiceRangeUpdateRequest voiceRangeUpdateRequest) {
-        return voiceRangeService.updateBySessionId(sessionId, voiceRangeUpdateRequest);
+        return VoiceRangeResponse.from(
+                voiceRangeService.updateBySessionId(sessionId, voiceRangeUpdateRequest.toCommand()));
     }
 }

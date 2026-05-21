@@ -14,18 +14,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.mobruji.recommendation.application.RecommendationScorer.ScoreBreakdown;
-import com.mobruji.recommendation.api.dto.RecommendationCreateRequest;
-import com.mobruji.recommendation.api.dto.RecommendationResponse;
-import com.mobruji.recommendation.api.dto.RecommendedSongResponse;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
-import com.mobruji.song.api.dto.SongResponse;
 
 import lombok.RequiredArgsConstructor;
 
 import com.mobruji.recommendation.domain.Recommendation;
 import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
+import com.mobruji.recommendation.domain.RecommendationResult;
+import com.mobruji.recommendation.domain.ScoredRecommendation;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
 
@@ -41,16 +39,16 @@ public class RecommendationService {
     private final DiversityPostProcessor diversityPostProcessor;
     private final RecommendationProperties recommendationProperties;
 
-    public RecommendationResponse create(final RecommendationCreateRequest recommendationCreateRequest) {
-        Objects.requireNonNull(recommendationCreateRequest, "recommendationCreateRequest must not be null");
-        final List<Long> excludeSongIds = recommendationCreateRequest.excludeSongIdsOrEmpty();
+    public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
+        Objects.requireNonNull(createRecommendationCommand, "createRecommendationCommand must not be null");
+        final List<Long> excludeSongIds = createRecommendationCommand.excludeSongIds();
 
         final RecommendationRequestEntity savedRequest = recommendationRequestRepository.save(
                 RecommendationRequestEntity.create(
-                        recommendationCreateRequest.sessionId(),
-                        recommendationCreateRequest.voiceRangeLow(),
-                        recommendationCreateRequest.voiceRangeHigh(),
-                        recommendationCreateRequest.mood(),
+                        createRecommendationCommand.sessionId(),
+                        createRecommendationCommand.voiceRangeLow(),
+                        createRecommendationCommand.voiceRangeHigh(),
+                        createRecommendationCommand.mood(),
                         excludeSongIds));
 
         // 후보 곡 단계에서 excludeSongIds 필터링.
@@ -81,41 +79,47 @@ public class RecommendationService {
         final int resultCount = recommendationProperties.resultCount();
         final List<ScoredSong> diversified = diversityPostProcessor.apply(scoredSongs, resultCount);
 
-        final List<Recommendation> persisted = new ArrayList<>();
+        final List<ScoredRecommendation> recommendations = new ArrayList<>();
         for (int i = 0; i < diversified.size(); i++) {
             final ScoredSong scoredSong = diversified.get(i);
             final String matchReason = scoredSong.breakdown.toMatchReason(scoredSong.song, savedRequest.getMood());
-            persisted.add(recommendationRepository.save(Recommendation.create(
+            final int rankPosition = i + 1;
+            recommendationRepository.save(Recommendation.create(
                     savedRequest.getId(),
                     scoredSong.song.getId(),
                     scoredSong.breakdown.total(),
                     matchReason,
-                    i + 1)));
+                    rankPosition));
+            recommendations.add(new ScoredRecommendation(
+                    scoredSong.song,
+                    scoredSong.breakdown.total(),
+                    matchReason,
+                    rankPosition));
         }
 
-        return toResponse(savedRequest.getId(), persisted, diversified);
+        return new RecommendationResult(savedRequest.getId(), recommendations);
     }
 
     @Transactional(readOnly = true)
-    public RecommendationResponse readById(final Long requestId) {
+    public RecommendationResult readById(final Long requestId) {
         final RecommendationRequestEntity savedRequest = recommendationRequestRepository.findById(requestId)
                 .orElseThrow(() -> new RecommendationNotFoundException(requestId));
         final List<Recommendation> persisted = recommendationRepository
                 .findByRecommendationRequestIdOrderByRankPositionAsc(savedRequest.getId());
         if (persisted.isEmpty()) {
-            return new RecommendationResponse(savedRequest.getId(), List.of());
+            return new RecommendationResult(savedRequest.getId(), List.of());
         }
         final List<Long> songIds = persisted.stream().map(Recommendation::getSongId).toList();
         final Map<Long, Song> songsById = new HashMap<>();
         songRepository.findAllById(songIds).forEach(song -> songsById.put(song.getId(), song));
-        final List<RecommendedSongResponse> recommendations = persisted.stream()
-                .map(recommendation -> new RecommendedSongResponse(
-                        SongResponse.from(songsById.get(recommendation.getSongId())),
+        final List<ScoredRecommendation> recommendations = persisted.stream()
+                .map(recommendation -> new ScoredRecommendation(
+                        songsById.get(recommendation.getSongId()),
                         recommendation.getScore(),
                         recommendation.getMatchReason(),
                         recommendation.getRankPosition()))
                 .toList();
-        return new RecommendationResponse(savedRequest.getId(), recommendations);
+        return new RecommendationResult(savedRequest.getId(), recommendations);
     }
 
     /**
@@ -139,23 +143,6 @@ public class RecommendationService {
                 savedRequest.getMood(),
                 excludeSongIds);
         return new Random(seed);
-    }
-
-    private RecommendationResponse toResponse(
-            final Long requestId,
-            final List<Recommendation> persisted,
-            final List<ScoredSong> diversified) {
-        final List<RecommendedSongResponse> recommendations = new ArrayList<>();
-        for (int i = 0; i < persisted.size(); i++) {
-            final Recommendation recommendation = persisted.get(i);
-            final ScoredSong scoredSong = diversified.get(i);
-            recommendations.add(new RecommendedSongResponse(
-                    SongResponse.from(scoredSong.song),
-                    recommendation.getScore(),
-                    recommendation.getMatchReason(),
-                    recommendation.getRankPosition()));
-        }
-        return new RecommendationResponse(requestId, recommendations);
     }
 
     record ScoredSong(Song song, ScoreBreakdown breakdown) {
