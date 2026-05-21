@@ -6,13 +6,14 @@
  * - 최고음/최저음 음표명, 장르 칩, score, matchReason이 노출된다.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongCard } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
+import { useLikesStore } from "@/store/likes";
 
 function buildItem(
   overrides: Partial<RecommendedSongResponse["song"]> = {},
@@ -40,6 +41,14 @@ function buildItem(
     ...itemOverrides,
   };
 }
+
+beforeEach(() => {
+  // 좋아요 store 격리 — persist localStorage 영향 제거.
+  useLikesStore.setState({ likedSongIds: [] });
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem("mobruji-likes");
+  }
+});
 
 afterEach(() => {
   cleanup();
@@ -181,6 +190,34 @@ describe("SongCard", () => {
       await user.click(expanded);
       const collapsed = screen.getByRole("button", { name: /자세히 보기/ });
       expect(collapsed).toHaveAttribute("aria-expanded", "false");
+    });
+  });
+
+  // closes #176 — 좋아요 토글 (spec PR D 일부, client-side stub).
+  describe("좋아요 토글 (closes #176)", () => {
+    it("버튼 클릭 시 aria-pressed가 토글되고 store에 반영된다", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "EASY" }); // song.id = 1
+      render(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      expect(button).toHaveAttribute("aria-pressed", "false");
+      expect(useLikesStore.getState().likedSongIds).toEqual([]);
+
+      await user.click(button);
+
+      const toggled = screen.getByRole("button", {
+        name: /테스트 곡 좋아요 취소/,
+      });
+      expect(toggled).toHaveAttribute("aria-pressed", "true");
+      expect(useLikesStore.getState().likedSongIds).toEqual([1]);
+
+      await user.click(toggled);
+      expect(useLikesStore.getState().likedSongIds).toEqual([]);
     });
   });
 
