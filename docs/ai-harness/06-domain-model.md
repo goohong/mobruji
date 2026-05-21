@@ -21,8 +21,10 @@
 | `voice` | 음역대 진단, 음역 데이터 관리 |
 | `song` | 곡 카탈로그, 메타데이터, 외부 음원 API 연동 |
 | `recommendation` | 추천 알고리즘, 요청→결과 변환 |
+| `feedback` | 사용자 시그널(Like/Bookmark) 수집. v0.2에서는 추천 가중치에 영향 없음 (recommendation-history-and-feedback.md PR B) |
 
-> 1차 PoC는 user + voice + song + recommendation을 한 백엔드 모놀리스로 구현. 분리는 트래픽/팀 성장 시점에 재논의.
+> 1차 PoC는 user + voice + song + recommendation + feedback을 한 백엔드 모놀리스로 구현. 분리는 트래픽/팀 성장 시점에 재논의.
+> `feedback`은 Like/Bookmark가 추천과 별도 관심사이고 v0.3+에 ML 시그널 소스로 확장될 여지가 있어 BC를 분리했다 (spec §5-1에서는 recommendation context에 두는 안도 검토했으나 분리 선택, 결정 로그는 본 PR).
 
 ## 4) 유비쿼터스 랭귀지 (Ubiquitous Language)
 
@@ -35,6 +37,8 @@
 | 분위기 | Mood | 추천 입력 중 정성적 요소 (예: 신남, 잔잔함) |
 | 가창 난이도 | Difficulty | 곡을 부르기 어려운 정도 (EASY/NORMAL/HARD). 곡 음역(`lowMidi`/`highMidi`)으로 자동 분류 (PR #96, 이슈 #77) |
 | 음표명 | NoteName | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
+| 좋아요 | Like | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR) |
+| 북마크 | Bookmark | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정) |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -108,6 +112,25 @@
 - 인덱스: `(recommendation_request_id, rank_position)`로 페치 최적화.
 - 점수 함수는 `RecommendationScorer` (순수 함수). `voiceRangeFit` = 곡 키 음역(root±7 semitones) 와 사용자 음역 overlap 비율.
 
+### 5-4) `Like`, `Bookmark` (PR #179, recommendation-history-and-feedback.md PR B)
+
+`feedback` BC. Song aggregate 참조는 ID-only(ADR 0005 §A-7). 같은 `(sessionId, songId)` 토글 시 기존 행이 삭제된다.
+
+**`Like`** — 사용자가 곡에 남긴 긍정 시그널.
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | |
+| `sessionId` | String(64) | not null, UK(`session_id, song_id`) | 익명 사용자 식별자 |
+| `songId` | Long | not null, UK | FK 없음(application 레벨) |
+| `createdAt` | LocalDateTime | not null | |
+
+**`Bookmark`** — 동일 스키마, 의미만 분리(다시 찾을 큐).
+
+- 테이블명: `like_feedback`, `bookmark_feedback` (MySQL 예약어 회피 + BC 의미 가시화).
+- 인덱스: `(session_id, created_at)` — 세션별 최신순 조회용.
+- 도메인 메서드: `static create(sessionId, songId)`. toggle 로직은 `LikeService`/`BookmarkService`에 위치.
+- **v0.2 비영향 약속**: 추천 알고리즘 입력에 포함되지 않는다 (`RecommendationService` 어떤 코드도 `LikeRepository`/`BookmarkRepository`를 의존하지 않음).
+
 ## 6) Mermaid ERD
 
 ```mermaid
@@ -166,13 +189,29 @@ erDiagram
         bigint song_id
     }
 
+    LIKE_FEEDBACK {
+        bigint id PK
+        varchar session_id UK
+        bigint song_id UK
+        datetime created_at
+    }
+
+    BOOKMARK_FEEDBACK {
+        bigint id PK
+        varchar session_id UK
+        bigint song_id UK
+        datetime created_at
+    }
+
     SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION_REQUEST_EXCLUDE_SONG : "excludeSongIds (@ElementCollection)"
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
+    SONG ||--o{ LIKE_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
+    SONG ||--o{ BOOKMARK_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
 ```
 
-- 현재 구현: `VoiceRange`, `Song`, `RecommendationRequest`, `Recommendation` — 4개 엔티티 모두.
+- 현재 구현: `VoiceRange`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark` — 6개 엔티티.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join.
 
 ## 7) 오픈 이슈
