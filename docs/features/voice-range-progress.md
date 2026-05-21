@@ -37,6 +37,7 @@ last_reviewed: 2026-05-21
   - 각 항목 필드: `lowMidi`, `highMidi`, `sourceMethod`, `measuredAt`.
 - [ ] `web/history` 페이지가 위 API를 호출하여 LocalStorage 대신 backend 데이터를 source-of-truth로 사용. LocalStorage는 **오프라인 fallback**으로만 유지.
 - [ ] fe 표시: 첫 측정 대비 최신 측정의 lowMidi/highMidi delta(반음 단위) 노출.
+- [x] **session-bound 인증** (§5-2-1): `GET /sessions/{id}/voice-range-history` 호출 시 path sessionId 와 `X-Session-Id` 헤더 일치 검증. 누락/blank/불일치 모두 401. 사양 출처: ADR-0011, 구현: `SessionAuthGuard` (#244, closes #238).
 
 ### 비기능 요구사항
 - 결정성: 본 기능은 추천 결과에 영향을 주지 **않는다** (read-side만 확장). `recommendation-algorithm-v1` 결정성 회귀 테스트는 기존과 동일하게 통과해야 한다.
@@ -67,9 +68,22 @@ last_reviewed: 2026-05-21
 ### 5-2) API 엔드포인트
 | Method | Path | 설명 | 인증 | Req | Res |
 |---|---|---|---|---|---|
-| GET | /api/v1/sessions/{id}/voice-range-history | 세션의 음역 측정 시계열 조회 | `X-Session-Id` 헤더 = path sessionId (rev 16 / #238) | path: sessionId, header: `X-Session-Id` | `VoiceRangeHistoryResponse { voiceRangeSnapshotResponses: [...] }` |
+| GET | /api/v1/sessions/{id}/voice-range-history | 세션의 음역 측정 시계열 조회 | **session-bound (§5-2-1)** — `X-Session-Id` 헤더 = path sessionId | path: sessionId, header: `X-Session-Id` | `VoiceRangeHistoryResponse { voiceRangeSnapshotResponses: [...] }` |
 
-> 인증 게이트(rev 16 / #238): `SessionAuthGuard` 가 `X-Session-Id` 헤더와 path `sessionId` 를 상수시간 비교. 누락/blank/불일치 → 401. Spring Security 정식 도입 전 임시 게이트로 admin gate(#229) 와 동일 패턴.
+#### 5-2-1) 인증/인가 (session-bound)
+
+본 endpoint 는 **session-bound endpoint** 분류에 속한다. 정책 출처는 **ADR-0011 — Session-Bound Endpoint 인증 정책**, 구현은 `com.mobruji.auth.SessionAuthGuard` (#244, closes #238).
+
+- 호출자는 path 의 `sessionId` 와 동일한 sessionId 를 **호출자 자신이 보유함**을 증명해야 한다 (= "본인 sessionId 만 본인 history 조회 가능").
+- 증명 방식:
+  - 클라이언트는 `X-Session-Id` 헤더(또는 동등한 cookie — fe 결정에 위임)로 자신의 sessionId 를 함께 전달한다.
+  - 서버는 path `{sessionId}` 와 헤더 sessionId 를 **상수시간 비교(`MessageDigest.isEqual`)** 로 일치 여부 판정.
+- 상태 코드 매핑 (ADR-0011 §Decision 에 따라 401 통일):
+  - `X-Session-Id` 헤더 누락 / blank → **401 Unauthorized** ("missing session id")
+  - 헤더와 path sessionId 불일치 → **401 Unauthorized** ("session id mismatch") — 403 이 아닌 이유는 ADR-0011 §Alternatives (D)
+  - 정상 → **200 OK** (해당 sessionId 의 snapshot 이 0건이면 빈 배열 반환, 404 아님)
+- 로그 정책: sessionId 원문은 로그/예외 메시지/응답에 노출하지 않는다. 디버깅이 필요하면 sessionId 의 prefix 8 자만 노출. `04-security-policy.md §3` 준수.
+- admin 인증(#229 — `X-Admin-Token`)과는 **별 트랙**이다. session-bound 는 "본인 자신만", admin 은 "운영자만" 으로 의도가 다르다. 한 endpoint 가 두 인증을 동시에 요구하지 않는다.
 
 ### 5-3) 외부 연동
 - 없음. 내부 DB만 사용.
@@ -103,6 +117,7 @@ last_reviewed: 2026-05-21
 - [ ] PR B — backend: `VoiceRangeService` upsert 흐름에 snapshot insert 통합 + 통합 테스트
 - [ ] PR C — backend: `GET /voice-range-history` 컨트롤러/DTO + E2E(RestAssured)
 - [ ] PR D — web: `/history` 페이지 backend 동기화 + delta 표시 + 테스트
+- [x] **PR E** — backend (#244, closes #238): `GET /voice-range-history` 에 session-bound 인증 게이트 적용 (§5-2-1, ADR-0011). `SessionAuthGuard` 신설 및 recommendation-history 와 공유.
 
 ## 7) 테스트 전략
 - 단위: `VoiceRangeService` upsert 시 snapshot 1행이 같은 트랜잭션에 insert되는지(rollback 케이스 포함).
@@ -113,6 +128,12 @@ last_reviewed: 2026-05-21
   - then: 3행, `measuredAt` 오름차순, 각 행 MIDI 일치.
 - 결정성 회귀: `recommendation-algorithm-v1` 골든 픽스처 테스트가 그대로 통과해야 함 (snapshot 추가가 추천 입력에 영향 없음 검증).
 - fe: history 페이지 React Testing Library — API mock 응답으로 시계열/ delta 렌더 검증.
+- **인증 E2E (§5-2-1, ADR-0011 — 구현됨 #244)**:
+  - given: sessionId=`A` 로 voice-range 1회 측정 + sessionId=`B` 로 0회 측정
+  - case 1: `GET /sessions/A/voice-range-history` + `X-Session-Id: A` → 200, 1행
+  - case 2: `GET /sessions/A/voice-range-history` + `X-Session-Id: B` → 401, 응답에 sessionId 원문 미노출
+  - case 3: `GET /sessions/A/voice-range-history` (헤더 없음) → 401
+  - case 4: `GET /sessions/B/voice-range-history` + `X-Session-Id: B` → 200, 빈 배열 (404 아님)
 
 ## 8) 오픈 질문
 > 구현 전에 답이 나와야 하는 것들. 해소되면 §9 결정 로그로 이동.
@@ -126,4 +147,5 @@ last_reviewed: 2026-05-21
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
 - 2026-05-21: 초안 작성 (status=draft) — PR #221, closes #220.
-- 2026-05-22: history endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가 (rev 16 / closes #238). path sessionId 와 헤더 값을 `SessionAuthGuard` 가 상수시간 비교, 누락/불일치 → 401. 쿠키 기반은 sessionId TTL/회전(#209) 도입 후 별도 ADR 로 다룬다.
+- 2026-05-22 (be 27, #244 closes #238): history endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가. `SessionAuthGuard` 가 path sessionId 와 헤더 값을 상수시간 비교, 누락/blank/불일치 모두 401.
+- 2026-05-22 (plan 27, ADR-0011 영속화): session-bound 인증 정책을 ADR-0011 로 형식화 (정책 출처를 spec 본문에서 ADR 로 이동). §5-2-1 에 상세 절 추가, 상태 코드 매핑 401 통일(#244 구현 정합), admin 트랙(#229)과 별 트랙임을 명시. 후속 endpoint(like/bookmark 등) 도 본 ADR 패턴 강제.
