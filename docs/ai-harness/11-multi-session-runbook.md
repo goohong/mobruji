@@ -106,6 +106,57 @@ PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 본진은 다음을 호출�
 
 수동으로 본진에서 `git -C ../mobruji-be reset --hard origin/develop` 호출하던 패턴을 대체한다. 사이클 종료 직후 1번만 호출하면 다음 사이클을 clean 상태에서 시작할 수 있다.
 
+#### 옵션
+
+```
+Usage: post-merge-cleanup.sh [--force]
+  --force: dirty 워크트리도 강제 reset (작업 분실 위험)
+```
+
+- **기본 (안전)**: 워크트리가 dirty(unstaged/staged 변경 또는 untracked 파일)면 detach를 skip + 경고. 사람이 직접 정리.
+- **`--force`**: dirty 무시하고 `git reset --hard origin/develop` + `git clean -fd`로 강제 reset. **stash되지 않은 변경은 영구 손실**. 본진이 명시적 결정 후에만 사용.
+
+본진이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
+
+### 0-8) 통지 우선 처리
+
+본진은 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
+
+처리 순서:
+1. 결과 보고 — 사용자에게 한두 줄로 요약 (PR 번호 + mergeable 상태 정도)
+2. rev 코멘트 자동 등록 — §0-9 절차 따라 이슈 등록 (rev 완료 통지일 때만)
+3. 다음 sub-agent scaffold + launch — 백로그가 살아있으면 즉시
+4. 자기 작업으로 복귀 — 컨텍스트 회복 후 멈춘 지점에서 계속
+
+본진 작업은 **호흡당 1~2 도구 호출** 단위로 쪼갠다. 긴 단위로 묶으면 통지 도착해도 처리 지연이 늘어난다.
+
+통지 동시 도착 시 우선순위:
+1. 🔴 발견 (spec/비기능 위반) — 즉시 다음 사이클 fix 트리거 결정 필요
+2. release / `develop → main` 머지 결정 — 사용자 컨펌 대기
+3. 일반 보고 (✅ OK, 🟡 개선)
+
+### 0-9) rev 코멘트 자동 등록
+
+rev sub-agent 완료 통지를 받으면 본진은 발견 항목을 **GitHub 이슈로 자동 등록**한다. 사용자가 일일이 트리아지하지 않아도 다음 사이클 백로그가 자동으로 쌓이는 구조.
+
+분류 기준:
+- 🔴 **spec/비기능 위반** — 각각 **단독 이슈**로 등록. 같은 사이클에 다음 be/fe sub-agent로 즉시 fix 트리거 가능한 것은 1~2건 한정.
+- 🟡 **개선/drift/nit** — **PR 단위 묶음 1개 이슈**. 7건 이상이면 우선순위 상위만 등록 + 나머지는 `backlog` 라벨로 stash.
+- 🟢 **OK / 합격** — 등록하지 않는다.
+
+이슈 본문 필수 포함:
+- rev 코멘트 URL 인용 (`gh pr view <N> --comments`로 확인)
+- 영향 받는 spec/스코프 (`docs/features/*.md` 또는 ADR 번호)
+- 추정 작업 시간 (sub-agent 1사이클 안에 끝낼 수 있는지)
+
+라벨:
+- 🔴 → `type:fix` + 해당 `scope:*` + `session:backend|frontend` 후보
+- 🟡 묶음 → `type:refactor` 또는 `type:chore` + `backlog`
+
+가장 시급한 🔴은 같은 사이클에 다음 be/fe sub-agent로 **즉시 트리거**. 묶음 처리하면 회귀 누적되니 spec 위반은 핫라인 처리.
+
+누적 패턴/메타 인사이트(예: "최근 5사이클 연속 같은 final 누락 패턴")는 **별 docs PR 후보**로 따로 모은다. 이슈 등록과 docs promote는 분리.
+
 ## 1) 셋업 (최초 1회)
 
 ### 1-1) 워크트리 3개 생성
