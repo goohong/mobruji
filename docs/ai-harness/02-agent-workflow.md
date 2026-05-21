@@ -2,8 +2,8 @@
 
 ## 1) 브랜치 전략
 - 유지 브랜치: `main`, `develop`
-- 작업 브랜치: `develop`에서 파생 (`feature`, `refactor`, `chore`, `fix`)
-- 브랜치 이름 예시: `feature/voice-range-input-#12`
+- 작업 브랜치: `develop`에서 파생 (`feature`, `refactor`, `chore`, `fix`, `docs`, `test`)
+- 브랜치 이름 예시: `feature/voice-range-input-#12`, `docs/voice-range-input-spec-#1`
 - 이슈는 `.github/ISSUE_TEMPLATE/task.md` 템플릿으로 생성하고, 제목은 브랜치 목적이 드러나게 간결하게 작성한다.
 
 ## 2) PR 라이프사이클
@@ -135,3 +135,35 @@ gh release create vX.Y.Z --generate-notes
 - 관련 기능의 PR을 만들 때 해당 spec을 **반드시 Read**해 컨텍스트 로드.
 - spec과 코드가 충돌하면 **spec을 먼저 갱신**한 뒤 구현(01-harness-spec §5 결정 규칙).
 - 오픈 질문 중 구현에 영향을 주는 것이 남아있으면 구현 착수 금지, 사용자에게 확인.
+
+## 10) 다중 AI 에이전트 운영 (Claude + Codex)
+
+복수의 AI 에이전트(예: Claude Code + OpenAI Codex CLI)가 같은 레포에서 동시에 동작할 수 있다. 충돌과 추적성 손실을 막기 위한 룰.
+
+### 10-1) 1 브랜치 = 1 에이전트
+- 한 브랜치/PR에는 **한 에이전트만** 커밋한다. 다른 에이전트가 같은 브랜치에 직접 push 금지.
+- 다른 에이전트의 변경을 보고 싶다면: **PR 코멘트**로 제안만 한다. 직접 push 하지 않는다.
+- 사람만이 두 에이전트 브랜치를 교차로 수정/머지/리베이스할 수 있다.
+
+### 10-2) 에이전트 식별
+- **커밋 trailer**(필수): 모든 AI 작성 커밋에 `Co-Authored-By: <에이전트명> <noreply@...>`를 포함한다.
+  - Claude: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` (또는 사용 모델에 따라 표기)
+  - Codex: `Co-Authored-By: OpenAI Codex <noreply@openai.com>`
+- **PR 라벨**(필수): `ai-generated` 우산 라벨 + 구체 라벨 `ai:claude` 또는 `ai:codex` 중 하나.
+- **PR 본문 "AI 작업 기록"**: 사용 에이전트와 프롬프트 요약을 명시.
+
+### 10-3) 작업 분담
+1차 권장 패턴 (변경 가능):
+- **영역 분담**: 백엔드(Spring) = Claude, 프론트엔드(Next.js) = Codex. 풀스택 기능은 두 PR로 분리.
+- **역할 분담**: spec/review = Claude, implementation = Codex (또는 반대).
+- 둘 다 같은 PR을 만들고 사람이 픽하는 **평행 + 교차 리뷰** 패턴은 비용 크므로 학습/비교 목적에만.
+
+### 10-4) 컨텍스트 파일
+- `CLAUDE.md`: Claude 자동 로딩 룰. 비협상 룰의 single source of truth.
+- `AGENTS.md`(root): Codex 자동 로딩 룰. `CLAUDE.md`를 가리키되 Codex 한정 메모를 추가한다.
+- `web/AGENTS.md`: 프론트엔드 작업 시 Codex/Claude 모두 참조.
+- 새 룰 추가는 `CLAUDE.md`/`AGENTS.md` 한 번에 갱신한다 (drift 방지).
+
+### 10-5) 충돌 발생 시
+- 두 에이전트가 같은 파일/심볼을 동시에 만지는 경우 → 후순위 PR이 사람 중재 요청(PR 코멘트 + `needs-human-review` 라벨).
+- spec(`docs/features/*.md`)의 결정 로그 충돌 → 사람이 합의 결정 후 다시 spec 갱신 PR.

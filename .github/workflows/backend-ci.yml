@@ -21,15 +21,9 @@ jobs:
   build-and-test:
     runs-on: ubuntu-22.04
 
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: mobruji_test
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    # NOTE: ADR 0003 적용 후 모든 테스트가 @ActiveProfiles("test") + H2를 사용.
+    # MySQL 서비스 컨테이너와 SPRING_DATASOURCE_* env는 더 이상 필요 없음.
+    # 향후 MySQL 방언 검증용 별도 integration job을 추가할 때 다시 도입.
 
     defaults:
       run:
@@ -57,10 +51,6 @@ jobs:
 
       - name: Test with Gradle
         run: ./gradlew test
-        env:
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/mobruji_test?useSSL=false&allowPublicKeyRetrieval=true
-          SPRING_DATASOURCE_USERNAME: root
-          SPRING_DATASOURCE_PASSWORD: root
 
       - name: BootJar with Gradle
         run: ./gradlew bootJar -x test

@@ -36,17 +36,128 @@
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
-## 5) 엔티티 (placeholder)
-> 첫 도메인 구현 PR에서 채워 넣음.
+## 5) 엔티티
 
-## 6) Mermaid ERD (placeholder)
+> 각 PR에서 신규 엔티티 도입 시 본 섹션과 §6 ERD를 같이 갱신한다.
+
+### 5-1) `VoiceRange` (PR #16, voice-range-input.md)
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | 내부 식별자 |
+| `sessionId` | String(64) | unique, not null | 익명 세션 식별자 (PoC 시 클라이언트 생성) |
+| `lowestNoteMidi` | int | not null, 12~119 | 사용자 최저음 MIDI |
+| `highestNoteMidi` | int | not null, 12~119, ≥ lowestNoteMidi | 사용자 최고음 MIDI |
+| `sourceMethod` | enum | not null | `SELF_REPORT` / `OCTAVE_PICK` / `MIC_MEASURE` |
+| `createdAt` | LocalDateTime | not null | |
+| `updatedAt` | LocalDateTime | not null | |
+
+- 불변식: `lowestNoteMidi ≤ highestNoteMidi`, MIDI 범위 [12, 119].
+- 도메인 메서드: `static create(...)`, `updateRange(...)`.
+- voice-range-input.md Q4 결정에 따라 sessionId 당 **최신 1건만** 보관(unique 제약 + service에서 createOrReplace).
+
+### 5-2) `Song` (PR #17, song-metadata-source.md)
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | |
+| `title` | String(200) | not null, not blank | |
+| `artist` | String(200) | not null, not blank | |
+| `releaseYear` | Integer | nullable | 출시 연도 |
+| `keyOriginal` | enum `MusicalKey` | not null | 메이저 12 + 마이너 12 + UNKNOWN |
+| `bpm` | Integer | nullable, 30~300 | |
+| `mood` | enum `Mood` | nullable | 단일 (v1). 다중은 v2 |
+| `language` | String(32) | nullable | ko/en/... |
+| `genre` | String(32) | nullable | |
+| `tjNumber` | String(16) | nullable | TJ 노래방 번호 |
+| `kyNumber` | String(16) | nullable | 금영 노래방 번호 |
+| `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED |
+| `createdAt`, `updatedAt` | LocalDateTime | not null | |
+
+- 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
+- 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재.
+- `SongRange`는 본 PR에 없음 (spec Q3 보류 결정).
+
+### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
+
+**`RecommendationRequestEntity`** — 추천 요청 영속화 단위.
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK | |
+| `sessionId` | String(64) | not null | 익명 사용자 식별자 (VoiceRange와 동일) |
+| `voiceRangeLow`, `voiceRangeHigh` | int | not null | MIDI [12, 119] |
+| `mood` | enum `Mood` | nullable | 선택 |
+| `createdAt` | LocalDateTime | not null | |
+
+**`Recommendation`** — 한 요청에 대한 결과 행. 요청 1 : N 행.
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK | |
+| `recommendationRequestId` | Long | not null | FK 없음(application 레벨) |
+| `songId` | Long | not null | FK 없음 |
+| `score` | double | not null | 최종 점수 |
+| `matchReason` | String(200) | not null | 한국어 매칭 근거 |
+| `rankPosition` | int | not null, ≥ 1 | 결과 내 순위 |
+| `createdAt` | LocalDateTime | not null | |
+
+- 인덱스: `(recommendation_request_id, rank_position)`로 페치 최적화.
+- 점수 함수는 `RecommendationScorer` (순수 함수). `voiceRangeFit` = 곡 키 음역(root±7 semitones) 와 사용자 음역 overlap 비율.
+
+## 6) Mermaid ERD
+
 ```mermaid
 erDiagram
-    USER ||--o{ RECOMMENDATION_REQUEST : creates
-    RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : produces
-    RECOMMENDATION }o--|| SONG : suggests
+    VOICE_RANGE {
+        bigint id PK
+        varchar session_id UK
+        int lowest_note_midi
+        int highest_note_midi
+        varchar source_method
+        datetime created_at
+        datetime updated_at
+    }
+
+    SONG {
+        bigint id PK
+        varchar title
+        varchar artist
+        int release_year
+        varchar key_original
+        int bpm
+        varchar mood
+        varchar language
+        varchar genre
+        varchar tj_number
+        varchar ky_number
+        varchar metadata_source
+        datetime created_at
+        datetime updated_at
+    }
+
+    RECOMMENDATION_REQUEST {
+        bigint id PK
+        varchar session_id
+        int voice_range_low
+        int voice_range_high
+        varchar mood
+        datetime created_at
+    }
+
+    RECOMMENDATION {
+        bigint id PK
+        bigint recommendation_request_id
+        bigint song_id
+        double score
+        varchar match_reason
+        int rank_position
+        datetime created_at
+    }
+
+    SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
+    RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
+    VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
 ```
-> 위는 가설 ERD. 실제 엔티티 추가 시 같이 갱신.
+
+- 현재 구현: `VoiceRange`, `Song`, `RecommendationRequest`, `Recommendation` — 4개 엔티티 모두.
+- 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join.
 
 ## 7) 오픈 이슈
 
