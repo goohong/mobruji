@@ -29,6 +29,7 @@ import { readLikesBySessionId } from "@/lib/api/feedback";
 import { readSongById, type SongResponse } from "@/lib/api/song";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
+import { Card } from "@/components/ui";
 
 export default function LikesPage() {
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
@@ -139,12 +140,14 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
             ))}
           </ul>
         ) : pendingCount === 0 ? (
-          <p
+          <Card
             role="status"
-            className="rounded-2xl border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+            as="p"
+            flush
+            className="border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
           >
             좋아한 곡 정보를 불러올 수 없어요. 잠시 후 다시 시도해주세요.
-          </p>
+          </Card>
         ) : null}
 
         {missingSongIds.length > 0 ? (

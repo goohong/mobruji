@@ -29,6 +29,7 @@ import { ApiError } from "@/lib/api/client";
 import { midiToNoteName, MIN_MIDI, MAX_MIDI } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
+import { Button } from "@/components/ui";
 import {
   MEASUREMENT_DURATION_MS,
   MeasurementPhase,
@@ -266,13 +267,14 @@ function PermissionStep({ onStart, permissionError }: PermissionStepProps) {
         준비되면 아래 버튼을 눌러 측정을 시작하세요. 낮은 음 5초 → 높은 음 5초
         순으로 진행됩니다.
       </p>
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        size="lg"
+        fullWidth
         onClick={onStart}
-        className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
       >
         측정 시작
-      </button>
+      </Button>
       {permissionError ? (
         <p
           role="alert"
@@ -408,14 +410,16 @@ function ResultStep({
         </p>
       ) : null}
 
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        size="lg"
+        fullWidth
         onClick={onSave}
-        disabled={saving || validationError !== null}
-        className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        loading={saving}
+        disabled={validationError !== null}
       >
         {saving ? "저장 중..." : "추천 받기"}
-      </button>
+      </Button>
     </div>
   );
 }
