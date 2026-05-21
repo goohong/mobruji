@@ -6,13 +6,20 @@
 # 본진(`mobruji`)에서 머지된 로컬 branch들을 일괄 삭제한다.
 #
 # 사용법:
-#   ./scripts/post-merge-cleanup.sh
+#   ./scripts/post-merge-cleanup.sh [--force]
+#
+# 옵션:
+#   --force  dirty 워크트리도 강제 reset (작업 분실 위험)
+#            기본은 dirty면 skip + 경고. force는 git reset --hard + clean -fd로
+#            unstaged/untracked 파일을 모두 제거한다. 본진이 명시적 결정 후에만 사용.
 #
 # 동작:
 #   1. 본진 워크트리(`mobruji`)에서 `git fetch origin develop`
 #   2. be/fe/rev/plan 워크트리 순회:
-#      - 작업 브랜치에 있으면 detach (origin/develop 기준)
-#      - 변경사항이 있으면 경고 후 skip
+#      - dirty 검사 (unstaged/staged/untracked)
+#      - 기본: dirty면 skip + 경고
+#      - --force: reset --hard origin/develop + clean -fd
+#      - clean이면 그대로 detach
 #   3. 본진에서 `origin/develop`에 머지된 로컬 branch 삭제
 #
 # 가정:
@@ -29,6 +36,24 @@ SUB_WORKTREES=(
   "${HOME}/workspace/github/mobruji-rev"
   "${HOME}/workspace/github/mobruji-plan"
 )
+
+FORCE=0
+for arg in "$@"; do
+  case "${arg}" in
+    --force)
+      FORCE=1
+      ;;
+    -h|--help)
+      sed -n '2,25p' "$0"
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "${arg}" >&2
+      printf 'Usage: post-merge-cleanup.sh [--force]\n' >&2
+      exit 2
+      ;;
+  esac
+done
 
 log() {
   printf '[post-merge-cleanup] %s\n' "$*"
@@ -48,6 +73,10 @@ fi
 log "본진(${ROOT_DIR})에서 origin/develop fetch"
 git -C "${ROOT_DIR}" fetch origin develop --prune
 
+if (( FORCE )); then
+  warn "--force 활성: dirty 워크트리도 강제 reset 한다. 작업 분실 위험."
+fi
+
 # 2) 서브 워크트리 순회
 for wt in "${SUB_WORKTREES[@]}"; do
   if [[ ! -d "${wt}" ]]; then
@@ -55,15 +84,38 @@ for wt in "${SUB_WORKTREES[@]}"; do
     continue
   fi
 
-  # working tree dirty 체크
-  if ! git -C "${wt}" diff --quiet || ! git -C "${wt}" diff --cached --quiet; then
-    warn "${wt}: working tree dirty. detach skip. 사람이 정리 필요."
-    continue
+  # dirty 상태 종합 판정
+  has_unstaged=0
+  has_staged=0
+  has_untracked=0
+  if ! git -C "${wt}" diff --quiet; then
+    has_unstaged=1
+  fi
+  if ! git -C "${wt}" diff --cached --quiet; then
+    has_staged=1
+  fi
+  if [[ -n "$(git -C "${wt}" ls-files --others --exclude-standard)" ]]; then
+    has_untracked=1
   fi
 
-  # untracked 파일은 경고만
-  if [[ -n "$(git -C "${wt}" ls-files --others --exclude-standard)" ]]; then
-    warn "${wt}: untracked 파일 있음. detach는 진행하지만 사용자 확인 권장."
+  is_dirty=$(( has_unstaged || has_staged || has_untracked ))
+
+  if (( is_dirty )); then
+    log "${wt}: dirty 상태 (unstaged=${has_unstaged} staged=${has_staged} untracked=${has_untracked})"
+    git -C "${wt}" status --short || true
+
+    if (( FORCE )); then
+      warn "${wt}: --force로 강제 reset 진행 (변경 영구 손실)"
+      git -C "${wt}" fetch origin develop --prune
+      git -C "${wt}" reset --hard origin/develop
+      git -C "${wt}" clean -fd
+      # reset 후에도 detached 상태 확정
+      git -C "${wt}" checkout --detach origin/develop
+      log "${wt}: forced reset + detach 완료"
+    else
+      warn "${wt}: dirty라 detach skip. --force로 재실행하거나 사람이 정리 필요."
+    fi
+    continue
   fi
 
   log "${wt}: origin/develop으로 detach"
