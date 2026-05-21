@@ -140,8 +140,8 @@ last_reviewed: 2026-05-21
 
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | snapshot 보관 기간 | (a) 영구 보관 / (b) 1년 후 파티션/삭제 잡 | @goohong / 2026-06-30 |
-| Q2 | `sessionId` TTL(issue #209)과의 호환 — 세션 만료 시 snapshot도 함께 삭제할지 | (a) 함께 삭제 (cascade) / (b) snapshot은 익명화 후 보존 | @goohong / 2026-06-30 |
+| Q1 | snapshot 보관 기간 | (a) 영구 보관 / (b) 1년 후 파티션/삭제 잡 | ~~@goohong / 2026-06-30~~ → **closed by ADR-0013 (plan 33)**: sessionId TTL=180일 inactive sliding window + cascade-delete 가 단일 진실. snapshot 도 sessionId 만료 시 함께 삭제. |
+| ~~Q2~~ | ~~`sessionId` TTL(issue #209)과의 호환 — 세션 만료 시 snapshot도 함께 삭제할지~~ | ~~(a) 함께 삭제 (cascade) / (b) snapshot은 익명화 후 보존~~ | **closed 2026-05-22 by ADR-0013**: (a) cascade-delete default. (b) opt-in anonymize 는 v0.4 후속 별 PR. 구현 가이드: `docs/features/anonymous-session-lifecycle.md`. |
 
 ## 9) 결정 로그
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
@@ -149,3 +149,4 @@ last_reviewed: 2026-05-21
 - 2026-05-21: 초안 작성 (status=draft) — PR #221, closes #220.
 - 2026-05-22 (be 27, #244 closes #238): history endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가. `SessionAuthGuard` 가 path sessionId 와 헤더 값을 상수시간 비교, 누락/blank/불일치 모두 401.
 - 2026-05-22 (plan 27, ADR-0011 영속화): session-bound 인증 정책을 ADR-0011 로 형식화 (정책 출처를 spec 본문에서 ADR 로 이동). §5-2-1 에 상세 절 추가, 상태 코드 매핑 401 통일(#244 구현 정합), admin 트랙(#229)과 별 트랙임을 명시. 후속 endpoint(like/bookmark 등) 도 본 ADR 패턴 강제.
+- 2026-05-22 (plan 33, ADR-0013 cross-ref): Q1/Q2 (snapshot 보관 기간 + sessionId TTL 정합성) 를 ADR-0013 (`sessionid-ttl-rotation`) 로 닫음. snapshot 은 sessionId TTL 180일 inactive 만료 시 cascade-delete (default). opt-in anonymize 는 v0.4 후속. 구현 가이드 spec: `docs/features/anonymous-session-lifecycle.md`.
