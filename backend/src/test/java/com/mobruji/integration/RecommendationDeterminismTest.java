@@ -85,6 +85,35 @@ class RecommendationDeterminismTest {
     }
 
     @Test
+    @DisplayName("결정성 회귀 가드 (#145): breakdown 노출이 score/순서에 영향이 없다 — 같은 입력 두 번 → 1위 score 동일")
+    void determinism_breakdownDoesNotAffectScore() {
+        // given
+        final String payload = """
+                {
+                  "sessionId": "determinism-score-stable",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+        // when
+        final Float firstScore = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(payload)
+                .when().post("/api/v1/recommendations")
+                .then().statusCode(HttpStatus.CREATED.value())
+                .extract().jsonPath().getFloat("recommendations[0].score");
+        final Float secondScore = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(payload)
+                .when().post("/api/v1/recommendations")
+                .then().statusCode(HttpStatus.CREATED.value())
+                .extract().jsonPath().getFloat("recommendations[0].score");
+        // then: SeedDeriver 입력이 변함 없으면 score도 그대로
+        assertThat(firstScore).isEqualTo(secondScore);
+    }
+
+    @Test
     @DisplayName("entropy 보존: 다른 sessionId → 적어도 한 자리에서 순서가 달라진다")
     void determinism_differentInput_yieldsDifferentOrder() {
         // given: sessionId만 다르고 나머지는 동일 → jitter seed가 달라져야 함

@@ -7,6 +7,7 @@ import java.util.Random;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.mobruji.recommendation.domain.ScoreBreakdown;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -57,6 +58,15 @@ class RecommendationScorerTest {
     }
 
     @Test
+    @DisplayName("keyMatch: 알려진 키는 1.0, UNKNOWN/null은 0.5")
+    void keyMatch_cases() {
+        assertThat(RecommendationScorer.keyMatch(MusicalKey.C_MAJOR)).isEqualTo(1.0);
+        assertThat(RecommendationScorer.keyMatch(MusicalKey.A_MAJOR)).isEqualTo(1.0);
+        assertThat(RecommendationScorer.keyMatch(MusicalKey.UNKNOWN)).isEqualTo(0.5);
+        assertThat(RecommendationScorer.keyMatch(null)).isEqualTo(0.5);
+    }
+
+    @Test
     @DisplayName("moodMatch: 같으면 1, 다르면 0, 요청 null이면 0")
     void moodMatch_cases() {
         assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, Mood.UPBEAT)).isEqualTo(1.0);
@@ -72,20 +82,56 @@ class RecommendationScorerTest {
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT);
         final Random fixedRandom = new Random(42);
         // when
-        final RecommendationScorer.ScoreBreakdown breakdown = scorer(defaultProperties()).score(song, 50, 80,
+        final RecommendationScorer.Scored scored = scorer(defaultProperties()).score(song, 50, 80,
                 Mood.UPBEAT, fixedRandom);
         // then: voiceFit 1.0 + mood 1.0 + popularity 1.0 (genre 0) → 0.5 + 0.2 + 0.1 = 0.8 ± 0.01
-        assertThat(breakdown.voiceRangeFit()).isEqualTo(1.0);
-        assertThat(breakdown.moodMatch()).isEqualTo(1.0);
-        assertThat(breakdown.total()).isBetween(0.79, 0.81);
+        assertThat(scored.voiceRangeFit()).isEqualTo(1.0);
+        assertThat(scored.moodMatch()).isEqualTo(1.0);
+        assertThat(scored.total()).isBetween(0.79, 0.81);
+    }
+
+    @Test
+    @DisplayName("score: breakdown 5신호가 모두 [0,1] 범위 안에 있다 (raw 신호 보존)")
+    void score_breakdownAllFieldsInUnitInterval() {
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT);
+        final RecommendationScorer.Scored scored = scorer(defaultProperties())
+                .score(song, 50, 80, Mood.UPBEAT, new Random(0));
+        final ScoreBreakdown breakdown = scored.breakdown();
+        assertThat(breakdown.keyMatch()).isBetween(0.0, 1.0);
+        assertThat(breakdown.rangeFit()).isBetween(0.0, 1.0);
+        assertThat(breakdown.genreMatch()).isBetween(0.0, 1.0);
+        assertThat(breakdown.moodMatch()).isBetween(0.0, 1.0);
+        assertThat(breakdown.popularity()).isBetween(0.0, 1.0);
+    }
+
+    @Test
+    @DisplayName("score: breakdown — 알려진 키는 keyMatch=1.0, genreMatch=0(v1), popularity=1.0(v1)")
+    void score_breakdownKnownKeyShape() {
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT);
+        final RecommendationScorer.Scored scored = scorer(defaultProperties())
+                .score(song, 50, 80, Mood.UPBEAT, new Random(0));
+        assertThat(scored.breakdown().keyMatch()).isEqualTo(1.0);
+        assertThat(scored.breakdown().genreMatch()).isEqualTo(0.0);
+        assertThat(scored.breakdown().popularity()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("score: UNKNOWN 키는 keyMatch=0.5 (중립)")
+    void score_breakdownUnknownKey() {
+        final Song song = buildSong(MusicalKey.UNKNOWN, Mood.UPBEAT);
+        final RecommendationScorer.Scored scored = scorer(defaultProperties())
+                .score(song, 50, 80, Mood.UPBEAT, new Random(0));
+        assertThat(scored.breakdown().keyMatch()).isEqualTo(0.5);
     }
 
     @Test
     @DisplayName("matchReason: 음역+분위기 모두 일치하면 통합 메시지")
     void toMatchReason_bothMatch() {
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT);
-        final RecommendationScorer.ScoreBreakdown breakdown = new RecommendationScorer.ScoreBreakdown(0.7, 1.0, 1.0);
-        assertThat(breakdown.toMatchReason(song, Mood.UPBEAT)).contains("음역대").contains("분위기");
+        // total=0.7, breakdown: rangeFit=1.0, moodMatch=1.0
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 1.0, 1.0);
+        final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.7, breakdown);
+        assertThat(scored.toMatchReason(song, Mood.UPBEAT)).contains("음역대").contains("분위기");
     }
 
     @Test
