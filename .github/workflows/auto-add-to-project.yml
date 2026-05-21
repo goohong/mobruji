@@ -19,7 +19,7 @@ jobs:
     if: vars.PROJECT_URL != ''
     steps:
       - name: Add to project
-        uses: actions/add-to-project@v1
+        uses: actions/add-to-project@v1.0.2
         with:
           project-url: ${{ vars.PROJECT_URL }}
           github-token: ${{ secrets.PROJECT_TOKEN || github.token }}
