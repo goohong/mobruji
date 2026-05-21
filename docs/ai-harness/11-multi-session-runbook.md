@@ -168,16 +168,24 @@ hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mob
 
 | 세션 | 워크트리 | 역할 | 만질 수 있는 파일 | 금지 |
 |---|---|---|---|---|
-| **본진** | `mobruji` | develop 점유 + 공유 영역 관리 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
-| **be** | `mobruji-be` | 백엔드 구현 | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치 |
-| **fe** | `mobruji-fe` | 프론트엔드 구현 | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치 |
-| **rev** | `mobruji-rev` | 리뷰 전용 (read + PR 코멘트만) | (없음 — 코드/문서 직접 수정 금지, `pre-push` hook으로 push 차단됨) | 모든 직접 수정 |
+| **본진** | `mobruji` | 오케스트레이션·**기획·이슈 등록·백로그 우선순위**·공유 영역 관리·develop 점유 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
+| **be** | `mobruji-be` | 백엔드 **구현 전용** | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치, **기획/이슈 등록(본진에 보고만)** |
+| **fe** | `mobruji-fe` | 프론트엔드 **구현 전용** | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치, **기획/이슈 등록(본진에 보고만)** |
+| **rev** | `mobruji-rev` | 사후 감사 + **QA 실행 검증** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 본진에 보고 |
+
+### rev 세션의 QA 범위 (확장)
+rev는 read-only 감사 외에 **실행 검증**도 수행한다 (워크트리 안에서 read와 실행만, 파일 수정 금지):
+- 백엔드: `./gradlew test`로 회귀 확인, RestAssured E2E 결과 분석, curl로 머지된 엔드포인트 sample 검증
+- 프론트: `npm run lint/typecheck/test/build`, `npm run dev` 띄우고 curl로 SSR 응답 확인
+- BE+FE 통합: `docker compose up -d` + `./gradlew bootRun` + `npm run dev` 동시 기동 후 흐름 + 결정성 + p95 + 다양성 검증
+- 발견 사항은 PR 코멘트로 남기고, 후속이 필요하면 본진에 보고(이슈 등록은 본진).
 
 **공통 룰**:
 - be/fe 세션은 `origin/develop`에서 분기 (워크트리는 detached HEAD라 develop을 체크아웃하지 않는다).
 - 한 세션의 브랜치에 다른 세션이 직접 push 금지.
 - 공유 영역(`CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/`, root 설정) 변경은 본진에서 처리.
 - 본진은 항상 `develop` 브랜치에 머물러야 한다. 본진에서 다른 세션 브랜치를 체크아웃하면 develop 점유가 해제돼 다른 세션이 stale 참조하는 사고가 생긴다. 본진에서 일회성 PR을 만들어야 할 때는 임시 브랜치 분기 후 머지 즉시 `develop`으로 복귀.
+- **자율 운영**: 사용자 부재 시에도 본진은 sub-agent 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
 
 ## 3) 새 작업 시작 (be/fe 세션)
 
