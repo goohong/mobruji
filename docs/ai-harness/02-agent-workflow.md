@@ -167,3 +167,12 @@ gh release create vX.Y.Z --generate-notes
 ### 10-5) 충돌 발생 시
 - 두 에이전트가 같은 파일/심볼을 동시에 만지는 경우 → 후순위 PR이 사람 중재 요청(PR 코멘트 + `needs-human-review` 라벨).
 - spec(`docs/features/*.md`)의 결정 로그 충돌 → 사람이 합의 결정 후 다시 spec 갱신 PR.
+- `.github/workflows/session-collision-check.yml`이 PR 열릴 때 자동으로 다른 open PR과의 파일 겹침을 검출해 코멘트로 경고.
+
+### 10-6) 다중 세션 실행 룬북
+구체 셋업·운영 명령은 [`docs/ai-harness/11-multi-session-runbook.md`](./11-multi-session-runbook.md)에 있다. 워크트리 생성, 라벨, 새 브랜치 시작 스크립트, 리뷰 세션 트리거, Projects v2 보드 연동까지 포함.
+
+### 10-7) 동기화 채널
+- **세션 간 시그널**: PR 라벨(`session:*`, `reviewed:*`, `ai:*`) + draft state + `gh pr list` 조회. 새 메커니즘 없이 GitHub state가 자연스러운 싱크 채널.
+- **사람 대시보드**: GitHub Projects v2(`mobruji` 보드). PR/이슈 자동 등록은 `.github/workflows/auto-add-to-project.yml`. Status/Session 필드로 칸반 + 필터.
+- `docs/backlog.md`는 폐기되었다(2026-05-21). 대체: Projects v2 보드 + 영속 결정은 `docs/decisions/` ADR로.

@@ -25,6 +25,7 @@
 - `docs/ai-harness/07-testing-guide.md` — 레이어별 테스트 전략, BDD 스타일, E2E 필수 룰
 - `docs/ai-harness/08-code-conventions.md` — 코드 컨벤션 (final/DTO/엔티티/Lombok/null 검증)
 - `docs/ai-harness/10-observability.md` — 로깅/메트릭/트레이싱 룰
+- `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션(be/fe/rev) 셋업·운영 룬북
 - `docs/decisions/` — ADR (횡단 결정의 영속 이력)
 - `docs/features/` — Feature Spec (기능 단위 living 명세서)
 
