@@ -205,6 +205,90 @@ class AudioAnalysisRunnerTest {
                 .hasMessageContaining("empty stdout");
     }
 
+    @Test
+    @DisplayName("호스트 모드: analyze.py 가 toolDir 에 없으면 친화적 에러 메시지로 실패 (#207)")
+    void missingAnalyzePy_throwsFriendlyMessage() {
+        // given — toolDir 은 존재하지만 analyze.py 가 없는 상태
+        final AudioAnalysisProperties props = new AudioAnalysisProperties(
+                "python3", toolDir.toString(), Duration.ofSeconds(60),
+                false, null, null);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+
+        // when / then
+        assertThatThrownBy(() -> runner.analyzeByMetadata("t", "a"))
+                .isInstanceOf(AudioAnalysisFailedException.class)
+                .hasMessageContaining("analyze.py not found")
+                .hasMessageContaining("tools/audio-analysis");
+    }
+
+    @Test
+    @DisplayName("호스트 모드: Python 실행 파일 ENOENT 시 venv 셋업 안내 메시지 (#207)")
+    void spawnFailure_includesVenvHelp() throws IOException {
+        // given
+        Files.createFile(toolDir.resolve("analyze.py"));
+        final AudioAnalysisProperties props = new AudioAnalysisProperties(
+                "/no/such/python/binary", toolDir.toString(), Duration.ofSeconds(60),
+                false, null, null);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+            @Override
+            protected Process startProcess(final List<String> command, final Path workingDir) throws IOException {
+                throw new IOException("Cannot run program \"/no/such/python/binary\": "
+                        + "error=2, No such file or directory");
+            }
+        };
+
+        // when / then
+        assertThatThrownBy(() -> runner.analyzeByMetadata("t", "a"))
+                .isInstanceOf(AudioAnalysisFailedException.class)
+                .hasMessageContaining("Python 실행 파일을 찾을 수 없습니다")
+                .hasMessageContaining("python3 -m venv .venv")
+                .hasMessageContaining("AUDIO_ANALYSIS_PYTHON_CMD");
+    }
+
+    @Test
+    @DisplayName("docker 모드: docker CLI ENOENT 시 docker 설치/호스트 모드 안내 (#207)")
+    void spawnFailure_dockerMode_includesDockerHelp() throws IOException {
+        // given
+        Files.createFile(toolDir.resolve("analyze.py"));
+        final AudioAnalysisProperties props = new AudioAnalysisProperties(
+                "python3", toolDir.toString(), Duration.ofSeconds(60),
+                true, "/abs/docker-compose.audio.yml", "audio-analysis");
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+            @Override
+            protected Process startProcess(final List<String> command, final Path workingDir) throws IOException {
+                throw new IOException("Cannot run program \"docker\": error=2, No such file or directory");
+            }
+        };
+
+        // when / then
+        assertThatThrownBy(() -> runner.analyzeByMetadata("t", "a"))
+                .isInstanceOf(AudioAnalysisFailedException.class)
+                .hasMessageContaining("docker CLI not found")
+                .hasMessageContaining("use-docker=false");
+    }
+
+    @Test
+    @DisplayName("호스트 모드: Python 실행 파일 권한 없음 시 chmod 안내 메시지 (#207)")
+    void spawnFailure_permissionDenied_includesChmodHelp() throws IOException {
+        // given
+        Files.createFile(toolDir.resolve("analyze.py"));
+        final AudioAnalysisProperties props = new AudioAnalysisProperties(
+                "/some/python", toolDir.toString(), Duration.ofSeconds(60),
+                false, null, null);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+            @Override
+            protected Process startProcess(final List<String> command, final Path workingDir) throws IOException {
+                throw new IOException("Cannot run program \"/some/python\": error=13, Permission denied");
+            }
+        };
+
+        // when / then
+        assertThatThrownBy(() -> runner.analyzeByMetadata("t", "a"))
+                .isInstanceOf(AudioAnalysisFailedException.class)
+                .hasMessageContaining("실행 권한이 없습니다")
+                .hasMessageContaining("chmod +x");
+    }
+
     // ---------- helpers ----------
 
     private AudioAnalysisRunner runnerWithFakeProcess(
