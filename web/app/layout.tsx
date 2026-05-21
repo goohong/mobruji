@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
+import { BottomNav } from "@/components/nav/BottomNav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,8 +51,14 @@ export default function RootLayout({
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      {/*
+        모바일 BottomNav가 fixed로 깔리므로 main 콘텐츠가 가려지지 않도록 body에
+        하단 padding을 둔다. 데스크탑(md:)에선 nav를 숨기므로 padding도 제거.
+        nav 높이(h-14=56px) + safe-area 여유로 pb-20 (= 80px) 사용.
+      */}
+      <body className="min-h-full flex flex-col pb-20 md:pb-0">
         <Providers>{children}</Providers>
+        <BottomNav />
         <ServiceWorkerRegistrar />
       </body>
     </html>
