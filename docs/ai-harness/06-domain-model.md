@@ -36,17 +36,46 @@
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
-## 5) 엔티티 (placeholder)
-> 첫 도메인 구현 PR에서 채워 넣음.
+## 5) 엔티티
 
-## 6) Mermaid ERD (placeholder)
+> 각 PR에서 신규 엔티티 도입 시 본 섹션과 §6 ERD를 같이 갱신한다.
+
+### 5-1) `VoiceRange` (PR #15, voice-range-input.md)
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | 내부 식별자 |
+| `sessionId` | String(64) | unique, not null | 익명 세션 식별자 (PoC 시 클라이언트 생성) |
+| `lowestNoteMidi` | int | not null, 12~119 | 사용자 최저음 MIDI |
+| `highestNoteMidi` | int | not null, 12~119, ≥ lowestNoteMidi | 사용자 최고음 MIDI |
+| `sourceMethod` | enum | not null | `SELF_REPORT` / `OCTAVE_PICK` / `MIC_MEASURE` |
+| `createdAt` | LocalDateTime | not null | |
+| `updatedAt` | LocalDateTime | not null | |
+
+- 불변식: `lowestNoteMidi ≤ highestNoteMidi`, MIDI 범위 [12, 119].
+- 도메인 메서드: `static create(...)`, `updateRange(...)`.
+- voice-range-input.md Q4 결정에 따라 sessionId 당 **최신 1건만** 보관(unique 제약 + service에서 createOrReplace).
+
+## 6) Mermaid ERD
+
 ```mermaid
 erDiagram
-    USER ||--o{ RECOMMENDATION_REQUEST : creates
-    RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : produces
-    RECOMMENDATION }o--|| SONG : suggests
+    VOICE_RANGE {
+        bigint id PK
+        varchar session_id UK
+        int lowest_note_midi
+        int highest_note_midi
+        varchar source_method
+        datetime created_at
+        datetime updated_at
+    }
+
+    SONG ||--o{ RECOMMENDATION : "v1 미구현"
+    RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "v1 미구현"
+    VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "v1: sessionId로 join (FK 없음)"
 ```
-> 위는 가설 ERD. 실제 엔티티 추가 시 같이 갱신.
+
+- v1 단계: `VoiceRange` 만 구현. `Song`, `RecommendationRequest`, `Recommendation`은 후속 PR.
+- 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join.
 
 ## 7) 오픈 이슈
 

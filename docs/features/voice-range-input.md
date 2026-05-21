@@ -1,12 +1,12 @@
 ---
 feature: 음역대 입력 (voice-range-input)
 slug: voice-range-input
-status: approved
+status: implementing
 owner: "@goohong"
 scope: voice
-related_issues: [1]
+related_issues: [1, 15]
 related_prs: [2]
-last_reviewed: 2026-05-20
+last_reviewed: 2026-05-21
 ---
 
 # 음역대 입력 (voice-range-input)
@@ -55,14 +55,15 @@ last_reviewed: 2026-05-20
 - 사용자 엔티티(또는 익명 세션)와 1:1 또는 1:N(이력 보존 시) 관계.
 - 도메인 모델 §4 유비쿼터스 랭귀지에 `VoiceRange = 음역대`는 이미 등재됨. 신규 용어 후보: `Note`(음표), `MidiNote`(int 표현).
 
-### 5-2) API 엔드포인트 (잠정 — 진단 방식 결정 후 확정)
+### 5-2) API 엔드포인트
 | Method | Path | 설명 | 인증 | Req | Res |
 |---|---|---|---|---|---|
-| POST | /api/v1/voice-ranges | 음역대 등록 (수동 입력 또는 진단 결과 제출) | 1차 익명 허용 | `VoiceRangeCreateRequest` | `VoiceRangeResponse` |
-| GET | /api/v1/voice-ranges/me | 내 음역대 조회 | 익명 세션 또는 사용자 | - | `VoiceRangeResponse` |
-| PUT | /api/v1/voice-ranges/me | 음역대 갱신(재측정/수동 보정) | 익명 세션 또는 사용자 | `VoiceRangeUpdateRequest` | `VoiceRangeResponse` |
+| POST | /api/v1/voice-ranges | 음역대 등록 (같은 sessionId면 덮어쓰기, Q4) | 익명 (sessionId in body) | `VoiceRangeCreateRequest` | `VoiceRangeResponse` (201) |
+| GET | /api/v1/voice-ranges/{sessionId} | 음역대 조회 | 익명 | - | `VoiceRangeResponse` (200) / 404 |
+| PUT | /api/v1/voice-ranges/{sessionId} | 음역대 갱신 | 익명 | `VoiceRangeUpdateRequest` | `VoiceRangeResponse` (200) / 404 |
 
-- DTO 명명: spec 채택 시 `docs/ai-harness/08-code-conventions.md`의 규칙(풀네임, API별 분리) 준수.
+- DTO 명명: `docs/ai-harness/08-code-conventions.md` 풀네임 + API별 분리 규칙 준수 (`VoiceRangeCreateRequest`, `VoiceRangeUpdateRequest`, `VoiceRangeResponse`).
+- 인증 미들웨어 도입 시 `/{sessionId}` → `/me`로 마이그레이션 후보 (별 PR).
 
 ### 5-3) 외부 연동
 - D1 결정에 따라 다름:
@@ -131,3 +132,6 @@ last_reviewed: 2026-05-20
   - **Q2 → (a) 익명 세션** — PoC 단계엔 회원가입 없이 흐름을 닫는 것이 학습/검증 측면에서 가장 빠르다.
   - **Q3 → (a) Flyway** — 단순/관용적이고 Spring Boot 통합 풍부.
   - **Q4 → (a) 최신 1건** — 분석 가치보다 스키마 단순성이 더 중요한 PoC 단계.
+- 2026-05-21: 첫 구현 PR 진입, status=implementing. 출처: #15
+  - **API 경로 변경**: spec §5-2의 `/me` → `/{sessionId}` (PoC 인증/세션 미들웨어 미도입으로 명시적 경로 파라미터). spec §5-2 표 갱신.
+  - **Q3 Flyway 후순위**: PoC 한정 `ddl-auto=update` 활용. Flyway 도입은 첫 실배포 직전 ADR로.
