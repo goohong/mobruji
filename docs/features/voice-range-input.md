@@ -1,11 +1,11 @@
 ---
 feature: 음역대 입력 (voice-range-input)
 slug: voice-range-input
-status: implementing
+status: shipped
 owner: "@goohong"
 scope: voice
 related_issues: [1, 15]
-related_prs: [2]
+related_prs: [2, 16]
 last_reviewed: 2026-05-21
 ---
 

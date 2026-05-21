@@ -1,11 +1,11 @@
 ---
 feature: 곡 메타데이터 출처 (song-metadata-source)
 slug: song-metadata-source
-status: implementing
+status: shipped
 owner: "@goohong"
 scope: song
 related_issues: [3, 17]
-related_prs: [4]
+related_prs: [4, 18]
 last_reviewed: 2026-05-21
 ---
 
