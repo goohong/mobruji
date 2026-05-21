@@ -129,7 +129,8 @@ gh release create vX.Y.Z --generate-notes
 3. **머지** — status = `approved`. 구현 착수 가능.
 4. **구현 PR들** — PR 본문에 `참고: docs/features/<slug>.md` 백링크. 첫 구현 PR 머지 시 status = `implementing`.
 5. **요구사항 변경** — spec을 `type:docs` 갱신 PR로 먼저 업데이트 후 구현.
-6. **완료** — 마지막 구현 머지 시 status = `shipped`.
+6. **도메인 모델 promote (`shipped` 직전)** — spec `§5-1 잠정 필드`에 남아있는 것들이 코드에 실제 들어갔으면, `docs/ai-harness/06-domain-model.md §5 엔티티 표`로 옮기고(promote) ERD §6도 갱신. 잠정 → 확정 전이는 같은 PR에서 처리. spec과 도메인 모델이 drift된 채 `shipped`로 가지 않도록.
+7. **완료** — 마지막 구현 머지 시 status = `shipped`. 6번 promote가 끝났음을 확인하고 전이.
 
 ### 9-5) AI 에이전트 의무
 - 관련 기능의 PR을 만들 때 해당 spec을 **반드시 Read**해 컨텍스트 로드.
