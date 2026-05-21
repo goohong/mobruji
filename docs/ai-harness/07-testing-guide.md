@@ -89,8 +89,80 @@ void recommend_called_returnsSongsInRange() {
 
 ## 7) 테스트 생략 조건
 - 설정/문서/스타일 변경
-- 엔티티 필드 추가만 있는 리팩터 (도메인 로직 없음)
+- 엔티티 필드 추가만 있는 리팩터 (도메인 로직 없음) — 단, **§7-1 회귀 가드**의 조건을 충족하지 않으면 생략 불가
 - 외부 서비스 연결이 불가능한 환경 (그 경우 PR 본문에 "테스트 불가 사유" 명시)
+
+## 7-1) 엔티티 / seed 변경 회귀 가드 (비협상)
+
+> 근거: rev 사이클 9 F-2(이슈 #125). PR #96(`Song.lowMidi/highMidi/difficulty` 추가)에서 `SongSeedLoader`의 `if (count > 0) skip` 패턴이 **새 컬럼이 NULL인 기존 row**를 그대로 두어 운영 결함을 유발했다. 새 컬럼 추가가 "리팩터" 카테고리로 분류되어 통합 테스트 없이 머지된 게 원인.
+
+### 7-1.1 엔티티 필드 추가 시 — 두 케이스 모두 통합 테스트
+
+엔티티에 nullable 필드를 추가하더라도 **이전 데이터셋과의 호환성**을 통합 테스트로 가드한다. 둘 중 하나라도 빠지면 PR 머지 금지.
+
+| 케이스 | 시나리오 | 검증 항목 |
+|---|---|---|
+| **A. 빈 DB → seed 적재** | 신규 환경 부팅. seed loader가 새 컬럼까지 채움 | 새 컬럼이 not-null인 row 수 = 시드 수 |
+| **B. 기존 데이터(이전 컬럼만) → 재기동** | 운영 DB에 새 컬럼이 NULL인 row가 이미 있음 | (1) 부팅 성공 (2) 새 컬럼 NULL인 row에 대한 응답 직렬화/추천 로직이 안전(null safety 또는 backfill 검증) |
+
+### 7-1.2 Idempotent loader (`count > 0 skip` 류) 안전성 명시
+
+`SongSeedLoader`처럼 "이미 있으면 skip"하는 loader는 **새 컬럼 추가 시점에 반드시 다음 중 하나를 명시**한다 (PR 본문 + 코드 주석):
+
+1. **Row별 upsert로 전환** — `findByNaturalKey` 후 새 컬럼만 update.
+2. **Backfill 마이그레이션 동반** — Flyway/Liquibase 도입 전에는 1회성 `@Bean ApplicationRunner`로 NULL row 채움. 컬럼 추가 PR과 **같은 PR**에서 처리.
+3. **NULL 허용 + 응답 안전 처리** — 새 컬럼이 끝까지 nullable. DTO/직렬화/도메인 로직이 NULL을 모두 수용. 통합 테스트로 NULL row 시나리오 1건 강제.
+
+PR 본문 체크리스트(엔티티/seed 변경 시 필수):
+- [ ] Case A(빈 DB) 통합 테스트 존재
+- [ ] Case B(기존 데이터) 통합 테스트 존재 또는 선택지 1~3 중 하나를 명시적으로 채택
+- [ ] Idempotent loader가 있다면 위 1~3 중 선택지 + 근거를 PR 본문 또는 코드 주석에 기록
+
+### 7-1.3 마이그레이션(Flyway/Liquibase 도입 시)
+
+도입 시점에 본 절을 갱신할 ADR을 함께 작성한다. 도입 이전 임시 규칙:
+- DDL 변경(컬럼 추가/제거/타입 변경)은 **rollback 가능**해야 한다. PR 본문에 rollback 절차를 적는다.
+- **Zero-downtime 검증**: (1) 기존 코드가 새 컬럼 없이도 동작 (2) 새 코드가 기존 컬럼만 있는 row를 처리 — 두 케이스 모두 통합 테스트 1건씩.
+
+### 7-1.4 예시
+
+#### 단위 — Idempotent loader의 새 컬럼 안전성 가드 (Case B 일부)
+
+```java
+@Test
+@DisplayName("기존 row가 있을 때 SongSeedLoader는 새 컬럼을 backfill하거나 skip 사유를 명시한다")
+void run_existingRowsPresent_safeForNewColumns() throws Exception {
+    // given — 새 컬럼(lowMidi/highMidi)이 NULL인 기존 row 1건
+    final Song legacy = Song.builder()
+            .title("기존곡")
+            .artist("아티스트")
+            .metadataSource(MetadataSource.MANUAL_SEED)
+            .build();
+    songRepository.save(legacy);
+
+    // when — loader 재기동
+    songSeedLoader.run(new DefaultApplicationArguments());
+
+    // then — 부팅 성공 + 응답 직렬화 시 NULL 노트명이 안전 처리
+    final Song reloaded = songRepository.findById(legacy.getId()).orElseThrow();
+    assertThat(SongResponse.from(reloaded).lowestNoteName()).isNull(); // null-safe 직렬화 가드
+}
+```
+
+#### 통합 — 빈 DB seed 적재 (Case A)
+
+```java
+@Test
+@DisplayName("빈 DB 부팅 시 SongSeedLoader는 모든 시드를 lowMidi/highMidi 포함해 적재한다")
+void emptyDb_seedLoader_populatesNewColumns() {
+    // given: songRepository.count() == 0 (테스트 컨테이너 초기 상태)
+    // when: ApplicationRunner 실행 (Spring 컨텍스트 로딩 시점)
+    // then
+    final List<Song> all = songRepository.findAll();
+    assertThat(all).isNotEmpty();
+    assertThat(all).allMatch(s -> s.getLowMidi() != null && s.getHighMidi() != null);
+}
+```
 
 ## 8) 커버리지 기준
 - 현재 정량 기준 없음. jacoco 도입 후 도메인 패키지 70% 목표 검토.
