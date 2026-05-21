@@ -1,0 +1,70 @@
+name: PR Size Check
+
+# docs/ai-harness/03-quality-gates.md §3-2:
+# 권장 400 LOC, 1000 LOC 초과는 분할 (분할 불가 사유 명시 시 통과).
+# 락 파일/바이너리/이미지는 카운트 제외.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  size:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute diff size
+        id: diff
+        run: |
+          BASE=${{ github.event.pull_request.base.ref }}
+          git fetch origin $BASE --depth=100
+          git diff --numstat origin/$BASE...HEAD > /tmp/diffstat.txt
+          cat /tmp/diffstat.txt
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diffStat = fs.readFileSync('/tmp/diffstat.txt', 'utf8');
+
+            const excludePatterns = [
+              /(^|\/)package-lock\.json$/,
+              /(^|\/)pnpm-lock\.yaml$/,
+              /(^|\/)yarn\.lock$/,
+              /(^|\/)gradle-wrapper\.jar$/,
+              /(^|\/)node_modules\//,
+              /\.(png|jpg|jpeg|gif|svg|ico|woff2?|ttf|otf|eot)$/i,
+            ];
+
+            let added = 0;
+            let removed = 0;
+            const included = [];
+            for (const line of diffStat.split('\n').filter(Boolean)) {
+              const parts = line.split('\t');
+              if (parts.length < 3) continue;
+              const [a, r, file] = parts;
+              if (a === '-' || r === '-') continue; // binary
+              if (excludePatterns.some(p => p.test(file))) continue;
+              const ai = parseInt(a) || 0;
+              const ri = parseInt(r) || 0;
+              added += ai;
+              removed += ri;
+              included.push({ file, ai, ri });
+            }
+            const total = added + removed;
+
+            const body = context.payload.pull_request.body || '';
+            const hasSplitException = /분할\s*불가\s*사유/.test(body);
+
+            core.notice(`PR size (excluding lock/binary): +${added} / -${removed} (total ${total} LOC)`);
+
+            if (total > 1000 && !hasSplitException) {
+              core.setFailed(`PR exceeds 1000 LOC hard limit (${total}). Add "분할 불가 사유: ..." to PR body or split.`);
+            } else if (total > 400) {
+              core.warning(`PR exceeds 400 LOC soft limit (${total}). Consider splitting.`);
+            }

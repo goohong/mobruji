@@ -1,0 +1,95 @@
+name: Auto Label PR
+
+# PR 제목 `type(scope):` prefix에서 type:* / scope:* 라벨 자동 부여.
+# 커밋 trailer에서 Co-Authored-By: Claude / OpenAI Codex 감지해 ai:* 라벨 추가.
+# 보호 영역 파일 변경 시 needs-human-review 라벨 추가.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title;
+            const m = title.match(/^(\w+)\(([\w-]+)\):/);
+
+            const labels = new Set();
+
+            if (!m) {
+              core.warning(`PR title "${title}" does not match "type(scope): ..." pattern`);
+            } else {
+              const [, type, scope] = m;
+              const allowedTypes = ['feat','fix','docs','style','refactor','test','chore','release'];
+              const allowedScopes = ['user','song','recommendation','voice','infra','web'];
+              if (allowedTypes.includes(type)) labels.add(`type:${type}`);
+              else core.warning(`Unknown type: ${type}`);
+              if (allowedScopes.includes(scope)) labels.add(`scope:${scope}`);
+              else core.warning(`Unknown scope: ${scope}`);
+            }
+
+            // Detect AI authorship from commit messages
+            const commits = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const allMessages = commits.data.map(c => c.commit.message).join('\n');
+            const hasClaude = /Co-Authored-By:\s*Claude/i.test(allMessages);
+            const hasCodex = /Co-Authored-By:\s*OpenAI Codex/i.test(allMessages);
+            if (hasClaude || hasCodex) labels.add('ai-generated');
+            if (hasClaude) labels.add('ai:claude');
+            if (hasCodex) labels.add('ai:codex');
+
+            // Protected area detection
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const protectedPatterns = [
+              /^\.github\/workflows\//,
+              /^\.github\/CODEOWNERS$/,
+              /\/db\/migration\//,
+              /\/resources\/db\//,
+              /(^|\/)application[^/]*\.ya?ml$/,
+              /(^|\/)application[^/]*\.properties$/,
+              /(^|\/)\.env/,
+              /^backend\/build\.gradle/,
+              /^backend\/settings\.gradle/,
+              /^backend\/gradle\//,
+              /^web\/next\.config\./,
+              /^web\/package\.json$/,
+              /^web\/.*-lock\./,
+              /^Dockerfile$/,
+              /^docker-compose.*\.ya?ml$/,
+              /^LICENSE$/,
+            ];
+            const hasProtected = files.data.some(f =>
+              protectedPatterns.some(p => p.test(f.filename))
+            );
+            if (hasProtected) labels.add('needs-human-review');
+
+            const toAdd = [...labels];
+            if (toAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: toAdd,
+              });
+              core.notice(`Applied labels: ${toAdd.join(', ')}`);
+            } else {
+              core.notice('No labels to apply');
+            }

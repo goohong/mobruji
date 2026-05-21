@@ -1,0 +1,65 @@
+name: Feature Spec Status Check
+
+# docs/features/*.md 변경 시 frontmatter status 필드가 valid한지 검증.
+# 유효 값: draft, approved, implementing, shipped, deprecated.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs/features/**.md'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const validStatuses = ['draft','approved','implementing','shipped','deprecated'];
+            const dir = 'docs/features';
+
+            if (!fs.existsSync(dir)) {
+              core.notice('docs/features directory not found, skipping');
+              return;
+            }
+
+            const files = fs.readdirSync(dir)
+              .filter(f => f.endsWith('.md'))
+              .filter(f => !['README.md', '_template.md'].includes(f));
+
+            let failed = false;
+            const reports = [];
+            for (const f of files) {
+              const content = fs.readFileSync(path.join(dir, f), 'utf8');
+              const m = content.match(/^---\n([\s\S]*?)\n---/);
+              if (!m) {
+                core.error(`${f}: missing frontmatter (--- block)`);
+                failed = true;
+                continue;
+              }
+              const fm = m[1];
+              const statusMatch = fm.match(/^status:\s*(\S+)/m);
+              if (!statusMatch) {
+                core.error(`${f}: missing 'status' field in frontmatter`);
+                failed = true;
+                continue;
+              }
+              const status = statusMatch[1];
+              if (!validStatuses.includes(status)) {
+                core.error(`${f}: invalid status '${status}'. Must be one of: ${validStatuses.join(', ')}`);
+                failed = true;
+                continue;
+              }
+              reports.push(`✓ ${f}: ${status}`);
+            }
+
+            core.notice(`Validated ${files.length} spec(s):\n${reports.join('\n')}`);
+            if (failed) core.setFailed('Feature spec frontmatter validation failed');
