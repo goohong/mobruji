@@ -85,6 +85,7 @@
 | `sessionId` | String(64) | not null | 익명 사용자 식별자 (VoiceRange와 동일) |
 | `voiceRangeLow`, `voiceRangeHigh` | int | not null | MIDI [12, 119] |
 | `mood` | enum `Mood` | nullable | 선택 |
+| `excludeSongIds` | List&lt;Long&gt; | nullable→[] 정규화 | 사용자가 "이미 들었어요"로 제외한 곡 ID. 별 join table `recommendation_request_exclude_song(recommendation_request_id, song_id)`에 영속 (`@ElementCollection`) |
 | `createdAt` | LocalDateTime | not null | |
 
 **`Recommendation`** — 한 요청에 대한 결과 행. 요청 1 : N 행.
@@ -151,8 +152,14 @@ erDiagram
         datetime created_at
     }
 
+    RECOMMENDATION_REQUEST_EXCLUDE_SONG {
+        bigint recommendation_request_id FK
+        bigint song_id
+    }
+
     SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
+    RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION_REQUEST_EXCLUDE_SONG : "excludeSongIds (@ElementCollection)"
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
 ```
 

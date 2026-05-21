@@ -16,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 
 import com.mobruji.recommendation.RecommendationRepository;
+import com.mobruji.recommendation.RecommendationRequestEntity;
 import com.mobruji.recommendation.RecommendationRequestRepository;
 import com.mobruji.song.MetadataSource;
 import com.mobruji.song.Mood;
@@ -190,6 +191,36 @@ class RecommendationExcludeSongIdsTest {
         assertThat(orderEmpty).isNotEqualTo(orderWithExclude);
         // 제외 곡은 두 번째 결과에 등장하지 않아야 한다.
         assertThat(orderWithExclude).doesNotContain(buskerId.intValue());
+    }
+
+    @Test
+    @DisplayName("API로 받은 excludeSongIds는 RecommendationRequestEntity에 영속된다 (#72/#73)")
+    void excludeSongIds_persistedOnRequestEntity() {
+        // given
+        final String payload = """
+                {
+                  "sessionId": "persist-exclude",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "excludeSongIds": [%d, %d]
+                }
+                """.formatted(bts1Id, iu1Id);
+
+        // when
+        final Integer requestId = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(payload)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .extract().jsonPath().getInt("requestId");
+
+        // then: DB에 같은 곡 ID 셋이 저장돼 있어야 한다.
+        final RecommendationRequestEntity saved = recommendationRequestRepository.findById(requestId.longValue())
+                .orElseThrow();
+        assertThat(saved.getExcludeSongIds()).containsExactlyInAnyOrder(bts1Id, iu1Id);
     }
 
     @Test
