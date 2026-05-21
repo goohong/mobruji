@@ -24,6 +24,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "song", indexes = {
         @Index(name = "ix_song_title", columnList = "title"),
         @Index(name = "ix_song_artist", columnList = "artist"),
+        @Index(name = "uk_song_isrc", columnList = "isrc", unique = true),
 })
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -85,6 +86,25 @@ public class Song {
     private MetadataSource metadataSource;
 
     /**
+     * 외부 분석/큐레이션 시 채워지는 곡의 International Standard Recording Code (ISO 3901, 12자).
+     * 수기 시드는 null. 글로벌 유일 식별자라 DB 레벨 {@code UNIQUE} 인덱스로 보호한다 — null 은
+     * MySQL 8.4 UNIQUE 가 다중 허용하므로 충돌 없음.
+     *
+     * <p>spec {@code song-metadata-source.md} §5-1 잠정 필드를 본진 컬럼으로 promote.
+     */
+    @Column(length = 12)
+    private String isrc;
+
+    /**
+     * 메타데이터 신뢰도 (0.0~1.0). 기본 1.0 = {@link MetadataSource#MANUAL_SEED} 수기 입력 신뢰도.
+     * {@link #backfillFromAudioAnalysis} 시 {@link AudioAnalysisResult#confidence()} 가 저장된다.
+     *
+     * <p>fe/추천 알고리즘은 본 값을 입력으로 쓰지 않는다 — 결정성 회귀 없음. 큐레이션/UX 신호용.
+     */
+    @Column(name = "metadata_confidence", nullable = false)
+    private double metadataConfidence;
+
+    /**
      * 곡 보컬 멜로디의 최저음 (MIDI note number).
      * nullable — 시드/외부 출처에 따라 미보유 가능. {@link #difficulty} 자동 계산은
      * lowMidi/highMidi가 둘 다 있을 때만 수행한다.
@@ -121,6 +141,8 @@ public class Song {
             final String tjNumber,
             final String kyNumber,
             final MetadataSource metadataSource,
+            final String isrc,
+            final Double metadataConfidence,
             final Integer lowMidi,
             final Integer highMidi,
             final Difficulty difficulty) {
@@ -141,6 +163,12 @@ public class Song {
             throw new IllegalArgumentException(
                     "lowMidi must not exceed highMidi: lowMidi=" + lowMidi + ", highMidi=" + highMidi);
         }
+        if (metadataConfidence != null && (metadataConfidence < 0.0 || metadataConfidence > 1.0)) {
+            throw new IllegalArgumentException(
+                    "metadataConfidence out of [0.0, 1.0]: " + metadataConfidence);
+        }
+        // metadataConfidence 미명시 시 기본값 1.0 (MANUAL_SEED 수기 입력 신뢰도).
+        final double resolvedConfidence = metadataConfidence != null ? metadataConfidence : 1.0;
         // difficulty가 명시되지 않으면 lowMidi/highMidi로 자동 분류 (둘 다 있을 때만).
         final Difficulty resolvedDifficulty = difficulty != null
                 ? difficulty
@@ -148,7 +176,8 @@ public class Song {
         final LocalDateTime now = LocalDateTime.now();
         return new Song(
                 null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
-                tjNumber, kyNumber, metadataSource, lowMidi, highMidi, resolvedDifficulty, now, now);
+                tjNumber, kyNumber, metadataSource, isrc, resolvedConfidence,
+                lowMidi, highMidi, resolvedDifficulty, now, now);
     }
 
     /**
@@ -263,6 +292,11 @@ public class Song {
         }
         if (this.metadataSource != MetadataSource.AUDIO_ANALYSIS) {
             this.metadataSource = MetadataSource.AUDIO_ANALYSIS;
+            changed = true;
+        }
+        // 분석 결과의 confidence 를 그대로 저장 — 큐레이션/UX 신호용 (추천 알고리즘 무관).
+        if (this.metadataConfidence != result.confidence()) {
+            this.metadataConfidence = result.confidence();
             changed = true;
         }
         if (changed) {

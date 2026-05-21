@@ -269,9 +269,9 @@ class SongTest {
     }
 
     @Test
-    @DisplayName("backfillFromAudioAnalysis: confidence 임계 통과 시 lowMidi/highMidi/difficulty/source 갱신")
+    @DisplayName("backfillFromAudioAnalysis: confidence 임계 통과 시 lowMidi/highMidi/difficulty/source/confidence 갱신")
     void backfillFromAudio_aboveThreshold_updatesAllFields() {
-        // given: 수기 시드값 (사람이 대충 추정한 음역)
+        // given: 수기 시드값 (사람이 대충 추정한 음역) — 기본 confidence = 1.0
         final Song song = Song.builder()
                 .title("t").artist("a")
                 .keyOriginal(MusicalKey.C_MAJOR)
@@ -280,6 +280,7 @@ class SongTest {
                 .build();
         // sanity
         assertThat(song.getDifficulty()).isEqualTo(Difficulty.EASY);
+        assertThat(song.getMetadataConfidence()).isEqualTo(1.0);
 
         final AudioAnalysisResult result = new AudioAnalysisResult(
                 57, 78, "C", 120.0, 200.0, 0.85, "analyze-py-0.1.0");
@@ -287,12 +288,52 @@ class SongTest {
         // when
         final boolean changed = song.backfillFromAudioAnalysis(result, 0.6);
 
-        // then: 분석값으로 덮어쓰고 source/difficulty 재계산
+        // then: 분석값으로 덮어쓰고 source/difficulty/confidence 재계산
         assertThat(changed).isTrue();
         assertThat(song.getLowMidi()).isEqualTo(57);
         assertThat(song.getHighMidi()).isEqualTo(78);
         assertThat(song.getDifficulty()).isEqualTo(Difficulty.HARD); // highMidi=78 ≥ 76
         assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
+        assertThat(song.getMetadataConfidence()).isEqualTo(0.85);
+    }
+
+    @Test
+    @DisplayName("create: metadataConfidence 미명시 시 기본값 1.0 (MANUAL 신뢰도)")
+    void create_withoutConfidence_defaultsToOne() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThat(song.getMetadataConfidence()).isEqualTo(1.0);
+        assertThat(song.getIsrc()).isNull();
+    }
+
+    @Test
+    @DisplayName("create: metadataConfidence 0.0~1.0 범위 밖이면 IllegalArgumentException")
+    void create_withConfidenceOutOfRange_throws() {
+        assertThatThrownBy(() -> Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .metadataConfidence(1.5)
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("metadataConfidence");
+    }
+
+    @Test
+    @DisplayName("create: isrc 명시 시 그대로 저장")
+    void create_withIsrc_isPersisted() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .isrc("KRA301700001")
+                .build();
+
+        assertThat(song.getIsrc()).isEqualTo("KRA301700001");
     }
 
     @Test

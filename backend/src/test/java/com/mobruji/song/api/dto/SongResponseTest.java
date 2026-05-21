@@ -20,6 +20,8 @@ class SongResponseTest {
                 .title("벚꽃 엔딩").artist("버스커 버스커").releaseYear(2012)
                 .keyOriginal(MusicalKey.A_MAJOR).bpm(132)
                 .metadataSource(MetadataSource.MANUAL_SEED)
+                .isrc("KRA301200001")
+                .metadataConfidence(0.95)
                 .lowMidi(60).highMidi(76)
                 .build();
 
@@ -34,6 +36,8 @@ class SongResponseTest {
         assertThat(songResponse.lowestNoteName()).isEqualTo("C4");
         assertThat(songResponse.highestNoteName()).isEqualTo("E5");
         assertThat(songResponse.difficulty()).isEqualTo(Difficulty.HARD);
+        assertThat(songResponse.isrc()).isEqualTo("KRA301200001");
+        assertThat(songResponse.metadataConfidence()).isEqualTo(0.95);
     }
 
     @Test
@@ -54,5 +58,8 @@ class SongResponseTest {
         assertThat(songResponse.highMidi()).isNull();
         assertThat(songResponse.lowestNoteName()).isNull();
         assertThat(songResponse.highestNoteName()).isNull();
+        // 신규 필드: 수기 시드 기본값
+        assertThat(songResponse.isrc()).isNull();
+        assertThat(songResponse.metadataConfidence()).isEqualTo(1.0);
     }
 }
