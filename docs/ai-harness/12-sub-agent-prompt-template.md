@@ -107,6 +107,45 @@ sub-agent가 본진에 회신할 때 다음을 포함:
   - 통합: `docker compose up -d` + `./gradlew bootRun` + `npm run dev` 동시 기동 후 흐름/결정성/p95/다양성 검증
 - 발견 사항은 PR 코멘트로. 후속이 필요하면 본진에 보고(이슈 등록은 본진).
 
+#### E-1) rev 감사 표준 절차 (비협상)
+
+본 절은 rev 사이클 8 self-review(2026-05-21, 이슈 #104)에서 박제된 룰을 영속화한다. 16 PR 통틀어 보안 grep 0건이었고, 사이클 5~7 8연속 🔴=0 LGTM drift가 발견된 직후의 보강이다.
+
+##### E-1.1 비기능 매트릭스 grep (rev 필수)
+
+매 PR 변경분(`gh pr diff <N>`)에 대해 다음 패턴을 grep하고 **결과(0건도 명시)를 PR 코멘트에 보고**한다. "안 봤다"와 "0건"을 분간 가능하게 만드는 게 목적이다.
+
+| 카테고리 | grep 패턴 / 점검 항목 | 참조 |
+|---|---|---|
+| 보안 | `password\|secret\|token\|api[_-]?key\|PII\|sessionId\|민감` | `04-security-policy.md` |
+| 로그/관측성 | `log\.(info\|warn\|error)` — 구조화 로그 + trace ID 포함 여부 | `10-observability.md` |
+| DB | 새 마이그레이션 / DDL / `fetch.*EAGER` / N+1 의심 쿼리 | `06-domain-model.md`, `03-quality-gates.md` |
+| 의존성 | `package.json` / `build.gradle*` diff 시 신규 라이브러리 라이선스 + CVE | `02-license-agpl-3-0` ADR, `04-security-policy.md` |
+| 마이그레이션 안전성 | DDL 변경 시 rollback 가능 여부 + zero-downtime 검증 | `03-quality-gates.md` |
+
+> 보고 형식 예: `보안 grep: 0건 / 로그 grep: 2건 (log.info 2건, trace ID 미포함 — 보강 권장)`.
+
+##### E-1.2 LGTM self-guard (rev 필수)
+
+- 최근 **3 PR 연속 🔴=0**이면 본 PR 감사에 비기능 매트릭스를 **한 단계 더 깊게**(예: grep을 변경분 → 인접 파일 전체로 확장, 또는 통합 시나리오 1개 추가) 적용한다.
+- drift 가능성을 본진에 보고한다(예: "최근 N PR 🔴=0 — drift 의심, 추가 점검 권고"). 본진이 패턴 재검토 사이클을 launch할 수 있도록 가시화한다.
+- 사이클 6 PR #74에서 LGTM 헤더 다음 EAGER fetch p95=80.9ms(3.7배) 회귀 신호를 누락한 사례가 본 룰의 근거다.
+
+##### E-1.3 누적 경고 봉인 명시 섹션
+
+PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서 봉인된 항목"** 표를 포함한다. drift 추적 가능하도록 누적 경고를 명시적으로 닫는다.
+
+| 사이클/PR | 예측 패턴 | 본 PR에서 봉인 여부 | 비고 |
+|---|---|---|---|
+| 사이클 6 #74 | EAGER fetch p95 회귀 | 봉인됨 / 미봉인 / 해당 없음 | (관찰 또는 후속 이슈 링크) |
+
+##### E-1.4 결론 헤더 폐기 (anchoring 회피)
+
+- rev 코멘트 **첫 줄**을 `🟢 LGTM` 또는 `🟢 GREEN` 같은 **결론 단정형**으로 시작 **금지**.
+- 대신 중립 헤더(`발견 사항 — 분석`)로 시작하여 **발견 → 분석 → 종합 판정** 순서로 작성한다.
+- 이유: 리뷰어/머지권자가 첫 줄에 anchoring되어 본문 회귀 신호를 놓치는 confirmation bias를 회피한다.
+- 사례: 사이클 6 PR #74에서 `🟢 LGTM` 헤더 다음에 EAGER fetch p95=80.9ms(3.7배) 회귀 신호가 누락된 적이 있다.
+
 ### plan (mobruji-plan)
 - 워크트리: `/Users/goohong/workspace/github/mobruji-plan`
 - 작업 가능 경로: 큰 docs/spec/ADR — `docs/ai-harness/**`, `docs/features/**`, `docs/decisions/**`, `scripts/**`, `.github/**`(보호 영역 라벨 필수)
@@ -138,3 +177,4 @@ sub-agent가 본진에 회신할 때 다음을 포함:
 ## 4) 변경 이력
 
 - 2026-05-21 — 최초 작성 (be/fe/rev/plan 4역할, 공통 룰 추출).
+- 2026-05-21 — rev §E-1 추가: 비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 표 / 결론 헤더 폐기 (이슈 #104, PR #109).
