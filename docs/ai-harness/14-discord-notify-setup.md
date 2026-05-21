@@ -75,7 +75,51 @@ gh secret set DISCORD_WEBHOOK_URL --repo goohong/mobruji
 - **민감정보**: 이슈/PR 제목·본문에 secret/토큰/사용자 음역대 원문이 들어가지 않도록 주의 (`docs/ai-harness/04-security-policy.md`). 알림에 그대로 노출된다.
 - **장애 시**: Discord webhook 자체 장애나 GitHub Actions 큐 지연 가능. 알림은 "best-effort 모니터링"이고 단일 SoT 아님. 진짜 상태는 GitHub에서 확인.
 
-## 6) 한계와 다음 단계
+## 6) 주기 요약 (Periodic Summary)
+
+`discord-notify.yml`이 "즉시 이벤트 push"라면, `discord-periodic-summary.yml`은 **"자고 일어났을 때 한 눈에 보는 다이제스트"**다. 이벤트별 알림을 다 보지 못했어도 N시간치 누적이 한 카드에 정리된다.
+
+### 6-1) 기본 동작
+- 트리거: `schedule: cron '0 */6 * * *'` (UTC 기준 6시간 간격, KST 09/15/21/03시) + `workflow_dispatch`.
+- 집계 항목 (마지막 6시간, 또는 `since_hours` input):
+  - 🟢 머지된 PR (상위 5건 제목 + "외 N건")
+  - ⚪ 신규 이슈
+  - ✅ 닫힌 이슈
+  - 🚀 published 된 release
+- 활동 0건이어도 "조용한 사이클" 카드 1장을 보낸다 (정상적으로 조용함의 신호). 노이즈가 크면 후속 ADR에서 임계치 도입.
+
+### 6-2) cron 간격 변경
+`.github/workflows/discord-periodic-summary.yml`의 `cron` 값을 수정한다. 기억할 점:
+- GitHub Actions cron은 **UTC** 기준이다. 한국 시간으로 매일 9시면 `0 0 * * *` (UTC 00:00 = KST 09:00).
+- 5분보다 짧은 간격은 GitHub이 보장하지 않는다.
+- cron을 변경하면 본 문서의 시간표 예시도 같이 갱신.
+
+예시:
+| 원하는 주기 | cron | 비고 |
+|---|---|---|
+| 6시간마다 (기본) | `0 */6 * * *` | KST 09/15/21/03 |
+| 매일 아침 09시 KST | `0 0 * * *` | 자고 일어났을 때 1회 |
+| 평일 출근/퇴근 | `0 0,9 * * 1-5` | KST 09/18 평일만 |
+
+### 6-3) 수동 트리거 ("지금 요약 받기")
+모바일/외출 중 즉시 요약이 필요하면:
+```bash
+# 기본 6시간치
+gh workflow run discord-periodic-summary.yml --repo goohong/mobruji
+
+# 임의 구간 (예: 지난 24시간)
+gh workflow run discord-periodic-summary.yml --repo goohong/mobruji -f since_hours=24
+```
+GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 트리거 가능.
+
+### 6-4) 시간대 (UTC vs KST)
+- `cron`은 UTC, embed 본문 표시 구간은 KST로 변환해서 사람이 읽기 쉽게 보낸다.
+- workflow 로그(`echo "window: ..."`)에도 KST로 같이 찍어 디버깅 편의 확보.
+
+### 6-5) graceful skip
+즉시 알림과 동일하게 `DISCORD_WEBHOOK_URL` 없으면 첫 step의 안내 echo만 남기고 모든 step이 skip된다. 셋업 전에 미리 머지해 둬도 안전.
+
+## 7) 한계와 다음 단계
 
 이 워크플로우는 **단방향 push**다. 사용자가 모바일에서 명령을 내리려면 별도 채널 필요:
 - GitHub 모바일 앱: 이슈/PR 코멘트, 머지, 라벨 조작 가능
