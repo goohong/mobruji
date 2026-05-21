@@ -81,6 +81,17 @@ jobs:
             );
             if (hasProtected) labels.add('needs-human-review');
 
+            // Session label inference from file paths.
+            // PR이 backend/** 만 건드리면 session:backend, web/** 만 건드리면 session:frontend.
+            // 혼합(infra/docs 등)이면 라벨 없음 — 스크립트가 부여한 라벨이 우선되거나 사람이 판단.
+            const fileNames = files.data.map(f => f.filename);
+            if (fileNames.length > 0) {
+              const allBackend = fileNames.every(f => f.startsWith('backend/'));
+              const allWeb = fileNames.every(f => f.startsWith('web/'));
+              if (allBackend) labels.add('session:backend');
+              else if (allWeb) labels.add('session:frontend');
+            }
+
             const toAdd = [...labels];
             if (toAdd.length > 0) {
               await github.rest.issues.addLabels({
