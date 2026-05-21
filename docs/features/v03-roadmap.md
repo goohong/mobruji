@@ -61,7 +61,7 @@ last_reviewed: 2026-05-22
   #68 MusicBrainz 통합 — 메타 보강 batch + ISRC
        └─→ #69 Spotify Audio Features (Spotify ID 매칭에 MB ISRC 활용)
              └─ 추천 v2 (#219 머지 완료) 의 w4 (popularity) → mood/valence 가중치로 전환
-                + 추천 가중치 변경은 ADR 신설 권장 (`0012-recommendation-mood-signal-source.md`)
+                + 추천 가중치 변경은 ADR 신설 권장 (`0013-recommendation-mood-signal-source.md`)
 ```
 
 ### 4-1) P2 권장 순서
@@ -69,7 +69,7 @@ last_reviewed: 2026-05-22
 1. **#62 p95 회귀 가드** 먼저 (1 PR, 의존 없음). 이후 신호/추천 변경이 들어와도 회귀를 잡을 안전망 확보.
 2. **#71 큐레이션** 은 백그라운드 콘텐츠 트랙으로 사이클마다 점진 진행 (10곡씩 × 7 사이클).
 3. **#68 MusicBrainz** 가 #69 Spotify 의 매칭 키(ISRC) 를 채워야 정확도가 높다. 순서 #68 → #69 권장.
-4. **#69 Spotify + 추천 w4 활성화** 는 ADR(`0012-recommendation-mood-signal-source.md` — 본 문서가 후속 트리거) 와 같이 묶어 머지.
+4. **#69 Spotify + 추천 w4 활성화** 는 ADR(`0013-recommendation-mood-signal-source.md` — 본 문서가 후속 트리거) 와 같이 묶어 머지.
 5. **운영 관측성 베이스라인** 은 위 4 작업 중 어디서든 metric 카운터 신설이 늘어나기 때문에 P2 초~중반에 한번에 인프라 합의(어떤 도구, 어떤 라벨 컨벤션) 를 보고 후속 PR 들이 그 컨벤션을 따르도록 강제.
 
 ## 5) Beyond v0.3 (v0.4 후보 — spec 미작성)
@@ -88,4 +88,5 @@ last_reviewed: 2026-05-22
 
 ## 7) 결정 로그
 
-- **2026-05-22 (plan 27)**: 초안 작성 (status=draft). #69/#68/#71/#62/#209/#238 을 v0.3 P1/P2/P3 로 분류. #69 는 #68 선행 필요(Spotify ID 매칭). 추천 w4 (popularity) 신호를 mood/valence 로 전환하는 결정은 별도 ADR(`0012-recommendation-mood-signal-source.md`) 신설 권장. #70 은 wontfix 유지 → v0.4 로 이동.
+- **2026-05-22 (plan 27)**: 초안 작성 (status=draft). #69/#68/#71/#62/#209/#238 을 v0.3 P1/P2/P3 로 분류. #69 는 #68 선행 필요(Spotify ID 매칭). 추천 w4 (popularity) 신호를 mood/valence 로 전환하는 결정은 별도 ADR(`0013-recommendation-mood-signal-source.md`) 신설 권장. #70 은 wontfix 유지 → v0.4 로 이동.
+- **2026-05-22 (plan 28)**: #242 운영 관측성 베이스라인 spec/ADR 머지. 베이스라인 = 메트릭 네이밍 컨벤션 + 필수 카운터 표 + p95 매트릭스 + 라벨 화이트리스트 + Grafana Cloud Free + Discord webhook 알림. 수집 스택은 ADR-0012 로 분리. 분산 트레이싱/SaaS 유료/SLO/로그 집계/web RUM 은 v0.4 이후. **§4-1 권장 순서 5번 — 운영 관측성 베이스라인 합의 — 완료.** 후속 PR: be 가 `application.yml` percentiles + MeterRegistry 카운터 통일, infra 가 Grafana Cloud 셋업 + 알림 4 규칙. 추천 mood/valence ADR 슬롯(`0013-recommendation-mood-signal-source.md`) 은 ADR-0012 가 점유하므로 **다음 번호 0013 으로 재할당**.
