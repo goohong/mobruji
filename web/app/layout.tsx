@@ -34,8 +34,19 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * PWA status bar / browser chrome 색을 라이트/다크에 분기.
+ *
+ * mobruji 는 모바일 우선이며 OS 다크 모드 설정을 그대로 따라간다 (#296).
+ * iOS Safari 와 PWA 모드에서 status bar 가 시스템 모드와 어긋나면 인지 부조화가
+ * 크므로 prefers-color-scheme 별로 themeColor 를 분기한다.
+ * 값은 globals.css 의 `--background` 변수와 동일 — light=#ffffff, dark=#0a0a0a.
+ */
 export const viewport: Viewport = {
-  themeColor: "#000000",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",

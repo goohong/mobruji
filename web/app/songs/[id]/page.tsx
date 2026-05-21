@@ -92,7 +92,7 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
           </p>
           <Link
             href="/songs"
-            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600"
           >
             검색으로 돌아가기
           </Link>
