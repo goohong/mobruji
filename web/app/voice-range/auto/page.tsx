@@ -373,7 +373,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         aria-live="polite"
       >
         <div className="flex items-center justify-between">
-          <span className="text-xs uppercase tracking-widest text-zinc-500">
+          <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             현재 음
           </span>
           <span
@@ -393,7 +393,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               ? midiToNoteName(sample.midi)
               : "—"}
           </span>
-          <span className="text-sm text-zinc-500">
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
             {sample && sample.frequencyHz > 0
               ? `${sample.frequencyHz.toFixed(1)} Hz`
               : "발성 대기"}
@@ -412,7 +412,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               className={
                 hasSignal
                   ? "text-xs text-emerald-700 dark:text-emerald-300"
-                  : "text-xs text-zinc-500"
+                  : "text-xs text-zinc-500 dark:text-zinc-400"
               }
             >
               {hasSignal ? "감지 중" : "신호 없음"}
@@ -566,7 +566,7 @@ function ConfidenceBadge({ label, result }: ConfidenceBadgeProps) {
   const text = result?.confirmed ? "안정" : "낮음 — 재측정 권장";
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs uppercase tracking-widest text-zinc-500">
+      <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
         {label}
       </span>
       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
