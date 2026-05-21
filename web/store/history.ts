@@ -51,6 +51,16 @@ export type RecommendationHistoryEntry = {
   songs: RecommendedSongResponse[];
   /** 추천 요청 시 사용한 누적 제외 곡 ID 스냅샷. */
   excludedSongIds: number[];
+  /**
+   * 추천 시점의 음역대 스냅샷 (closes #170).
+   *
+   * - 기존 entry 와의 호환을 위해 optional 로 두며, 누락 시 진행 추적 카드에서 무시된다.
+   * - voiceRangeId 만으로는 측정값을 복원할 수 없어 진행 그래프를 그릴 수 없으므로
+   *   onSuccess 시점의 lowestNoteMidi/highestNoteMidi/sourceMethod 를 그대로 보관한다.
+   */
+  voiceRangeLowMidi?: number;
+  voiceRangeHighMidi?: number;
+  voiceRangeSourceMethod?: "SELF_REPORT" | "OCTAVE_PICK" | "MIC_MEASURE";
 };
 
 /**
