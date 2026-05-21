@@ -23,13 +23,17 @@ import com.mobruji.song.infrastructure.SongRepository;
 import io.restassured.RestAssured;
 
 /**
- * E2E: {@code GET /api/v1/songs/stats} — admin 통계 응답 shape 검증.
+ * E2E: {@code GET /api/v1/songs/stats} — admin 통계 응답 shape + 인증 게이트 검증.
  *
- * <p>spec rev 14 후속(#208/#212).
+ * <p>spec rev 14 후속(#208/#212), rev 15 인증 게이트(#224/#228 — v0.3 P0).
+ * 본 endpoint 는 {@code X-Admin-Token} 헤더가 필수. 누락/불일치 → 401.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class SongStatsIntegrationTest {
+
+    // application-test.yml 의 mobruji.admin.token 과 동일해야 한다.
+    private static final String ADMIN_TOKEN = "test-admin-token";
 
     @LocalServerPort
     private int port;
@@ -64,9 +68,10 @@ class SongStatsIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E: GET /api/v1/songs/stats — total/byMetadataSource/avgConfidence/lastBackfillAt")
+    @DisplayName("E2E: GET /api/v1/songs/stats — X-Admin-Token 정상 → total/byMetadataSource/avgConfidence/lastBackfillAt")
     void e2e_stats_returnsExpectedShape() {
         given()
+                .header("X-Admin-Token", ADMIN_TOKEN)
                 .when()
                 .get("/api/v1/songs/stats")
                 .then()
@@ -84,11 +89,12 @@ class SongStatsIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E: 곡 0건이면 total=0, avgConfidence=0.0")
+    @DisplayName("E2E: 곡 0건이면 total=0, avgConfidence=0.0 (인증 통과 시)")
     void e2e_stats_empty() {
         songRepository.deleteAll();
 
         given()
+                .header("X-Admin-Token", ADMIN_TOKEN)
                 .when()
                 .get("/api/v1/songs/stats")
                 .then()
@@ -96,5 +102,26 @@ class SongStatsIntegrationTest {
                 .body("total", equalTo(0))
                 .body("avgConfidence", equalTo(0.0f))
                 .body("byMetadataSource", notNullValue());
+    }
+
+    @Test
+    @DisplayName("E2E: X-Admin-Token 헤더 누락 → 401")
+    void e2e_stats_missingToken_returns401() {
+        given()
+                .when()
+                .get("/api/v1/songs/stats")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
+
+    @Test
+    @DisplayName("E2E: X-Admin-Token 값 불일치 → 401")
+    void e2e_stats_invalidToken_returns401() {
+        given()
+                .header("X-Admin-Token", "wrong-token")
+                .when()
+                .get("/api/v1/songs/stats")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
 }
