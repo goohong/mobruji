@@ -1,0 +1,18 @@
+[Unit]
+Description=mobruji Discord bot daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/mobruji/tools/discord-daemon
+EnvironmentFile=/home/ubuntu/mobruji/tools/discord-daemon/.env
+ExecStart=/home/ubuntu/mobruji/tools/discord-daemon/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/mobruji-discord-daemon.out.log
+StandardError=append:/var/log/mobruji-discord-daemon.err.log
+
+[Install]
+WantedBy=multi-user.target
