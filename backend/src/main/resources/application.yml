@@ -10,6 +10,14 @@ spring:
       hibernate:
         format_sql: false
 
+# Admin endpoint 보호용 임시 토큰 (v0.3 P0, #224 #228).
+# 평문 yml 금지 — 환경변수 MOBRUJI_ADMIN_TOKEN 로 주입.
+# blank/null 이면 부팅 실패 (admin endpoint 무인증 노출 방지).
+# v0.3 후속 PR에서 Spring Security 정식 도입과 함께 제거 예정.
+mobruji:
+  admin:
+    token: ${MOBRUJI_ADMIN_TOKEN:}
+
 server:
   port: ${SERVER_PORT:8080}
 
@@ -24,21 +32,37 @@ management:
     health:
       show-details: when-authorized
 
-# 추천 v1 점수 가중치 / 다양성 캡 / 결과 개수.
+# 추천 v1/v2 점수 가중치 / 다양성 캡 / 결과 개수 / tempo 설정.
 # spec: docs/features/recommendation-algorithm-v1.md §9
 # - voiceFit 0.5: 음역 적합이 1순위
 # - genre 0.2:    v1에서 입력 신호 없음(가중치만 보존)
 # - mood 0.2:     분위기 일치 가산
 # - popularity 0.1: 모든 곡 popularity=1.0 (시드에 컬럼 없음) → 동일 가산
+# - tempoMatch 0.1: v2(#218) 신규. 곡 BPM ↔ 사용자 선호(또는 mood default) BPM 거리 기반.
 recommendation:
   weights:
     voice-fit: 0.5
     genre: 0.2
     mood: 0.2
     popularity: 0.1
+    tempo-match: 0.1
   diversity:
     max-same-artist: 2
     max-same-genre: 4
+  # v2(#218) tempoMatch 신호 설정.
+  # distance-tolerance: |songBpm - target|가 이 값 이상이면 0, 미만이면 선형 감쇠.
+  # mood-default-bpm: 사용자 preferredBpm 미입력 시 mood로 추론할 default 표.
+  # fallback-bpm: mood 미입력일 때의 최후 default(없으면 tempoMatch=0.5 중립).
+  tempo:
+    distance-tolerance: 40
+    mood-default-bpm:
+      UPBEAT: 128
+      CALM: 70
+      EMOTIONAL: 80
+      POWERFUL: 140
+      GROOVY: 110
+      NOSTALGIC: 90
+    fallback-bpm: 110
   result-count: 10
   jitter-magnitude: 0.01
   # spec §3 비기능 — 결정성: 같은 입력 → 같은 결과.

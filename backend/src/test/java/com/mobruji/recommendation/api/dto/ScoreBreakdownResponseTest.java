@@ -10,9 +10,9 @@ import com.mobruji.recommendation.domain.ScoreBreakdown;
 class ScoreBreakdownResponseTest {
 
     @Test
-    @DisplayName("from: domain ScoreBreakdown의 5신호를 그대로 DTO로 매핑한다")
+    @DisplayName("from: domain ScoreBreakdown의 6신호를 그대로 DTO로 매핑한다 (v2 #218)")
     void from_mapsAllFields() {
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.8, 0.0, 1.0, 1.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.8, 0.0, 1.0, 1.0, 0.6);
 
         final ScoreBreakdownResponse response = ScoreBreakdownResponse.from(breakdown);
 
@@ -21,6 +21,7 @@ class ScoreBreakdownResponseTest {
         assertThat(response.genreMatch()).isEqualTo(0.0);
         assertThat(response.moodMatch()).isEqualTo(1.0);
         assertThat(response.popularity()).isEqualTo(1.0);
+        assertThat(response.tempoMatch()).isEqualTo(0.6);
     }
 
     @Test

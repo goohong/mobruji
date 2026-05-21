@@ -1,3 +1,9 @@
+# test 프로파일은 Spring Security 미도입 단계에서 결정적 token 사용 (#224 #228).
+# 실제 token 값은 의미 없음 — 테스트가 동일 값을 헤더로 보낸다.
+mobruji:
+  admin:
+    token: test-admin-token
+
 spring:
   datasource:
     url: jdbc:h2:mem:mobruji-test;MODE=MySQL;DB_CLOSE_DELAY=-1;CASE_INSENSITIVE_IDENTIFIERS=TRUE

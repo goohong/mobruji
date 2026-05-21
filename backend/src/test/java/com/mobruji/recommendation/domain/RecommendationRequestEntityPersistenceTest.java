@@ -35,7 +35,7 @@ class RecommendationRequestEntityPersistenceTest {
         // given
         final List<Long> excludeSongIds = List.of(101L, 202L, 303L);
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "round-trip-session", 50, 80, Mood.UPBEAT, excludeSongIds);
+                "round-trip-session", 50, 80, Mood.UPBEAT, null, excludeSongIds);
 
         // when
         final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);
@@ -48,11 +48,45 @@ class RecommendationRequestEntityPersistenceTest {
     }
 
     @Test
+    @DisplayName("preferredBpm은 save → findById 라운드트립 시 동일 값으로 보존된다 (v2 #218)")
+    void preferredBpm_roundTrips() {
+        // given
+        final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
+                "bpm-session", 50, 80, Mood.UPBEAT, 128, List.of());
+
+        // when
+        final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);
+        recommendationRequestRepository.flush();
+        final RecommendationRequestEntity loaded = recommendationRequestRepository.findById(saved.getId())
+                .orElseThrow();
+
+        // then
+        assertThat(loaded.getPreferredBpm()).isEqualTo(128);
+    }
+
+    @Test
+    @DisplayName("preferredBpm null도 라운드트립 시 null로 복원된다 (v2 #218)")
+    void preferredBpm_nullRoundTripsAsNull() {
+        // given
+        final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
+                "bpm-null-session", 50, 80, Mood.UPBEAT, null, List.of());
+
+        // when
+        final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);
+        recommendationRequestRepository.flush();
+        final RecommendationRequestEntity loaded = recommendationRequestRepository.findById(saved.getId())
+                .orElseThrow();
+
+        // then
+        assertThat(loaded.getPreferredBpm()).isNull();
+    }
+
+    @Test
     @DisplayName("빈 excludeSongIds도 round-trip 시 빈 컬렉션으로 복원된다")
     void excludeSongIds_emptyListRoundTripsAsEmpty() {
         // given
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "empty-session", 50, 80, Mood.UPBEAT, List.of());
+                "empty-session", 50, 80, Mood.UPBEAT, null, List.of());
 
         // when
         final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);

@@ -2,6 +2,7 @@ package com.mobruji.song.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -37,15 +38,14 @@ class AudioAnalysisScheduledBackfillTest {
     }
 
     @Test
-    @DisplayName("runScheduledBackfill: AUDIO_ANALYSIS 아닌 곡만 골라 backfillCommand 에 위임한다")
-    void runScheduledBackfill_filtersByMetadataSource() {
-        // given: 3곡 — 2곡은 미분석(시드/외부), 1곡은 이미 audio 분석 완료
+    @DisplayName("runScheduledBackfill: repository selective query 결과를 그대로 backfillCommand 에 위임한다")
+    void runScheduledBackfill_delegatesCandidatesFromQuery() {
+        // given: repository selective query 가 2곡 후보를 돌려준다고 가정
         final Song s1 = song("seed", MetadataSource.MANUAL_SEED);
-        final Song s2 = song("audio-done", MetadataSource.AUDIO_ANALYSIS);
         final Song s3 = song("new", MetadataSource.MANUAL_SEED);
 
         final SongRepository repo = mock(SongRepository.class);
-        when(repo.findAll()).thenReturn(List.of(s1, s2, s3));
+        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of(s1, s3));
 
         final SongAudioBackfillCommand backfillCommand = mock(SongAudioBackfillCommand.class);
         when(backfillCommand.runBackfill(any(List.class), eq(0.6)))
@@ -56,17 +56,15 @@ class AudioAnalysisScheduledBackfillTest {
         // when
         scheduler.runScheduledBackfill();
 
-        // then: AUDIO_ANALYSIS 곡(s2)은 제외, 나머지 2곡만 위임
+        // then: query 결과를 그대로 위임 (in-memory 재필터링 없음)
         verify(backfillCommand).runBackfill(List.of(s1, s3), 0.6);
     }
 
     @Test
-    @DisplayName("runScheduledBackfill: 대상 곡이 없으면 backfillCommand 호출 없이 종료")
+    @DisplayName("runScheduledBackfill: query 결과가 비면 backfillCommand 호출 없이 종료")
     void runScheduledBackfill_noTargets_skips() {
-        final Song s1 = song("audio-done", MetadataSource.AUDIO_ANALYSIS);
-
         final SongRepository repo = mock(SongRepository.class);
-        when(repo.findAll()).thenReturn(List.of(s1));
+        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of());
 
         final SongAudioBackfillCommand backfillCommand = mock(SongAudioBackfillCommand.class);
 
@@ -74,17 +72,16 @@ class AudioAnalysisScheduledBackfillTest {
 
         scheduler.runScheduledBackfill();
 
-        verify(backfillCommand, never()).runBackfill(any(List.class), any(Double.class));
+        verify(backfillCommand, never()).runBackfill(any(List.class), anyDouble());
     }
 
     @Test
-    @DisplayName("selectTargets: metadataSource != AUDIO_ANALYSIS 인 곡만 반환")
-    void selectTargets_returnsOnlyNonAudioAnalysis() {
+    @DisplayName("selectTargets: SongRepository#findCandidatesForBackfill 를 threshold 0.6 으로 위임 호출한다")
+    void selectTargets_delegatesToRepositorySelectiveQuery() {
         final Song s1 = song("seed", MetadataSource.MANUAL_SEED);
-        final Song s2 = song("audio-done", MetadataSource.AUDIO_ANALYSIS);
 
         final SongRepository repo = mock(SongRepository.class);
-        when(repo.findAll()).thenReturn(List.of(s1, s2));
+        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of(s1));
 
         final AudioAnalysisScheduledBackfill scheduler = new AudioAnalysisScheduledBackfill(
                 repo, mock(SongAudioBackfillCommand.class));
@@ -92,5 +89,6 @@ class AudioAnalysisScheduledBackfillTest {
         final List<Song> targets = scheduler.selectTargets();
 
         assertThat(targets).containsExactly(s1);
+        verify(repo).findCandidatesForBackfill(0.6);
     }
 }

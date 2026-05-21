@@ -17,6 +17,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.mobruji.admin.AdminTokenVerifier;
 import com.mobruji.song.application.SongService;
 import com.mobruji.song.application.SongStatsService;
 import com.mobruji.song.domain.MetadataSource;
@@ -37,6 +38,10 @@ class SongControllerTest {
 
     @MockBean
     private SongStatsService songStatsService;
+
+    // stats endpoint 인증 게이트(#224 #228). 기존 read/search 테스트는 stats 호출 X — bean 주입만 충족.
+    @MockBean
+    private AdminTokenVerifier adminTokenVerifier;
 
     @Test
     @DisplayName("GET /api/v1/songs/{id}: 200")

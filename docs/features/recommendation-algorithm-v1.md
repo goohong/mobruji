@@ -181,3 +181,19 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **재조회 경로**: 영속 엔티티(`Recommendation`)에는 breakdown 컬럼을 추가하지 않았다 — DB 마이그레이션은 보호 영역이며 v1 한정 응답 표현 추가에 그치는 범위라 본 PR의 범위 외. 따라서 `GET /recommendations/{id}`의 `breakdown`은 `null`. UI는 펼침 영역을 숨기는 식으로 동작한다. 영속화는 후속 PR(`recommendation` 테이블에 5개 double 컬럼 추가) 후보.
   - **알고리즘 영향 없음**: SeedDeriver 입력·점수 산식·다양성 후처리 모두 무변경. 결정성 회귀 가드 1건 추가(같은 입력 두 번 → 1위 score 동일).
   - **테스트**: ScoreBreakdown 단위(범위/NaN), ScoreBreakdownResponse.from null 통과, RecommendationResponse from breakdown 매핑, E2E 응답에 breakdown 포함, RecommendationScorerTest 5신호 검증.
+- 2026-05-21: **알고리즘 v2 — tempoMatch 신호 활성화 + preferredBpm 입력** (closes #218).
+  - **배경**: AudioAnalysisRunner(#190) + backfill(#192) + Song.bpm 영속 인프라가 완비되어 BPM 신호를 추천 점수에 활성화할 수 있게 됐다. v1 의 `keyMatch` 메타 신호와 별개로, 새 가중 신호 `tempoMatch` 를 도입.
+  - **API 입력 확장**: `RecommendationCreateRequest.preferredBpm: Integer?` (옵션, [30, 300]). null 이면 mood 기반 default BPM 표(`recommendation.tempo.mood-default-bpm`)에서 추론, mood 도 없으면 `recommendation.tempo.fallback-bpm` 사용. 그것마저 없으면 tempoMatch=0.5 중립.
+  - **응답 확장**: `ScoreBreakdown` / `ScoreBreakdownResponse` 에 `tempoMatch` 필드 추가(5→6 신호). raw [0,1].
+  - **공식**: `tempoMatch = 1.0 - min(1.0, |songBpm - target| / distanceTolerance)`.
+    - 곡 BPM null 이면 0.5 중립(정보 없음). target 결정 불가도 0.5 중립.
+    - 기본 `distanceTolerance = 40` BPM, 사용자 정의 가능.
+  - **가중치**: `recommendation.weights.tempoMatch = 0.1` (application.yml). v2 유효 점수식:
+    `score = 0.5 * voiceFit + 0.2 * mood + 0.1 * popularity + 0.1 * tempoMatch + jitter` (+ genre 0.2 비활성, key 메타).
+  - **mood default BPM 표** (application.yml):
+    UPBEAT=128, CALM=70, EMOTIONAL=80, POWERFUL=140, GROOVY=110, NOSTALGIC=90 / fallback=110.
+    > Mood enum 에는 HAPPY/SAD/ENERGETIC 가 없어 기존 라벨로 매핑.
+  - **결정성 회귀 가드 (필수)**: `SeedDeriver.derive(...)` 입력에 `preferredBpm` 포함. 같은 voiceRange/세션이라도 BPM 입력이 다르면 다른 seed → 다른 jitter → 다른 결과. null vs 정수 입력도 구분.
+  - **영속화**: `recommendation_request.preferred_bpm INTEGER NULL` 컬럼 추가(V4 migration). 보호 영역 (`needs-human-review` 라벨). `RecommendationRequestEntity` 에 nullable `preferredBpm` 필드.
+  - **테스트**: tempoMatch 단위 7건(정확/거리감쇠/tolerance 초과/mood default/preferredBpm 우선/null song bpm/target 없음/fallback) + ScoreBreakdown 6번째 필드 단위 + SeedDeriver preferredBpm 회귀 2건 + 영속 라운드트립 2건 + E2E breakdown.tempoMatch 노출 + E2E 결정성 회귀 2건. 기존 23 테스트 시그니처 마이그레이션.
+  - **DiversityPostProcessor / matchReason 무변경**: tempoMatch 는 가중 합산 score 에만 영향, top 신호 분기는 rangeFit/moodMatch 기반 유지.

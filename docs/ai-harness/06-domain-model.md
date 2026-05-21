@@ -30,7 +30,8 @@
 
 | 한국어 | 영어 (코드) | 정의 |
 |---|---|---|
-| 음역대 | VoiceRange | 사용자가 부를 수 있는 음의 최저~최고 범위 |
+| 음역대 | VoiceRange | 사용자가 부를 수 있는 음의 최저~최고 범위 (현재 값) |
+| 음역 스냅샷 | VoiceRangeSnapshot | 음역 측정 시계열 행 (insert-only). voice-range-progress spec — "발전 인지" 위해 변경 이력 누적. 결정성 영향 없음 (추천 입력 미사용) |
 | 키 | Key | 곡의 조성 (예: C, G, Am) |
 | 곡 음역 | SongRange | 곡 자체의 음역 범위 |
 | 추천 | Recommendation | 사용자 컨텍스트 기반 곡 매칭 결과 |
@@ -131,6 +132,24 @@
 - 도메인 메서드: `static create(sessionId, songId)`. toggle 로직은 `LikeService`/`BookmarkService`에 위치.
 - **v0.2 비영향 약속**: 추천 알고리즘 입력에 포함되지 않는다 (`RecommendationService` 어떤 코드도 `LikeRepository`/`BookmarkRepository`를 의존하지 않음).
 
+### 5-5) `VoiceRangeSnapshot` (PR #231, voice-range-progress.md PR A)
+
+음역 측정 시계열. `VoiceRange` 가 "현재 값"을 담당하는 반면 본 엔티티는 "변경 이력"을 담당하는 CQRS-라이트 분리. **insert-only / immutable**. `VoiceRangeService.createOrReplace` / `updateBySessionId` 흐름에서 동일 트랜잭션에 1행씩 누적된다. 추천 입력에 영향 없음(결정성 회귀 가드).
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | 내부 식별자 |
+| `sessionId` | String(64) | not null, index | 익명 세션 식별자 (`VoiceRange.sessionId`와 ID-only 참조) |
+| `lowMidi` | int | not null, 12~119 | 측정 시점 최저음 MIDI |
+| `highMidi` | int | not null, 12~119, ≥ lowMidi | 측정 시점 최고음 MIDI |
+| `sourceMethod` | enum `VoiceRangeSourceMethod` | not null | `SELF_REPORT` / `OCTAVE_PICK` / `MIC_MEASURE` — VoiceRange 와 동일 enum 재사용 |
+| `measuredAt` | LocalDateTime | not null | 측정/insert 시각 |
+
+- 인덱스: `(session_id, measured_at)` — 시계열 조회 정렬용.
+- 도메인 메서드: `static create(...)`, `static fromVoiceRange(VoiceRange)` (편의 팩토리).
+- Repository: `findBySessionIdOrderByMeasuredAtDesc(sessionId)`, `findBySessionIdOrderByMeasuredAtAsc(sessionId)`.
+- update 메서드 없음 (불변).
+
 ## 6) Mermaid ERD
 
 ```mermaid
@@ -203,15 +222,25 @@ erDiagram
         datetime created_at
     }
 
+    VOICE_RANGE_SNAPSHOT {
+        bigint id PK
+        varchar session_id
+        int low_midi
+        int high_midi
+        varchar source_method
+        datetime measured_at
+    }
+
     SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION_REQUEST_EXCLUDE_SONG : "excludeSongIds (@ElementCollection)"
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
     SONG ||--o{ LIKE_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
     SONG ||--o{ BOOKMARK_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
+    VOICE_RANGE ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId로 join (FK 없음, insert-only 시계열)"
 ```
 
-- 현재 구현: `VoiceRange`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark` — 6개 엔티티.
+- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark` — 7개 엔티티.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join.
 
 ## 7) 오픈 이슈

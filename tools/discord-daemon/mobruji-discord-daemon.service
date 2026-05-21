@@ -2,6 +2,12 @@
 Description=mobruji Discord bot daemon
 After=network-online.target
 Wants=network-online.target
+# 무한 재시작 루프 방어 — 5분(300s) 안에 5회 재시작 실패 시 unit 을 stop 한다.
+# rev 15 #225: systemd 디폴트는 10s/5 로 RestartSec=10 과 결합 시 윈도우가 짧아
+# 일시적 네트워크/디스코드 장애에도 빠르게 dead 상태로 빠질 수 있어 윈도우를 늘렸다.
+# 참고: StartLimitIntervalSec/StartLimitBurst 는 [Unit] 섹션에 둔다 (systemd 229+).
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

@@ -86,8 +86,13 @@ class RecommendationPropertiesValidationTest {
                 "recommendation.weights.genre=0.2",
                 "recommendation.weights.mood=0.2",
                 "recommendation.weights.popularity=0.1",
+                "recommendation.weights.tempo-match=0.1",
                 "recommendation.diversity.max-same-artist=2",
                 "recommendation.diversity.max-same-genre=4",
+                "recommendation.tempo.distance-tolerance=40",
+                "recommendation.tempo.mood-default-bpm.UPBEAT=128",
+                "recommendation.tempo.mood-default-bpm.CALM=70",
+                "recommendation.tempo.fallback-bpm=110",
                 "recommendation.result-count=10",
                 "recommendation.jitter-magnitude=0.01",
                 "recommendation.seed-strategy=derived"
