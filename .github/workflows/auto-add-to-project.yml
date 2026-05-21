@@ -17,9 +17,12 @@ jobs:
   add:
     runs-on: ubuntu-22.04
     if: vars.PROJECT_URL != ''
+    # User-owned project은 github.token으로 add 불가. PROJECT_TOKEN PAT 없으면 graceful fail.
+    continue-on-error: true
     steps:
       - name: Add to project
         uses: actions/add-to-project@v1.0.2
+        continue-on-error: true
         with:
           project-url: ${{ vars.PROJECT_URL }}
           github-token: ${{ secrets.PROJECT_TOKEN || github.token }}

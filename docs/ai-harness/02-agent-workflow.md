@@ -169,7 +169,7 @@ gh release create vX.Y.Z --generate-notes
 - spec(`docs/features/*.md`)의 결정 로그 충돌 → 사람이 합의 결정 후 다시 spec 갱신 PR.
 - `.github/workflows/session-collision-check.yml`이 PR 열릴 때 자동으로 다른 open PR과의 파일 겹침을 검출해 코멘트로 경고.
 
-### 10-6) 다중 세션 실행 룬북
+### 10-6) 다중 세션 실행 런북
 구체 셋업·운영 명령은 [`docs/ai-harness/11-multi-session-runbook.md`](./11-multi-session-runbook.md)에 있다. 워크트리 생성, 라벨, 새 브랜치 시작 스크립트, 리뷰 세션 트리거, Projects v2 보드 연동까지 포함.
 
 ### 10-7) 동기화 채널
