@@ -26,6 +26,7 @@ import userEvent from "@testing-library/user-event";
 import VoiceRangePage from "./page";
 import { ApiError } from "@/lib/api/client";
 import { createVoiceRange } from "@/lib/api/voice-range";
+import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 // vi.hoisted: vi.mock factory가 hoisting되므로 mock이 참조하는 식별자도 hoisting되어야 한다.
 // async hoisted + dynamic import로 vite alias("@/...")를 그대로 사용한다.
@@ -198,5 +199,31 @@ describe("VoiceRangePage 제출 흐름", () => {
     expect(submit).toBeDisabled();
     await user.click(submit);
     expect(createVoiceRangeMock).not.toHaveBeenCalled();
+  });
+});
+
+// closes #107 — 음역대 입력 페이지는 49개 옵션 select 2개 + 폼 라벨 + submit 버튼이
+// 핵심 a11y 위험 영역. 정상 상태와 validation 에러 상태 둘 다 검사한다.
+describe("VoiceRangePage a11y", () => {
+  it("초기 렌더 상태에 a11y 위반이 없다", async () => {
+    const { container } = renderWithQueryClient(<VoiceRangePage />);
+    await expectNoA11yViolations(container);
+  });
+
+  it("validation 에러 메시지 노출 상태에도 a11y 위반이 없다", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
+
+    expect(
+      screen.getByText(/최저음은 최고음보다 같거나 낮아야 합니다/),
+    ).toBeInTheDocument();
+
+    await expectNoA11yViolations(container);
   });
 });

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 import { SongCard } from "./SongCard";
+import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 
 function buildItem(
@@ -121,5 +122,49 @@ describe("SongCard", () => {
     // 카드 내용은 그대로 보여야 한다.
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("#1")).toBeInTheDocument();
+  });
+
+  // closes #107 — axe-core 자동 검사. serious/critical 위반이 없어야 한다.
+  // SongCard는 다양한 prop 조합으로 렌더되므로 대표 케이스 4종을 모두 검사.
+  describe("a11y", () => {
+    it("추천 컨텍스트 카드는 a11y 위반이 없다 (item + difficulty)", async () => {
+      const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
+      const { container } = render(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      await expectNoA11yViolations(container);
+    });
+
+    it("검색 컨텍스트 카드는 a11y 위반이 없다 (song prop)", async () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      const { container } = render(
+        <ul>
+          <SongCard song={item.song} />
+        </ul>,
+      );
+      await expectNoA11yViolations(container);
+    });
+
+    it("href 링크 카드는 a11y 위반이 없다", async () => {
+      const item = buildItem({ difficulty: "EASY" });
+      const { container } = render(
+        <ul>
+          <SongCard item={item} href="/songs/1" />
+        </ul>,
+      );
+      await expectNoA11yViolations(container);
+    });
+
+    it("난이도 정보가 없는 카드도 a11y 위반이 없다", async () => {
+      const item = buildItem();
+      const { container } = render(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      await expectNoA11yViolations(container);
+    });
   });
 });

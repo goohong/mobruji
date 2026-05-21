@@ -21,6 +21,7 @@ import userEvent from "@testing-library/user-event";
 
 import SongSearchPage from "./page";
 import { searchSongs } from "@/lib/api/song";
+import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 vi.mock("@/lib/api/song", async () => {
   const actual =
@@ -185,5 +186,71 @@ describe("SongSearchPage", () => {
       expect(screen.queryByText("쉬운 곡")).not.toBeInTheDocument();
     });
     expect(screen.getByText("어려운 곡")).toBeInTheDocument();
+  });
+
+  // closes #107 — 검색 페이지는 search input, 난이도 필터 칩(aria-pressed),
+  // 결과 카드 리스트, 빈 결과 fallback이 한 화면에 공존. 각 상태별 a11y 검사.
+  describe("a11y", () => {
+    it("초기(검색어 미입력) 상태에 a11y 위반이 없다", async () => {
+      const { container } = renderWithQueryClient(<SongSearchPage />);
+      await expectNoA11yViolations(container);
+    });
+
+    it("검색 결과 카드 렌더 상태에 a11y 위반이 없다", async () => {
+      const user = userEvent.setup();
+      searchSongsMock.mockResolvedValueOnce([
+        {
+          id: 1,
+          title: "a11y 곡",
+          artist: "Tester",
+          releaseYear: 2024,
+          keyOriginal: "C_MAJOR",
+          bpm: 100,
+          mood: "UPBEAT",
+          language: "ko",
+          genre: "POP",
+          tjNumber: null,
+          kyNumber: null,
+          metadataSource: "MANUAL_SEED",
+          lowMidi: 48,
+          highMidi: 70,
+        },
+      ]);
+
+      const { container } = renderWithQueryClient(<SongSearchPage />);
+      await user.type(
+        screen.getByPlaceholderText("곡 제목이나 아티스트로 검색"),
+        "a11y",
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByText("a11y 곡")).toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("'검색 결과 없음' fallback 상태에 a11y 위반이 없다", async () => {
+      const user = userEvent.setup();
+      searchSongsMock.mockResolvedValueOnce([]);
+
+      const { container } = renderWithQueryClient(<SongSearchPage />);
+      await user.type(
+        screen.getByPlaceholderText("곡 제목이나 아티스트로 검색"),
+        "zzz",
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/검색 결과 없음/)).toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+
+      await expectNoA11yViolations(container);
+    });
   });
 });
