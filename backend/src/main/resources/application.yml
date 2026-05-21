@@ -23,3 +23,21 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# 추천 v1 점수 가중치 / 다양성 캡 / 결과 개수.
+# spec: docs/features/recommendation-algorithm-v1.md §9
+# - voiceFit 0.5: 음역 적합이 1순위
+# - genre 0.2:    v1에서 입력 신호 없음(가중치만 보존)
+# - mood 0.2:     분위기 일치 가산
+# - popularity 0.1: 모든 곡 popularity=1.0 (시드에 컬럼 없음) → 동일 가산
+recommendation:
+  weights:
+    voice-fit: 0.5
+    genre: 0.2
+    mood: 0.2
+    popularity: 0.1
+  diversity:
+    max-same-artist: 2
+    max-same-genre: 4
+  result-count: 10
+  jitter-magnitude: 0.01

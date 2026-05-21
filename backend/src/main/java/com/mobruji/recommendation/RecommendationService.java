@@ -25,13 +25,12 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RecommendationService {
 
-    public static final int DEFAULT_RESULT_COUNT = 10;
-    public static final int MAX_SAME_ARTIST = 2;
-    public static final int MAX_SAME_GENRE = 4;
-
     private final RecommendationRequestRepository recommendationRequestRepository;
     private final RecommendationRepository recommendationRepository;
     private final SongRepository songRepository;
+    private final RecommendationScorer recommendationScorer;
+    private final DiversityPostProcessor diversityPostProcessor;
+    private final RecommendationProperties recommendationProperties;
 
     public RecommendationResponse create(final RecommendationCreateRequest recommendationCreateRequest) {
         final RecommendationRequestEntity savedRequest = recommendationRequestRepository.save(
@@ -45,7 +44,7 @@ public class RecommendationService {
         final Random random = new Random();
         final List<ScoredSong> scoredSongs = allSongs.stream()
                 .map(song -> {
-                    final ScoreBreakdown breakdown = RecommendationScorer.score(
+                    final ScoreBreakdown breakdown = recommendationScorer.score(
                             song,
                             savedRequest.getVoiceRangeLow(),
                             savedRequest.getVoiceRangeHigh(),
@@ -56,7 +55,8 @@ public class RecommendationService {
                 .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.breakdown.total()).reversed())
                 .toList();
 
-        final List<ScoredSong> diversified = applyDiversity(scoredSongs, DEFAULT_RESULT_COUNT);
+        final int resultCount = recommendationProperties.resultCount();
+        final List<ScoredSong> diversified = diversityPostProcessor.apply(scoredSongs, resultCount);
 
         final List<Recommendation> persisted = new ArrayList<>();
         for (int i = 0; i < diversified.size(); i++) {
@@ -93,31 +93,6 @@ public class RecommendationService {
                         recommendation.getRankPosition()))
                 .toList();
         return new RecommendationResponse(savedRequest.getId(), recommendations);
-    }
-
-    static List<ScoredSong> applyDiversity(final List<ScoredSong> sorted, final int resultCount) {
-        final List<ScoredSong> output = new ArrayList<>();
-        final Map<String, Integer> artistCount = new HashMap<>();
-        final Map<String, Integer> genreCount = new HashMap<>();
-        for (final ScoredSong candidate : sorted) {
-            if (output.size() >= resultCount) {
-                break;
-            }
-            final String artist = candidate.song.getArtist();
-            final String genre = candidate.song.getGenre() == null ? "" : candidate.song.getGenre();
-            if (artistCount.getOrDefault(artist, 0) >= MAX_SAME_ARTIST) {
-                continue;
-            }
-            if (!genre.isEmpty() && genreCount.getOrDefault(genre, 0) >= MAX_SAME_GENRE) {
-                continue;
-            }
-            output.add(candidate);
-            artistCount.merge(artist, 1, Integer::sum);
-            if (!genre.isEmpty()) {
-                genreCount.merge(genre, 1, Integer::sum);
-            }
-        }
-        return output;
     }
 
     private RecommendationResponse toResponse(
