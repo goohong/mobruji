@@ -68,7 +68,7 @@ class RecommendationIntegrationTest {
                 }
                 """;
 
-        // POST → 201
+        // POST → 201. breakdown 5신호도 함께 노출 (spec #145 Spotify "Why this song?" UX)
         final Integer requestId = given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body(createBody)
@@ -81,9 +81,15 @@ class RecommendationIntegrationTest {
                 .body("recommendations.size()", lessThanOrEqualTo(10))
                 .body("recommendations[0].rankPosition", equalTo(1))
                 .body("recommendations[0].matchReason", notNullValue())
+                .body("recommendations[0].breakdown", notNullValue())
+                .body("recommendations[0].breakdown.keyMatch", notNullValue())
+                .body("recommendations[0].breakdown.rangeFit", notNullValue())
+                .body("recommendations[0].breakdown.genreMatch", notNullValue())
+                .body("recommendations[0].breakdown.moodMatch", notNullValue())
+                .body("recommendations[0].breakdown.popularity", notNullValue())
                 .extract().path("requestId");
 
-        // GET 재조회 → 동일
+        // GET 재조회 → 동일. 영속 엔티티에 breakdown 컬럼이 없으므로 재조회 경로의 breakdown은 null로 노출된다.
         given()
                 .when()
                 .get("/api/v1/recommendations/" + requestId)

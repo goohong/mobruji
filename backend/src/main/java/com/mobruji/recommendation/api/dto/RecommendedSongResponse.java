@@ -7,7 +7,8 @@ public record RecommendedSongResponse(
         SongResponse song,
         double score,
         String matchReason,
-        int rankPosition
+        int rankPosition,
+        ScoreBreakdownResponse breakdown
 ) {
 
     public static RecommendedSongResponse from(final ScoredRecommendation scoredRecommendation) {
@@ -15,6 +16,7 @@ public record RecommendedSongResponse(
                 SongResponse.from(scoredRecommendation.song()),
                 scoredRecommendation.score(),
                 scoredRecommendation.matchReason(),
-                scoredRecommendation.rankPosition());
+                scoredRecommendation.rankPosition(),
+                ScoreBreakdownResponse.from(scoredRecommendation.breakdown()));
     }
 }

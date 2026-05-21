@@ -13,7 +13,7 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.mobruji.recommendation.application.RecommendationScorer.ScoreBreakdown;
+import com.mobruji.recommendation.application.RecommendationScorer.Scored;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
 
@@ -65,15 +65,15 @@ public class RecommendationService {
         final Random random = buildRandom(savedRequest, excludeSongIds);
         final List<ScoredSong> scoredSongs = candidates.stream()
                 .map(song -> {
-                    final ScoreBreakdown breakdown = recommendationScorer.score(
+                    final Scored scored = recommendationScorer.score(
                             song,
                             savedRequest.getVoiceRangeLow(),
                             savedRequest.getVoiceRangeHigh(),
                             savedRequest.getMood(),
                             random);
-                    return new ScoredSong(song, breakdown);
+                    return new ScoredSong(song, scored);
                 })
-                .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.breakdown.total()).reversed())
+                .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.scored.total()).reversed())
                 .toList();
 
         final int resultCount = recommendationProperties.resultCount();
@@ -82,19 +82,20 @@ public class RecommendationService {
         final List<ScoredRecommendation> recommendations = new ArrayList<>();
         for (int i = 0; i < diversified.size(); i++) {
             final ScoredSong scoredSong = diversified.get(i);
-            final String matchReason = scoredSong.breakdown.toMatchReason(scoredSong.song, savedRequest.getMood());
+            final String matchReason = scoredSong.scored.toMatchReason(scoredSong.song, savedRequest.getMood());
             final int rankPosition = i + 1;
             recommendationRepository.save(Recommendation.create(
                     savedRequest.getId(),
                     scoredSong.song.getId(),
-                    scoredSong.breakdown.total(),
+                    scoredSong.scored.total(),
                     matchReason,
                     rankPosition));
             recommendations.add(new ScoredRecommendation(
                     scoredSong.song,
-                    scoredSong.breakdown.total(),
+                    scoredSong.scored.total(),
                     matchReason,
-                    rankPosition));
+                    rankPosition,
+                    scoredSong.scored.breakdown()));
         }
 
         return new RecommendationResult(savedRequest.getId(), recommendations);
@@ -145,6 +146,6 @@ public class RecommendationService {
         return new Random(seed);
     }
 
-    record ScoredSong(Song song, ScoreBreakdown breakdown) {
+    record ScoredSong(Song song, Scored scored) {
     }
 }
