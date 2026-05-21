@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
+import com.mobruji.voice.application.CreateVoiceRangeCommand;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 
 public record VoiceRangeCreateRequest(
@@ -13,4 +14,8 @@ public record VoiceRangeCreateRequest(
         @NotNull @Min(12) @Max(119) Integer highestNoteMidi,
         @NotNull VoiceRangeSourceMethod sourceMethod
 ) {
+
+    public CreateVoiceRangeCommand toCommand() {
+        return new CreateVoiceRangeCommand(sessionId, lowestNoteMidi, highestNoteMidi, sourceMethod);
+    }
 }

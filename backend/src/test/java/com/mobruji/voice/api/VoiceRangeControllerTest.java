@@ -10,8 +10,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
-
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,10 +21,12 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
-import com.mobruji.voice.api.dto.VoiceRangeResponse;
 import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
 
+import com.mobruji.voice.application.CreateVoiceRangeCommand;
+import com.mobruji.voice.application.UpdateVoiceRangeCommand;
 import com.mobruji.voice.application.VoiceRangeService;
+import com.mobruji.voice.domain.VoiceRange;
 import com.mobruji.voice.domain.VoiceRangeNotFoundException;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 
@@ -49,10 +49,8 @@ class VoiceRangeControllerTest {
         // given
         final VoiceRangeCreateRequest request = new VoiceRangeCreateRequest(
                 "s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
-        final LocalDateTime now = LocalDateTime.now();
-        final VoiceRangeResponse response = new VoiceRangeResponse(
-                1L, "s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK, now, now);
-        given(voiceRangeService.createOrReplace(any(VoiceRangeCreateRequest.class))).willReturn(response);
+        final VoiceRange voiceRange = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
+        given(voiceRangeService.createOrReplace(any(CreateVoiceRangeCommand.class))).willReturn(voiceRange);
 
         // when / then
         mockMvc.perform(post("/api/v1/voice-ranges")
@@ -79,10 +77,8 @@ class VoiceRangeControllerTest {
     @DisplayName("GET /api/v1/voice-ranges/{sessionId}: 200 + 응답 바디")
     void read_returns200() throws Exception {
         // given
-        final LocalDateTime now = LocalDateTime.now();
-        final VoiceRangeResponse response = new VoiceRangeResponse(
-                1L, "s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK, now, now);
-        given(voiceRangeService.readBySessionId("s")).willReturn(response);
+        final VoiceRange voiceRange = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
+        given(voiceRangeService.readBySessionId("s")).willReturn(voiceRange);
 
         // when / then
         mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "s"))
@@ -106,11 +102,9 @@ class VoiceRangeControllerTest {
         // given
         final VoiceRangeUpdateRequest request = new VoiceRangeUpdateRequest(
                 50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
-        final LocalDateTime now = LocalDateTime.now();
-        final VoiceRangeResponse response = new VoiceRangeResponse(
-                1L, "s", 50, 72, VoiceRangeSourceMethod.MIC_MEASURE, now, now);
-        given(voiceRangeService.updateBySessionId(eq("s"), any(VoiceRangeUpdateRequest.class)))
-                .willReturn(response);
+        final VoiceRange voiceRange = VoiceRange.create("s", 50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
+        given(voiceRangeService.updateBySessionId(eq("s"), any(UpdateVoiceRangeCommand.class)))
+                .willReturn(voiceRange);
 
         // when / then
         mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "s")

@@ -23,11 +23,13 @@ public class SongController {
 
     @GetMapping("/{id}")
     public SongResponse read(@PathVariable final Long id) {
-        return songService.readById(id);
+        return SongResponse.from(songService.readById(id));
     }
 
     @GetMapping
     public List<SongResponse> search(@RequestParam(name = "keyword", required = false) final String keyword) {
-        return songService.searchByKeyword(keyword);
+        return songService.searchByKeyword(keyword).stream()
+                .map(SongResponse::from)
+                .toList();
     }
 }

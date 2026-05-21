@@ -3,10 +3,6 @@ package com.mobruji.voice.application;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
-import com.mobruji.voice.api.dto.VoiceRangeResponse;
-import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
-
 import lombok.RequiredArgsConstructor;
 
 import com.mobruji.voice.domain.VoiceRange;
@@ -20,40 +16,38 @@ public class VoiceRangeService {
 
     private final VoiceRangeRepository voiceRangeRepository;
 
-    public VoiceRangeResponse createOrReplace(final VoiceRangeCreateRequest voiceRangeCreateRequest) {
-        final VoiceRange voiceRange = voiceRangeRepository
-                .findBySessionId(voiceRangeCreateRequest.sessionId())
+    public VoiceRange createOrReplace(final CreateVoiceRangeCommand createVoiceRangeCommand) {
+        return voiceRangeRepository
+                .findBySessionId(createVoiceRangeCommand.sessionId())
                 .map(existing -> {
                     existing.updateRange(
-                            voiceRangeCreateRequest.lowestNoteMidi(),
-                            voiceRangeCreateRequest.highestNoteMidi(),
-                            voiceRangeCreateRequest.sourceMethod());
+                            createVoiceRangeCommand.lowestNoteMidi(),
+                            createVoiceRangeCommand.highestNoteMidi(),
+                            createVoiceRangeCommand.sourceMethod());
                     return existing;
                 })
                 .orElseGet(() -> voiceRangeRepository.save(VoiceRange.create(
-                        voiceRangeCreateRequest.sessionId(),
-                        voiceRangeCreateRequest.lowestNoteMidi(),
-                        voiceRangeCreateRequest.highestNoteMidi(),
-                        voiceRangeCreateRequest.sourceMethod())));
-        return VoiceRangeResponse.from(voiceRange);
+                        createVoiceRangeCommand.sessionId(),
+                        createVoiceRangeCommand.lowestNoteMidi(),
+                        createVoiceRangeCommand.highestNoteMidi(),
+                        createVoiceRangeCommand.sourceMethod())));
     }
 
     @Transactional(readOnly = true)
-    public VoiceRangeResponse readBySessionId(final String sessionId) {
+    public VoiceRange readBySessionId(final String sessionId) {
         return voiceRangeRepository.findBySessionId(sessionId)
-                .map(VoiceRangeResponse::from)
                 .orElseThrow(() -> new VoiceRangeNotFoundException(sessionId));
     }
 
-    public VoiceRangeResponse updateBySessionId(
+    public VoiceRange updateBySessionId(
             final String sessionId,
-            final VoiceRangeUpdateRequest voiceRangeUpdateRequest) {
+            final UpdateVoiceRangeCommand updateVoiceRangeCommand) {
         final VoiceRange voiceRange = voiceRangeRepository.findBySessionId(sessionId)
                 .orElseThrow(() -> new VoiceRangeNotFoundException(sessionId));
         voiceRange.updateRange(
-                voiceRangeUpdateRequest.lowestNoteMidi(),
-                voiceRangeUpdateRequest.highestNoteMidi(),
-                voiceRangeUpdateRequest.sourceMethod());
-        return VoiceRangeResponse.from(voiceRange);
+                updateVoiceRangeCommand.lowestNoteMidi(),
+                updateVoiceRangeCommand.highestNoteMidi(),
+                updateVoiceRangeCommand.sourceMethod());
+        return voiceRange;
     }
 }
