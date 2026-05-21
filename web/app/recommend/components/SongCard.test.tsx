@@ -107,4 +107,19 @@ describe("SongCard", () => {
     expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
     expect(screen.queryByText("#1")).not.toBeInTheDocument();
   });
+
+  // closes #100 — href가 주어지면 카드 전체가 곡 상세 페이지로 가는 링크가 된다.
+  it("href가 주어지면 카드 전체를 상세 페이지 링크로 감싼다", () => {
+    const item = buildItem({ difficulty: "NORMAL" });
+    render(
+      <ul>
+        <SongCard item={item} href="/songs/1" />
+      </ul>,
+    );
+    const link = screen.getByRole("link", { name: /테스트 곡 상세 보기/ });
+    expect(link).toHaveAttribute("href", "/songs/1");
+    // 카드 내용은 그대로 보여야 한다.
+    expect(screen.getByText("테스트 곡")).toBeInTheDocument();
+    expect(screen.getByText("#1")).toBeInTheDocument();
+  });
 });

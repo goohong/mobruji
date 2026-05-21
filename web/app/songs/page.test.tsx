@@ -101,6 +101,10 @@ describe("SongSearchPage", () => {
       expect(screen.getByText("Hello")).toBeInTheDocument();
     });
     expect(screen.getByText("Adele")).toBeInTheDocument();
+    // closes #100 — 검색 카드는 곡 상세 페이지로 가는 링크가 되어야 한다.
+    expect(
+      screen.getByRole("link", { name: /Hello 상세 보기/ }),
+    ).toHaveAttribute("href", "/songs/1");
   });
 
   it("응답이 빈 배열이면 '검색 결과 없음' fallback을 노출한다", async () => {

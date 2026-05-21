@@ -230,7 +230,7 @@ function SearchResult({
   return (
     <ul aria-label="검색 결과" className="flex flex-col gap-3">
       {songs.map((song) => (
-        <SongCard key={song.id} song={song} />
+        <SongCard key={song.id} song={song} href={`/songs/${song.id}`} />
       ))}
     </ul>
   );
