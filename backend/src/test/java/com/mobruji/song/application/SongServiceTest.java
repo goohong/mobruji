@@ -14,8 +14,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.mobruji.song.api.dto.SongResponse;
-
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
@@ -32,8 +30,8 @@ class SongServiceTest {
     private SongService songService;
 
     @Test
-    @DisplayName("readById: 존재하면 응답 반환")
-    void readById_found_returnsResponse() {
+    @DisplayName("readById: 존재하면 도메인 객체 반환")
+    void readById_found_returnsSong() {
         // given
         final Song song = Song.builder()
                 .title("t").artist("a")
@@ -43,10 +41,10 @@ class SongServiceTest {
         given(songRepository.findById(1L)).willReturn(Optional.of(song));
 
         // when
-        final SongResponse songResponse = songService.readById(1L);
+        final Song readSong = songService.readById(1L);
 
         // then
-        assertThat(songResponse.title()).isEqualTo("t");
+        assertThat(readSong.getTitle()).isEqualTo("t");
     }
 
     @Test
@@ -68,8 +66,8 @@ class SongServiceTest {
     }
 
     @Test
-    @DisplayName("searchByKeyword: 유효 키워드면 매핑된 응답 리스트 반환")
-    void searchByKeyword_valid_returnsResponses() {
+    @DisplayName("searchByKeyword: 유효 키워드면 매핑된 도메인 리스트 반환")
+    void searchByKeyword_valid_returnsSongs() {
         final Song song = Song.builder()
                 .title("벚꽃 엔딩").artist("버스커 버스커")
                 .keyOriginal(MusicalKey.A_MAJOR)
@@ -77,9 +75,9 @@ class SongServiceTest {
                 .build();
         given(songRepository.searchByKeyword("벚꽃")).willReturn(List.of(song));
 
-        final List<SongResponse> songResponses = songService.searchByKeyword("벚꽃");
+        final List<Song> songs = songService.searchByKeyword("벚꽃");
 
-        assertThat(songResponses).hasSize(1);
-        assertThat(songResponses.get(0).title()).isEqualTo("벚꽃 엔딩");
+        assertThat(songs).hasSize(1);
+        assertThat(songs.get(0).getTitle()).isEqualTo("벚꽃 엔딩");
     }
 }

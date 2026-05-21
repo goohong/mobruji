@@ -92,6 +92,10 @@ idle 룰 적용 기준:
   ```
 - 사용자 부재 시: 사용자가 돌아오기 전까지 본진이 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
 
+### 0-6-1) 본진 닫혀있을 때 모바일 모니터링
+
+본진 Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
+
 ### 0-7) 사이클 완료 후 워크트리 정리
 
 PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 본진은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
@@ -105,6 +109,57 @@ PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 본진은 다음을 호출�
 - 본진에서 `origin/develop`에 머지된 로컬 branch 일괄 삭제 (develop/main 제외, 다른 워크트리 사용 중인 branch는 skip)
 
 수동으로 본진에서 `git -C ../mobruji-be reset --hard origin/develop` 호출하던 패턴을 대체한다. 사이클 종료 직후 1번만 호출하면 다음 사이클을 clean 상태에서 시작할 수 있다.
+
+#### 옵션
+
+```
+Usage: post-merge-cleanup.sh [--force]
+  --force: dirty 워크트리도 강제 reset (작업 분실 위험)
+```
+
+- **기본 (안전)**: 워크트리가 dirty(unstaged/staged 변경 또는 untracked 파일)면 detach를 skip + 경고. 사람이 직접 정리.
+- **`--force`**: dirty 무시하고 `git reset --hard origin/develop` + `git clean -fd`로 강제 reset. **stash되지 않은 변경은 영구 손실**. 본진이 명시적 결정 후에만 사용.
+
+본진이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
+
+### 0-8) 통지 우선 처리
+
+본진은 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
+
+처리 순서:
+1. 결과 보고 — 사용자에게 한두 줄로 요약 (PR 번호 + mergeable 상태 정도)
+2. rev 코멘트 자동 등록 — §0-9 절차 따라 이슈 등록 (rev 완료 통지일 때만)
+3. 다음 sub-agent scaffold + launch — 백로그가 살아있으면 즉시
+4. 자기 작업으로 복귀 — 컨텍스트 회복 후 멈춘 지점에서 계속
+
+본진 작업은 **호흡당 1~2 도구 호출** 단위로 쪼갠다. 긴 단위로 묶으면 통지 도착해도 처리 지연이 늘어난다.
+
+통지 동시 도착 시 우선순위:
+1. 🔴 발견 (spec/비기능 위반) — 즉시 다음 사이클 fix 트리거 결정 필요
+2. release / `develop → main` 머지 결정 — 사용자 컨펌 대기
+3. 일반 보고 (✅ OK, 🟡 개선)
+
+### 0-9) rev 코멘트 자동 등록
+
+rev sub-agent 완료 통지를 받으면 본진은 발견 항목을 **GitHub 이슈로 자동 등록**한다. 사용자가 일일이 트리아지하지 않아도 다음 사이클 백로그가 자동으로 쌓이는 구조.
+
+분류 기준:
+- 🔴 **spec/비기능 위반** — 각각 **단독 이슈**로 등록. 같은 사이클에 다음 be/fe sub-agent로 즉시 fix 트리거 가능한 것은 1~2건 한정.
+- 🟡 **개선/drift/nit** — **PR 단위 묶음 1개 이슈**. 7건 이상이면 우선순위 상위만 등록 + 나머지는 `backlog` 라벨로 stash.
+- 🟢 **OK / 합격** — 등록하지 않는다.
+
+이슈 본문 필수 포함:
+- rev 코멘트 URL 인용 (`gh pr view <N> --comments`로 확인)
+- 영향 받는 spec/스코프 (`docs/features/*.md` 또는 ADR 번호)
+- 추정 작업 시간 (sub-agent 1사이클 안에 끝낼 수 있는지)
+
+라벨:
+- 🔴 → `type:fix` + 해당 `scope:*` + `session:backend|frontend` 후보
+- 🟡 묶음 → `type:refactor` 또는 `type:chore` + `backlog`
+
+가장 시급한 🔴은 같은 사이클에 다음 be/fe sub-agent로 **즉시 트리거**. 묶음 처리하면 회귀 누적되니 spec 위반은 핫라인 처리.
+
+누적 패턴/메타 인사이트(예: "최근 5사이클 연속 같은 final 누락 패턴")는 **별 docs PR 후보**로 따로 모은다. 이슈 등록과 docs promote는 분리.
 
 ## 1) 셋업 (최초 1회)
 
@@ -206,8 +261,38 @@ gh project item-add 5 --owner goohong --url https://github.com/goohong/mobruji/p
 
 #### Status / Session 필드 운영
 - 기본 `Status`: Todo / In Progress / Done. UI에서 칸반 보드로 자동 표시.
-- `Session` 필드: 새 PR을 보드에 add 후 backend/frontend/review/infra/release 중 하나로 설정.
-- 자동 전이: 별 워크플로우 없음. 사람이 UI에서 드래그하거나 `gh project item-edit`로 갱신.
+- `Session` 필드: backend / frontend / review / infra / release 중 하나로 분류.
+- 자동 전이:
+  - `Status`는 `auto-update-project-status.yml`이 PR ready/draft/issue reopen 이벤트로 전이.
+  - `Session`은 `auto-set-session-on-project.yml`이 PR/이슈 open/reopen/labeled 이벤트로 분류 시도.
+
+##### auto-set-session 매핑 룰
+신규 PR/이슈가 보드에 add되면 (`auto-add-to-project.yml`이 먼저 add) workflow가 다음 순서로 Session을 자동 설정한다:
+
+1. `session:backend|frontend|review` 라벨이 있으면 그 값 (rev 세션이 이슈 등록 시 명시하는 패턴 우선).
+2. 라벨이 없으면 폴백:
+   - PR 제목이 `release:`로 시작 → `release`
+   - 라벨 `scope:web` → `frontend`
+   - 라벨 `scope:song|voice|recommendation` → `backend`
+   - 라벨 `scope:infra` → `infra`
+3. 위 어느 룰에도 걸리지 않으면 Session은 빈 상태로 둔다(manual 분류 필요).
+
+PROJECT_TOKEN secret 미설정 시 graceful skip한다(`auto-add-to-project.yml`와 동일 패턴). 즉 보드 셋업 전이거나 토큰을 회수해도 workflow는 살아 있다.
+
+##### 수동 분류가 필요한 경우
+auto-set-session이 매핑에 실패해 Session 필드가 비어 있는 카드는 보드 UI에서 직접 옵션을 선택하거나 다음 명령으로 갱신:
+
+```bash
+gh project item-edit \
+  --project-id PVT_kwHOBRYNe84BYVlg \
+  --field-id PVTSSF_lAHOBRYNe84BYVlgzhTcJwU \
+  --id <project-item-id> \
+  --single-select-option-id <option-id>
+```
+
+옵션 ID: backend `aabcec2d`, frontend `0c6191d7`, review `bf8ab92d`, infra `c697cb09`, release `41252f0d`.
+
+`<project-item-id>`는 `gh api graphql` projectItems 쿼리 또는 UI의 카드 상세에서 확인. 일반적으로는 적절한 `session:*` 또는 `scope:*` 라벨을 PR/이슈에 부여하면 workflow가 다시 트리거되어 자동 분류된다(라벨 추가 → labeled 이벤트). 라벨로 표현 가능한 케이스는 라벨을 먼저 시도하고, 표현 불가한 경우만 직접 옵션 설정으로 처리한다.
 
 ### 1-5) rev 세션 push 차단 hook 설치
 

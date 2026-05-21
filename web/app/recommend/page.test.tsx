@@ -33,14 +33,31 @@ import { readVoiceRange } from "@/lib/api/voice-range";
 import { createRecommendation } from "@/lib/api/recommendation";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
-const { sessionMock } = await vi.hoisted(async () => {
-  const helper = await import("@/lib/test-helpers/mock-session-store");
-  return { sessionMock: helper.buildSessionStoreMock() };
+const { sessionMock, historyMock } = await vi.hoisted(async () => {
+  const sessionHelper = await import(
+    "@/lib/test-helpers/mock-session-store"
+  );
+  const historyHelper = await import(
+    "@/lib/test-helpers/mock-history-store"
+  );
+  return {
+    sessionMock: sessionHelper.buildSessionStoreMock(),
+    historyMock: historyHelper.buildHistoryStoreMock(),
+  };
 });
 
 vi.mock("@/store/session", () => ({
   useSessionStore: sessionMock.useSessionStore,
 }));
+
+vi.mock("@/store/history", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/store/history")>("@/store/history");
+  return {
+    ...actual,
+    useHistoryStore: historyMock.useHistoryStore,
+  };
+});
 
 vi.mock("@/lib/api/voice-range", async () => {
   const actual =
@@ -83,6 +100,7 @@ function renderWithQueryClient(ui: ReactNode) {
 
 beforeEach(() => {
   sessionMock.reset();
+  historyMock.reset();
   readVoiceRangeMock.mockReset();
   createRecommendationMock.mockReset();
 });
@@ -517,6 +535,46 @@ describe("RecommendPage", () => {
       voiceRangeHigh: 72,
       excludeSongIds: [100, 200, 300, 400],
     });
+  });
+
+  // closes #134 — 추천 응답이 성공하면 히스토리 store 에 push 된다.
+  it("추천 응답이 비어있지 않으면 history.appendRecommendation 이 호출된다", async () => {
+    sessionMock.set({ sessionId: "sess-hist", voiceRangeId: 77 });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 77,
+      sessionId: "sess-hist",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValueOnce(
+      buildRecommendationResponse(555, "히스토리 곡"),
+    );
+
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("히스토리 곡")).toBeInTheDocument();
+    });
+
+    const append = historyMock.state().appendRecommendation as ReturnType<
+      typeof vi.fn
+    >;
+    expect(append).toHaveBeenCalledTimes(1);
+    const callArg = append.mock.calls[0][0] as {
+      requestId: number;
+      voiceRangeId: number | null;
+      songs: { song: { id: number } }[];
+      excludedSongIds: number[];
+    };
+    expect(callArg.requestId).toBe(555);
+    expect(callArg.voiceRangeId).toBe(77);
+    expect(callArg.songs).toHaveLength(1);
+    expect(callArg.songs[0].song.id).toBe(555);
+    expect(callArg.excludedSongIds).toEqual([]);
   });
 
   // closes #107 — 추천 결과 페이지는 NoSession fallback, 카드 리스트, 빈 결과 fallback

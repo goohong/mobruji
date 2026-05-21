@@ -3,10 +3,15 @@ name: Auto Label PR
 # PR 제목 `type(scope):` prefix에서 type:* / scope:* 라벨 자동 부여.
 # 커밋 trailer에서 Co-Authored-By: Claude / OpenAI Codex 감지해 ai:* 라벨 추가.
 # 보호 영역 파일 변경 시 needs-human-review 라벨 추가.
+#
+# 보호 영역 라벨 가드 (#124):
+# - 트리거에 reopened / ready_for_review / unlabeled 추가 — draft → ready, 라벨 수동 제거 시에도 재평가.
+# - 보호 영역 파일이 변경된 PR에서 needs-human-review가 부착되지 않은 채 종료되면 워크플로우 실패 처리(체크 fail).
+#   → 라벨 제거 후 머지 시도 시 가시화.
 
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, edited, synchronize, reopened, ready_for_review, unlabeled]
 
 permissions:
   pull-requests: write
@@ -71,15 +76,26 @@ jobs:
               /^backend\/gradle\//,
               /^web\/next\.config\./,
               /^web\/package\.json$/,
+              // lockfile은 lockfile-only 변경(devDep 추가 등)도 보호 영역 — 이슈 #124 기준.
+              /^web\/package-lock\.json$/,
+              /^web\/pnpm-lock\.ya?ml$/,
+              /^web\/yarn\.lock$/,
               /^web\/.*-lock\./,
               /^Dockerfile$/,
               /^docker-compose.*\.ya?ml$/,
               /^LICENSE$/,
             ];
-            const hasProtected = files.data.some(f =>
+            const protectedHits = files.data.filter(f =>
               protectedPatterns.some(p => p.test(f.filename))
             );
-            if (hasProtected) labels.add('needs-human-review');
+            const hasProtected = protectedHits.length > 0;
+            if (hasProtected) {
+              labels.add('needs-human-review');
+              core.notice(
+                `Protected paths detected (${protectedHits.length}): ` +
+                  protectedHits.map(h => h.filename).slice(0, 10).join(', ')
+              );
+            }
 
             // Session label inference from file paths.
             // PR이 backend/** 만 건드리면 session:backend, web/** 만 건드리면 session:frontend.
@@ -103,4 +119,23 @@ jobs:
               core.notice(`Applied labels: ${toAdd.join(', ')}`);
             } else {
               core.notice('No labels to apply');
+            }
+
+            // 보호 영역 가드 (#124): addLabels 호출 후 실제 PR 상태를 다시 조회하여
+            // needs-human-review가 부착됐는지 확인. 누군가 직전에 라벨을 제거한 unlabeled 이벤트라면
+            // 위에서 다시 부착되지만, GitHub API 전파 지연으로 누락될 가능성을 닫기 위해
+            // 보호 영역 변경이 감지된 PR에서 needs-human-review가 없으면 워크플로우를 실패 처리한다.
+            if (hasProtected) {
+              const fresh = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+              });
+              const names = fresh.data.labels.map(l => (typeof l === 'string' ? l : l.name));
+              if (!names.includes('needs-human-review')) {
+                core.setFailed(
+                  'Protected paths changed but `needs-human-review` label is missing. ' +
+                    'Re-run this workflow or add the label manually before merging.'
+                );
+              }
             }

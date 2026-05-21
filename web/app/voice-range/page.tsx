@@ -12,6 +12,7 @@
  */
 
 import { FormEvent, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 
@@ -100,43 +101,81 @@ export default function VoiceRangePage() {
           </p>
         </header>
 
-        <form
-          onSubmit={handleSubmit}
-          className="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+        <section
+          aria-labelledby="voice-range-auto-cta-heading"
+          className="flex flex-col gap-3 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
         >
-          <NoteSelect
-            label="최저음"
-            value={lowestNoteMidi}
-            options={noteOptions}
-            onChange={setLowestNoteMidi}
-          />
-          <NoteSelect
-            label="최고음"
-            value={highestNoteMidi}
-            options={noteOptions}
-            onChange={setHighestNoteMidi}
-          />
-
-          {validationError ? (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              {validationError}
-            </p>
-          ) : null}
-
-          {submitError ? (
-            <p className="text-sm text-red-600 dark:text-red-400">
-              저장에 실패했습니다. {submitError}
-            </p>
-          ) : null}
-
-          <button
-            type="submit"
-            disabled={mutation.isPending || validationError !== null}
-            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          <h2
+            id="voice-range-auto-cta-heading"
+            className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
           >
-            {mutation.isPending ? "저장 중..." : "추천 받기"}
-          </button>
-        </form>
+            🎤 마이크로 자동 측정
+          </h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            마이크에 직접 노래를 부르면 최저음/최고음을 자동으로 잡아드려요.
+          </p>
+          <Link
+            href="/voice-range/auto"
+            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            자동으로 측정하기
+          </Link>
+        </section>
+
+        <section
+          aria-labelledby="voice-range-manual-heading"
+          className="flex flex-col gap-4"
+        >
+          <div className="space-y-1">
+            <h2
+              id="voice-range-manual-heading"
+              className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+            >
+              직접 선택
+            </h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              이미 음역대를 알고 있다면 아래에서 직접 골라주세요.
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+          >
+            <NoteSelect
+              label="최저음"
+              value={lowestNoteMidi}
+              options={noteOptions}
+              onChange={setLowestNoteMidi}
+            />
+            <NoteSelect
+              label="최고음"
+              value={highestNoteMidi}
+              options={noteOptions}
+              onChange={setHighestNoteMidi}
+            />
+
+            {validationError ? (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {validationError}
+              </p>
+            ) : null}
+
+            {submitError ? (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                저장에 실패했습니다. {submitError}
+              </p>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={mutation.isPending || validationError !== null}
+              className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {mutation.isPending ? "저장 중..." : "추천 받기"}
+            </button>
+          </form>
+        </section>
       </div>
     </main>
   );

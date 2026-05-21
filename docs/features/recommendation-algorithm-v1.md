@@ -25,9 +25,10 @@ last_reviewed: 2026-05-21
 ## 3) 요구사항
 ### 기능 요구사항
 - [x] 입력: `VoiceRange`(필수) + ~~`gender`(선택)~~ + `mood`(선택, v1 단일 값) + `excludeSongIds`(재추천 시). gender/moods[] 는 §9 결정 로그에 따라 v1에서 제외, `mood`는 단일 enum으로 축소.
-- [x] 출력: `RecommendationResponse` — `List<RecommendedSong>` (곡 + score + matchReason 텍스트) + `requestId`.
+- [x] 출력: `RecommendationResponse` — `List<RecommendedSong>` (곡 + score + matchReason 텍스트 + breakdown 5신호) + `requestId`.
 - [x] 결과 곡 수: 기본 10곡(설정 가능). `recommendation.result-count` 프로퍼티.
 - [x] 매칭 근거(`matchReason`)는 한 줄 한국어 문장으로 사용자에게 노출 가능한 수준이어야 한다 (예: "원곡 키가 사용자 음역대 안에 있음").
+- [x] **점수 신호 분해(`breakdown`)** — Spotify "Why this song?" UX 영감(P2). 가중치 적용 전 raw 신호 5종(`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`, 각 0~1)을 응답에 노출해 fe 14 matchReason 펼침 UX를 backend가 정확히 채우게 한다. 영속 엔티티에는 저장되지 않으므로 `GET /recommendations/{id}` 재조회 경로의 `breakdown`은 `null`.
 - [x] `RecommendationRequest`와 결과는 영속화한다(이력/분석). `excludeSongIds`는 별 join table `recommendation_request_exclude_song`에 영속(PR #74, closes #72/#73).
 
 ### 비기능 요구사항
@@ -171,3 +172,12 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **UX 배경**(이슈 #75/#77, 2026-05-21 사용자 결정): 추천 카드의 음역 막대 그래프를 폐기하고 "가창 난이도 라벨 + 최고음 표기"로 대체. 사람이 즉시 이해할 수 있는 표현 우선.
   - **분류 룰**: fe(`web/lib/difficulty.ts`)와 1:1 일치. HARD: high≥76(E5) 또는 span≥17, NORMAL: 71~75, EASY: <71. 임계값 영속화는 ADR 0007 후보(본진 후속).
   - **알고리즘 영향 없음**: 본 PR은 응답 표현만 추가. score 산식·다양성 후처리·결정성 어떤 것도 변경하지 않음. 기존 가드 테스트 모두 통과.
+- 2026-05-21: 추천 응답에 score breakdown 분해 노출 (PR #146, closes #145).
+  - **배경**: plan 사이클 10 영감 분석 F-2 P2(Spotify "Why this song?"). 기존 응답은 `score`(가중 합산 double) + `matchReason`(한 줄)만이라 사용자가 추천 사유를 펼쳐볼 수단이 없었다. fe 사이클 14(#142)가 client-side로 breakdown을 추정 중인 상황을 backend가 정확히 채우는 방향.
+  - **응답 필드 추가**: `RecommendedSongResponse`에 `breakdown: ScoreBreakdownResponse?` 추가. 5신호 raw 값(0~1): `keyMatch` / `rangeFit` / `genreMatch` / `moodMatch` / `popularity`.
+  - **도메인 모델**: `recommendation.domain.ScoreBreakdown` (record, 불변, 각 필드 [0,1] 검증). `ScoredRecommendation`에 `breakdown` 필드 추가(nullable).
+  - **스코어러 반환 타입**: `RecommendationScorer.score(...)` → `RecommendationScorer.Scored(double total, ScoreBreakdown breakdown)`. 가중 합산된 `total`과 raw 신호 분해를 함께 담는다. 점수 산식·가중치는 변경하지 않음 (결정성 회귀 가드 유지).
+  - **matchReason 형식**: 단일 string 유지(fe 14가 client-side로 다중 줄 펼침 처리 중이라 응답 호환을 깨지 않기 위함). fe는 응답의 `breakdown`을 raw 신호로 활용해 펼침 영역을 구성한다.
+  - **재조회 경로**: 영속 엔티티(`Recommendation`)에는 breakdown 컬럼을 추가하지 않았다 — DB 마이그레이션은 보호 영역이며 v1 한정 응답 표현 추가에 그치는 범위라 본 PR의 범위 외. 따라서 `GET /recommendations/{id}`의 `breakdown`은 `null`. UI는 펼침 영역을 숨기는 식으로 동작한다. 영속화는 후속 PR(`recommendation` 테이블에 5개 double 컬럼 추가) 후보.
+  - **알고리즘 영향 없음**: SeedDeriver 입력·점수 산식·다양성 후처리 모두 무변경. 결정성 회귀 가드 1건 추가(같은 입력 두 번 → 1위 score 동일).
+  - **테스트**: ScoreBreakdown 단위(범위/NaN), ScoreBreakdownResponse.from null 통과, RecommendationResponse from breakdown 매핑, E2E 응답에 breakdown 포함, RecommendationScorerTest 5신호 검증.

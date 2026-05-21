@@ -7,8 +7,9 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import com.mobruji.recommendation.application.RecommendationScorer.ScoreBreakdown;
+import com.mobruji.recommendation.application.RecommendationScorer.Scored;
 import com.mobruji.recommendation.application.RecommendationService.ScoredSong;
+import com.mobruji.recommendation.domain.ScoreBreakdown;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -131,6 +132,8 @@ class RecommendationDiversityTest {
                 .genre(genre)
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();
-        return new ScoredSong(song, new ScoreBreakdown(score, 1.0, 1.0));
+        // diversity 후처리는 total만 사용 — breakdown 5신호는 임의로 채워 둠.
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 1.0, 1.0);
+        return new ScoredSong(song, new Scored(score, breakdown));
     }
 }

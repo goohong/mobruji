@@ -25,6 +25,8 @@
 import axe, { AxeResults, Result, RunOptions } from "axe-core";
 import { expect } from "vitest";
 
+import { safeLog } from "@/lib/logging";
+
 /**
  * fail로 다룰 axe impact 레벨. axe-core impact: `minor` | `moderate` | `serious` | `critical`.
  */
@@ -61,7 +63,7 @@ export type ExpectNoA11yViolationsOptions = {
 /**
  * 주어진 DOM 컨테이너에 대해 axe-core 검사를 수행.
  * serious/critical violations가 1건이라도 있으면 테스트를 fail한다.
- * minor/moderate violations는 `console.warn`으로 알림만 남긴다.
+ * minor/moderate violations는 `safeLog.warn`으로 알림만 남긴다.
  */
 export async function expectNoA11yViolations(
   container: Element,
@@ -77,7 +79,8 @@ export async function expectNoA11yViolations(
 
   if (advisory.length > 0) {
     // 테스트 fail은 아니지만 가시화. CI 로그에서 잡히게 한다.
-    console.warn(
+    // PR #129 로그 정책: 전 코드베이스에서 console.* 직접 사용 금지, safeLog 경유.
+    safeLog.warn(
       `[a11y] minor/moderate violations (${advisory.length}):\n` +
         formatViolations(advisory),
     );

@@ -16,10 +16,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
-import com.mobruji.voice.api.dto.VoiceRangeResponse;
-import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
-
 import com.mobruji.voice.domain.VoiceRange;
 import com.mobruji.voice.domain.VoiceRangeNotFoundException;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
@@ -35,21 +31,21 @@ class VoiceRangeServiceTest {
     private VoiceRangeService voiceRangeService;
 
     @Test
-    @DisplayName("createOrReplace: 신규 sessionId면 save 호출 후 응답 반환")
+    @DisplayName("createOrReplace: 신규 sessionId면 save 호출 후 도메인 객체 반환")
     void createOrReplace_newSession_savesAndReturns() {
         // given
-        final VoiceRangeCreateRequest request = new VoiceRangeCreateRequest(
+        final CreateVoiceRangeCommand command = new CreateVoiceRangeCommand(
                 "new-session", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
         given(voiceRangeRepository.findBySessionId("new-session")).willReturn(Optional.empty());
         final VoiceRange saved = VoiceRange.create("new-session", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
         given(voiceRangeRepository.save(any(VoiceRange.class))).willReturn(saved);
 
         // when
-        final VoiceRangeResponse voiceRangeResponse = voiceRangeService.createOrReplace(request);
+        final VoiceRange voiceRange = voiceRangeService.createOrReplace(command);
 
         // then
-        assertThat(voiceRangeResponse.sessionId()).isEqualTo("new-session");
-        assertThat(voiceRangeResponse.lowestNoteMidi()).isEqualTo(48);
+        assertThat(voiceRange.getSessionId()).isEqualTo("new-session");
+        assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(48);
         verify(voiceRangeRepository).save(any(VoiceRange.class));
     }
 
@@ -59,31 +55,31 @@ class VoiceRangeServiceTest {
         // given
         final VoiceRange existing = VoiceRange.create("dup-session", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
         given(voiceRangeRepository.findBySessionId("dup-session")).willReturn(Optional.of(existing));
-        final VoiceRangeCreateRequest request = new VoiceRangeCreateRequest(
+        final CreateVoiceRangeCommand command = new CreateVoiceRangeCommand(
                 "dup-session", 50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
 
         // when
-        final VoiceRangeResponse voiceRangeResponse = voiceRangeService.createOrReplace(request);
+        final VoiceRange voiceRange = voiceRangeService.createOrReplace(command);
 
         // then
-        assertThat(voiceRangeResponse.lowestNoteMidi()).isEqualTo(50);
-        assertThat(voiceRangeResponse.highestNoteMidi()).isEqualTo(72);
-        assertThat(voiceRangeResponse.sourceMethod()).isEqualTo(VoiceRangeSourceMethod.MIC_MEASURE);
+        assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(50);
+        assertThat(voiceRange.getHighestNoteMidi()).isEqualTo(72);
+        assertThat(voiceRange.getSourceMethod()).isEqualTo(VoiceRangeSourceMethod.MIC_MEASURE);
         verify(voiceRangeRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("readBySessionId: 존재하면 응답 반환")
+    @DisplayName("readBySessionId: 존재하면 도메인 객체 반환")
     void readBySessionId_found_returnsResponse() {
         // given
         final VoiceRange existing = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
         given(voiceRangeRepository.findBySessionId("s")).willReturn(Optional.of(existing));
 
         // when
-        final VoiceRangeResponse voiceRangeResponse = voiceRangeService.readBySessionId("s");
+        final VoiceRange voiceRange = voiceRangeService.readBySessionId("s");
 
         // then
-        assertThat(voiceRangeResponse.sessionId()).isEqualTo("s");
+        assertThat(voiceRange.getSessionId()).isEqualTo("s");
     }
 
     @Test
@@ -97,30 +93,30 @@ class VoiceRangeServiceTest {
     }
 
     @Test
-    @DisplayName("updateBySessionId: 존재하면 업데이트 후 응답 반환")
+    @DisplayName("updateBySessionId: 존재하면 업데이트 후 도메인 객체 반환")
     void updateBySessionId_found_updates() {
         // given
         final VoiceRange existing = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
         given(voiceRangeRepository.findBySessionId("s")).willReturn(Optional.of(existing));
-        final VoiceRangeUpdateRequest request = new VoiceRangeUpdateRequest(
+        final UpdateVoiceRangeCommand command = new UpdateVoiceRangeCommand(
                 50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
 
         // when
-        final VoiceRangeResponse voiceRangeResponse = voiceRangeService.updateBySessionId("s", request);
+        final VoiceRange voiceRange = voiceRangeService.updateBySessionId("s", command);
 
         // then
-        assertThat(voiceRangeResponse.lowestNoteMidi()).isEqualTo(50);
-        assertThat(voiceRangeResponse.highestNoteMidi()).isEqualTo(72);
+        assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(50);
+        assertThat(voiceRange.getHighestNoteMidi()).isEqualTo(72);
     }
 
     @Test
     @DisplayName("updateBySessionId: 없으면 VoiceRangeNotFoundException")
     void updateBySessionId_notFound_throws() {
         given(voiceRangeRepository.findBySessionId("missing")).willReturn(Optional.empty());
-        final VoiceRangeUpdateRequest request = new VoiceRangeUpdateRequest(
+        final UpdateVoiceRangeCommand command = new UpdateVoiceRangeCommand(
                 50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
 
-        assertThatThrownBy(() -> voiceRangeService.updateBySessionId("missing", request))
+        assertThatThrownBy(() -> voiceRangeService.updateBySessionId("missing", command))
                 .isInstanceOf(VoiceRangeNotFoundException.class);
     }
 }
