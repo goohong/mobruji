@@ -267,4 +267,105 @@ class SongTest {
         assertThat(changed).isTrue();
         assertThat(song.getDifficulty()).isEqualTo(Difficulty.NORMAL);
     }
+
+    @Test
+    @DisplayName("backfillFromAudioAnalysis: confidence 임계 통과 시 lowMidi/highMidi/difficulty/source 갱신")
+    void backfillFromAudio_aboveThreshold_updatesAllFields() {
+        // given: 수기 시드값 (사람이 대충 추정한 음역)
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(70) // EASY
+                .build();
+        // sanity
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.EASY);
+
+        final AudioAnalysisResult result = new AudioAnalysisResult(
+                57, 78, "C", 120.0, 200.0, 0.85, "analyze-py-0.1.0");
+
+        // when
+        final boolean changed = song.backfillFromAudioAnalysis(result, 0.6);
+
+        // then: 분석값으로 덮어쓰고 source/difficulty 재계산
+        assertThat(changed).isTrue();
+        assertThat(song.getLowMidi()).isEqualTo(57);
+        assertThat(song.getHighMidi()).isEqualTo(78);
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.HARD); // highMidi=78 ≥ 76
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
+    }
+
+    @Test
+    @DisplayName("backfillFromAudioAnalysis: confidence 임계 미달이면 수기 값 보존, no-op")
+    void backfillFromAudio_belowThreshold_preservesAll() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(70)
+                .build();
+
+        final AudioAnalysisResult lowConf = new AudioAnalysisResult(
+                40, 90, "C", 120.0, 200.0, 0.40, "analyze-py-0.1.0");
+
+        // when
+        final boolean changed = song.backfillFromAudioAnalysis(lowConf, 0.6);
+
+        // then
+        assertThat(changed).isFalse();
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isEqualTo(70);
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+    }
+
+    @Test
+    @DisplayName("backfillFromAudioAnalysis: 분석값이 기존과 동일하면 source만 갱신")
+    void backfillFromAudio_sameValues_updatesSourceOnly() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(78)
+                .build();
+
+        final AudioAnalysisResult sameResult = new AudioAnalysisResult(
+                60, 78, "C", 120.0, 200.0, 0.90, "analyze-py-0.1.0");
+
+        final boolean changed = song.backfillFromAudioAnalysis(sameResult, 0.6);
+
+        assertThat(changed).isTrue();
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isEqualTo(78);
+    }
+
+    @Test
+    @DisplayName("backfillFromAudioAnalysis: 임계값 범위 밖이면 IllegalArgumentException")
+    void backfillFromAudio_invalidThreshold_throws() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+        final AudioAnalysisResult result = new AudioAnalysisResult(
+                57, 78, null, null, 200.0, 0.7, "analyze-py-0.1.0");
+
+        assertThatThrownBy(() -> song.backfillFromAudioAnalysis(result, 1.5))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("confidenceThreshold");
+    }
+
+    @Test
+    @DisplayName("backfillFromAudioAnalysis: result null이면 NullPointerException")
+    void backfillFromAudio_nullResult_throws() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThatThrownBy(() -> song.backfillFromAudioAnalysis(null, 0.6))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("result");
+    }
 }

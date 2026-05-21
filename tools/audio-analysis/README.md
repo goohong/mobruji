@@ -77,6 +77,31 @@ pytest -q
 - YouTube ToS 및 각국 저작권법을 준수할 책임은 호출자에게 있다. 운영 환경에서 차단(403/age-gate) 발생 시 spec §3 fallback 정책을 따른다.
 - 로그에는 URL 원문을 마스킹해서 남긴다 (`mask_url` helper).
 
+## 시드 30곡 backfill batch (Spring 측)
+
+Spec PR C — `SongAudioBackfillCommand` 가 DB 의 곡 전체를 순회하며 `analyzeByMetadata(title, artist)` 결과로 `lowMidi/highMidi/difficulty/metadataSource` 를 갱신한다.
+
+```bash
+# 0) MySQL 기동
+docker compose up -d
+
+# 1) venv 활성화 + Python tool 동작 확인
+source tools/audio-analysis/.venv/bin/activate
+python tools/audio-analysis/analyze.py --song-title "Yesterday" --artist "The Beatles"
+
+# 2) 백엔드에 backfill 옵션 전달 (수동 trigger, 운영 안전)
+cd backend
+AUDIO_ANALYSIS_PYTHON_CMD="$(pwd)/../tools/audio-analysis/.venv/bin/python" \
+  ./gradlew bootRun --args='--spring.profiles.active=local --mobruji.backfill-audio=true'
+```
+
+- 옵션 미지정 시 부팅에 영향 없음 (no-op).
+- 시간 예상: **30곡 × ~30s ≈ 15분** (단일 코어 기준).
+- 적용 임계 confidence 기본 **0.6** — 미달 곡은 수기 시드 값을 보존한다.
+- 곡 단위 실패(timeout/403/parse error)는 로그 + 다음 곡으로 진행. 전체 batch 중단 X.
+- 완료 시 `audio backfill done analyzed=N successful=M updated=K skipped_low_confidence=J failed=F` 1줄 요약 로그.
+- audio 임시 파일은 Python 측에서 즉시 삭제 (ADR 0006).
+
 ## 알려진 한계
 
 - `spleeter` (보컬 stem 분리)는 본 PR에 포함하지 않았다. Python 3.10 의존성 + TensorFlow 무게 문제로 PR B에서 도입 여부를 결정한다 (대안: demucs).
