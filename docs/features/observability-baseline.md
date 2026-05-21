@@ -119,9 +119,11 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 
 ### 5-4) p95 측정 endpoint 매트릭스 (#62 동기화)
 
+> **추천 POST 임계 단일 진실**: `docs/features/recommendation-p95-regression-guard.md` §5-3. 본 표의 추천 POST 행은 본 spec 머지 후 후속 PR (PR 2) 에서 200ms 로 동기화. 다른 endpoint 는 본 표가 단일 진실 (별 spec 미작성).
+
 | Endpoint | Method | 목표 p95 | 비고 |
 |---|---|---|---|
-| `/api/v1/recommendations` | POST | **300ms** | 추천 v1/v2 산정 + DB 조회. #62 회귀 가드 대상 |
+| `/api/v1/recommendations` | POST | **300ms** (→ 200ms 동기화 예정, recommendation-p95-regression-guard §5-3) | 추천 v1/v2 산정 + DB 조회. #62 회귀 가드 대상 |
 | `/api/v1/recommendations/{id}/like` | POST/DELETE | 150ms | 단순 INSERT/DELETE |
 | `/api/v1/recommendations/{id}/bookmark` | POST/DELETE | 150ms | 단순 INSERT/DELETE |
 | `/api/v1/sessions/{id}/voice-range-history` | GET | 200ms | snapshot 조회 + 정렬 |

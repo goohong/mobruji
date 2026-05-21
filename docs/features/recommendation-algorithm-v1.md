@@ -32,7 +32,7 @@ last_reviewed: 2026-05-21
 - [x] `RecommendationRequest`와 결과는 영속화한다(이력/분석). `excludeSongIds`는 별 join table `recommendation_request_exclude_song`에 영속(PR #74, closes #72/#73).
 
 ### 비기능 요구사항
-- p95 응답 200ms 이내 (DB 100~수백곡 카탈로그 가정).
+- p95 응답 200ms 이내 (DB 100~수백곡 카탈로그 가정). **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3**. 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
 - 결정 가능성: 같은 입력 → 같은 결과 (재추천 제외). 디버깅·이슈 재현용.
 - 외부 API 호출 없음(v1 한정). 내부 DB 질의만으로 완결.
 - 매칭 점수 계산식이 코드 한 군데에 모여 있어야 하고, 가중치는 설정으로 빼야 한다.
