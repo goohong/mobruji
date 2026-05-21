@@ -57,6 +57,7 @@ import {
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
+import { Chip } from "@/components/ui";
 
 /**
  * Props 분기:
@@ -155,11 +156,7 @@ export function SongCard(props: SongCardProps) {
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          {song.genre ? (
-            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-              {song.genre}
-            </span>
-          ) : null}
+          {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {item ? (
             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {item.matchReason}

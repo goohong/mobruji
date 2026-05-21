@@ -24,6 +24,7 @@ import {
 import { ApiError } from "@/lib/api/client";
 import { midiToNoteName, octaveRangeMidis } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
+import { Button } from "@/components/ui";
 
 const DEFAULT_LOW_MIDI = 48; // C3
 const DEFAULT_HIGH_MIDI = 69; // A4
@@ -167,13 +168,16 @@ export default function VoiceRangePage() {
               </p>
             ) : null}
 
-            <button
+            <Button
               type="submit"
-              disabled={mutation.isPending || validationError !== null}
-              className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={mutation.isPending}
+              disabled={validationError !== null}
             >
               {mutation.isPending ? "저장 중..." : "추천 받기"}
-            </button>
+            </Button>
           </form>
         </section>
       </div>

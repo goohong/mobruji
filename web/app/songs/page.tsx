@@ -31,6 +31,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { searchSongs, type SongResponse } from "@/lib/api/song";
 import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
+import { Chip, Input } from "@/components/ui";
 
 import { SongCard } from "../recommend/components/SongCard";
 
@@ -202,17 +203,15 @@ function SongSearchPageInner() {
         </header>
 
         <div className="flex flex-col gap-3">
-          <label htmlFor="song-search-input" className="sr-only">
-            곡 검색
-          </label>
-          <input
+          <Input
             id="song-search-input"
             type="search"
+            label="곡 검색"
+            labelHidden
             value={inputValue}
             onChange={(event) => setInputValue(event.target.value)}
             placeholder="곡 제목이나 아티스트로 검색"
             autoComplete="off"
-            className="h-12 w-full rounded-2xl border border-zinc-200 bg-white px-4 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-zinc-700"
           />
 
           <FilterPanel
@@ -272,12 +271,13 @@ function FilterPanel({
         {DIFFICULTY_OPTIONS.map((option) => {
           const active = selectedDifficulties.has(option.key);
           return (
-            <FilterChip
+            <Chip
               key={option.key}
-              label={option.label}
-              active={active}
+              pressed={active}
               onClick={() => onToggleDifficulty(option.key)}
-            />
+            >
+              {option.label}
+            </Chip>
           );
         })}
       </div>
@@ -295,12 +295,13 @@ function FilterPanel({
           {availableGenres.map((genre) => {
             const active = selectedGenres.has(genre);
             return (
-              <FilterChip
+              <Chip
                 key={genre}
-                label={genre}
-                active={active}
+                pressed={active}
                 onClick={() => onToggleGenre(genre)}
-              />
+              >
+                {genre}
+              </Chip>
             );
           })}
         </div>
@@ -318,29 +319,6 @@ function FilterPanel({
         </div>
       )}
     </div>
-  );
-}
-
-type FilterChipProps = {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-};
-
-function FilterChip({ label, active, onClick }: FilterChipProps) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-medium transition ${
-        active
-          ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-          : "bg-white text-zinc-700 ring-1 ring-zinc-200 hover:bg-zinc-100 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800 dark:hover:bg-zinc-800"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
