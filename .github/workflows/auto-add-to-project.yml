@@ -1,0 +1,25 @@
+name: Auto Add to Project
+
+# PR/이슈 열릴 때 GitHub Projects v2 보드에 자동 등록.
+# Project URL은 secret/var로 보관 (org-wide rate limit 회피용 PAT 권장).
+# Project가 없으면 step은 skip하고 끝낸다 (셋업 전에도 워크플로우는 살아있음).
+
+on:
+  pull_request:
+    types: [opened, reopened]
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  add:
+    runs-on: ubuntu-22.04
+    if: vars.PROJECT_URL != ''
+    steps:
+      - name: Add to project
+        uses: actions/add-to-project@v1
+        with:
+          project-url: ${{ vars.PROJECT_URL }}
+          github-token: ${{ secrets.PROJECT_TOKEN || github.token }}
