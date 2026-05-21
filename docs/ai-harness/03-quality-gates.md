@@ -22,6 +22,7 @@
 - 정적 분석/포맷 검사 (backend: checkstyle, spotless / web: ESLint, Prettier)
 - 아키텍처 규칙 검사 (DDD 레이어 침범 감지)
 - 변경 영향 테스트(핵심 도메인 우선)
+- 부하 테스트 게이트 (recommendation): `.github/workflows/load-test.yml` — k6로 p95/p99/TPS/에러율 회귀 감시. 임계 및 운영 가이드는 `scripts/load/README.md`.
 
 ## 3-1) 테스트 정책
 - **단위 테스트**: 도메인 로직(서비스/엔티티 메서드)에 신규 코드를 추가하면 같은 PR에 단위 테스트를 동반한다.

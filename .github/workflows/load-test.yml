@@ -1,0 +1,237 @@
+name: Load Test - Recommendation API
+
+# 추천 API p95/p99/TPS 자동 회귀 가드.
+# spec: docs/features/recommendation-algorithm-v1.md §3 비기능 "p95 200ms"
+#
+# 트리거: backend 변경 PR + 수동 dispatch (튜닝/회귀 재현 목적).
+# 임계 fail 시 workflow fail.
+
+on:
+  pull_request:
+    branches: [ "develop", "main" ]
+    types: [ opened, synchronize, reopened ]
+    paths:
+      - 'backend/**'
+      - 'scripts/load/**'
+      - '.github/workflows/load-test.yml'
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: 'k6 동시 VU 수 (기본 10)'
+        required: false
+        default: '10'
+      duration:
+        description: 'k6 steady-state duration (기본 60s)'
+        required: false
+        default: '60s'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: load-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  k6-load:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.4.6
+        env:
+          MYSQL_ROOT_PASSWORD: mobruji
+          MYSQL_DATABASE: mobruji
+          MYSQL_USER: mobruji
+          MYSQL_PASSWORD: mobruji
+        ports:
+          - 13306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -pmobruji"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+          cache: 'gradle'
+          cache-dependency-path: backend/*.gradle*
+
+      - name: Install k6
+        run: |
+          set -euo pipefail
+          # k6 official apt repo
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -y
+          sudo apt-get install -y k6
+          k6 version
+
+      - name: Build backend bootJar
+        working-directory: backend
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar -x test --no-daemon
+
+      - name: Start backend (local profile = MySQL)
+        working-directory: backend
+        env:
+          SPRING_PROFILES_ACTIVE: local
+          MYSQL_USER: mobruji
+          MYSQL_PASSWORD: mobruji
+        run: |
+          set -euo pipefail
+          JAR=$(ls build/libs/*.jar | grep -v plain | head -1)
+          echo "Booting $JAR"
+          nohup java -jar "$JAR" > backend.log 2>&1 &
+          echo $! > backend.pid
+
+      - name: Wait for backend health
+        run: |
+          set -euo pipefail
+          # actuator management port 8081
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8081/actuator/health | grep -q '"status":"UP"'; then
+              echo "backend UP after ${i}s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend did not become healthy in 120s"
+          echo "--- backend.log tail ---"
+          tail -200 backend/backend.log || true
+          exit 1
+
+      - name: Run k6 load test
+        id: k6
+        env:
+          BASE_URL: http://localhost:8080
+          VUS: ${{ github.event.inputs.vus || '10' }}
+          DURATION: ${{ github.event.inputs.duration || '60s' }}
+          K6_OUT_SUMMARY: summary.json
+        run: |
+          set -euo pipefail
+          k6 run \
+            --summary-export=k6-summary-builtin.json \
+            scripts/load/recommendation.k6.js \
+            | tee k6-stdout.log
+          # k6 exit code 0 = thresholds OK, 99 = thresholds failed.
+
+      - name: Parse results
+        if: always()
+        id: parse
+        run: |
+          set -euo pipefail
+          if [ ! -f summary.json ]; then
+            echo "summary.json missing — k6 likely failed before handleSummary"
+            echo "p50=n/a" >> "$GITHUB_OUTPUT"
+            echo "p95=n/a" >> "$GITHUB_OUTPUT"
+            echo "p99=n/a" >> "$GITHUB_OUTPUT"
+            echo "tps=n/a" >> "$GITHUB_OUTPUT"
+            echo "errors=n/a" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          with open('summary.json') as f:
+              data = json.load(f)
+          metrics = data.get('metrics', {})
+          rec = metrics.get('http_req_duration{endpoint:recommendation}', {}).get('values', {})
+          reqs = metrics.get('http_reqs', {}).get('values', {})
+          failed = metrics.get('http_req_failed', {}).get('values', {})
+
+          def fmt(v):
+              if v is None: return 'n/a'
+              return f"{float(v):.2f}"
+
+          print(f"p50={fmt(rec.get('p(50)'))}")
+          print(f"p95={fmt(rec.get('p(95)'))}")
+          print(f"p99={fmt(rec.get('p(99)'))}")
+          print(f"tps={fmt(reqs.get('rate'))}")
+          err_rate = failed.get('rate', 0) or 0
+          print(f"errors={float(err_rate)*100:.2f}")
+          PY
+
+      - name: Comment results on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const p50 = '${{ steps.parse.outputs.p50 }}';
+            const p95 = '${{ steps.parse.outputs.p95 }}';
+            const p99 = '${{ steps.parse.outputs.p99 }}';
+            const tps = '${{ steps.parse.outputs.tps }}';
+            const errors = '${{ steps.parse.outputs.errors }}';
+            const k6Outcome = '${{ steps.k6.outcome }}';
+            const status = k6Outcome === 'success' ? '통과' : '실패';
+            const body = [
+              '## k6 부하 테스트 결과 — 추천 API',
+              '',
+              `- 상태: **${status}** (\`${k6Outcome}\`)`,
+              `- p50: \`${p50} ms\``,
+              `- p95: \`${p95} ms\` (임계 < 200)`,
+              `- p99: \`${p99} ms\` (임계 < 400)`,
+              `- TPS: \`${tps} req/s\``,
+              `- 에러율: \`${errors} %\` (임계 < 1.0)`,
+              '',
+              '_트리거: `' + context.eventName + '`, run: ' + context.runId + '_',
+              '_spec: `docs/features/recommendation-algorithm-v1.md` §3 비기능_',
+            ].join('\n');
+
+            // 이전 봇 코멘트 갱신(없으면 신규 생성)
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '## k6 부하 테스트 결과 — 추천 API';
+            const existing = comments.find(c => c.user.type === 'Bot' && c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-load-results
+          path: |
+            summary.json
+            k6-summary-builtin.json
+            k6-stdout.log
+            backend/backend.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f backend/backend.pid ]; then
+            kill "$(cat backend/backend.pid)" || true
+          fi
