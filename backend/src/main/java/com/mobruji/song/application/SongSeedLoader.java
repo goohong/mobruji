@@ -83,6 +83,8 @@ public class SongSeedLoader implements ApplicationRunner {
                             .tjNumber(entry.tjNumber())
                             .kyNumber(entry.kyNumber())
                             .metadataSource(MetadataSource.MANUAL_SEED)
+                            .isrc(entry.isrc())
+                            .metadataConfidence(entry.metadataConfidence())
                             .lowMidi(entry.lowMidi())
                             .highMidi(entry.highMidi())
                             .build();
@@ -117,6 +119,8 @@ public class SongSeedLoader implements ApplicationRunner {
             String genre,
             String tjNumber,
             String kyNumber,
+            String isrc,
+            Double metadataConfidence,
             Integer lowMidi,
             Integer highMidi
     ) {

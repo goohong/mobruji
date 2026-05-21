@@ -10,6 +10,8 @@
     "genre": "발라드",
     "tjNumber": "60540",
     "kyNumber": "84226",
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 57,
     "highMidi": 76
   },
@@ -24,6 +26,8 @@
     "genre": "댄스",
     "tjNumber": "29062",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 59,
     "highMidi": 78
   },
@@ -38,6 +42,8 @@
     "genre": "발라드",
     "tjNumber": "70146",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 51,
     "highMidi": 75
   },
@@ -52,6 +58,8 @@
     "genre": "발라드",
     "tjNumber": "70200",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 79
   },
@@ -66,6 +74,8 @@
     "genre": "댄스",
     "tjNumber": "67854",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 77
   },
@@ -80,6 +90,8 @@
     "genre": "댄스",
     "tjNumber": "28782",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 57,
     "highMidi": 77
   },
@@ -94,6 +106,8 @@
     "genre": "댄스",
     "tjNumber": "71029",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 76
   },
@@ -108,6 +122,8 @@
     "genre": "팝",
     "tjNumber": "28570",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 64,
     "highMidi": 76
   },
@@ -122,6 +138,8 @@
     "genre": "팝",
     "tjNumber": "29655",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 62,
     "highMidi": 78
   },
@@ -136,6 +154,8 @@
     "genre": "팝",
     "tjNumber": "29489",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 76
   },
@@ -150,6 +170,8 @@
     "genre": "발라드",
     "tjNumber": "71862",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 53,
     "highMidi": 77
   },
@@ -164,6 +186,8 @@
     "genre": "R&B",
     "tjNumber": "68252",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 74
   },
@@ -178,6 +202,8 @@
     "genre": "R&B",
     "tjNumber": "63041",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 74
   },
@@ -192,6 +218,8 @@
     "genre": "댄스",
     "tjNumber": "60681",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 72
   },
@@ -206,6 +234,8 @@
     "genre": "댄스",
     "tjNumber": "71309",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 76
   },
@@ -220,6 +250,8 @@
     "genre": "팝",
     "tjNumber": "29917",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 73
   },
@@ -234,6 +266,8 @@
     "genre": "팝",
     "tjNumber": "30236",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 73
   },
@@ -248,6 +282,8 @@
     "genre": "팝",
     "tjNumber": "30421",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 62,
     "highMidi": 73
   },
@@ -262,6 +298,8 @@
     "genre": "댄스",
     "tjNumber": "29870",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 57,
     "highMidi": 76
   },
@@ -276,6 +314,8 @@
     "genre": "댄스",
     "tjNumber": "30058",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 79
   },
@@ -290,6 +330,8 @@
     "genre": "댄스",
     "tjNumber": "29799",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 55,
     "highMidi": 75
   },
@@ -304,6 +346,8 @@
     "genre": "댄스",
     "tjNumber": "30181",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 77
   },
@@ -318,6 +362,8 @@
     "genre": "발라드",
     "tjNumber": "29632",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 58,
     "highMidi": 72
   },
@@ -332,6 +378,8 @@
     "genre": "발라드",
     "tjNumber": "29773",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 48,
     "highMidi": 74
   },
@@ -346,6 +394,8 @@
     "genre": "발라드",
     "tjNumber": "30450",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 53,
     "highMidi": 77
   },
@@ -360,6 +410,8 @@
     "genre": "트로트",
     "tjNumber": "29622",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 55,
     "highMidi": 69
   },
@@ -374,6 +426,8 @@
     "genre": "발라드",
     "tjNumber": "311",
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 57,
     "highMidi": 81
   },
@@ -388,6 +442,8 @@
     "genre": "팝",
     "tjNumber": null,
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 55,
     "highMidi": 67
   },
@@ -402,6 +458,8 @@
     "genre": "팝",
     "tjNumber": null,
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 58,
     "highMidi": 73
   },
@@ -416,6 +474,8 @@
     "genre": "팝",
     "tjNumber": null,
     "kyNumber": null,
+    "isrc": null,
+    "metadataConfidence": 1.0,
     "lowMidi": 60,
     "highMidi": 74
   }
