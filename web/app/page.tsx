@@ -16,12 +16,20 @@ export default function Home() {
           </p>
         </div>
 
-        <Link
-          href="/voice-range"
-          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          음역대 입력으로 시작
-        </Link>
+        <div className="flex w-full flex-col gap-3">
+          <Link
+            href="/voice-range"
+            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            음역대 입력으로 시작
+          </Link>
+          <Link
+            href="/songs"
+            className="inline-flex h-12 w-full items-center justify-center rounded-full border border-zinc-300 bg-white px-6 text-base font-medium text-zinc-900 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
+          >
+            곡 검색하기
+          </Link>
+        </div>
 
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
           익명 세션으로 동작합니다. 회원가입 없음.

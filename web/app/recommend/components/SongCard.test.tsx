@@ -89,4 +89,22 @@ describe("SongCard", () => {
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("C Major")).toBeInTheDocument();
   });
+
+  // closes #91 #92 — 검색 페이지에서 song prop으로 카드 렌더 시
+  // rank/score/matchReason은 숨기고 곡 정보만 노출한다.
+  it("song prop만 받으면 rank/score/matchReason은 숨기고 곡 정보만 보여준다", () => {
+    const item = buildItem({ lowMidi: 48, highMidi: 78 }); // HARD
+    render(
+      <ul>
+        <SongCard song={item.song} />
+      </ul>,
+    );
+    expect(screen.getByText("테스트 곡")).toBeInTheDocument();
+    expect(screen.getByText("가수")).toBeInTheDocument();
+    expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+    // 추천 컨텍스트 전용 표시는 모두 숨김.
+    expect(screen.queryByText(/score/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
+    expect(screen.queryByText("#1")).not.toBeInTheDocument();
+  });
 });
