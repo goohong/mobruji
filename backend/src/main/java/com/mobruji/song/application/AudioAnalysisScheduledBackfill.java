@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
 
@@ -23,9 +22,9 @@ import com.mobruji.song.infrastructure.SongRepository;
  * <ul>
  * <li>{@code @Profile("prod")} 로 prod 프로파일에서만 활성. local/test 에서는 빈 자체가 등록되지 않는다.</li>
  * <li>cron {@code 0 0 4 * * SUN} (KST) — 일요일 새벽 4시. 사용자 트래픽 거의 없는 시간대.</li>
- * <li>대상: {@code metadataSource != AUDIO_ANALYSIS} 인 곡 — 도메인에 별도 confidence 컬럼은 없으므로,
- * "audio 분석으로 갱신된 적 없는 곡" (수기 시드 + 외부 출처 + 미분석 신규 곡 포함) 을 selective 하게 backfill 한다.
- * spec 의 "metadataConfidence &lt; 0.6" 의도와 정합.</li>
+ * <li>대상: DB 측 selective query 로 {@code metadataConfidence < threshold} 또는
+ * {@code metadataSource != AUDIO_ANALYSIS} 인 곡만 조회한다 (rev 15 #226). 임계 이상 + audio 분석 완료된
+ * 곡은 처음부터 후보에서 제외되어 불필요한 재분석 비용을 막는다. spec 의 "metadataConfidence &lt; 0.6" 의도와 정합.</li>
  * <li>곡 단위 실패는 {@link SongAudioBackfillCommand#runBackfill(List, double)} 내부에서 격리되어 전체 batch 가 중단되지 않는다.</li>
  * </ul>
  *
@@ -75,15 +74,10 @@ public class AudioAnalysisScheduledBackfill {
     }
 
     /**
-     * 분석 대상 selection — {@code metadataSource != AUDIO_ANALYSIS} 인 곡. v0.x 단축형으로
-     * 별도 confidence 컬럼은 아직 없어 source 기반으로 대체한다 (spec 의 metadataConfidence &lt; 0.6 의도).
-     *
-     * <p>곡 수가 많아지면 {@link SongRepository} 에 selective query 메서드를 추가하는 것이 적절하나,
-     * 본 PR 범위에서는 in-memory 필터로 단순화한다.
+     * 분석 대상 selection — {@link SongRepository#findCandidatesForBackfill(double)} 를 위임 호출.
+     * {@code metadataConfidence < threshold} 또는 {@code metadataSource != AUDIO_ANALYSIS} 인 곡만 반환한다 (rev 15 #226).
      */
     List<Song> selectTargets() {
-        return songRepository.findAll().stream()
-                .filter(song -> song.getMetadataSource() != MetadataSource.AUDIO_ANALYSIS)
-                .toList();
+        return songRepository.findCandidatesForBackfill(CONFIDENCE_THRESHOLD);
     }
 }
