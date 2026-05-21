@@ -14,8 +14,8 @@
 
 | Spec | Status | 첫 구현 PR |
 |------|--------|------------|
-| `voice-range-input` | implementing | PR #15 |
-| `song-metadata-source` | approved | 대기 |
+| `voice-range-input` | implementing | PR #16 (머지됨) |
+| `song-metadata-source` | implementing | PR #17 (진행) |
 | `recommendation-algorithm-v1` | approved | 대기 |
 
 ## 다음 PR 큐 (예정 순서)
