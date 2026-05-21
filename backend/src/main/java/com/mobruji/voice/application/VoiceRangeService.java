@@ -7,7 +7,9 @@ import lombok.RequiredArgsConstructor;
 
 import com.mobruji.voice.domain.VoiceRange;
 import com.mobruji.voice.domain.VoiceRangeNotFoundException;
+import com.mobruji.voice.domain.VoiceRangeSnapshot;
 import com.mobruji.voice.infrastructure.VoiceRangeRepository;
+import com.mobruji.voice.infrastructure.VoiceRangeSnapshotRepository;
 
 @Service
 @Transactional
@@ -15,9 +17,10 @@ import com.mobruji.voice.infrastructure.VoiceRangeRepository;
 public class VoiceRangeService {
 
     private final VoiceRangeRepository voiceRangeRepository;
+    private final VoiceRangeSnapshotRepository voiceRangeSnapshotRepository;
 
     public VoiceRange createOrReplace(final CreateVoiceRangeCommand createVoiceRangeCommand) {
-        return voiceRangeRepository
+        final VoiceRange voiceRange = voiceRangeRepository
                 .findBySessionId(createVoiceRangeCommand.sessionId())
                 .map(existing -> {
                     existing.updateRange(
@@ -31,6 +34,8 @@ public class VoiceRangeService {
                         createVoiceRangeCommand.lowestNoteMidi(),
                         createVoiceRangeCommand.highestNoteMidi(),
                         createVoiceRangeCommand.sourceMethod())));
+        voiceRangeSnapshotRepository.save(VoiceRangeSnapshot.fromVoiceRange(voiceRange));
+        return voiceRange;
     }
 
     @Transactional(readOnly = true)
@@ -48,6 +53,7 @@ public class VoiceRangeService {
                 updateVoiceRangeCommand.lowestNoteMidi(),
                 updateVoiceRangeCommand.highestNoteMidi(),
                 updateVoiceRangeCommand.sourceMethod());
+        voiceRangeSnapshotRepository.save(VoiceRangeSnapshot.fromVoiceRange(voiceRange));
         return voiceRange;
     }
 }

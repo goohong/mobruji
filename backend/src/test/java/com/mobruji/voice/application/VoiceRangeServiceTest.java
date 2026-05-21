@@ -12,14 +12,17 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.mobruji.voice.domain.VoiceRange;
 import com.mobruji.voice.domain.VoiceRangeNotFoundException;
+import com.mobruji.voice.domain.VoiceRangeSnapshot;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 import com.mobruji.voice.infrastructure.VoiceRangeRepository;
+import com.mobruji.voice.infrastructure.VoiceRangeSnapshotRepository;
 
 @ExtendWith(MockitoExtension.class)
 class VoiceRangeServiceTest {
@@ -27,11 +30,14 @@ class VoiceRangeServiceTest {
     @Mock
     private VoiceRangeRepository voiceRangeRepository;
 
+    @Mock
+    private VoiceRangeSnapshotRepository voiceRangeSnapshotRepository;
+
     @InjectMocks
     private VoiceRangeService voiceRangeService;
 
     @Test
-    @DisplayName("createOrReplace: 신규 sessionId면 save 호출 후 도메인 객체 반환")
+    @DisplayName("createOrReplace: 신규 sessionId면 save 호출 후 도메인 객체 반환 + snapshot 1행 insert")
     void createOrReplace_newSession_savesAndReturns() {
         // given
         final CreateVoiceRangeCommand command = new CreateVoiceRangeCommand(
@@ -47,10 +53,18 @@ class VoiceRangeServiceTest {
         assertThat(voiceRange.getSessionId()).isEqualTo("new-session");
         assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(48);
         verify(voiceRangeRepository).save(any(VoiceRange.class));
+        final ArgumentCaptor<VoiceRangeSnapshot> snapshotCaptor = ArgumentCaptor.forClass(VoiceRangeSnapshot.class);
+        verify(voiceRangeSnapshotRepository).save(snapshotCaptor.capture());
+        final VoiceRangeSnapshot snapshot = snapshotCaptor.getValue();
+        assertThat(snapshot.getSessionId()).isEqualTo("new-session");
+        assertThat(snapshot.getLowMidi()).isEqualTo(48);
+        assertThat(snapshot.getHighMidi()).isEqualTo(69);
+        assertThat(snapshot.getSourceMethod()).isEqualTo(VoiceRangeSourceMethod.OCTAVE_PICK);
+        assertThat(snapshot.getMeasuredAt()).isNotNull();
     }
 
     @Test
-    @DisplayName("createOrReplace: 기존 sessionId면 update만 호출 (save 호출 안 함)")
+    @DisplayName("createOrReplace: 기존 sessionId면 update만 호출 (voiceRange.save 없음) + snapshot 1행 insert")
     void createOrReplace_existingSession_updatesInPlace() {
         // given
         final VoiceRange existing = VoiceRange.create("dup-session", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
@@ -66,6 +80,12 @@ class VoiceRangeServiceTest {
         assertThat(voiceRange.getHighestNoteMidi()).isEqualTo(72);
         assertThat(voiceRange.getSourceMethod()).isEqualTo(VoiceRangeSourceMethod.MIC_MEASURE);
         verify(voiceRangeRepository, never()).save(any());
+        final ArgumentCaptor<VoiceRangeSnapshot> snapshotCaptor = ArgumentCaptor.forClass(VoiceRangeSnapshot.class);
+        verify(voiceRangeSnapshotRepository).save(snapshotCaptor.capture());
+        final VoiceRangeSnapshot snapshot = snapshotCaptor.getValue();
+        assertThat(snapshot.getLowMidi()).isEqualTo(50);
+        assertThat(snapshot.getHighMidi()).isEqualTo(72);
+        assertThat(snapshot.getSourceMethod()).isEqualTo(VoiceRangeSourceMethod.MIC_MEASURE);
     }
 
     @Test
@@ -80,6 +100,7 @@ class VoiceRangeServiceTest {
 
         // then
         assertThat(voiceRange.getSessionId()).isEqualTo("s");
+        verify(voiceRangeSnapshotRepository, never()).save(any());
     }
 
     @Test
@@ -93,7 +114,7 @@ class VoiceRangeServiceTest {
     }
 
     @Test
-    @DisplayName("updateBySessionId: 존재하면 업데이트 후 도메인 객체 반환")
+    @DisplayName("updateBySessionId: 존재하면 업데이트 후 도메인 객체 반환 + snapshot 1행 insert")
     void updateBySessionId_found_updates() {
         // given
         final VoiceRange existing = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
@@ -107,10 +128,14 @@ class VoiceRangeServiceTest {
         // then
         assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(50);
         assertThat(voiceRange.getHighestNoteMidi()).isEqualTo(72);
+        final ArgumentCaptor<VoiceRangeSnapshot> snapshotCaptor = ArgumentCaptor.forClass(VoiceRangeSnapshot.class);
+        verify(voiceRangeSnapshotRepository).save(snapshotCaptor.capture());
+        assertThat(snapshotCaptor.getValue().getLowMidi()).isEqualTo(50);
+        assertThat(snapshotCaptor.getValue().getHighMidi()).isEqualTo(72);
     }
 
     @Test
-    @DisplayName("updateBySessionId: 없으면 VoiceRangeNotFoundException")
+    @DisplayName("updateBySessionId: 없으면 VoiceRangeNotFoundException — snapshot insert 없음")
     void updateBySessionId_notFound_throws() {
         given(voiceRangeRepository.findBySessionId("missing")).willReturn(Optional.empty());
         final UpdateVoiceRangeCommand command = new UpdateVoiceRangeCommand(
@@ -118,5 +143,6 @@ class VoiceRangeServiceTest {
 
         assertThatThrownBy(() -> voiceRangeService.updateBySessionId("missing", command))
                 .isInstanceOf(VoiceRangeNotFoundException.class);
+        verify(voiceRangeSnapshotRepository, never()).save(any());
     }
 }
