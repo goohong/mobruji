@@ -31,6 +31,22 @@ docker run --rm mobruji/audio-analysis:dev \
   python analyze.py --youtube-url "https://www.youtube.com/watch?v=xxxx"
 ```
 
+### docker compose (권장, spec PR D)
+
+호스트에 Python/ffmpeg/librosa 설치 없이 격리 실행한다.
+
+```bash
+# 빌드 + 단발 실행 (--rm 으로 종료 시 컨테이너 정리)
+docker compose -f docker-compose.audio.yml run --rm audio-analysis \
+  --song-title "Yesterday" --artist "The Beatles"
+
+# YouTube URL 직접 지정
+docker compose -f docker-compose.audio.yml run --rm audio-analysis \
+  --youtube-url "https://www.youtube.com/watch?v=xxxx"
+```
+
+Spring 측 `AudioAnalysisRunner` 도 본 compose 파일을 호출 가능하다 — `audio.analysis.use-docker=true` (또는 `AUDIO_ANALYSIS_USE_DOCKER=true`) 환경변수로 활성화한다. 호스트 Python 의존성 미설치 환경 (예: 운영 서버 컨테이너 내부) 에서 유용하다.
+
 ## 사용
 
 ```bash
@@ -101,6 +117,17 @@ AUDIO_ANALYSIS_PYTHON_CMD="$(pwd)/../tools/audio-analysis/.venv/bin/python" \
 - 곡 단위 실패(timeout/403/parse error)는 로그 + 다음 곡으로 진행. 전체 batch 중단 X.
 - 완료 시 `audio backfill done analyzed=N successful=M updated=K skipped_low_confidence=J failed=F` 1줄 요약 로그.
 - audio 임시 파일은 Python 측에서 즉시 삭제 (ADR 0006).
+
+## 정기 batch (Spring 측, spec PR D)
+
+`AudioAnalysisScheduledBackfill` 가 **매주 일요일 새벽 4시 KST** (`cron = "0 0 4 * * SUN"`, zone `Asia/Seoul`) 에 자동 실행된다.
+
+- 활성 조건: **`prod` 프로파일만** (`@Profile("prod")`). 로컬/CI 에서는 빈 자체가 등록되지 않는다.
+- 대상 곡: `metadataSource != AUDIO_ANALYSIS` — audio 분석으로 갱신된 적 없는 곡 (신규 곡, 시드, 외부 출처). spec 의 "metadataConfidence &lt; 0.6" 의도와 정합.
+- 위임: 일회성 backfill 과 동일한 `SongAudioBackfillCommand.runBackfill(songs, 0.6)` 호출.
+- 곡 단위 실패는 격리되어 전체 batch 가 중단되지 않는다.
+- 로그: `audio scheduled backfill: done analyzed=N successful=M updated=K skipped=J failed=F`.
+- 결정성 영향 없음 — 추천 알고리즘 입력 데이터만 정확해지고 알고리즘 코드 변경 없음 (ADR 0010).
 
 ## 알려진 한계
 

@@ -56,3 +56,8 @@ audio:
     python-cmd: ${AUDIO_ANALYSIS_PYTHON_CMD:python3}
     tool-dir: ${AUDIO_ANALYSIS_TOOL_DIR:../tools/audio-analysis}
     timeout: 60s
+    # use-docker=true 시 호스트 Python 대신 docker compose 컨테이너에서 실행 (spec PR D).
+    # 기본 false — 호스트 Python 사용 (CI/로컬 venv).
+    use-docker: ${AUDIO_ANALYSIS_USE_DOCKER:false}
+    docker-compose-file: ${AUDIO_ANALYSIS_COMPOSE_FILE:../docker-compose.audio.yml}
+    docker-compose-service: ${AUDIO_ANALYSIS_COMPOSE_SERVICE:audio-analysis}

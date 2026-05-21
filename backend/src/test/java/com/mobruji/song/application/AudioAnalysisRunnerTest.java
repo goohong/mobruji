@@ -122,7 +122,8 @@ class AudioAnalysisRunnerTest {
     void missingToolDir_throwsFailedException() {
         // given
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
-                "python3", "/no/such/dir/for/audio/analysis", Duration.ofSeconds(60));
+                "python3", "/no/such/dir/for/audio/analysis", Duration.ofSeconds(60),
+                false, null, null);
         final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
 
         // when / then
@@ -132,12 +133,50 @@ class AudioAnalysisRunnerTest {
     }
 
     @Test
+    @DisplayName("use-docker=true 시 docker compose run 명령으로 호출한다 (spec PR D)")
+    void useDocker_buildsDockerComposeCommand() throws IOException {
+        // given
+        Files.createFile(toolDir.resolve("analyze.py"));
+        final AudioAnalysisProperties props = new AudioAnalysisProperties(
+                "python3", toolDir.toString(), Duration.ofSeconds(60),
+                true, "/abs/path/docker-compose.audio.yml", "audio-analysis");
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+
+        // when
+        final List<String> command = runner.buildCommand(List.of("--song-title", "Y", "--artist", "B"));
+
+        // then: `docker compose -f <file> run --rm <service> <toolArgs>`
+        assertThat(command).containsExactly(
+                "docker", "compose", "-f", "/abs/path/docker-compose.audio.yml",
+                "run", "--rm", "audio-analysis",
+                "--song-title", "Y", "--artist", "B");
+    }
+
+    @Test
+    @DisplayName("use-docker=false (기본) 는 호스트 python 명령으로 호출한다")
+    void useDockerFalse_buildsHostPythonCommand() throws IOException {
+        // given
+        Files.createFile(toolDir.resolve("analyze.py"));
+        final AudioAnalysisProperties props = new AudioAnalysisProperties(
+                "python3", toolDir.toString(), Duration.ofSeconds(60),
+                false, null, null);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+
+        // when
+        final List<String> command = runner.buildCommand(List.of("--song-title", "Y"));
+
+        // then
+        assertThat(command).containsExactly("python3", "analyze.py", "--song-title", "Y");
+    }
+
+    @Test
     @DisplayName("timeout 초과 시 destroyForcibly + AudioAnalysisFailedException")
     void timeout_throwsFailedException() throws IOException {
         // given
         Files.createFile(toolDir.resolve("analyze.py"));
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
-                "python3", toolDir.toString(), Duration.ofMillis(10));
+                "python3", toolDir.toString(), Duration.ofMillis(10),
+                false, null, null);
         final HangingProcess hanging = new HangingProcess();
         final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
             @Override
@@ -171,7 +210,8 @@ class AudioAnalysisRunnerTest {
     private AudioAnalysisRunner runnerWithFakeProcess(
             final int exitCode, final String stdout, final String stderr) {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
-                "python3", toolDir.toString(), Duration.ofSeconds(60));
+                "python3", toolDir.toString(), Duration.ofSeconds(60),
+                false, null, null);
         return new AudioAnalysisRunner(props) {
             @Override
             protected Process startProcess(final List<String> command, final Path workingDir) {

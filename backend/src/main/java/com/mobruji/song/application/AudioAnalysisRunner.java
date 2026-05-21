@@ -76,10 +76,7 @@ public class AudioAnalysisRunner {
             throw new AudioAnalysisFailedException(
                     "audio analysis tool directory not found: " + properties.toolDir());
         }
-        final List<String> command = new ArrayList<>();
-        command.add(properties.pythonCmd());
-        command.add("analyze.py");
-        command.addAll(toolArgs);
+        final List<String> command = buildCommand(toolArgs);
 
         final long startedAt = System.currentTimeMillis();
         final Process process;
@@ -87,7 +84,7 @@ public class AudioAnalysisRunner {
             process = startProcess(command, toolDir);
         } catch (final IOException e) {
             throw new AudioAnalysisFailedException(
-                    "failed to spawn audio analysis process: " + properties.pythonCmd(), e);
+                    "failed to spawn audio analysis process: " + command.get(0), e);
         }
 
         final String stdout;
@@ -132,6 +129,38 @@ public class AudioAnalysisRunner {
                 .directory(workingDir.toFile())
                 .redirectErrorStream(false)
                 .start();
+    }
+
+    /**
+     * 호스트 Python vs docker compose 분기. spec PR D — {@code audio.analysis.use-docker=true} 시
+     * Python 의존성을 호스트에 설치하지 않고 컨테이너에서 실행한다.
+     *
+     * <p>docker 모드 명령:
+     * {@code docker compose -f <compose-file> run --rm <service> --song-title ...}.
+     * Dockerfile 의 ENTRYPOINT 가 {@code ["python", "analyze.py"]} 이므로 toolArgs 만 그대로 전달한다.
+     *
+     * <p>호스트 모드 명령: {@code <python-cmd> analyze.py <toolArgs>}.
+     */
+    List<String> buildCommand(final List<String> toolArgs) {
+        final List<String> command = new ArrayList<>();
+        if (properties.useDocker()) {
+            command.add("docker");
+            command.add("compose");
+            final String composeFile = properties.dockerComposeFile();
+            if (composeFile != null && !composeFile.isBlank()) {
+                command.add("-f");
+                command.add(composeFile);
+            }
+            command.add("run");
+            command.add("--rm");
+            command.add(properties.dockerComposeService());
+            command.addAll(toolArgs);
+            return command;
+        }
+        command.add(properties.pythonCmd());
+        command.add("analyze.py");
+        command.addAll(toolArgs);
+        return command;
     }
 
     private AudioAnalysisResult parse(final String stdout) {
