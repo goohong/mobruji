@@ -8,6 +8,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { SongCard } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
@@ -122,6 +123,65 @@ describe("SongCard", () => {
     // 카드 내용은 그대로 보여야 한다.
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("#1")).toBeInTheDocument();
+  });
+
+  // closes #141 — matchReason 다중 줄 + 펼침 토글 (Spotify "Why this song?" 영감).
+  describe("matchReason expander (closes #141)", () => {
+    it("접힘 상태에서 '자세히 보기' 버튼이 보이고 breakdown 패널은 숨겨진다", () => {
+      const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
+      render(
+        <ul>
+          <SongCard item={item} userVoiceRange={{ lowMidi: 48, highMidi: 67 }} />
+        </ul>,
+      );
+      const toggle = screen.getByRole("button", { name: /자세히 보기/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      // 펼침 시 노출되는 라벨이 아직 보이지 않아야 한다
+      expect(screen.queryByText("키 매칭")).not.toBeInTheDocument();
+    });
+
+    it("클릭하면 breakdown 항목(키 매칭/장르/음역 적합)이 노출된다", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
+      render(
+        <ul>
+          <SongCard item={item} userVoiceRange={{ lowMidi: 48, highMidi: 67 }} />
+        </ul>,
+      );
+      await user.click(screen.getByRole("button", { name: /자세히 보기/ }));
+
+      expect(screen.getByText("키 매칭")).toBeInTheDocument();
+      expect(screen.getByText("장르")).toBeInTheDocument();
+      expect(screen.getByText("음역 적합")).toBeInTheDocument();
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시
+      expect(
+        screen.getByText("사용자 C3-G4 vs 곡 G3-F5"),
+      ).toBeInTheDocument();
+      // 추정값 안내 footnote
+      expect(
+        screen.getByText(/클라이언트 추정값입니다/),
+      ).toBeInTheDocument();
+    });
+
+    it("토글 클릭으로 aria-expanded가 false ↔ true 사이를 오간다", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      render(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const toggle = screen.getByRole("button", { name: /자세히 보기/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+      await user.click(toggle);
+      const expanded = screen.getByRole("button", { name: /접기/ });
+      expect(expanded).toHaveAttribute("aria-expanded", "true");
+
+      await user.click(expanded);
+      const collapsed = screen.getByRole("button", { name: /자세히 보기/ });
+      expect(collapsed).toHaveAttribute("aria-expanded", "false");
+    });
   });
 
   // closes #107 — axe-core 자동 검사. serious/critical 위반이 없어야 한다.

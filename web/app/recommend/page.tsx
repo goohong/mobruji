@@ -218,6 +218,8 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           onRetry={handleRecommendAgain}
           onRecommendAgain={handleRecommendAgain}
           excludedCount={excludedSongIds.length}
+          userVoiceRangeLow={voiceRange.lowestNoteMidi}
+          userVoiceRangeHigh={voiceRange.highestNoteMidi}
         />
       </div>
     </main>
@@ -231,6 +233,12 @@ type RecommendationListProps = {
   onRetry: () => void;
   onRecommendAgain: () => void;
   excludedCount: number;
+  /**
+   * 사용자 음역대 — 추천 카드의 "자세히 보기" 패널에서 음역 적합 점수를 계산할 때 사용.
+   * (closes #141) 추천 컨텍스트에서는 항상 알 수 있는 값이라 필수로 받는다.
+   */
+  userVoiceRangeLow: number;
+  userVoiceRangeHigh: number;
 };
 
 function RecommendationList({
@@ -240,6 +248,8 @@ function RecommendationList({
   onRetry,
   onRecommendAgain,
   excludedCount,
+  userVoiceRangeLow,
+  userVoiceRangeHigh,
 }: RecommendationListProps) {
   if (isPending) {
     return (
@@ -309,6 +319,10 @@ function RecommendationList({
             key={item.song.id}
             item={item}
             href={`/songs/${item.song.id}`}
+            userVoiceRange={{
+              lowMidi: userVoiceRangeLow,
+              highMidi: userVoiceRangeHigh,
+            }}
           />
         ))}
       </ul>
