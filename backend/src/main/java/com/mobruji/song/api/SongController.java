@@ -9,10 +9,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.mobruji.song.api.dto.SongResponse;
+import com.mobruji.song.api.dto.SongStatsResponse;
 
 import lombok.RequiredArgsConstructor;
 
 import com.mobruji.song.application.SongService;
+import com.mobruji.song.application.SongStatsService;
 
 @RestController
 @RequestMapping("/api/v1/songs")
@@ -20,6 +22,12 @@ import com.mobruji.song.application.SongService;
 public class SongController {
 
     private final SongService songService;
+    private final SongStatsService songStatsService;
+
+    @GetMapping("/stats")
+    public SongStatsResponse stats() {
+        return SongStatsResponse.from(songStatsService.getStats());
+    }
 
     @GetMapping("/{id}")
     public SongResponse read(@PathVariable final Long id) {
