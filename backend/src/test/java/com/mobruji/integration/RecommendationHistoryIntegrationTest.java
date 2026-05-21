@@ -32,6 +32,9 @@ import io.restassured.RestAssured;
  * <p>spec: docs/features/recommendation-history-and-feedback.md §5-2, §7.
  * 같은 sessionId 로 POST /recommendations 를 N회 호출 → 응답에 N건이 최신순으로 노출.
  * 다른 세션의 추천은 격리.
+ *
+ * <p>rev 16(#238): {@code X-Session-Id} 헤더 인증 게이트. path sessionId 와 일치하는 헤더 필수.
+ * 누락/불일치 → 401.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -72,6 +75,7 @@ class RecommendationHistoryIntegrationTest {
 
         // when / then: 최신(두 번째) 요청이 [0] 에 위치
         given()
+                .header("X-Session-Id", sessionId)
                 .when()
                 .get("/api/v1/sessions/{sessionId}/recommendation-history", sessionId)
                 .then()
@@ -94,9 +98,10 @@ class RecommendationHistoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E: 추천 이력 없는 sessionId → 200 + 빈 배열")
+    @DisplayName("E2E: 추천 이력 없는 sessionId → 200 + 빈 배열 (인증 통과 시)")
     void e2e_history_unknownSession_returnsEmptyList() {
         given()
+                .header("X-Session-Id", "no-such-session")
                 .when()
                 .get("/api/v1/sessions/{sessionId}/recommendation-history", "no-such-session")
                 .then()
@@ -111,6 +116,7 @@ class RecommendationHistoryIntegrationTest {
         postRecommendation("session-B", 50, 80, "EMOTIONAL");
 
         given()
+                .header("X-Session-Id", "session-A")
                 .when()
                 .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
                 .then()
@@ -118,6 +124,40 @@ class RecommendationHistoryIntegrationTest {
                 .body("recommendationHistoryResponses", hasSize(1))
                 .body("recommendationHistoryResponses[0].sessionId", equalTo("session-A"))
                 .body("recommendationHistoryResponses[0].mood", equalTo("UPBEAT"));
+    }
+
+    @Test
+    @DisplayName("E2E (#238): X-Session-Id 헤더 누락 → 401")
+    void e2e_history_missingHeader_returns401() {
+        given()
+                .when()
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
+
+    @Test
+    @DisplayName("E2E (#238): X-Session-Id 헤더가 path sessionId 와 다르면 → 401 (다른 세션 히스토리 노출 차단)")
+    void e2e_history_mismatchedHeader_returns401() {
+        postRecommendation("session-A", 55, 75, "UPBEAT");
+
+        given()
+                .header("X-Session-Id", "session-B")
+                .when()
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
+
+    @Test
+    @DisplayName("E2E (#238): X-Session-Id 헤더 blank → 401")
+    void e2e_history_blankHeader_returns401() {
+        given()
+                .header("X-Session-Id", "")
+                .when()
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
 
     @Test
@@ -141,6 +181,7 @@ class RecommendationHistoryIntegrationTest {
 
         // history 에서 같은 requestId 의 첫 곡 정보가 일치 (영속 라운드트립 확인)
         given()
+                .header("X-Session-Id", sessionId)
                 .when()
                 .get("/api/v1/sessions/{sessionId}/recommendation-history", sessionId)
                 .then()

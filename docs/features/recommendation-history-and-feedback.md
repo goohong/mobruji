@@ -90,9 +90,9 @@ status_pr_c: in-progress (#237)
 | POST   | /api/v1/bookmarks                                 | 북마크 생성(멱등)          | sessionId | `BookmarkCreateRequest`         | `BookmarkResponse`                        |
 | DELETE | /api/v1/bookmarks                                 | 북마크 제거                | sessionId | `BookmarkDeleteRequest`         | 204 No Content                            |
 | GET    | /api/v1/sessions/{sessionId}/bookmarks            | 세션의 북마크 목록         | sessionId | (query: page, size)              | `Page<BookmarkWithSongResponse>`         |
-| GET    | /api/v1/sessions/{sessionId}/recommendation-history | 세션의 추천 히스토리     | sessionId | (v0.2: 무페이징, 최신순 전체)    | `RecommendationHistoryListResponse`       |
+| GET    | /api/v1/sessions/{sessionId}/recommendation-history | 세션의 추천 히스토리     | `X-Session-Id` 헤더 = path (rev 16 / #238) | (v0.2: 무페이징, 최신순 전체)    | `RecommendationHistoryListResponse`       |
 
-- 인증: 별도 토큰 없이 sessionId(쿠키 또는 헤더 `X-Session-Id`) 검증만. 추후 인증 ADR이 도입되면 갱신.
+- 인증: 별도 토큰 없이 sessionId 헤더 `X-Session-Id` 검증만. **rev 16 (#238)** — `recommendation-history` endpoint 는 `SessionAuthGuard` 가 path sessionId 와 헤더 값을 상수시간 비교, 누락/blank/불일치 → 401. like/bookmark/POST 계열 endpoint 의 인증 게이트는 후속 PR. 쿠키 기반은 sessionId TTL/회전(#209) 도입 후 별도 ADR 로 다룬다. 추후 인증 ADR이 도입되면 갱신.
 - DTO 명명: CLAUDE.md 8) 코드 컨벤션 — API별 분리, 리스트 응답 변수명 `responses`.
 
 ### 5-3) 외부 연동
@@ -176,3 +176,4 @@ sequenceDiagram
 
 - **2026-05-21**: Feature Spec 초안 작성 (status=draft). 출처: plan 15 (#160 / PR #161). v0.2 추천 알고리즘 출력에는 좋아요/북마크가 영향을 주지 않음을 명시(가중치 도입은 v0.3+ 별도 ADR로 다룸).
 - **2026-05-21 (PR C, #237)**: spec 용어 `RecommendationResultEntry` 는 PR C 구현 시점 기존 엔티티 `Recommendation`(테이블 `recommendation`) 가 동일 schema 를 가지므로 신설 없이 매핑. history 엔드포인트 경로는 voice-range-progress 와 일관성 위해 `/recommendation-history` 로 확정 (spec 표의 `/recommendations` 보다 의도 명확). V6 는 `recommendation_request(session_id, created_at)` 보조 인덱스 추가만 수행 (보호 영역 → needs-human-review).
+- **2026-05-22 (#238)**: `recommendation-history` GET endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가. `SessionAuthGuard` (admin gate #229 와 동일 상수시간 비교 패턴) 가 path sessionId 와 헤더 값을 비교, 누락/blank/불일치 → 401. 메커니즘은 헤더 우선 (쿠키는 sessionId TTL/회전 #209 도입 후 별도 ADR). like/bookmark/POST 계열 인증 게이트는 후속 PR 로 분리.

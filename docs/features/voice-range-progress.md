@@ -67,7 +67,9 @@ last_reviewed: 2026-05-21
 ### 5-2) API 엔드포인트
 | Method | Path | 설명 | 인증 | Req | Res |
 |---|---|---|---|---|---|
-| GET | /api/v1/sessions/{id}/voice-range-history | 세션의 음역 측정 시계열 조회 | sessionId 쿠키 일치 | path: sessionId | `VoiceRangeHistoryResponse { voiceRangeSnapshotResponses: [...] }` |
+| GET | /api/v1/sessions/{id}/voice-range-history | 세션의 음역 측정 시계열 조회 | `X-Session-Id` 헤더 = path sessionId (rev 16 / #238) | path: sessionId, header: `X-Session-Id` | `VoiceRangeHistoryResponse { voiceRangeSnapshotResponses: [...] }` |
+
+> 인증 게이트(rev 16 / #238): `SessionAuthGuard` 가 `X-Session-Id` 헤더와 path `sessionId` 를 상수시간 비교. 누락/blank/불일치 → 401. Spring Security 정식 도입 전 임시 게이트로 admin gate(#229) 와 동일 패턴.
 
 ### 5-3) 외부 연동
 - 없음. 내부 DB만 사용.
@@ -124,3 +126,4 @@ last_reviewed: 2026-05-21
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
 - 2026-05-21: 초안 작성 (status=draft) — PR #221, closes #220.
+- 2026-05-22: history endpoint 에 `X-Session-Id` 헤더 인증 게이트 추가 (rev 16 / closes #238). path sessionId 와 헤더 값을 `SessionAuthGuard` 가 상수시간 비교, 누락/불일치 → 401. 쿠키 기반은 sessionId TTL/회전(#209) 도입 후 별도 ADR 로 다룬다.
