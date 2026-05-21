@@ -6,7 +6,7 @@ owner: "@goohong"
 scope: song
 related_issues: [67, 98]
 related_prs: [99]
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-22
 ---
 
 # 자체 곡 분석 파이프라인 (song-self-analysis-pipeline)
@@ -145,3 +145,4 @@ last_reviewed: 2026-05-21
 - 2026-05-21: 초안 작성 (status=draft). 자체 분석 pivot 확정, audio 출처 = YouTube extract (ADR 0006). v0.2 PoC 큐레이션 기준(§4-1) 합리적 default 제시. 출처: #99
 - 2026-05-21: 이슈 #67(외부 ingestion spec)을 본 spec으로 promote. 외부 메타 카탈로그 의존은 v0.x 한정 잔존, v0.2부터 자체 분석으로 전환. 출처: #99
 - 2026-05-21: Q2(JVM↔Python 통합 방식) 종결. ADR 0010에서 **Python worker + Spring `ProcessBuilder`**로 결정. monorepo 단일 배포 유지, microservice 분리는 v0.3 이상 재평가. 출처: #163
+- 2026-05-22: cross-ref — `song-curation-seed-100.md` Q4 (장르 분포 통일) 제기됨. 본 spec §4-1 (발라드30/댄스20/락15/트로트15/팝10/힙합10) vs curation spec §3 (발라드30/댄스20/락15/트로트15/팝20)이 다름. 결정은 curation spec Q4에서 단일화. 본 spec §4-1은 결정 후 후속 PR에서 동기화. 출처: 본 sequel PR (#71)
