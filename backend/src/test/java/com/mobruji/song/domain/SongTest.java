@@ -84,4 +84,91 @@ class SongTest {
                 .build();
         assertThat(song.getBpm()).isNull();
     }
+
+    @Test
+    @DisplayName("deriveDifficulty: highMidi 76 (E5)은 HARD")
+    void deriveDifficulty_high76_isHard() {
+        // given: 경계값 highMidi=HIGH_HARD_THRESHOLD, span=10 (span 조건은 미충족)
+        // when
+        final Difficulty difficulty = Song.deriveDifficulty(66, 76);
+        // then
+        assertThat(difficulty).isEqualTo(Difficulty.HARD);
+    }
+
+    @Test
+    @DisplayName("deriveDifficulty: highMidi 75 + span 17은 HARD (span 조건)")
+    void deriveDifficulty_spanAtThreshold_isHard() {
+        // given: highMidi<76 이지만 span=17 (=SPAN_HARD_THRESHOLD)
+        // when
+        final Difficulty difficulty = Song.deriveDifficulty(58, 75);
+        // then
+        assertThat(difficulty).isEqualTo(Difficulty.HARD);
+    }
+
+    @Test
+    @DisplayName("deriveDifficulty: highMidi 71 (B4) + span 11은 NORMAL")
+    void deriveDifficulty_high71SpanSmall_isNormal() {
+        // given: 경계값 highMidi=HIGH_NORMAL_THRESHOLD, span<17
+        // when
+        final Difficulty difficulty = Song.deriveDifficulty(60, 71);
+        // then
+        assertThat(difficulty).isEqualTo(Difficulty.NORMAL);
+    }
+
+    @Test
+    @DisplayName("deriveDifficulty: highMidi 70 (A#4) + span 10은 EASY")
+    void deriveDifficulty_high70_isEasy() {
+        // given: highMidi=70<71, span<17
+        // when
+        final Difficulty difficulty = Song.deriveDifficulty(60, 70);
+        // then
+        assertThat(difficulty).isEqualTo(Difficulty.EASY);
+    }
+
+    @Test
+    @DisplayName("create: lowMidi/highMidi 둘 다 있으면 difficulty 자동 분류")
+    void create_withMidiRange_autoDerivesDifficulty() {
+        // given/when: highMidi 78 = HARD 임계 초과
+        final Song song = Song.builder()
+                .title("t")
+                .artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60)
+                .highMidi(78)
+                .build();
+        // then
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.HARD);
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isEqualTo(78);
+    }
+
+    @Test
+    @DisplayName("create: lowMidi > highMidi이면 IllegalArgumentException")
+    void create_withInvertedMidi_throws() {
+        assertThatThrownBy(() -> Song.builder()
+                .title("t")
+                .artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(80)
+                .highMidi(60)
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("lowMidi");
+    }
+
+    @Test
+    @DisplayName("create: MIDI 미지정 시 difficulty도 null (자동 분류 스킵)")
+    void create_withoutMidi_leavesDifficultyNull() {
+        final Song song = Song.builder()
+                .title("t")
+                .artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+        assertThat(song.getDifficulty()).isNull();
+        assertThat(song.getLowMidi()).isNull();
+        assertThat(song.getHighMidi()).isNull();
+    }
 }

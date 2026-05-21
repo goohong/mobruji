@@ -57,18 +57,24 @@ public class SongSeedLoader implements ApplicationRunner {
                     objectMapper.getTypeFactory().constructCollectionType(List.class, SongSeedEntry.class));
             for (final SongSeedEntry entry : entries) {
                 Objects.requireNonNull(entry, "seed entry must not be null");
-                final Song song = Song.create(
-                        entry.title(),
-                        entry.artist(),
-                        entry.releaseYear(),
-                        entry.keyOriginal(),
-                        entry.bpm(),
-                        entry.mood(),
-                        entry.language(),
-                        entry.genre(),
-                        entry.tjNumber(),
-                        entry.kyNumber(),
-                        MetadataSource.MANUAL_SEED);
+                // lowMidi/highMidi가 둘 다 있으면 Song.create() 내부에서 difficulty 자동 분류.
+                // 시드에 difficulty를 직접 명시하지 않는 이유: 분류 규칙(임계값)은 코드에 단일 소스로 두어
+                // fe와의 1:1 일치를 컴파일 시 강제하기 위함.
+                final Song song = Song.builder()
+                        .title(entry.title())
+                        .artist(entry.artist())
+                        .releaseYear(entry.releaseYear())
+                        .keyOriginal(entry.keyOriginal())
+                        .bpm(entry.bpm())
+                        .mood(entry.mood())
+                        .language(entry.language())
+                        .genre(entry.genre())
+                        .tjNumber(entry.tjNumber())
+                        .kyNumber(entry.kyNumber())
+                        .metadataSource(MetadataSource.MANUAL_SEED)
+                        .lowMidi(entry.lowMidi())
+                        .highMidi(entry.highMidi())
+                        .build();
                 songRepository.save(song);
             }
             log.info("Loaded {} song seed entries", entries.size());
@@ -86,7 +92,9 @@ public class SongSeedLoader implements ApplicationRunner {
             String language,
             String genre,
             String tjNumber,
-            String kyNumber
+            String kyNumber,
+            Integer lowMidi,
+            Integer highMidi
     ) {
     }
 }
