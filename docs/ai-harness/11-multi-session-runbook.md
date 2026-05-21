@@ -48,29 +48,55 @@ bash scripts/setup-labels.sh
 
 ### 1-4) Projects v2 보드 (사람용 대시보드)
 
-#### 토큰 scope 갱신
+**현재 셋업된 보드**: https://github.com/users/goohong/projects/5 (mobruji)
+
+#### 최초 셋업 (이미 완료, 재현용 참고)
 ```bash
+# 토큰 scope 갱신 (1회)
 gh auth refresh -s project,read:project
-```
 
-#### 보드 생성
-```bash
+# 보드 생성
 gh project create --owner goohong --title "mobruji"
-# → 출력에 number 있음. 예: Project #1
+
+# Session 필드 추가
+gh project field-create <number> --owner goohong \
+    --name "Session" --data-type SINGLE_SELECT \
+    --single-select-options "backend,frontend,review,infra,release"
+
+# repo variable 등록 (auto-add workflow가 참조)
+gh variable set PROJECT_URL --body "https://github.com/users/goohong/projects/5" \
+    --repo goohong/mobruji
 ```
 
-#### 커스텀 필드 추가
-GitHub UI에서 (gh project field-create CLI도 가능):
-- `Session` (single select): `backend`, `frontend`, `review`, `infra`, `release`
-- `Status`는 기본 제공 (`Todo`, `In Progress`, `Done`) — 그대로 사용. 필요 시 `Review` 추가.
+#### auto-add workflow 동작 조건
 
-#### 자동 등록 워크플로우 활성화
-1. Project URL을 repo variable로 등록:
+`.github/workflows/auto-add-to-project.yml`이 PR/이슈를 자동 등록한다. 단:
+
+- **User-owned project**(현재 상태)는 `github.token`으로 add 불가 (GitHub 제약).
+- → `repo` + `project` scope의 **Personal Access Token (Classic)** 을 발급해 repo secret `PROJECT_TOKEN`으로 등록해야 작동.
+
+PAT 발급:
+1. https://github.com/settings/tokens (classic) → Generate new token
+2. Scopes: `repo`, `project`
+3. 토큰을 repo secret으로 등록:
    ```bash
-   gh variable set PROJECT_URL --body "https://github.com/users/goohong/projects/1"
+   gh secret set PROJECT_TOKEN --repo goohong/mobruji
+   # (붙여넣기 프롬프트에 토큰 입력)
    ```
-2. (선택) repo write 권한 있는 PAT를 `PROJECT_TOKEN` secret으로 등록하면 cross-repo도 가능. 단일 레포면 기본 `github.token`도 작동.
-3. `.github/workflows/auto-add-to-project.yml`이 이후 모든 PR/이슈를 자동 등록.
+4. 이후 PR/이슈 열릴 때 자동으로 보드에 추가됨.
+
+PAT 없이도 워크플로우는 살아있고 `skipping`으로 graceful fail. 사람이 보드에 수동 추가하면 동일 효과.
+
+#### 수동 추가 (PAT 미사용 시)
+```bash
+gh project item-add 5 --owner goohong --url https://github.com/goohong/mobruji/issues/<N>
+gh project item-add 5 --owner goohong --url https://github.com/goohong/mobruji/pull/<N>
+```
+
+#### Status / Session 필드 운영
+- 기본 `Status`: Todo / In Progress / Done. UI에서 칸반 보드로 자동 표시.
+- `Session` 필드: 새 PR을 보드에 add 후 backend/frontend/review/infra/release 중 하나로 설정.
+- 자동 전이: 별 워크플로우 없음. 사람이 UI에서 드래그하거나 `gh project item-edit`로 갱신.
 
 ## 2) 세션별 역할
 
