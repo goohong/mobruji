@@ -92,7 +92,7 @@ cd web && npm run lint && npm run typecheck && npm test
 **Frontend**
 - 컴포넌트는 함수형 + 명시적 props 타입
 - 서버 상태는 React Query, 클라이언트 상태는 Zustand/Jotai 등 (스택 확정 시 ADR 추가)
-- API 호출은 `web/src/lib/api/` 한 곳에서 집중 관리
+- API 호출은 `web/lib/api/` 한 곳에서 집중 관리
 - 환경변수는 `NEXT_PUBLIC_*` 또는 서버 전용 명확히 구분
 
 **테스트**

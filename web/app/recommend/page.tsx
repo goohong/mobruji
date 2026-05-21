@@ -44,28 +44,58 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     queryFn: () => readVoiceRange(sessionId),
   });
 
+  type RecommendationInput = {
+    sessionId: string;
+    voiceRangeLow: number;
+    voiceRangeHigh: number;
+  };
+
   const recommendationMutation = useMutation<
     RecommendationResponse,
     Error,
-    VoiceRangeResponse
+    RecommendationInput
   >({
-    mutationFn: (voiceRange) =>
-      createRecommendation({
-        sessionId: voiceRange.sessionId,
-        voiceRangeLow: voiceRange.lowestNoteMidi,
-        voiceRangeHigh: voiceRange.highestNoteMidi,
-      }),
+    mutationFn: (input) => createRecommendation(input),
   });
 
   // 음역대 조회 성공 시 자동으로 추천 호출 (1회).
+  // 객체 의존성으로 인한 useEffect 무한 재실행 함정을 피하기 위해
+  // primitive 필드와 mutation의 stable 함수 ref만 의존성에 둔다.
+  // (TanStack Query는 .mutate 함수 ref는 안정적으로 보장한다.)
+  const isVoiceRangeSuccess = voiceRangeQuery.isSuccess;
+  const voiceRangeSessionId = voiceRangeQuery.data?.sessionId;
+  const voiceRangeLow = voiceRangeQuery.data?.lowestNoteMidi;
+  const voiceRangeHigh = voiceRangeQuery.data?.highestNoteMidi;
+  const isRecommendationIdle = recommendationMutation.isIdle;
+  const triggerRecommendation = recommendationMutation.mutate;
+
   useEffect(() => {
-    if (!voiceRangeQuery.data) {
+    if (!isVoiceRangeSuccess) {
       return;
     }
-    if (recommendationMutation.isIdle) {
-      recommendationMutation.mutate(voiceRangeQuery.data);
+    if (
+      voiceRangeSessionId === undefined ||
+      voiceRangeLow === undefined ||
+      voiceRangeHigh === undefined
+    ) {
+      return;
     }
-  }, [voiceRangeQuery.data, recommendationMutation]);
+    if (!isRecommendationIdle) {
+      return;
+    }
+    triggerRecommendation({
+      sessionId: voiceRangeSessionId,
+      voiceRangeLow,
+      voiceRangeHigh,
+    });
+  }, [
+    isVoiceRangeSuccess,
+    voiceRangeSessionId,
+    voiceRangeLow,
+    voiceRangeHigh,
+    isRecommendationIdle,
+    triggerRecommendation,
+  ]);
 
   if (voiceRangeQuery.isLoading) {
     return <StatusShell title="음역대를 불러오는 중..." />;
@@ -121,7 +151,13 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           }
           error={recommendationMutation.error}
           data={recommendationMutation.data}
-          onRetry={() => recommendationMutation.mutate(voiceRange)}
+          onRetry={() =>
+            recommendationMutation.mutate({
+              sessionId: voiceRange.sessionId,
+              voiceRangeLow: voiceRange.lowestNoteMidi,
+              voiceRangeHigh: voiceRange.highestNoteMidi,
+            })
+          }
         />
       </div>
     </main>
