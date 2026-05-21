@@ -699,4 +699,121 @@ describe("RecommendPage", () => {
     const cta = screen.getAllByRole("link", { name: "음역대 다시 입력" });
     expect(cta.length).toBeGreaterThanOrEqual(1);
   });
+
+  // ---------- closes #282 ----------
+  //
+  // 추천 페이지 헤더가 voice-range source method 를 뱃지로 노출하고,
+  // MIC_MEASURE 일 때만 "마이크로 다시 측정" 1차 액션 링크를 강조한다.
+  // 음역대 컨텍스트를 시각적으로 연결해 사용자가 결과를 자기 행동과 매칭할 수
+  // 있게 한다.
+  describe("음역대 source method 헤더 뱃지 (#282)", () => {
+    function buildResponse(): Awaited<ReturnType<typeof createRecommendation>> {
+      return {
+        requestId: 999,
+        recommendations: [
+          {
+            rankPosition: 1,
+            score: 0.9,
+            matchReason: "음역 매칭",
+            song: {
+              id: 1,
+              title: "헤더 테스트 곡",
+              artist: "가수",
+              releaseYear: 2024,
+              keyOriginal: "C_MAJOR",
+              bpm: 110,
+              mood: "UPBEAT",
+              language: "ko",
+              genre: "POP",
+              tjNumber: "T-1",
+              kyNumber: "K-1",
+              metadataSource: "MANUAL_SEED",
+            },
+          },
+        ],
+      };
+    }
+
+    it("MIC_MEASURE 응답이면 '마이크 측정' 뱃지와 '마이크로 다시 측정' 링크가 노출된다", async () => {
+      sessionMock.set({ sessionId: "sess-mic", voiceRangeId: 7 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 7,
+        sessionId: "sess-mic",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 72,
+        sourceMethod: "MIC_MEASURE",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(buildResponse());
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("헤더 테스트 곡")).toBeInTheDocument();
+      });
+
+      const badge = screen.getByTestId("voice-range-source-badge");
+      expect(badge).toHaveTextContent("마이크 측정");
+      expect(
+        screen.getByRole("link", { name: "마이크로 다시 측정" }),
+      ).toHaveAttribute("href", "/voice-range/auto");
+    });
+
+    it("OCTAVE_PICK 응답이면 '직접 선택' 뱃지가 노출되고 '마이크로 다시 측정' 링크는 노출되지 않는다", async () => {
+      sessionMock.set({ sessionId: "sess-pick", voiceRangeId: 8 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 8,
+        sessionId: "sess-pick",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(buildResponse());
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("헤더 테스트 곡")).toBeInTheDocument();
+      });
+
+      const badge = screen.getByTestId("voice-range-source-badge");
+      expect(badge).toHaveTextContent("직접 선택");
+      expect(
+        screen.queryByRole("link", { name: "마이크로 다시 측정" }),
+      ).not.toBeInTheDocument();
+      // 수동 재입력 링크는 그대로 노출.
+      expect(
+        screen.getByRole("link", { name: "음역대 다시 입력" }),
+      ).toHaveAttribute("href", "/voice-range");
+    });
+
+    it("SELF_REPORT 응답이면 '자가 보고' 뱃지가 노출되고 '마이크로 다시 측정' 링크는 노출되지 않는다", async () => {
+      sessionMock.set({ sessionId: "sess-self", voiceRangeId: 9 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 9,
+        sessionId: "sess-self",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "SELF_REPORT",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(buildResponse());
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("헤더 테스트 곡")).toBeInTheDocument();
+      });
+
+      const badge = screen.getByTestId("voice-range-source-badge");
+      expect(badge).toHaveTextContent("자가 보고");
+      expect(
+        screen.queryByRole("link", { name: "마이크로 다시 측정" }),
+      ).not.toBeInTheDocument();
+    });
+  });
 });

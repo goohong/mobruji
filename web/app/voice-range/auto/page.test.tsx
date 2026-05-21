@@ -72,6 +72,23 @@ function renderWithQueryClient(ui: ReactNode) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
+/**
+ * cache prime 검증용 — 호출자가 client 인스턴스를 직접 들고 setQueryData 가
+ * 일어났는지 확인할 수 있게 한다 (#282).
+ */
+function renderWithExposedQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const rendered = render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+  return { ...rendered, client };
+}
+
 function fakeStream(): MediaStream {
   // happy-dom에는 MediaStream 생성자가 없을 수 있으므로 간이 stub.
   return {
@@ -328,6 +345,43 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(sessionMock.state().setVoiceRangeId).toHaveBeenCalledWith(91);
     });
     expect(pushMock).toHaveBeenCalledWith("/recommend");
+  });
+
+  // (closes #282) /recommend 진입 시 voice-range GET 왕복을 제거하기 위해
+  // 자동 측정 흐름의 mutation onSuccess 도 react-query 캐시를 prime 한다.
+  it("저장 성공 시 응답을 react-query 캐시에 prime 한다 (#282)", async () => {
+    const user = userEvent.setup();
+    const response = {
+      id: 92,
+      sessionId: "test-session-id",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "MIC_MEASURE" as const,
+      createdAt: "2026-05-22T00:00:00Z",
+      updatedAt: "2026-05-22T00:00:00Z",
+    };
+    createVoiceRangeMock.mockResolvedValueOnce(response);
+
+    const { client } = renderWithExposedQueryClient(
+      <AutoVoiceRangePage deps={buildDeps()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /추천 받기/ }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/recommend");
+    });
+
+    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+      response,
+    );
   });
 
   it("API 실패 시 에러 메시지를 노출하고 라우팅하지 않는다", async () => {
