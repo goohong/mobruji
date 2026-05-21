@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS LaunchAgent 템플릿. setup-launchagent.sh 가 아래 토큰을 치환한다.
+    {{DAEMON_DIR}}  : tools/discord-daemon 절대 경로
+    {{PYTHON_BIN}}  : venv 의 python 절대 경로
+    {{LOG_DIR}}     : 로그 출력 디렉토리 (~/Library/Logs)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mobruji.discord-daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{PYTHON_BIN}}</string>
+    <string>{{DAEMON_DIR}}/bot.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{DAEMON_DIR}}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{LOG_DIR}}/mobruji-discord-daemon.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{LOG_DIR}}/mobruji-discord-daemon.err.log</string>
+</dict>
+</plist>
