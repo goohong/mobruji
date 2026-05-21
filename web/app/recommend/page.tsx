@@ -8,9 +8,14 @@
  *   - POST /api/v1/recommendations 호출 → 결과 카드 리스트 노출.
  *
  * 세션 없음/음역대 미등록인 경우 음역대 입력 페이지로 안내한다.
+ *
+ * 이슈 #75 / PR #76 (2026-05-21):
+ *   - 카드 렌더는 `./components/SongCard`로 분리. 음역대 막대 그래프 시각화는 폐기.
+ *   - 로딩 중에는 SongCardSkeleton 다수 노출 → 결과 자리에 대한 공간 인지 향상.
+ *   - 빈 결과 시 음역대 재입력 CTA 강조.
  */
 
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
@@ -18,11 +23,14 @@ import { ApiError } from "@/lib/api/client";
 import {
   createRecommendation,
   RecommendationResponse,
-  RecommendedSongResponse,
 } from "@/lib/api/recommendation";
 import { readVoiceRange, VoiceRangeResponse } from "@/lib/api/voice-range";
 import { midiToNoteName } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
+
+import { SongCard, SongCardSkeleton } from "./components/SongCard";
+
+const SKELETON_COUNT = 4;
 
 export default function RecommendPage() {
   const sessionId = useSessionStore((state) => state.sessionId);
@@ -179,9 +187,15 @@ function RecommendationList({
 }: RecommendationListProps) {
   if (isPending) {
     return (
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        추천 결과를 가져오는 중...
-      </p>
+      <ul
+        aria-busy="true"
+        aria-label="추천 결과 로딩 중"
+        className="flex flex-col gap-3"
+      >
+        {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
+          <SongCardSkeleton key={idx} />
+        ))}
+      </ul>
     );
   }
 
@@ -207,60 +221,26 @@ function RecommendationList({
 
   if (!data || data.recommendations.length === 0) {
     return (
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        조건에 맞는 곡이 없습니다. 음역대를 다시 확인해 주세요.
-      </p>
+      <div className="flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          조건에 맞는 곡이 없습니다. 음역대를 다시 확인해 주세요.
+        </p>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-10 items-center justify-center rounded-full bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          음역대 다시 입력
+        </Link>
+      </div>
     );
   }
 
   return (
     <ul className="flex flex-col gap-3">
       {data.recommendations.map((item) => (
-        <RecommendationCard key={item.song.id} item={item} />
+        <SongCard key={item.song.id} item={item} />
       ))}
     </ul>
-  );
-}
-
-type RecommendationCardProps = {
-  item: RecommendedSongResponse;
-};
-
-function RecommendationCard({ item }: RecommendationCardProps) {
-  const keyLabel = useMemo(
-    () => formatMusicalKey(item.song.keyOriginal),
-    [item.song.keyOriginal],
-  );
-  return (
-    <li className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            #{item.rankPosition}
-          </p>
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-            {item.song.title}
-          </h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {item.song.artist}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1 text-right">
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">키</span>
-          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-            {keyLabel}
-          </span>
-        </div>
-      </div>
-      <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          {item.matchReason}
-        </span>
-        <span className="text-xs font-mono text-zinc-700 dark:text-zinc-300">
-          score {item.score.toFixed(2)}
-        </span>
-      </div>
-    </li>
   );
 }
 
@@ -310,17 +290,4 @@ function NoSessionFallback() {
       ctaLabel="음역대 입력하러 가기"
     />
   );
-}
-
-function formatMusicalKey(key: string): string {
-  if (key === "UNKNOWN") {
-    return "Unknown";
-  }
-  // ex) C_SHARP_MAJOR → C# Major
-  return key
-    .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
 }

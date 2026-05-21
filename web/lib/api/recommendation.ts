@@ -59,6 +59,16 @@ export type RecommendationCreateRequest = {
   mood?: Mood | null;
 };
 
+/**
+ * 곡 응답 DTO.
+ *
+ * 옵셔널 필드 (BE 미구현, 이슈 #77로 추가 예정):
+ *   - `lowMidi` / `highMidi`: 곡 음역 (반음 단위 MIDI note number).
+ *   - `difficulty`: 가창 난이도. BE가 채워주기 전에는 fe에서 `deriveDifficulty()`로 계산한다.
+ *
+ * 옵셔널 처리 이유: 백엔드 PR(#77)이 머지되기 전에 fe(#76)가 먼저 카드 UI를 다듬는다.
+ * BE가 필드를 추가하면 SongCard가 응답값을 우선 사용하고, 없으면 client-side fallback한다.
+ */
 export type SongResponse = {
   id: number;
   title: string;
@@ -72,6 +82,9 @@ export type SongResponse = {
   tjNumber: string | null;
   kyNumber: string | null;
   metadataSource: MetadataSource;
+  lowMidi?: number | null;
+  highMidi?: number | null;
+  difficulty?: "EASY" | "NORMAL" | "HARD" | null;
 };
 
 export type RecommendedSongResponse = {
