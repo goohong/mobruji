@@ -142,7 +142,14 @@ ADR 0005에 따라 모든 BoundedContext(BC)는 다음 4계층 패키지를 갖�
 com.mobruji.<bc>.{domain, application, infrastructure, api}
 ```
 
-현재 BC 목록: `voice`, `song`, `recommendation`. 횡단 코드가 생기면 `com.mobruji.common.*`을 BC 외부에 추가한다(현재는 두지 않음).
+현재 BC 목록: `voice`, `song`, `recommendation`, `feedback`. 횡단 코드가 생기면 `com.mobruji.common.*`을 BC 외부에 추가한다(현재는 두지 않음).
+
+| BC | 패키지 prefix | 주요 도메인 객체 | 비고 |
+|---|---|---|---|
+| `voice` | `com.mobruji.voice.*` | `VoiceRange` | 사용자 음역대 입력 |
+| `song` | `com.mobruji.song.*` | `Song`, `MusicalKey` | 곡 카탈로그/시드 |
+| `recommendation` | `com.mobruji.recommendation.*` | `Recommendation`, `RecommendationScorer` | 추천 유스케이스 |
+| `feedback` | `com.mobruji.feedback.*` | `Like`, `Bookmark` | 좋아요/북마크 (PR #179) |
 
 #### 계층별 책임
 
