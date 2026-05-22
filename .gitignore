@@ -75,3 +75,7 @@ tools/audio-analysis/*.webm
 tools/discord-daemon/venv/
 tools/discord-daemon/__pycache__/
 tools/discord-daemon/inbox.jsonl
+
+# Phase 4 NCP dev 배포 (.env.dev.example 만 추적)
+.env.dev
+!.env.dev.example
