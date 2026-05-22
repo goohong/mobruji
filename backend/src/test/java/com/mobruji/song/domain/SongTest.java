@@ -409,4 +409,74 @@ class SongTest {
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("result");
     }
+
+    @Test
+    @DisplayName("create: albumCoverUrl 명시 시 그대로 저장")
+    void create_withAlbumCoverUrl_isPersisted() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .albumCoverUrl("https://example.com/cover.jpg")
+                .build();
+
+        assertThat(song.getAlbumCoverUrl()).isEqualTo("https://example.com/cover.jpg");
+    }
+
+    @Test
+    @DisplayName("create: albumCoverUrl 미명시 시 null")
+    void create_withoutAlbumCoverUrl_isNull() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThat(song.getAlbumCoverUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("backfillAlbumCoverUrl: 기존 값이 null 이면 새 URL 로 채우고 true 반환")
+    void backfillAlbumCoverUrl_whenMissing_fillsAndReturnsTrue() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        final boolean changed = song.backfillAlbumCoverUrl("https://cdn.example.com/600x600bb.jpg");
+
+        assertThat(changed).isTrue();
+        assertThat(song.getAlbumCoverUrl()).isEqualTo("https://cdn.example.com/600x600bb.jpg");
+    }
+
+    @Test
+    @DisplayName("backfillAlbumCoverUrl: 이미 값이 있으면 보존, false 반환 (큐레이터 수정 보호)")
+    void backfillAlbumCoverUrl_whenPresent_preservesExisting() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .albumCoverUrl("https://curator.example.com/manual.jpg")
+                .build();
+
+        final boolean changed = song.backfillAlbumCoverUrl("https://cdn.example.com/600x600bb.jpg");
+
+        assertThat(changed).isFalse();
+        assertThat(song.getAlbumCoverUrl()).isEqualTo("https://curator.example.com/manual.jpg");
+    }
+
+    @Test
+    @DisplayName("backfillAlbumCoverUrl: null 또는 blank 입력은 적용하지 않음")
+    void backfillAlbumCoverUrl_nullOrBlank_isNoop() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThat(song.backfillAlbumCoverUrl(null)).isFalse();
+        assertThat(song.backfillAlbumCoverUrl("   ")).isFalse();
+        assertThat(song.getAlbumCoverUrl()).isNull();
+    }
 }
