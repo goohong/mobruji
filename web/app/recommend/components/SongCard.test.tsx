@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { SongCard } from "./SongCard";
+import { SongCard, buildYouTubeSearchUrl } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 import { useBookmarksStore } from "@/store/bookmarks";
@@ -374,6 +374,71 @@ describe("SongCard", () => {
           songId: 1,
         });
       });
+    });
+  });
+
+  // closes #302 — YouTube 검색 링크 (미리듣기 1단계). ADR-0006 범위 밖, BE 변경 없음.
+  describe("YouTube 검색 링크 (closes #302)", () => {
+    it("추천 카드에 'YouTube에서 듣기' 링크가 노출되고 새 탭으로 열린다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const link = screen.getByRole("link", {
+        name: /테스트 곡 YouTube에서 듣기 \(새 탭\)/,
+      });
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      // 검색 URL은 곡 제목 + 아티스트가 search_query로 인코딩되어야 한다.
+      const href = link.getAttribute("href") ?? "";
+      expect(href).toMatch(/^https:\/\/www\.youtube\.com\/results\?/);
+      expect(href).toContain("search_query=");
+    });
+
+    it("검색 컨텍스트(song prop) 카드에도 동일하게 노출된다", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard song={item.song} />
+        </ul>,
+      );
+      expect(
+        screen.getByRole("link", {
+          name: /테스트 곡 YouTube에서 듣기 \(새 탭\)/,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it("href 모드(상세 페이지 링크 카드)에서도 YouTube 링크가 부모 링크 외부에 있어 분리된다", () => {
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} href="/songs/1" />
+        </ul>,
+      );
+      const detailLink = screen.getByRole("link", {
+        name: /테스트 곡 상세 보기/,
+      });
+      const youtubeLink = screen.getByRole("link", {
+        name: /테스트 곡 YouTube에서 듣기 \(새 탭\)/,
+      });
+      expect(detailLink).toHaveAttribute("href", "/songs/1");
+      // 별도 링크여야 한다 (중첩되지 않음).
+      expect(detailLink).not.toContainElement(youtubeLink);
+    });
+
+    it("buildYouTubeSearchUrl: 한글 제목/아티스트도 안전하게 인코딩한다", () => {
+      const url = buildYouTubeSearchUrl("밤편지", "아이유");
+      expect(url).toBe(
+        "https://www.youtube.com/results?search_query=%EB%B0%A4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%B4%EC%9C%A0",
+      );
+    });
+
+    it("buildYouTubeSearchUrl: 특수문자(앰퍼샌드 등)도 안전하게 인코딩한다", () => {
+      const url = buildYouTubeSearchUrl("Me & You", "Artist?");
+      expect(url).toContain("search_query=Me+%26+You+Artist%3F");
     });
   });
 
