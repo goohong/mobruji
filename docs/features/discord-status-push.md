@@ -1,7 +1,7 @@
 ---
 feature: Discord 상태 push 룰 (maestro 사이클 트레일)
 slug: discord-status-push
-status: active
+status: approved
 owner: @mobruji-maestro
 scope: infra
 related_issues: [#352]
@@ -105,4 +105,4 @@ maestro가 매 사이클 launch마다 자기 점검:
 | Q1 | 결정 분기를 6h 다이제스트보다 빠르게 expose해야 하나? | (a) 6h로 충분 / (b) label 이벤트 webhook 신설 | @user / 후속 사이클 |
 
 ## 9) 결정 로그
-- 2026-05-23: 초안 작성 (status=active). 사용자 위임 — 자율 사이클 트레일 가시화 정형화. 기존 `discord-notify.yml` + `discord-periodic-summary.yml` 재사용. maestro가 직접 webhook curl 호출하지 않는다 (secret 이중 보유 회피).
+- 2026-05-23: 초안 작성 + 즉시 운영 적용 (status=approved). 사용자 위임 — 자율 사이클 트레일 가시화 정형화. 기존 `discord-notify.yml` + `discord-periodic-summary.yml` 재사용. maestro가 직접 webhook curl 호출하지 않는다 (secret 이중 보유 회피).
