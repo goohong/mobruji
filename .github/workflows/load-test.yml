@@ -99,6 +99,10 @@ jobs:
           SPRING_JPA_SHOW_SQL: 'false'
           LOGGING_LEVEL_ORG_HIBERNATE_SQL: 'ERROR'
           LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_BIND: 'ERROR'
+          # AdminAuthProperties @NotBlank fail-fast 회피용 CI 더미 토큰.
+          # 부하 테스트는 admin endpoint 를 호출하지 않으므로 검증값 의미 없음.
+          # spec: docs/ai-harness/04-security-policy.md — 운영 토큰과 분리, CI 한정.
+          MOBRUJI_ADMIN_TOKEN: ci-load-test-dummy-token
         run: |
           set -euo pipefail
           JAR=$(ls build/libs/*.jar | grep -v plain | head -1)
