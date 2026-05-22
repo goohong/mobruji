@@ -60,9 +60,10 @@ USER spring:spring
 # 100MB JVM/native overhead 여유로 두고 heap 은 -Xmx512m.
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=80.0"
 
-EXPOSE 8080
+EXPOSE 8080 8081
 
+# Spring management.server.port=8081 (application.yml) — actuator 별 port.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=4 \
-    CMD curl -fsS http://localhost:8080/actuator/health/liveness || exit 1
+    CMD curl -fsS http://localhost:8081/actuator/health/liveness || exit 1
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
