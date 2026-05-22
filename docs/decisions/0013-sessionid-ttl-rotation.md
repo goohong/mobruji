@@ -47,6 +47,18 @@ v0.2 ~ v0.3 의 모든 user-facing endpoint 가 **익명 sessionId** 위에서 �
 - **충돌 시나리오**: 한 user 가 여러 sessionId (여러 디바이스/익명 세션) 를 계정에 연결할 때 → 각 sessionId 의 데이터를 모두 user 로 머지, like/bookmark 의 `(sessionId, songId)` unique 제약은 `(user_id, songId)` 로 변경. 중복은 oldest createdAt 유지.
 - **계정 탈퇴 시 데이터 처리**: §D-3 cascade-delete 룰을 user 차원에서 동일 적용. v0.4 spec 에서 별도 결정 — 본 ADR 은 anonymous-session 한정.
 
+#### D-4 보강 (plan 38) — 머지 트리거 시점 + 비회원/회원 흐름 정책 합의
+
+본 보강은 `docs/features/anonymous-to-account-conversion.md` (plan 38) 의 사용자 정책 결정을 본 ADR 의 단일 진실에 반영한 것이다. 머지 알고리즘 단계별 상세는 그 spec §3-D 를 참조하되, **정책 결정** 자체는 본 ADR 이 영속한다.
+
+- **(1) 머지 트리거 시점 — 로그인 콜백 동기 처리**: OAuth 콜백 (`GET /api/v1/auth/oauth/{provider}/callback`) 또는 이메일 로그인 (`POST /api/v1/auth/email/login`) 응답을 반환하기 **전에** 머지 트랜잭션을 동기 실행한다. 비동기 큐 NOT 권장 — fe 가 로그인 직후 like/bookmark 보류 액션을 재호출하려면 머지가 끝나 있어야 unique 충돌 처리가 결정적으로 동작한다.
+- **(2) 머지 대상 sessionId 의 식별**: 클라이언트가 로그인 콜백 요청 시 `X-Session-Id` 헤더 (또는 동등한 cookie) 로 현재 비회원 sessionId 를 함께 전송. 헤더 없으면 머지 스킵 (그냥 로그인 처리). sessionId 가 이미 revoked 면 머지 스킵.
+- **(3) 비회원/회원 흐름 1순위 정책**: **비회원 흐름이 default**. 음역 측정·추천·history 조회는 비회원 그대로 가능. **회원 전환 트리거는 좋아요/북마크 클릭 시점 (모달)에 한정**. 그 외 시점의 회원 강제 (popup/interstitial/redirect) 는 금지. like/bookmark endpoint 자체는 v0.4 부터 회원 전용으로 게이트 (fe 가 모달로 호출 차단).
+- **(4) 머지 트랜잭션 실패 처리**: 로그인 자체는 성공 처리 (인증 토큰 발급) + 머지만 실패. `mobruji.session.merge.failed` 카운터 증분 (본 ADR §D-5 표 보강 — 본 ADR 의 D-5 카운터 표에 `failed` 추가). 수동 재시도 endpoint (`POST /api/v1/sessions/merge-to-account`) 는 v0.4 PR G 에서 노출.
+- **(5) sessionId 의 owner 컬럼 모델**: dual column (sessionId nullable + userId nullable, 둘 중 하나 NOT NULL CHECK) 을 default 로 권장. 이유: backward compatible, 마이그레이션 부담 최소, ownerType enum 도입 시의 application 분기 복잡도 회피. 최종 결정은 v0.4 PR B (User 엔티티 + 마이그레이션) 에서.
+- **(6) 머지 시 owner 치환 대상 테이블**: `voice_range`, `voice_range_snapshot`, `like`, `bookmark`, `recommendation`, `recommendation_result_entry` 6 개. 새 테이블이 sessionId 컬럼을 가질 때 본 목록 자동 확장은 아님 — 새 테이블 도입 시 같은 PR 에서 머지 대상 명시.
+- **(7) 비회원 사용 한도**: **한도 없음** (v0.4). 데이터 누적 후 v0.5+ 에서 재검토.
+
 ### D-5) 관측성 + 로그 정책
 - 만료/회전/머지 이벤트 카운터 (`observability-baseline.md §5-3` 표 갱신 필요):
   - `mobruji.session.expired` (counter, 라벨 `reason=ttl|user_rotate|account_merge`)
@@ -87,10 +99,12 @@ v0.2 ~ v0.3 의 모든 user-facing endpoint 가 **익명 sessionId** 위에서 �
 - Feature Spec: `docs/features/voice-range-progress.md §8 Q2` (cascade vs anonymize) — 본 ADR §D-3 으로 닫힘
 - Feature Spec: `docs/features/recommendation-history-and-feedback.md` — 본 ADR 룰에 따른 cascade-delete 대상 (FK on sessionId) 명시 필요
 - 신규 Feature Spec: `docs/features/anonymous-session-lifecycle.md` (본 ADR 의 구현 가이드 — TTL 평가 스케줄러, 회전 endpoint, 관측성 카운터, 마이그레이션)
-- 후속: v0.4 계정 시스템 spec (#243) — anonymous → account 머지 정책 결정 시 본 ADR §D-4 를 superseded 처리
+- 신규 Feature Spec: `docs/features/anonymous-to-account-conversion.md` (plan 38) — 본 ADR §D-4 의 머지 알고리즘 단계별 상세화 + 비회원/회원 흐름 매트릭스 + 로그인 모달 UX. 본 ADR §D-4 보강은 그 spec 의 결정을 단일 진실로 영속.
+- 후속: v0.4 계정 시스템 spec (#243) — 본 ADR §D-4 + `anonymous-to-account-conversion.md` 가 결정 트리 영속. v0.4 정식 인증 ADR (Spring Security / JWT 결정) 머지 시 본 ADR superseded 후보.
 - 관련 정책: `docs/ai-harness/04-security-policy.md` §3, CLAUDE.md §4
 - 관측성: `docs/features/observability-baseline.md §5-3` 표에 `mobruji.session.expired|rotated|merged` 신설 (본 ADR 머지 후 후속 PR 에서 표 갱신)
 - 법적 근거: PIPA (개인정보보호법) "장기 미접속 분리 보관" 권고 (365일) — 본 ADR 은 보수적으로 180일 + cascade-delete
 
 ## Changelog
 - **2026-05-22 (plan 33, 본 PR)**: 초안 작성 (status=accepted). TTL=180일 inactive sliding window, 정기 회전 없음 (사용자 트리거만), cascade-delete default + opt-in anonymize, v0.4 계정 머지 시 sessionId revoke. ADR-0011 의 만료 sessionId 우회 위험 (§Consequences 부정 #2) 을 본 ADR 의 D-1 만료 게이트가 닫음.
+- **2026-05-22 (plan 38)**: §D-4 보강 7항목 추가 — 머지 트리거 시점(로그인 콜백 동기), 비회원/회원 흐름 1순위 정책(비회원 default + 좋아요/북마크만 회원 전환 트리거), 머지 실패 처리(로그인 성공 + 머지만 실패 + 재시도 endpoint), owner 컬럼 모델(dual column default 권장), 머지 대상 6개 테이블 명시, 비회원 사용 한도 없음(v0.4). 머지 알고리즘 단계별 상세는 신규 spec `docs/features/anonymous-to-account-conversion.md` 로 분리하되 정책 결정 자체는 본 ADR 이 단일 진실로 보유. References 에 신규 spec 추가.
