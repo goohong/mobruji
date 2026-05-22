@@ -27,7 +27,7 @@ last_reviewed: 2026-05-21
 - [ ] Discord 봇 토큰을 안전하게 보관 (.env, OS 키체인, Workers secret 중 택1)
 - [ ] ALLOWED_USER_IDS 화이트리스트로 발신자 제한
 - [ ] mobruji repo 로 `repository_dispatch` 또는 로컬 프로세스 트리거 가능
-- [ ] 옵션 채택 후 본진 세션이 그대로 따라 칠 수 있는 셋업 절차 (커맨드 단위) 제공
+- [ ] 옵션 채택 후 maestro 세션이 그대로 따라 칠 수 있는 셋업 절차 (커맨드 단위) 제공
 
 ### 비기능 요구사항
 - 비용: 0원 우선, 차선은 GitHub 구독에 이미 포함된 자원
@@ -37,8 +37,8 @@ last_reviewed: 2026-05-21
 ## 4) 범위 / 비범위
 ### 포함
 - 무료/저비용 호스팅 옵션 비교표
-- 각 옵션의 셋업 절차 개요 (실제 스크립트는 본진 PR이 작성)
-- 채택 권장안 + 본진이 이어받을 후속 PR 명세
+- 각 옵션의 셋업 절차 개요 (실제 스크립트는 maestro PR이 작성)
+- 채택 권장안 + maestro이 이어받을 후속 PR 명세
 
 ### 제외 (Out of Scope)
 - Oracle 가입 재시도 (카드 인증 실패로 차단됨)
@@ -72,7 +72,7 @@ last_reviewed: 2026-05-21
 4. `~/Library/LaunchAgents/com.mobruji.discord-daemon.plist` 작성 — `RunAtLoad=true`, `KeepAlive=true`, stdout/stderr 로그를 `~/Library/Logs/mobruji-discord-daemon.log` 로
 5. `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.mobruji.discord-daemon.plist`
 6. 컴퓨터 sleep 방지: `caffeinate -dimsu` 백그라운드 또는 `sudo pmset -a disablesleep 1` (디스플레이만 끔)
-7. 본진이 이어받을 산출물: `tools/discord-daemon/setup-launchagent.sh`, `tools/discord-daemon/com.mobruji.discord-daemon.plist.template`, `tools/discord-daemon/bot.py`
+7. maestro이 이어받을 산출물: `tools/discord-daemon/setup-launchagent.sh`, `tools/discord-daemon/com.mobruji.discord-daemon.plist.template`, `tools/discord-daemon/bot.py`
 
 #### B. Termux on Android (권장 #2, 사용자가 안드로이드 보유 시)
 1. F-Droid 에서 Termux 설치 (Play 스토어 버전은 outdated)
@@ -81,7 +81,7 @@ last_reviewed: 2026-05-21
 4. Android 설정 → 배터리 최적화에서 Termux 예외
 5. `termux-wake-lock` 으로 sleep 방지
 6. `nohup python ~/mobruji/bot.py > ~/mobruji/bot.log 2>&1 &`
-7. 본진 산출물: `tools/discord-daemon/termux-setup.md`
+7. maestro 산출물: `tools/discord-daemon/termux-setup.md`
 
 #### C. Cloudflare Workers (권장 #3, 슬래시 명령 한정, 노트북 끄는 시간대 대비)
 1. `npm create cloudflare@latest mobruji-discord-bot -- --type=hello-world`
@@ -89,7 +89,7 @@ last_reviewed: 2026-05-21
 3. `worker.js` 에서 `POST /` 시그니처 검증 (Ed25519) + Interactions 응답
 4. Discord Developer Portal → Application → General Information → **Interactions Endpoint URL** 에 Worker URL 등록
 5. 슬래시 명령 등록 스크립트로 `/mobruji status`, `/do <task>`, `/fix <task>` 정의
-6. 본진 산출물: `tools/discord-bot-worker/wrangler.toml`, `tools/discord-bot-worker/src/worker.js`, `tools/discord-bot-worker/scripts/register-commands.ts`
+6. maestro 산출물: `tools/discord-bot-worker/wrangler.toml`, `tools/discord-bot-worker/src/worker.js`, `tools/discord-bot-worker/scripts/register-commands.ts`
 
 #### D~F (대안, 본 spec 채택 안 함)
 - D는 카드 인증 동일 문제, E는 60h/월 제약, F는 유료. 향후 카드 확보 또는 정책 변경 시 재검토.

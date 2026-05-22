@@ -39,7 +39,7 @@ public class Song {
      * <li>EASY: highMidi < 71</li>
      * </ul>
      *
-     * 기준 영속화는 ADR 0007 후보(본진 후속).
+     * 기준 영속화는 ADR 0007 후보(maestro 후속).
      */
     public static final int HIGH_HARD_THRESHOLD = 76;
     public static final int HIGH_NORMAL_THRESHOLD = 71;

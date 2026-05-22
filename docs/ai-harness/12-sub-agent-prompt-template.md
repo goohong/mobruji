@@ -1,11 +1,11 @@
 # Sub-Agent Prompt Template
 
-> 본진(`mobruji` 워크트리)이 be/fe/rev/plan 서브에이전트를 `Agent` 도구로 launch할 때 매번 반복되는 공통 룰을 코드화한 문서.
+> maestro(`mobruji` 워크트리)이 be/fe/rev/plan 서브에이전트를 `Agent` 도구로 launch할 때 매번 반복되는 공통 룰을 코드화한 문서.
 > sub-agent prompt에 매번 300+ 줄을 박지 말고, **이 문서를 참조하라**고만 적는다.
 
 ## 사용법
 
-본진이 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는다:
+maestro이 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는다:
 
 ```
 공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.
@@ -16,16 +16,16 @@
 ## 1) 공통 룰 (모든 sub-agent 공통)
 
 ### 워크트리 격리
-- prompt 첫 명령으로 `cd <워크트리 절대경로>` 실행. 본진(`mobruji`), 다른 세션(`mobruji-be`/`mobruji-fe`/`mobruji-rev`/`mobruji-plan`) **절대 건드리지 마**.
+- prompt 첫 명령으로 `cd <워크트리 절대경로>` 실행. maestro(`mobruji`), 다른 세션(`mobruji-be`/`mobruji-fe`/`mobruji-rev`/`mobruji-plan`) **절대 건드리지 마**.
 - 워크트리 경로 외 다른 경로(예: `~/.claude/`, 다른 repo)를 읽거나 쓰지 마.
 
 ### 메모리 보호
 - `~/.claude/projects/*/memory/` 디렉토리 **쓰기 금지**.
-- 메모리 갱신은 본진만 담당 (race 회피, `11-multi-session-runbook.md §1-2`).
+- 메모리 갱신은 maestro만 담당 (race 회피, `11-multi-session-runbook.md §1-2`).
 
 ### hook 우회 금지
 - `git push --no-verify`, `git commit --no-verify`, `--no-gpg-sign` 등으로 hook을 우회하지 마.
-- pre-push/pre-commit hook이 실패하면 **원인 수정** 후 재커밋. hook 우회 필요한 정당한 사유가 있으면 본진에 보고.
+- pre-push/pre-commit hook이 실패하면 **원인 수정** 후 재커밋. hook 우회 필요한 정당한 사유가 있으면 maestro에 보고.
 
 ### 보호 영역 라벨
 - 다음 경로 변경 시 PR에 `needs-human-review` 라벨 필수:
@@ -44,7 +44,7 @@
 - lockfile 변경(devDep 추가, transitive 업데이트)도 보호 영역이다. "package.json 본문은 안 건드렸으니 괜찮다"는 가정 금지.
 
 ### 기획/이슈 등록
-- be/fe/rev는 **이슈 등록 금지** (본진에 보고만). 기능/스펙 의사결정은 본진이 한다.
+- be/fe/rev는 **이슈 등록 금지** (maestro에 보고만). 기능/스펙 의사결정은 maestro이 한다.
 - plan은 docs/spec/ADR 작업 일환으로 이슈를 직접 등록할 수 있다.
 
 ### 푸시 + ready 전환 표준 명령
@@ -63,7 +63,7 @@ gh pr ready <PR번호>   # draft → ready for review
 상세: `CLAUDE.md §7-2 PR 생성 직후`.
 
 ### 완료 보고 형식
-sub-agent가 본진에 회신할 때 다음을 포함:
+sub-agent가 maestro에 회신할 때 다음을 포함:
 - PR URL + mergeable 상태
 - 변경 한 줄 요약 (수십 줄 코드 dump 금지)
 - 품질 게이트 통과 여부
@@ -110,7 +110,7 @@ sub-agent가 본진에 회신할 때 다음을 포함:
   - BE: `./gradlew test`, RestAssured E2E 분석, curl로 endpoint 검증
   - FE: `npm run lint/typecheck/test/build`, `npm run dev` + curl SSR 응답 확인
   - 통합: `docker compose up -d` + `./gradlew bootRun` + `npm run dev` 동시 기동 후 흐름/결정성/p95/다양성 검증
-- 발견 사항은 PR 코멘트로. 후속이 필요하면 본진에 보고(이슈 등록은 본진).
+- 발견 사항은 PR 코멘트로. 후속이 필요하면 maestro에 보고(이슈 등록은 maestro).
 
 #### E-1) rev 감사 표준 절차 (비협상)
 
@@ -133,7 +133,7 @@ sub-agent가 본진에 회신할 때 다음을 포함:
 ##### E-1.2 LGTM self-guard (rev 필수)
 
 - 최근 **3 PR 연속 🔴=0**이면 본 PR 감사에 비기능 매트릭스를 **한 단계 더 깊게**(예: grep을 변경분 → 인접 파일 전체로 확장, 또는 통합 시나리오 1개 추가) 적용한다.
-- drift 가능성을 본진에 보고한다(예: "최근 N PR 🔴=0 — drift 의심, 추가 점검 권고"). 본진이 패턴 재검토 사이클을 launch할 수 있도록 가시화한다.
+- drift 가능성을 maestro에 보고한다(예: "최근 N PR 🔴=0 — drift 의심, 추가 점검 권고"). maestro이 패턴 재검토 사이클을 launch할 수 있도록 가시화한다.
 - 사이클 6 PR #74에서 LGTM 헤더 다음 EAGER fetch p95=80.9ms(3.7배) 회귀 신호를 누락한 사례가 본 룰의 근거다.
 
 ##### E-1.3 누적 경고 봉인 명시 섹션
@@ -157,7 +157,7 @@ PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서
 - 금지: `backend/**`/`web/**` 구현 코드 (구현은 be/fe 담당)
 - ADR/spec 작성 시 `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md` 규약 준수
 
-## 3) 본진 sub-agent launch 시 prompt 예시
+## 3) maestro sub-agent launch 시 prompt 예시
 
 좋은 예시:
 ```

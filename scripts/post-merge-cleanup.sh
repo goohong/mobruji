@@ -3,7 +3,7 @@
 # post-merge-cleanup.sh
 #
 # 머지된 PR 정리 후 모든 워크트리를 origin/develop 최신 시점에 detach 시키고
-# 본진(`mobruji`)에서 머지된 로컬 branch들을 일괄 삭제한다.
+# maestro(`mobruji`)에서 머지된 로컬 branch들을 일괄 삭제한다.
 #
 # 사용법:
 #   ./scripts/post-merge-cleanup.sh [--force]
@@ -11,21 +11,21 @@
 # 옵션:
 #   --force  dirty 워크트리도 강제 reset (작업 분실 위험)
 #            기본은 dirty면 skip + 경고. force는 git reset --hard + clean -fd로
-#            unstaged/untracked 파일을 모두 제거한다. 본진이 명시적 결정 후에만 사용.
+#            unstaged/untracked 파일을 모두 제거한다. maestro이 명시적 결정 후에만 사용.
 #
 # 동작:
-#   1. 본진 워크트리(`mobruji`)에서 `git fetch origin develop`
+#   1. maestro 워크트리(`mobruji`)에서 `git fetch origin develop`
 #   2. be/fe/rev/plan 워크트리 순회:
 #      - dirty 검사 (unstaged/staged/untracked)
 #      - 기본: dirty면 skip + 경고
 #      - --force: reset --hard origin/develop + clean -fd
 #      - clean이면 그대로 detach
-#   3. 본진에서 `origin/develop`에 머지된 로컬 branch 삭제
+#   3. maestro에서 `origin/develop`에 머지된 로컬 branch 삭제
 #
 # 가정:
-#   - 본진 워크트리 경로: $HOME/workspace/github/mobruji
+#   - maestro 워크트리 경로: $HOME/workspace/github/mobruji
 #   - 서브 워크트리 경로: $HOME/workspace/github/mobruji-{be,fe,rev,plan}
-#   - 이 스크립트는 본진에서 실행 (다른 워크트리에서 실행해도 git worktree 정보는 동일)
+#   - 이 스크립트는 maestro에서 실행 (다른 워크트리에서 실행해도 git worktree 정보는 동일)
 
 set -euo pipefail
 
@@ -63,14 +63,14 @@ warn() {
   printf '[post-merge-cleanup] WARN: %s\n' "$*" >&2
 }
 
-# 0) 본진 존재 확인
+# 0) maestro 존재 확인
 if [[ ! -d "${ROOT_DIR}/.git" && ! -f "${ROOT_DIR}/.git" ]]; then
-  warn "본진 워크트리(${ROOT_DIR})가 git 워크트리가 아니다. 중단."
+  warn "maestro 워크트리(${ROOT_DIR})가 git 워크트리가 아니다. 중단."
   exit 1
 fi
 
-# 1) 본진에서 origin/develop fetch
-log "본진(${ROOT_DIR})에서 origin/develop fetch"
+# 1) maestro에서 origin/develop fetch
+log "maestro(${ROOT_DIR})에서 origin/develop fetch"
 git -C "${ROOT_DIR}" fetch origin develop --prune
 
 if (( FORCE )); then
@@ -123,8 +123,8 @@ for wt in "${SUB_WORKTREES[@]}"; do
   git -C "${wt}" checkout --detach origin/develop
 done
 
-# 3) 본진에서 머지된 로컬 branch 삭제 (develop 제외)
-log "본진에서 origin/develop에 머지된 로컬 branch 정리"
+# 3) maestro에서 머지된 로컬 branch 삭제 (develop 제외)
+log "maestro에서 origin/develop에 머지된 로컬 branch 정리"
 merged_branches=$(
   git -C "${ROOT_DIR}" branch --merged origin/develop \
     | sed 's/^[* ] //' \

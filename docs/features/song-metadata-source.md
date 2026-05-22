@@ -145,6 +145,6 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
 - 2026-05-22: **MusicBrainz 보강 spec 신설** — Q1 결정의 미완 부분 (MusicBrainz 보강) 을 별 spec `docs/features/musicbrainz-integration.md` 로 분리 (#68). `Song.mbId` 컬럼 + selective backfill job + rate limit 1 req/s + User-Agent 의무. `spotify-audio-features-integration.md` (#69) 의 ISRC 매칭 선행 의존. PR A/B/C 분할.
 - 2026-05-21: `Difficulty` enum + `lowMidi`/`highMidi` 도입(PR #96, closes #77, #95).
   - **`Song.lowMidi`/`highMidi`** — 곡 보컬 멜로디의 최저/최고음을 MIDI로 직접 저장 (Q3 보류 결정의 후속 진전). 별 `SongRange` VO는 도입하지 않음 — 30곡 시드 규모에선 두 필드로 충분.
-  - **`Difficulty` enum (EASY/NORMAL/HARD)** — fe(`web/lib/difficulty.ts`)와 1:1 동일 룰. 분류 임계값(HARD≥76 또는 span≥17, NORMAL 71~75, EASY <71)은 `Song`의 상수에 하드코딩. ADR 0007 후보(본진 후속).
+  - **`Difficulty` enum (EASY/NORMAL/HARD)** — fe(`web/lib/difficulty.ts`)와 1:1 동일 룰. 분류 임계값(HARD≥76 또는 span≥17, NORMAL 71~75, EASY <71)은 `Song`의 상수에 하드코딩. ADR 0007 후보(maestro 후속).
   - **응답 노출** — `SongResponse`에 `difficulty`, `lowestNoteName`, `highestNoteName` 추가. 노트명 변환은 `song.domain.NoteName` 유틸 (sharp 표기, fe와 일치).
   - **시드 30곡 모두 `lowMidi`/`highMidi` 채움** — 합리적 추정값. 후속 큐레이션에서 정확도 향상 가능.
