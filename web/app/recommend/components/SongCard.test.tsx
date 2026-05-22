@@ -176,6 +176,68 @@ describe("SongCard", () => {
     expect(screen.getByText("#1")).toBeInTheDocument();
   });
 
+  // closes #323 — onShowDetail이 주어지면 카드 본문 클릭이 모달 트리거(button + aria-haspopup="dialog")가 되고,
+  // 표면에서 score/matchReason/breakdown 패널/YouTube 링크는 숨겨져 요약 룩이 된다.
+  describe("모달 모드 (closes #323)", () => {
+    it("onShowDetail이 있으면 카드 본문이 button으로 감싸지고 클릭 시 콜백이 호출된다", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const trigger = screen.getByRole("button", { name: /테스트 곡 상세 보기/ });
+      expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+      await user.click(trigger);
+      expect(onShowDetail).toHaveBeenCalledTimes(1);
+    });
+
+    it("모달 모드에서는 score/matchReason/breakdown 패널/YouTube 링크가 카드 표면에 노출되지 않는다", () => {
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
+      renderWithQueryClient(
+        <ul>
+          <SongCard
+            item={item}
+            userVoiceRange={{ lowMidi: 48, highMidi: 67 }}
+            onShowDetail={onShowDetail}
+          />
+        </ul>,
+      );
+      // 카드 표면 핵심 정보는 그대로 보인다.
+      expect(screen.getByText("테스트 곡")).toBeInTheDocument();
+      expect(screen.getByText("가수")).toBeInTheDocument();
+      expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+      // 상세는 모달로 위임 — 카드 표면에 없어야 한다.
+      expect(screen.queryByText(/score/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /자세히 보기/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /YouTube에서 듣기/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("모달 모드에서도 좋아요/북마크 액션은 카드 footer에 유지된다", () => {
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 좋아요$/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
+      ).toBeInTheDocument();
+    });
+  });
+
   // closes #141 — matchReason 다중 줄 + 펼침 토글 (Spotify "Why this song?" 영감).
   describe("matchReason expander (closes #141)", () => {
     it("접힘 상태에서 '자세히 보기' 버튼이 보이고 breakdown 패널은 숨겨진다", () => {

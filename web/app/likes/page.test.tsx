@@ -135,10 +135,11 @@ describe("/likes 페이지", () => {
     expect(
       screen.getByRole("heading", { name: /좋아한 곡/ }),
     ).toBeInTheDocument();
-    // 카드 자체가 곡 상세 링크.
-    expect(
-      screen.getByRole("link", { name: /좋아요-곡-42 상세 보기/ }),
-    ).toHaveAttribute("href", "/songs/42");
+    // closes #323 — 카드는 페이지 이동이 아닌 상세 모달 트리거 (button + aria-haspopup="dialog").
+    const detailTrigger = screen.getByRole("button", {
+      name: /좋아요-곡-42 상세 보기/,
+    });
+    expect(detailTrigger).toHaveAttribute("aria-haspopup", "dialog");
     // zustand store가 BE 응답과 동기화돼야 함.
     expect(useLikesStore.getState().likedSongIds).toEqual([42, 99]);
   });
