@@ -77,6 +77,22 @@ recommendation:
   # random: 디버깅용 비결정 변주(운영 사용 금지).
   seed-strategy: derived
 
+# 곡 카드 앨범 커버 URL backfill 설정 (이슈 #322).
+# 1차 출처는 iTunes Search API (key 불필요, 즉시 호출 가능).
+# - base-url: iTunes Search API 엔드포인트. 운영/테스트에서 override 가능
+#             (테스트는 MockWebServer/WireMock 같은 stub 으로 교체).
+# - country: 검색 country code — 한국 가요 매칭 정확도 위해 KR 기본.
+# - request-timeout: 곡당 호출 timeout. iTunes 응답은 보통 < 500ms 지만 안전 마진.
+# - throttle: 곡 사이 sleep — Apple 공식 rate limit 명시 없으나 1초 1 req 보수적 보호.
+# - thumb-resolution: artworkUrl100 의 `100x100` 을 치환할 해상도 (기본 600x600).
+album-cover:
+  itunes:
+    base-url: ${ITUNES_SEARCH_BASE_URL:https://itunes.apple.com/search}
+    country: ${ITUNES_SEARCH_COUNTRY:KR}
+    request-timeout: 5s
+    throttle: 1s
+    thumb-resolution: 600x600
+
 # Python audio analysis tool (tools/audio-analysis/analyze.py) 호출 설정.
 # spec: docs/features/audio-tooling-bootstrap.md §3
 # - python-cmd: 실행 명령. 로컬 venv 사용 시 절대경로 또는 환경변수로 override.

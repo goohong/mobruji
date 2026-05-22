@@ -19,11 +19,13 @@
  * 보안: sessionId는 PII이므로 화면에 노출 금지, 로그는 `safeLog` 사용.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { SongCard } from "@/app/recommend/components/SongCard";
+import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
+import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
 import { ApiError } from "@/lib/api/client";
 import { readLikesBySessionId } from "@/lib/api/feedback";
 import { readSongById, type SongResponse } from "@/lib/api/song";
@@ -130,15 +132,7 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
         </header>
 
         {songs.length > 0 ? (
-          <ul aria-label="좋아한 곡 목록" className="flex flex-col gap-2">
-            {songs.map((song) => (
-              <SongCard
-                key={song.id}
-                song={song}
-                href={`/songs/${song.id}`}
-              />
-            ))}
-          </ul>
+          <SongListWithModal songs={songs} />
         ) : pendingCount === 0 ? (
           <Card
             role="status"
@@ -157,6 +151,39 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
         ) : null}
       </div>
     </main>
+  );
+}
+
+/**
+ * 좋아요 목록의 카드 + 모달 묶음 (closes #323).
+ * 카드 클릭 시 페이지 이동 대신 상세 모달이 열린다. 좋아한 곡은 추천 컨텍스트가 아니라
+ * matchReason/score 가 없으므로 SongDetailContent 도 song prop 으로 받는다.
+ */
+type SongListWithModalProps = {
+  songs: SongResponse[];
+};
+
+function SongListWithModal({ songs }: SongListWithModalProps) {
+  const [selected, setSelected] = useState<SongResponse | null>(null);
+  return (
+    <>
+      <ul aria-label="좋아한 곡 목록" className="flex flex-col gap-2">
+        {songs.map((song) => (
+          <SongCard
+            key={song.id}
+            song={song}
+            onShowDetail={() => setSelected(song)}
+          />
+        ))}
+      </ul>
+      <SongDetailModal
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        titleLabel={selected ? selected.title : ""}
+      >
+        {selected ? <SongDetailContent song={selected} /> : null}
+      </SongDetailModal>
+    </>
   );
 }
 

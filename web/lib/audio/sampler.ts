@@ -1,30 +1,48 @@
 /**
- * 마이크 입력 → pitch 샘플 → 안정 픽 MIDI 추출.
+ * 마이크 입력 → pitch 샘플 → phase 방향 극값 MIDI 추출.
  *
- * voice-range-auto-measurement.md §5-4 / §6 PR C / §8 Q2(5초 고정), Q3(안정성 임계),
- * Q5(iOS Safari user-gesture로 AudioContext).
+ * voice-range-auto-measurement.md §5-4 / §6 PR C / §8 Q2(5초 고정 — 조기 종료 폐기),
+ * Q3(안정성 임계), Q5(iOS Safari user-gesture로 AudioContext).
  *
  * 책임 분리:
- *   - {@link createMeasurementSession} — 5초 동안 100ms 간격으로 detectPitch를 호출,
- *     안정 픽(연속 STABLE_FRAMES_REQUIRED 프레임, MIDI ±MAX_MIDI_TOLERANCE) 추출.
+ *   - {@link runMeasurementSession} — 5초 동안 100ms 간격으로 detectPitch를 호출,
+ *     안정 샘플을 누적한 뒤 phase 방향 percentile(low→P5, high→P95)로 결정.
  *   - 외부 의존(`detectPitch` / 시간 / Analyser 데이터)을 모두 옵션으로 주입할 수 있게
  *     해서 jest/vitest happy-dom 환경에서도 Web Audio mock 없이 검증 가능하도록 한다.
  *
  * 보안/privacy: audio 샘플은 본 모듈 안에서만 다루고 외부로 노출하지 않는다.
  * 결과(`MeasurementResult`)는 MIDI 정수와 메타데이터(샘플 개수/안정성)만 포함한다.
+ *
+ * ## 5초 동기화 (issue #313)
+ * 이전 구현(2026-05-21)은 §8 Q2 권고 (c) "안정 픽 감지 시 조기 종료"를 따랐고,
+ * 연속 5프레임(=500ms)만에 종료되어 진행 바 안내(5초)와 실측 시간이 어긋났다.
+ * 사용자 검수 결과 Q2 결정을 (a) "5초 고정"으로 변경 — 다양한 음역을 시도할
+ * 시간을 보장하고 percentile 기반으로 첫 발성/끝맺음 outlier에도 robust하게 한다.
+ * confirmed 의미는 "안정 샘플이 MIN_STABLE_SAMPLES 이상 모임"으로 재정의.
  */
 
 import { detectPitch as defaultDetectPitch } from "./pitchDetector";
 import { frequencyToMidi } from "./midiConvert";
 
-/** §8 Q2 결정: phase당 측정 시간 5초 고정. 안정 픽 감지 시 조기 종료. */
+/**
+ * §8 Q2 결정(2026-05-22 갱신): phase당 측정 시간 5초 고정.
+ * 5초 동안 안정 샘플을 누적 → phase 방향 percentile로 결정 (조기 종료 폐기).
+ */
 export const MEASUREMENT_DURATION_MS = 5000;
 /** 샘플 주기. 100ms = 10fps. AnalyserNode FFT cost와 충돌 없도록 보수적으로 둔다. */
 export const SAMPLE_INTERVAL_MS = 100;
-/** 안정 픽 confirm 임계: 연속 동일 MIDI(±1) 5프레임. */
-export const STABLE_FRAMES_REQUIRED = 5;
-/** 연속 프레임 동일성 허용 오차(semitone). MIDI ±1까지 같은 음으로 간주. */
-export const MAX_MIDI_TOLERANCE = 1;
+/**
+ * confirmed=true 판정 최소 안정 샘플 수.
+ * 5초 / 100ms = 50 프레임 중 약 20% (=10) 가 안정이면 신뢰 가능.
+ */
+export const MIN_STABLE_SAMPLES = 10;
+/**
+ * low phase percentile (안정 샘플 MIDI 오름차순 P5).
+ * 첫 발성 흔들림 outlier 1~2개에 휘둘리지 않도록 min 대신 P5 사용.
+ */
+export const LOW_PERCENTILE = 0.05;
+/** high phase percentile (안정 샘플 MIDI 오름차순 P95). */
+export const HIGH_PERCENTILE = 0.95;
 
 export type MeasurementPhase = "low" | "high";
 
@@ -42,9 +60,9 @@ export interface PitchSample {
 }
 
 export interface MeasurementResult {
-  /** 안정 픽으로 confirm된 MIDI 정수. 안정 픽이 없으면 안정 샘플 중 phase에 맞는 극값(low→min, high→max), 그것도 없으면 null. */
+  /** phase 방향 percentile MIDI 정수. 안정 샘플이 0이면 null. */
   readonly midi: number | null;
-  /** 안정 픽으로 confirm 되었는지 여부 (UI 신뢰도 배지에 사용). */
+  /** 안정 샘플이 `MIN_STABLE_SAMPLES` 이상 모였는지 (UI 신뢰도 배지에 사용). */
   readonly confirmed: boolean;
   /** 수집된 안정 샘플 수. */
   readonly stableSampleCount: number;
@@ -81,10 +99,13 @@ export interface MeasurementOptions {
  * 한 phase의 측정을 실행한다.
  *
  * - 매 `sampleIntervalMs` 마다 `readFrame`을 호출해 pitch sample을 모은다.
- * - 안정 픽(연속 STABLE_FRAMES_REQUIRED 프레임, MIDI ±MAX_MIDI_TOLERANCE)이 confirm 되면
- *   기다리지 않고 즉시 종료(§8 Q2 권고: 조기 종료).
- * - duration 내 confirm 실패 시 안정 샘플 중 phase 방향 극값(low→min, high→max)을 반환,
- *   confirmed=false. 그것도 없으면 midi=null.
+ * - **`durationMs` 전체를 채운다** (issue #313): 조기 종료 없이 사용자가 다양한 음을
+ *   시도할 시간을 보장하고 첫/끝 흔들림 outlier를 percentile로 흡수.
+ * - 만료 시 안정 샘플(`isStable && midi !== null`)을 오름차순 정렬한 뒤 phase 방향
+ *   percentile (low → `LOW_PERCENTILE` = P5, high → `HIGH_PERCENTILE` = P95)을 반환.
+ * - 안정 샘플이 `MIN_STABLE_SAMPLES` 이상이면 `confirmed=true`.
+ * - 안정 샘플이 0이면 `midi=null` + `confirmed=false`.
+ * - `signal.abort()` 시 즉시 종료 — 누적된 샘플로 동일 percentile 계산.
  */
 export async function runMeasurementSession(
   options: MeasurementOptions,
@@ -96,8 +117,6 @@ export async function runMeasurementSession(
   return new Promise((resolve) => {
     let cancelled = false;
     let elapsed = 0;
-    let confirmedMidi: number | null = null;
-    const recentStableMidis: number[] = [];
 
     const finalize = (): void => {
       if (cancelled) {
@@ -105,32 +124,19 @@ export async function runMeasurementSession(
       }
       cancelled = true;
       clearInterval(timer);
-      const stableSamples = samples.filter(
-        (sample) => sample.isStable && sample.midi !== null,
-      );
-      if (confirmedMidi !== null) {
-        resolve({
-          midi: confirmedMidi,
-          confirmed: true,
-          stableSampleCount: stableSamples.length,
-          totalSampleCount: samples.length,
-        });
-        return;
-      }
-      // 안정 픽 confirm 실패 — fallback으로 phase 방향 극값을 반환한다.
-      const stableMidis = stableSamples
+      const stableMidis = samples
+        .filter((sample) => sample.isStable && sample.midi !== null)
         .map((sample) => sample.midi as number)
         .filter((midi) => Number.isFinite(midi));
-      const fallbackMidi =
-        stableMidis.length === 0
+      const stableSampleCount = stableMidis.length;
+      const midi =
+        stableSampleCount === 0
           ? null
-          : options.phase === "low"
-            ? Math.min(...stableMidis)
-            : Math.max(...stableMidis);
+          : pickPhasePercentile(stableMidis, options.phase);
       resolve({
-        midi: fallbackMidi,
-        confirmed: false,
-        stableSampleCount: stableSamples.length,
+        midi,
+        confirmed: stableSampleCount >= MIN_STABLE_SAMPLES,
+        stableSampleCount,
         totalSampleCount: samples.length,
       });
     };
@@ -155,29 +161,6 @@ export async function runMeasurementSession(
       samples.push(sample);
       options.onSample?.(sample);
 
-      if (sample.isStable && sample.midi !== null) {
-        // 연속 프레임 ±MAX_MIDI_TOLERANCE 윈도우를 유지한다.
-        const last = recentStableMidis[recentStableMidis.length - 1];
-        if (
-          last === undefined ||
-          Math.abs(sample.midi - last) <= MAX_MIDI_TOLERANCE
-        ) {
-          recentStableMidis.push(sample.midi);
-        } else {
-          recentStableMidis.length = 0;
-          recentStableMidis.push(sample.midi);
-        }
-        if (recentStableMidis.length >= STABLE_FRAMES_REQUIRED) {
-          // 윈도우 평균(반올림)으로 confirm — 단일 outlier에 휘둘리지 않게.
-          const sum = recentStableMidis.reduce((acc, v) => acc + v, 0);
-          confirmedMidi = Math.round(sum / recentStableMidis.length);
-          finalize();
-          return;
-        }
-      } else {
-        recentStableMidis.length = 0;
-      }
-
       if (elapsed >= durationMs) {
         finalize();
       }
@@ -186,6 +169,30 @@ export async function runMeasurementSession(
     const timer = setInterval(onTick, intervalMs);
     options.signal?.addEventListener("abort", finalize, { once: true });
   });
+}
+
+/**
+ * 안정 샘플 MIDI 배열에서 phase 방향 percentile 값을 정수로 반환.
+ *
+ * - low phase → `LOW_PERCENTILE`(P5) floor: 가장 낮은 안정 음 중 outlier 1~2개 제외.
+ * - high phase → `HIGH_PERCENTILE`(P95) ceil: 가장 높은 안정 음 중 outlier 1~2개 제외.
+ *
+ * 샘플이 1개뿐이면 그 값을 그대로 반환.
+ */
+function pickPhasePercentile(
+  midis: readonly number[],
+  phase: MeasurementPhase,
+): number {
+  const sorted = [...midis].sort((a, b) => a - b);
+  if (sorted.length === 1) {
+    return sorted[0];
+  }
+  const percentile = phase === "low" ? LOW_PERCENTILE : HIGH_PERCENTILE;
+  const rawIndex = percentile * (sorted.length - 1);
+  const index =
+    phase === "low" ? Math.floor(rawIndex) : Math.ceil(rawIndex);
+  const clampedIndex = Math.max(0, Math.min(sorted.length - 1, index));
+  return Math.round(sorted[clampedIndex]);
 }
 
 /**

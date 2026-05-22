@@ -158,10 +158,12 @@ describe("SongSearchPage", () => {
       expect(screen.getByText("Hello")).toBeInTheDocument();
     });
     expect(screen.getByText("Adele")).toBeInTheDocument();
-    // closes #100 — 검색 카드는 곡 상세 페이지로 가는 링크가 되어야 한다.
-    expect(
-      screen.getByRole("link", { name: /Hello 상세 보기/ }),
-    ).toHaveAttribute("href", "/songs/1");
+    // closes #323 — 검색 카드는 페이지 이동이 아닌 상세 모달 트리거.
+    // /songs/[id] deep-link 직접 접근은 기존 페이지가 그대로 처리한다.
+    const detailTrigger = screen.getByRole("button", {
+      name: /Hello 상세 보기/,
+    });
+    expect(detailTrigger).toHaveAttribute("aria-haspopup", "dialog");
   });
 
   it("응답이 빈 배열이면 '검색 결과 없음' fallback을 노출한다", async () => {

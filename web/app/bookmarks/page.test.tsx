@@ -141,10 +141,11 @@ describe("/bookmarks 페이지", () => {
     expect(
       screen.getByRole("heading", { name: /북마크한 곡/ }),
     ).toBeInTheDocument();
-    // 카드 자체가 곡 상세 링크.
-    expect(
-      screen.getByRole("link", { name: /북마크-곡-42 상세 보기/ }),
-    ).toHaveAttribute("href", "/songs/42");
+    // closes #323 — 카드는 페이지 이동이 아닌 상세 모달 트리거.
+    const detailTrigger = screen.getByRole("button", {
+      name: /북마크-곡-42 상세 보기/,
+    });
+    expect(detailTrigger).toHaveAttribute("aria-haspopup", "dialog");
     // zustand store가 BE 응답과 동기화돼야 함.
     expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([42, 99]);
   });

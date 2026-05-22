@@ -40,7 +40,7 @@
  *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
@@ -48,6 +48,7 @@ import { ApiError } from "@/lib/api/client";
 import {
   createRecommendation,
   RecommendationResponse,
+  RecommendedSongResponse,
 } from "@/lib/api/recommendation";
 import {
   readVoiceRange,
@@ -59,6 +60,8 @@ import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
+import { SongDetailModal } from "./components/SongDetailModal";
+import { SongDetailContent } from "./components/SongDetailContent";
 
 const SKELETON_COUNT = 4;
 /**
@@ -302,6 +305,12 @@ function RecommendationFeed({
     refetch,
   } = query;
 
+  // closes #323 — 카드 클릭 시 페이지 이동 대신 상세 모달.
+  // selected 는 현재 펼쳐진 카드 1개. null 이면 모달 닫힘. 같은 곡을 다시 클릭하거나
+  // 다른 곡을 클릭하면 setSelected 가 갱신되어 모달이 그 곡으로 다시 렌더된다.
+  // 훅 규칙 준수를 위해 early return 이전에 호출.
+  const [selected, setSelected] = useState<RecommendedSongResponse | null>(null);
+
   // 모든 페이지의 추천 곡을 평탄화. 페이지 경계 정보는 사용자에게 노출하지 않는다.
   const allRecommendations = useMemo(() => {
     if (!data) {
@@ -400,6 +409,11 @@ function RecommendationFeed({
     );
   }
 
+  const userRange = {
+    lowMidi: userVoiceRangeLow,
+    highMidi: userVoiceRangeHigh,
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-3">
@@ -407,14 +421,20 @@ function RecommendationFeed({
           <SongCard
             key={item.song.id}
             item={item}
-            href={`/songs/${item.song.id}`}
-            userVoiceRange={{
-              lowMidi: userVoiceRangeLow,
-              highMidi: userVoiceRangeHigh,
-            }}
+            userVoiceRange={userRange}
+            onShowDetail={() => setSelected(item)}
           />
         ))}
       </ul>
+      <SongDetailModal
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        titleLabel={selected ? selected.song.title : ""}
+      >
+        {selected ? (
+          <SongDetailContent item={selected} userVoiceRange={userRange} />
+        ) : null}
+      </SongDetailModal>
       {/*
         Footer 영역:
           - hasNextPage 가 true 면 sentinel + skeleton(로딩 중일 때) 노출.
