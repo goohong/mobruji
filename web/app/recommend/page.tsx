@@ -27,11 +27,22 @@
  *   - MIC_MEASURE 소스일 때만 "마이크로 다시 측정" 1차 액션 링크 강조.
  *   - voice-range mutation onSuccess 가 react-query 캐시에 응답을 prime 하므로
  *     이 페이지의 useQuery 는 캐시 히트로 즉시 추천 mutation 발화.
+ *
+ * 이슈 #321 (2026-05-22):
+ *   - "다른 곡 추천받기" 단일 액션을 폐기하고 **무한 스크롤** 패턴으로 전환.
+ *   - `useInfiniteQuery` + IntersectionObserver(sentinel)로 리스트 하단 진입 시
+ *     자동으로 다음 추천 batch 를 페치한다. 모바일 PWA 자연 UX 우선.
+ *   - 매 페이지의 queryFn 은 호출 시점의 누적 `excludedSongIds`(store snapshot)을
+ *     전달한다 → BE SeedDeriver(PR #64) + entity 영속화(PR #74) 효과로 결정성을
+ *     유지하면서도 페이지마다 다른 결과를 반환받는다.
+ *   - 시드 소진(빈 페이지) 감지 → `getNextPageParam`이 `undefined`를 반환해 추가
+ *     페치를 멈춘다. 첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA,
+ *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
  */
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
 import {
@@ -46,11 +57,18 @@ import {
 import { midiToNoteName } from "@/lib/notes";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
-import { Button } from "@/components/ui";
 
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 
 const SKELETON_COUNT = 4;
+/**
+ * IntersectionObserver sentinel 의 rootMargin.
+ *
+ * 사용자가 리스트 끝에 도달하기 전에 미리 다음 batch 페치를 트리거해서
+ * 무한 스크롤이 "끊김 없이" 보이도록 한다. 너무 크면 첫 페이지 마운트 직후에
+ * 두 번째 페이지가 즉시 페치돼서 의도와 어긋날 수 있으니 적당히 400px 만 둔다.
+ */
+const SENTINEL_ROOT_MARGIN = "400px";
 
 export default function RecommendPage() {
   const sessionId = useSessionStore((state) => state.sessionId);
@@ -72,102 +90,113 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     queryFn: () => readVoiceRange(sessionId),
   });
 
-  type RecommendationInput = {
-    sessionId: string;
-    voiceRangeLow: number;
-    voiceRangeHigh: number;
-    excludeSongIds: number[];
-  };
-
-  const excludedSongIds = useSessionStore((state) => state.excludedSongIds);
   const voiceRangeIdFromStore = useSessionStore((state) => state.voiceRangeId);
   const appendExcluded = useSessionStore((state) => state.appendExcluded);
   const appendHistory = useHistoryStore((state) => state.appendRecommendation);
 
-  const recommendationMutation = useMutation<
-    RecommendationResponse,
-    Error,
-    RecommendationInput
-  >({
-    mutationFn: (input) =>
-      createRecommendation({
-        sessionId: input.sessionId,
-        voiceRangeLow: input.voiceRangeLow,
-        voiceRangeHigh: input.voiceRangeHigh,
-        excludeSongIds: input.excludeSongIds,
-      }),
-    onSuccess: (data, variables) => {
-      // 다음 "다시 추천" 호출에 누적 전달되도록 결과 곡 ID들을 store에 push.
-      // 빈 응답이라도 호출에 문제는 없지만 빈 ids는 store 내부에서 no-op.
-      const ids = data.recommendations.map((rec) => rec.song.id);
-      if (ids.length > 0) {
-        appendExcluded(ids);
-      }
-      // 추천 히스토리(closes #134)에 누적. 빈 응답은 히스토리에 남기지 않는다 —
-      // 사용자가 "다시 보기"를 눌렀을 때 빈 카드만 보는 의미 없는 항목이 쌓이지 않게.
-      if (data.recommendations.length > 0) {
-        // 음역 발전 추적 카드(closes #170)용으로 추천 시점의 lowest/highest MIDI를
-        // 함께 보관한다. voiceRangeQuery.data 가 onSuccess 시점에 정의돼 있을
-        // 가능성이 매우 높지만 (이 mutation 은 voice-range 가 성공해야만 호출됨),
-        // 방어적으로 optional 로 spread 한다.
-        const snapshot = voiceRangeQuery.data;
-        appendHistory({
-          requestId: data.requestId,
-          voiceRangeId: voiceRangeIdFromStore,
-          songs: data.recommendations,
-          // 이 추천을 만든 시점의 누적 제외 셋 스냅샷. variables 에 담겨 들어온 값
-          // (호출 시점 store snapshot)이라 호출 후 store 변경에 영향받지 않는다.
-          excludedSongIds: variables.excludeSongIds,
-          voiceRangeLowMidi: variables.voiceRangeLow,
-          voiceRangeHighMidi: variables.voiceRangeHigh,
-          voiceRangeSourceMethod: snapshot?.sourceMethod,
-        });
-      }
-    },
-  });
-
-  // 음역대 조회 성공 시 자동으로 추천 호출 (1회).
-  // 객체 의존성으로 인한 useEffect 무한 재실행 함정을 피하기 위해
-  // primitive 필드와 mutation의 stable 함수 ref만 의존성에 둔다.
-  // (TanStack Query는 .mutate 함수 ref는 안정적으로 보장한다.)
-  //
-  // excludedSongIds는 자동 트리거 의존성에서 **제외**한다. mutate 핸들러
-  // 시점에 최신 값을 useSessionStore.getState()로 읽으면 useEffect를 다시
-  // 발화시키지 않으면서도 누적 리스트를 반영할 수 있다.
-  const isVoiceRangeSuccess = voiceRangeQuery.isSuccess;
+  const isVoiceRangeReady =
+    voiceRangeQuery.isSuccess &&
+    voiceRangeQuery.data !== undefined &&
+    voiceRangeQuery.data.sessionId !== undefined;
   const voiceRangeSessionId = voiceRangeQuery.data?.sessionId;
   const voiceRangeLow = voiceRangeQuery.data?.lowestNoteMidi;
   const voiceRangeHigh = voiceRangeQuery.data?.highestNoteMidi;
-  const isRecommendationIdle = recommendationMutation.isIdle;
-  const triggerRecommendation = recommendationMutation.mutate;
+
+  /**
+   * 무한 스크롤 핵심 쿼리.
+   *
+   * - `enabled`: voice-range 가 준비돼야 페치를 시작한다.
+   * - `queryFn`: 매 호출 시점의 누적 `excludedSongIds`(store snapshot)을
+   *   BE 로 전달한다. 같은 voiceRange 라도 누적이 늘어나면 SeedDeriver 입력이
+   *   달라져서 다른 결과를 결정성 있게 받는다.
+   * - `getNextPageParam`: 마지막 페이지 응답이 비었으면 `undefined` → hasNextPage=false.
+   *   비어있지 않으면 다음 pageIndex 를 그대로 돌려준다 (페이지 카운터는 단순 증가).
+   * - `initialPageParam`: 첫 페이지 인덱스 0.
+   *
+   * onSuccess 는 PR #85 부터 zustand store 에 결과 ID 를 누적하고 history 에
+   * push 하는 역할을 했다. v5 react-query 에서 `useInfiniteQuery` 에는 onSuccess 가
+   * 제거됐으므로 별도 useEffect 로 마지막 페이지 변화를 감지해 동일 효과를 낸다.
+   */
+  const recommendQuery = useInfiniteQuery<
+    RecommendationResponse,
+    Error,
+    { pages: RecommendationResponse[]; pageParams: number[] },
+    readonly unknown[],
+    number
+  >({
+    queryKey: ["recommendations", sessionId, voiceRangeIdFromStore],
+    enabled:
+      isVoiceRangeReady &&
+      voiceRangeLow !== undefined &&
+      voiceRangeHigh !== undefined,
+    initialPageParam: 0,
+    queryFn: () =>
+      createRecommendation({
+        sessionId: voiceRangeSessionId!,
+        voiceRangeLow: voiceRangeLow!,
+        voiceRangeHigh: voiceRangeHigh!,
+        // 호출 시점의 최신 누적 리스트를 BE 로 전달.
+        excludeSongIds: useSessionStore.getState().excludedSongIds,
+      }),
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.recommendations.length === 0) {
+        return undefined;
+      }
+      return allPages.length;
+    },
+  });
+
+  const pages = recommendQuery.data?.pages;
+  // 누적/히스토리 push 는 "방금 새로 도착한 페이지" 1건에 대해서만 수행해야 중복이 없다.
+  // pages.length 가 늘어나는 순간만 트리거되도록 ref 로 마지막 처리한 길이를 기억한다.
+  const lastProcessedPageCountRef = useRef(0);
+  // RecommendContent 가 새 키(예: 다른 sessionId)로 다시 마운트되거나 queryKey 가
+  // 바뀌어 데이터가 새로 발급되는 경우, ref 가 stale 한 값을 들고 있으면
+  // "이미 처리한 페이지" 로 오인해 누락이 발생할 수 있다. queryKey 변경 시 ref 를
+  // 0 으로 리셋한다.
+  useEffect(() => {
+    lastProcessedPageCountRef.current = 0;
+  }, [sessionId, voiceRangeIdFromStore]);
 
   useEffect(() => {
-    if (!isVoiceRangeSuccess) {
+    if (!pages || pages.length === 0) {
       return;
     }
-    if (
-      voiceRangeSessionId === undefined ||
-      voiceRangeLow === undefined ||
-      voiceRangeHigh === undefined
-    ) {
+    if (pages.length <= lastProcessedPageCountRef.current) {
       return;
     }
-    if (!isRecommendationIdle) {
-      return;
+    // 새로 도착한 페이지들만 순회. 보통 한 번에 1개씩 늘지만 방어적으로 범위로 처리.
+    const newPages = pages.slice(lastProcessedPageCountRef.current);
+    const snapshot = voiceRangeQuery.data;
+    for (const page of newPages) {
+      const ids = page.recommendations.map((rec) => rec.song.id);
+      if (ids.length > 0) {
+        // store 에 누적 — 다음 페이지 queryFn 호출 시 BE 로 전달된다.
+        appendExcluded(ids);
+        // 추천 히스토리(closes #134) 에 페이지 단위로 push. 빈 페이지는 push 하지 않아
+        // "다시 보기" 화면이 빈 카드로 더럽혀지지 않게 한다.
+        appendHistory({
+          requestId: page.requestId,
+          voiceRangeId: voiceRangeIdFromStore,
+          songs: page.recommendations,
+          // 호출 시점 누적 스냅샷을 그대로 기록 — 이 페이지가 어떤 제외 셋과 함께
+          // 발급됐는지 영구 기록.
+          excludedSongIds: useSessionStore.getState().excludedSongIds,
+          voiceRangeLowMidi: voiceRangeLow,
+          voiceRangeHighMidi: voiceRangeHigh,
+          voiceRangeSourceMethod: snapshot?.sourceMethod,
+        });
+      }
     }
-    triggerRecommendation({
-      sessionId: voiceRangeSessionId,
-      voiceRangeLow,
-      voiceRangeHigh,
-      excludeSongIds: useSessionStore.getState().excludedSongIds,
-    });
+    lastProcessedPageCountRef.current = pages.length;
   }, [
-    isVoiceRangeSuccess,
-    voiceRangeSessionId,
+    pages,
+    appendExcluded,
+    appendHistory,
+    voiceRangeIdFromStore,
     voiceRangeLow,
     voiceRangeHigh,
-    isRecommendationIdle,
-    triggerRecommendation,
+    voiceRangeQuery.data,
   ]);
 
   if (voiceRangeQuery.isLoading) {
@@ -193,16 +222,6 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   if (!voiceRange) {
     return <NoSessionFallback />;
   }
-
-  const handleRecommendAgain = () => {
-    recommendationMutation.mutate({
-      sessionId: voiceRange.sessionId,
-      voiceRangeLow: voiceRange.lowestNoteMidi,
-      voiceRangeHigh: voiceRange.highestNoteMidi,
-      // 버튼 클릭 시점의 최신 누적 리스트를 그대로 전달.
-      excludeSongIds: useSessionStore.getState().excludedSongIds,
-    });
-  };
 
   return (
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
@@ -242,15 +261,8 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           </div>
         </header>
 
-        <RecommendationList
-          isPending={
-            recommendationMutation.isPending || recommendationMutation.isIdle
-          }
-          error={recommendationMutation.error}
-          data={recommendationMutation.data}
-          onRetry={handleRecommendAgain}
-          onRecommendAgain={handleRecommendAgain}
-          excludedCount={excludedSongIds.length}
+        <RecommendationFeed
+          query={recommendQuery}
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
         />
@@ -259,13 +271,14 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   );
 }
 
-type RecommendationListProps = {
-  isPending: boolean;
-  error: Error | null;
-  data: RecommendationResponse | undefined;
-  onRetry: () => void;
-  onRecommendAgain: () => void;
-  excludedCount: number;
+type RecommendationFeedProps = {
+  query: ReturnType<typeof useInfiniteQuery<
+    RecommendationResponse,
+    Error,
+    { pages: RecommendationResponse[]; pageParams: number[] },
+    readonly unknown[],
+    number
+  >>;
   /**
    * 사용자 음역대 — 추천 카드의 "자세히 보기" 패널에서 음역 적합 점수를 계산할 때 사용.
    * (closes #141) 추천 컨텍스트에서는 항상 알 수 있는 값이라 필수로 받는다.
@@ -274,16 +287,64 @@ type RecommendationListProps = {
   userVoiceRangeHigh: number;
 };
 
-function RecommendationList({
-  isPending,
-  error,
-  data,
-  onRetry,
-  onRecommendAgain,
-  excludedCount,
+function RecommendationFeed({
+  query,
   userVoiceRangeLow,
   userVoiceRangeHigh,
-}: RecommendationListProps) {
+}: RecommendationFeedProps) {
+  const {
+    data,
+    error,
+    isPending,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = query;
+
+  // 모든 페이지의 추천 곡을 평탄화. 페이지 경계 정보는 사용자에게 노출하지 않는다.
+  const allRecommendations = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+    return data.pages.flatMap((page) => page.recommendations);
+  }, [data]);
+
+  // IntersectionObserver 로 sentinel 진입을 감지해 다음 batch 페치.
+  // ref 콜백 패턴: sentinel DOM 노드가 마운트/언마운트될 때마다 observer 를
+  // 다시 연결한다. 의존성에 fetchNextPage/hasNextPage/isFetchingNextPage 가 들어가서
+  // 상태가 바뀌면 콜백이 새 함수로 발급되어 observer 가 갱신된다.
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) {
+        return;
+      }
+      if (typeof IntersectionObserver === "undefined") {
+        // SSR/구식 브라우저 safety net — 진입 감지 불가하면 무한 스크롤이 동작하지
+        // 않지만 본 페이지는 client component 라 실질 영향은 거의 없다.
+        return;
+      }
+      if (!hasNextPage || isFetchingNextPage) {
+        return;
+      }
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry?.isIntersecting) {
+            fetchNextPage();
+          }
+        },
+        { rootMargin: SENTINEL_ROOT_MARGIN },
+      );
+      observer.observe(node);
+      return () => {
+        observer.disconnect();
+      };
+    },
+    [fetchNextPage, hasNextPage, isFetchingNextPage],
+  );
+
+  // 1차 페치(첫 페이지) 로딩 — skeleton 다수로 카드 공간 인지를 유지.
   if (isPending) {
     return (
       <ul
@@ -307,21 +368,20 @@ function RecommendationList({
             ? `${error.status}: ${error.message}`
             : error.message}
         </p>
-        <Button
-          variant="danger"
-          size="sm"
-          onClick={onRetry}
-          className="self-start"
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700"
         >
           다시 시도
-        </Button>
+        </button>
       </div>
     );
   }
 
-  // data가 정의됐는데 비어 있는 경우 = 카탈로그를 누적 제외 셋이 모두 덮은 케이스.
-  // 음역대 재입력 안내로 흐름을 끊는다. "다시 추천" 버튼은 숨긴다.
-  if (data && data.recommendations.length === 0) {
+  // 첫 페이지부터 빈 경우 = 시작 시점에 카탈로그가 누적 제외 셋에 이미 모두 덮인 케이스.
+  // 음역대 재입력 안내로 흐름을 끊는다.
+  if (allRecommendations.length === 0) {
     return (
       <div
         role="status"
@@ -340,15 +400,10 @@ function RecommendationList({
     );
   }
 
-  if (!data) {
-    // 자동 mutation이 트리거되기 전 idle 직후 한 프레임 — 안전망.
-    return null;
-  }
-
   return (
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-3">
-        {data.recommendations.map((item) => (
+        {allRecommendations.map((item) => (
           <SongCard
             key={item.song.id}
             item={item}
@@ -360,21 +415,54 @@ function RecommendationList({
           />
         ))}
       </ul>
-      <div className="flex flex-col items-stretch gap-1">
-        <Button
-          variant="primary"
-          size="md"
-          onClick={onRecommendAgain}
-          className="h-11"
+      {/*
+        Footer 영역:
+          - hasNextPage 가 true 면 sentinel + skeleton(로딩 중일 때) 노출.
+          - hasNextPage 가 false 면 시드 소진 안내 + 음역대 재입력 CTA 노출.
+            (이미 한 페이지 이상 본 후이므로 "더 이상 없어요" 톤은 부드럽게.)
+      */}
+      {hasNextPage ? (
+        <div className="flex flex-col gap-3">
+          {isFetchingNextPage ? (
+            <ul
+              aria-busy="true"
+              aria-label="다음 추천 결과 로딩 중"
+              className="flex flex-col gap-3"
+            >
+              {Array.from({ length: 2 }).map((_, idx) => (
+                <SongCardSkeleton key={idx} />
+              ))}
+            </ul>
+          ) : null}
+          {/*
+            sentinel: 사용자가 리스트 끝에 가까워지면 IntersectionObserver 가
+            진입을 감지해 fetchNextPage 를 호출한다. 시각적으로는 보이지 않지만
+            테스트가 식별할 수 있도록 data-testid 를 둔다.
+          */}
+          <div
+            ref={sentinelRef}
+            data-testid="recommend-sentinel"
+            aria-hidden="true"
+            className="h-1 w-full"
+          />
+        </div>
+      ) : (
+        <div
+          role="status"
+          className="flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
         >
-          다른 곡 추천받기
-        </Button>
-        {excludedCount > 0 ? (
-          <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-            이미 본 {excludedCount}곡은 제외하고 추천해요.
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            추천할 수 있는 곡을 모두 보여드렸어요. 음역대나 분위기를 바꿔서 다시
+            시도해 보세요.
           </p>
-        ) : null}
-      </div>
+          <Link
+            href="/voice-range"
+            className="inline-flex h-10 items-center justify-center rounded-full bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            음역대 다시 입력
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
