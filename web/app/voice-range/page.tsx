@@ -22,7 +22,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
-import { midiToNoteName, octaveRangeMidis } from "@/lib/notes";
+import { midiToCombinedNoteName, octaveRangeMidis } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { Button } from "@/components/ui";
 
@@ -214,7 +214,7 @@ function NoteSelect({ label, value, options, onChange }: NoteSelectProps) {
       >
         {options.map((midi) => (
           <option key={midi} value={midi}>
-            {midiToNoteName(midi)} (MIDI {midi})
+            {midiToCombinedNoteName(midi)} · MIDI {midi}
           </option>
         ))}
       </select>

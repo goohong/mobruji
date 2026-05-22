@@ -55,7 +55,7 @@ import {
   VoiceRangeResponse,
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
@@ -238,8 +238,8 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           </h1>
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              내 음역대: {midiToNoteName(voiceRange.lowestNoteMidi)} ~{" "}
-              {midiToNoteName(voiceRange.highestNoteMidi)}
+              내 음역대: {midiToCombinedNoteName(voiceRange.lowestNoteMidi)} ~{" "}
+              {midiToCombinedNoteName(voiceRange.highestNoteMidi)}
             </p>
             <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
           </div>

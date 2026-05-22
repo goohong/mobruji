@@ -145,10 +145,10 @@ describe("VoiceRangePage 렌더", () => {
     expect(lowOptions.length).toBe(49);
     expect(highOptions.length).toBe(49);
 
-    // 첫 옵션은 C2, 마지막은 C6 형식 확인
-    expect(lowOptions[0]).toHaveTextContent(/C2 \(MIDI 36\)/);
+    // 첫 옵션은 C2, 마지막은 C6 형식 확인 (#318: 한국어 (SPN) · MIDI N)
+    expect(lowOptions[0]).toHaveTextContent(/도2 \(C2\) · MIDI 36/);
     expect(lowOptions[lowOptions.length - 1]).toHaveTextContent(
-      /C6 \(MIDI 84\)/,
+      /도6 \(C6\) · MIDI 84/,
     );
   });
 

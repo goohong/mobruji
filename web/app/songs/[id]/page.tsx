@@ -41,7 +41,7 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import { useLikesStore } from "@/store/likes";
 
 export default function SongDetailPage() {
@@ -111,9 +111,13 @@ type SongDetailViewProps = {
 function SongDetailView({ song }: SongDetailViewProps) {
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number"
+      ? midiToCombinedNoteName(song.highMidi)
+      : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number"
+      ? midiToCombinedNoteName(song.lowMidi)
+      : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
 
   return (

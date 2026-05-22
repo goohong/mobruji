@@ -198,8 +198,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     renderWithQueryClient(<Home />);
 
     await waitFor(() => {
+      // 이슈 #318: 한국어 (SPN) 병기.
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /C3 ~ A4/,
+        /도3 \(C3\) ~ 라4 \(A4\)/,
       );
     });
     expect(readVoiceRangeMock).toHaveBeenCalledWith("test-session-id");
@@ -234,8 +235,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
 
     const { container } = renderWithQueryClient(<Home />);
     await waitFor(() => {
+      // 이슈 #318: 한국어 (SPN) 병기.
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /C3 ~ A4/,
+        /도3 \(C3\) ~ 라4 \(A4\)/,
       );
     });
     await expectNoA11yViolations(container);

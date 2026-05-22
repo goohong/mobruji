@@ -26,7 +26,11 @@ import {
   VoiceRangeResponse,
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
-import { midiToNoteName, MIN_MIDI, MAX_MIDI } from "@/lib/notes";
+import {
+  MAX_MIDI,
+  MIN_MIDI,
+  midiToCombinedNoteName,
+} from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
 import { Button } from "@/components/ui";
@@ -390,7 +394,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         <div className="flex items-baseline justify-between">
           <span className="text-2xl font-semibold tabular-nums">
             {sample?.midi !== null && sample?.midi !== undefined
-              ? midiToNoteName(sample.midi)
+              ? midiToCombinedNoteName(sample.midi)
               : "—"}
           </span>
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -591,7 +595,7 @@ function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
           {label}
         </span>
         <span className="tabular-nums text-zinc-900 dark:text-zinc-50">
-          {midiToNoteName(value)} (MIDI {value})
+          {midiToCombinedNoteName(value)} · MIDI {value}
         </span>
       </div>
       <input
