@@ -1,7 +1,7 @@
 ---
 feature: rev 세션 QA 실행 검증 프로토콜
 slug: rev-qa-protocol
-status: active
+status: implementing
 owner: @goohong
 scope: infra
 related_issues: []
@@ -97,59 +97,68 @@ last_reviewed: 2026-05-22
 
 각 시나리오는 **로컬 3-tier 가동 후** 실행. local 3-tier 가동은 `docs/runbooks/local-3tier-setup.md` 참조.
 
+**시나리오 작성 룰**: 필드명/payload는 §5-8 contract 표를 그대로 인용한다. 본 §5-3은 흐름 + Pass 조건 중심.
+
 #### S1. 음역 측정 (voice)
 ```bash
-# 1. 익명 세션 생성
-SID=$(curl -s -X POST http://localhost:8080/api/v1/sessions | jq -r .sessionId)
+# 1. 익명 세션 생성 (sessionId는 익명 세션 발급 endpoint가 미구현이면 임의 UUID 사용)
+SID=$(uuidgen)
 
-# 2. 음역 입력 (manual)
-curl -s -X PUT http://localhost:8080/api/v1/sessions/$SID/voice-range \
+# 2. 음역 입력 (§5-7-1 payload)
+curl -s -X POST http://localhost:8080/api/v1/voice-ranges \
   -H "Content-Type: application/json" \
-  -H "X-Session-Id: $SID" \
-  -d '{"lowestNote":"C3","highestNote":"E5"}' | jq
+  -d "{\"sessionId\":\"$SID\",\"lowestNoteMidi\":48,\"highestNoteMidi\":76,\"sourceMethod\":\"SELF_REPORT\"}" | jq
 
-# 3. 측정 이력 조회
+# 3. 음역 조회 (§5-7-2)
+curl -s http://localhost:8080/api/v1/voice-ranges/$SID | jq
+
+# 4. 측정 이력 조회 (§5-7-6, X-Session-Id 헤더 필수)
 curl -s -H "X-Session-Id: $SID" \
   http://localhost:8080/api/v1/sessions/$SID/voice-range-history | jq
 
-# Pass 조건: HTTP 200 + 응답 필드 spec 일치 (lowestNote/highestNote/measuredAt)
+# Pass 조건: 2번 201 + 3번 200(같은 lowestNoteMidi/highestNoteMidi) + 4번 200(snapshot 1건 이상)
+# 헤더 누락 시 4번이 401 반환하는지 함께 확인 (§S6 통합 가능)
 ```
 
 #### S2. 추천 (recommendation)
 ```bash
-# 음역 입력된 세션으로 추천 호출
+# 음역 입력된 세션으로 추천 호출 (§5-7-4 payload)
 curl -s -X POST http://localhost:8080/api/v1/recommendations \
   -H "Content-Type: application/json" \
-  -H "X-Session-Id: $SID" \
-  -d '{"gender":"MALE","mood":"BALLAD"}' | jq
+  -d "{\"sessionId\":\"$SID\",\"voiceRangeLow\":48,\"voiceRangeHigh\":76,\"mood\":\"UPBEAT\"}" | jq
 
 # Pass 조건:
-# - HTTP 200, results 배열 non-empty
-# - 결정성: 같은 요청 2회 호출 시 동일 순서 (spec recommendation-algorithm-v1.md §3)
+# - HTTP 201, requestId 발급, recommendations 배열 non-empty
+# - 결정성: 같은 요청 2회 호출 시 동일 순서 (recommendation-algorithm-v1.md §3)
 # - p95 < spec 정의된 임계 (p95-regression-guard.md)
 ```
 
 #### S3. 좋아요 / 북마크 (recommendation feedback)
 ```bash
-RID=<S2 응답의 첫 recommendationResultEntryId>
+# 추천에서 받은 songId 사용 (§5-7-4 응답의 recommendations[*].songId)
+SONG_ID=1   # S2 응답에서 추출
 
-# 좋아요
-curl -s -X POST http://localhost:8080/api/v1/recommendations/results/$RID/like \
-  -H "X-Session-Id: $SID" | jq
+# 좋아요 토글 (§5-7-10)
+curl -s -X POST http://localhost:8080/api/v1/likes \
+  -H "Content-Type: application/json" \
+  -d "{\"sessionId\":\"$SID\",\"songId\":$SONG_ID}" | jq
 
-# 좋아요 리스트 조회
+# 좋아요 리스트 조회 (§5-7-8, X-Session-Id 헤더 필수)
 curl -s -H "X-Session-Id: $SID" \
-  "http://localhost:8080/api/v1/recommendations/likes?page=0&size=20" | jq
+  "http://localhost:8080/api/v1/sessions/$SID/likes?page=0&size=20" | jq
 
-# Pass 조건: like 토글 후 list에 노출, page/size 페이지네이션 동작
+# 북마크도 동일 패턴 (§5-7-11 / §5-7-9)
+
+# Pass 조건: like 토글 후 list에 노출(`responses` 배열), page/size/totalCount/hasNext 필드 존재
 ```
 
 #### S4. 이력 조회 (recommendation history)
 ```bash
+# §5-7-7, X-Session-Id 헤더 필수
 curl -s -H "X-Session-Id: $SID" \
-  "http://localhost:8080/api/v1/recommendations/history?page=0&size=20" | jq
+  http://localhost:8080/api/v1/sessions/$SID/recommendation-history | jq
 
-# Pass 조건: S2 호출 이력이 최신순으로 노출
+# Pass 조건: 200 + recommendationHistoryResponses 배열에 S2 호출이 최신순으로 노출
 ```
 
 #### S5. FE 통합 흐름 (web)
@@ -168,16 +177,21 @@ curl -s http://localhost:3000/voice | grep -E "음역|voice-range"
 
 #### S6. auth 우회 시도 (D 범주 강제)
 ```bash
-# 헤더 누락
+# 헤더 누락 → 401
 curl -s -o /dev/null -w "%{http_code}\n" \
-  http://localhost:8080/api/v1/recommendations/likes
+  http://localhost:8080/api/v1/sessions/$SID/likes
 # 기대: 401
 
-# 위조 sessionId
+# 위조 sessionId → 401 (path와 header 불일치)
 curl -s -o /dev/null -w "%{http_code}\n" \
   -H "X-Session-Id: 00000000-0000-0000-0000-000000000000" \
-  http://localhost:8080/api/v1/recommendations/likes
-# 기대: 401 또는 403
+  http://localhost:8080/api/v1/sessions/$SID/likes
+# 기대: 401
+
+# voice-range-history / recommendation-history 도 같은 가드 적용 — 같은 패턴으로 확인
+curl -s -o /dev/null -w "%{http_code}\n" \
+  http://localhost:8080/api/v1/sessions/$SID/voice-range-history
+# 기대: 401
 
 # admin endpoint 인증 (예: song stats)
 curl -s -o /dev/null -w "%{http_code}\n" \
@@ -245,7 +259,87 @@ QA: 🔴 BLOCK — [범주 D] /api/v1/sessions 인증 우회 가능, ADR-0013 �
 - 🟡 NOTE — minor drift/nit. release gate 통과 가능 but 다음 사이클 fix 권장
 - 🔴 BLOCK — 런타임 에러, spec 위반, 회귀. release gate 차단.
 
-### 5-7) release gate 연계
+### 5-7) Endpoint payload / 응답 contract (rev 첫 try 가이드)
+
+rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름** 중심이라 매 사이클마다 필드명 오류(`lowMidi` vs `lowestNoteMidi`)로 400을 만들고 backend 코드를 grep하게 됨. 본 절은 그 1차 grep을 대체한다.
+
+**중요**: 본 절의 필드명은 backend DTO를 단일 진실 소스로 한다. 코드가 바뀌면 본 절도 같은 PR에서 갱신해야 한다 (CLAUDE.md §4 도메인/DDD 룰 적용).
+
+#### 5-7-1) `POST /api/v1/voice-ranges` (음역 등록/교체)
+- DTO: `VoiceRangeCreateRequest`
+- 인증: 없음 (body sessionId)
+- Request:
+  ```json
+  {"sessionId":"<SID>","lowestNoteMidi":48,"highestNoteMidi":76,"sourceMethod":"SELF_REPORT"}
+  ```
+- `sourceMethod` 허용 enum: `SELF_REPORT` | `OCTAVE_PICK` | `MIC_MEASURE`
+- MIDI 범위: 12~119
+- Response 201: `{id, sessionId, lowestNoteMidi, highestNoteMidi, sourceMethod, createdAt, updatedAt}`
+
+#### 5-7-2) `GET /api/v1/voice-ranges/{sessionId}` (음역 조회)
+- 인증: 없음
+- Response 200: `VoiceRangeResponse` (위와 동일 shape)
+
+#### 5-7-3) `PUT /api/v1/voice-ranges/{sessionId}` (음역 수정)
+- DTO: `VoiceRangeUpdateRequest`
+- 인증: 없음 (현재 — auth 적용 후속)
+- Request: `{"lowestNoteMidi":48,"highestNoteMidi":78,"sourceMethod":"OCTAVE_PICK"}` (필드명 PR별 확인)
+
+#### 5-7-4) `POST /api/v1/recommendations` (추천 생성)
+- DTO: `RecommendationCreateRequest`
+- 인증: 없음 (body sessionId)
+- Request (최소):
+  ```json
+  {"sessionId":"<SID>","voiceRangeLow":48,"voiceRangeHigh":76,"mood":"UPBEAT"}
+  ```
+- Request (전체):
+  ```json
+  {"sessionId":"<SID>","voiceRangeLow":48,"voiceRangeHigh":76,"mood":"UPBEAT","preferredBpm":120,"excludeSongIds":[1,2]}
+  ```
+- `mood` 허용 enum: `UPBEAT` | `CALM` | `EMOTIONAL` | `POWERFUL` | `GROOVY` | `NOSTALGIC` (Mood.java 단일 소스)
+- `preferredBpm` 범위: 30~300 (optional)
+- Response 201: `{requestId, recommendations: [RecommendedSongResponse...]}`
+
+#### 5-7-5) `GET /api/v1/recommendations/{requestId}` (추천 단건 조회)
+- 인증: 없음 (현재)
+- Response 200: `RecommendationResponse` (위와 동일 shape)
+
+#### 5-7-6) `GET /api/v1/sessions/{sessionId}/voice-range-history`
+- 인증: **`X-Session-Id` 헤더 필수** (path와 일치). 누락/blank/불일치 → 401
+- Response 200: `{voiceRangeSnapshotResponses: [...]}` (snapshot 시계열)
+
+#### 5-7-7) `GET /api/v1/sessions/{sessionId}/recommendation-history`
+- 인증: **`X-Session-Id` 헤더 필수**
+- Response 200: `{recommendationHistoryResponses: [...]}` (createdAt DESC)
+
+#### 5-7-8) `GET /api/v1/sessions/{sessionId}/likes?page=0&size=20`
+- 인증: **`X-Session-Id` 헤더 필수**
+- `page >= 0`, `1 <= size <= 100` (위반 시 400)
+- Response 200: `{responses: [...], page, size, totalCount, hasNext}`
+
+#### 5-7-9) `GET /api/v1/sessions/{sessionId}/bookmarks?page=0&size=20`
+- 인증: **`X-Session-Id` 헤더 필수**
+- 위와 동일 shape
+
+#### 5-7-10) `POST /api/v1/likes` (좋아요 토글)
+- DTO: `LikeToggleRequest`
+- 인증: 현재 body sessionId (header guard는 후속 이슈)
+- Request: `{"sessionId":"<SID>","songId":1}` (`songId` Positive Long)
+- Response 200: `LikeToggleResponse` (`liked: true/false`)
+
+#### 5-7-11) `POST /api/v1/bookmarks` (북마크 토글)
+- DTO: `BookmarkToggleRequest`
+- 인증: 현재 body sessionId
+- Request: `{"sessionId":"<SID>","songId":1}`
+- Response 200: `BookmarkToggleResponse` (`bookmarked: true/false`)
+
+#### 5-7-12) 인증 헤더 한 줄 정리
+- `X-Session-Id: <SID>` — `/api/v1/sessions/{sessionId}/**` 패턴은 모두 필수 (SessionAuthGuard).
+- `Authorization: Bearer <MOBRUJI_ADMIN_TOKEN>` — `/api/v1/songs/stats` 등 admin endpoint. 토큰은 env로 주입 (`docs/runbooks/local-3tier-setup.md` §2-2).
+
+> **새 endpoint 추가 시**: backend PR에서 본 §5-7 을 같은 PR로 갱신한다. 갱신 없는 endpoint는 rev sub-agent가 grep을 다시 하게 되어 wall-clock 손실 + 미QA 위험.
+
+### 5-8) release gate 연계
 
 `develop → main` release 머지 전 rev 세션이 다음을 수행:
 1. `gh pr list --base develop --state merged --search "merged:>=<이전 release 이후> -label:reviewed:claude"` → 미QA PR 색출
@@ -274,3 +368,4 @@ QA pass PR에는 `reviewed:claude` 라벨 부여 (라벨 없으면 release gate�
 
 ## 9) 결정 로그
 - 2026-05-22: 초안 작성 (status=active). 사용자 보강 결정 ("에러를 막는 것이 1순위, rev가 실 QA 실행 검증도 담당")을 정형화. plan 사이클 37.
+- 2026-05-22: rev 22 첫 적용 피드백 반영. §5-3 smoke 시나리오의 endpoint/필드명을 실 DTO와 일치시키고, §5-7 Endpoint payload contract 절을 신설(endpoint별 최소 payload + enum/헤더). 기존 release gate 절은 §5-8로 이동. plan 사이클 39.

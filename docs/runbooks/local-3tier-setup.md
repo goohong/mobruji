@@ -171,20 +171,50 @@ docker compose logs mysql --tail 50
 3. 마이그레이션 자체 버그면 PR 코멘트 + 본진에 보고 (rev 사이클의 범주 E 위반).
 
 ## 4) 3-tier 일괄 셧다운
+
+### 4-1) 권장 순서 (FE → BE → DB)
+
 ```bash
 # FE
 pkill -f "next dev" || true
 
 # BE
-pkill -f "GradleDaemon\|bootRun" || true
+pkill -f "GradleDaemon\|bootRun\|MobrujiBackendApplication" || true
 # 또는 bootRun 띄운 터미널에서 Ctrl+C
 
-# DB (데이터 보존)
-docker compose stop
+# DB는 보존 권장 (다음 사이클 startup 시간 절약)
+# 데이터 폐기가 필요하면 §4-3 참조
+```
 
-# DB (데이터 폐기 + 컨테이너 정리)
+> **MySQL 컨테이너는 가급적 유지한다**. 정상 셧다운(`docker compose stop`)으로도 약 5~10초 startup 비용이 발생하고, `down -v`는 30~60초 + Flyway 재마이그레이션 비용까지 추가된다. rev QA의 wall-clock 예산(`docs/features/rev-qa-protocol.md` §3 비기능)을 지키려면 컨테이너를 두는 편이 안전하다.
+
+### 4-2) `pkill -f` 가 안 먹힐 때 (macOS / gradle daemon)
+
+`pkill -f "GradleDaemon"` 가 rc=1로 끝나도 8080 포트가 여전히 LISTEN인 경우가 있다. macOS의 `pkill` 매칭이 daemon 클래스명을 못 잡거나, gradle daemon이 별 프로세스로 분리돼 있어서다. 다음 fallback을 쓴다:
+
+```bash
+# 8080(BE 서비스), 8081(BE management)을 점유 중인 PID를 lsof로 추출 → kill
+lsof -nP -iTCP:8080 -sTCP:LISTEN -Fp | sed 's/^p//' | xargs -r kill
+lsof -nP -iTCP:8081 -sTCP:LISTEN -Fp | sed 's/^p//' | xargs -r kill
+
+# 3000(FE) 동일 패턴
+lsof -nP -iTCP:3000 -sTCP:LISTEN -Fp | sed 's/^p//' | xargs -r kill
+
+# 안 죽으면 SIGKILL
+lsof -nP -iTCP:8080 -sTCP:LISTEN -Fp | sed 's/^p//' | xargs -r kill -9
+```
+
+- `-Fp`는 PID만 한 줄에 `p<pid>` 형식으로 출력. `sed 's/^p//'`로 prefix 제거.
+- macOS `xargs`는 GNU `-r`이 없을 수 있다. 입력이 빈 경우 `kill`이 usage 에러를 내지만 무해(rc 무시).
+- 포트 변경(`SERVER_PORT=18080` 등) 사용 시 위 포트 번호도 같이 변경.
+
+### 4-3) 데이터 폐기 (마이그레이션 재현 등)
+```bash
+# DB 컨테이너 + 볼륨 함께 삭제
 docker compose down -v
 ```
+- Flyway baseline 에러(§3-1) 재현, 새 V_N 마이그레이션 검증 등에서만 사용.
+- 일상적인 셧다운에는 §4-1로 충분.
 
 ## 5) rev QA에서의 사용
 
