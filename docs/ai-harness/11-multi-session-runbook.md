@@ -96,6 +96,19 @@ maestro이 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스
 
 maestro Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
 
+### 0-6-2) 사이클 트레일 push 룰 (maestro 의무)
+
+maestro가 자율 사이클을 돌릴 때 — 사이클 launch / 오류 / 결정 분기 — 가 Discord #모부르지 채널에 1줄로 expose되도록 **GitHub events로 변환**하는 룰은 `docs/features/discord-status-push.md` 가 정형화한다. 핵심 의무:
+
+| 사이클 단계 | maestro 행동 | webhook 흐름 |
+|---|---|---|
+| 사이클 launch | `gh issue create` (사이클 1개 = 이슈 1개 1:1) | `issues:opened` → discord-notify.yml |
+| sub-agent stall / CI 실패 | 별도 `type:bug` 이슈 등록 | `issues:opened` → discord-notify.yml |
+| 결정 분기 | 사이클 이슈에 `decision:pending` 라벨 | 6h 다이제스트 (discord-periodic-summary.yml) |
+| PR open/머지/close | sub-agent 또는 maestro가 정상 흐름 | `pull_request:*` → discord-notify.yml |
+
+**금지**: NCP에서 maestro가 Discord webhook URL을 `.env`로 보유하고 curl 직접 호출하는 패턴. secret 이중 보유 회피. webhook URL은 GitHub repo secret `DISCORD_WEBHOOK_URL` 단일 SoT.
+
 ### 0-7) 사이클 완료 후 워크트리 정리
 
 PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 maestro은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
