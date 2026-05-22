@@ -95,7 +95,10 @@ describe("buildScoreBreakdown", () => {
     ]);
     const rangeFit = breakdown.find((b) => b.key === "rangeFit");
     expect(rangeFit?.score).toBeCloseTo(0.55, 1);
-    expect(rangeFit?.detail).toBe("사용자 C3-G4 vs 곡 G3-F5");
+    // 이슈 #318: 한국어 (SPN) 병기.
+    expect(rangeFit?.detail).toBe(
+      "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+    );
     // 모든 추정 항목은 estimated=true
     expect(breakdown.every((b) => b.estimated)).toBe(true);
     // 키 한글 변환 — C_SHARP_MAJOR → "C# Major"

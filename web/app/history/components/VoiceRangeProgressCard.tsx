@@ -30,7 +30,7 @@
  *     컴포넌트 컨테이너의 aria-label 이 요약을 담당한다.
  */
 
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName, midiToNoteName } from "@/lib/notes";
 import { formatRelativeKorean } from "@/lib/relativeTime";
 import type {
   VoiceRangeProgressPoint,
@@ -177,8 +177,12 @@ export function VoiceRangeProgressCard({ summary }: Props) {
           const heightRaw = yBottom - yTop;
           const height = Math.max(BAR_MIN_HEIGHT, heightRaw);
           const isLatest = index === points.length - 1;
-          const highNote = midiToNoteName(point.highMidi);
-          const lowNote = midiToNoteName(point.lowMidi);
+          // 차트 막대 라벨은 공간이 좁아 SPN만 사용 (#318).
+          // 툴팁은 한국어 (SPN) 병기로 학습 효과 + 직관성 확보.
+          const highNoteShort = midiToNoteName(point.highMidi);
+          const lowNoteShort = midiToNoteName(point.lowMidi);
+          const highNoteCombined = midiToCombinedNoteName(point.highMidi);
+          const lowNoteCombined = midiToCombinedNoteName(point.lowMidi);
 
           return (
             <g key={point.id}>
@@ -195,8 +199,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 }
               >
                 <title>
-                  {formatRelativeKorean(point.requestedAt)}: {lowNote} ~{" "}
-                  {highNote} ({point.highMidi - point.lowMidi} 반음)
+                  {formatRelativeKorean(point.requestedAt)}: {lowNoteCombined}{" "}
+                  ~ {highNoteCombined} ({point.highMidi - point.lowMidi} 반음)
                 </title>
               </rect>
               {/*
@@ -213,7 +217,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                     : "fill-zinc-500 text-[9px] dark:fill-zinc-400"
                 }
               >
-                {highNote}
+                {highNoteShort}
               </text>
               <text
                 x={x + barWidth / 2}
@@ -225,7 +229,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                     : "fill-zinc-400 text-[9px] dark:fill-zinc-500"
                 }
               >
-                {lowNote}
+                {lowNoteShort}
               </text>
             </g>
           );

@@ -18,7 +18,7 @@
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
  *     · `song.difficulty`가 있으면 그 값을, 없으면 `deriveDifficulty(lowMidi, highMidi)`로 계산.
  *     · 둘 다 없으면(legacy 응답) 라벨을 숨긴다.
- *   - 최고음 음표명 (예: F#5) — `midiToNoteName(highMidi)`
+ *   - 최고음 음표명 (예: "라♯5 (F#5)") — `midiToCombinedNoteName(highMidi)` (#318)
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
  *   - matchReason 한 줄 — 추천 컨텍스트에서만
@@ -54,7 +54,7 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
@@ -109,9 +109,13 @@ export function SongCard(props: SongCardProps) {
   const keyLabel = formatMusicalKey(song.keyOriginal);
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number"
+      ? midiToCombinedNoteName(song.highMidi)
+      : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number"
+      ? midiToCombinedNoteName(song.lowMidi)
+      : null;
 
   const body: ReactNode = (
     <>

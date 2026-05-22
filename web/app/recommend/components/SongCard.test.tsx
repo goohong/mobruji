@@ -124,10 +124,10 @@ describe("SongCard", () => {
     expect(
       screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = F5
-    expect(screen.getByLabelText(/최고음 F5/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = G3
-    expect(screen.getByText("G3")).toBeInTheDocument();
+    // 최고음 음표명 노출 — MIDI 77 = 파5 (F5) (#318 한국어 (SPN) 병기)
+    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 솔3 (G3)
+    expect(screen.getByText("솔3 (G3)")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
@@ -204,9 +204,11 @@ describe("SongCard", () => {
       expect(screen.getByText("키 매칭")).toBeInTheDocument();
       expect(screen.getByText("장르")).toBeInTheDocument();
       expect(screen.getByText("음역 적합")).toBeInTheDocument();
-      // 음역 적합 detail에 사용자/곡 음역이 함께 표시
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (#318: 한국어 (SPN) 병기)
       expect(
-        screen.getByText("사용자 C3-G4 vs 곡 G3-F5"),
+        screen.getByText(
+          "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+        ),
       ).toBeInTheDocument();
       // 추정값 안내 footnote
       expect(
