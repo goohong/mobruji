@@ -61,6 +61,18 @@ class DedupLedgerTests(unittest.TestCase):
         self.assertFalse(self.ledger.is_processed("old"))
         self.assertTrue(self.ledger.is_processed("fresh"))
 
+    def test_count_since_empty(self) -> None:
+        self.assertEqual(self.ledger.count_since(300), 0)
+
+    def test_count_since_window(self) -> None:
+        now = int(time.time())
+        self.ledger.mark_processed("recent1", now_epoch=now - 60)
+        self.ledger.mark_processed("recent2", now_epoch=now - 200)
+        self.ledger.mark_processed("old", now_epoch=now - 1000)
+        self.assertEqual(self.ledger.count_since(300), 2)
+        self.assertEqual(self.ledger.count_since(100), 1)
+        self.assertEqual(self.ledger.count_since(2000), 3)
+
 
 class SentinelTests(unittest.TestCase):
     def test_ctrl_c(self) -> None:

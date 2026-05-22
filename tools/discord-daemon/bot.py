@@ -54,6 +54,8 @@ STATUS_OPEN_PR_LIMIT: Final[int] = 8
 STATUS_MERGED_PR_LIMIT: Final[int] = 5
 STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
 STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
+AUTO_ACK_QUEUE_WINDOW_SECONDS: Final[int] = 300  # 5분 안 dedup mark 수 = queue 표시
+AUTO_ACK_TEMPLATE: Final[str] = "📥 받음, maestro 처리 중 (queue: {queue})"
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -216,6 +218,19 @@ class DedupLedger:
             )
             self._conn.commit()
             return cursor.rowcount
+
+    def count_since(self, window_seconds: int) -> int:
+        """마지막 window_seconds 안에 처리된 메시지 수.
+
+        auto-ack 의 'queue: N' 값. maestro 처리 부하 가시화 목적.
+        """
+        cutoff = int(time.time()) - window_seconds
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM processed_messages WHERE processed_at >= ?",
+                (cutoff,),
+            ).fetchone()
+            return int(row[0]) if row else 0
 
 
 def start_dedup_gc_thread(ledger: DedupLedger) -> None:
@@ -603,6 +618,15 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             truncate_for_log(payload["text"]),
         )
         append_inbox(payload)
+
+        # auto-ack — 1초 안 채널 응답. maestro 거치지 않음. /status 분기는 이미 위에서 처리됨.
+        # queue: 마지막 AUTO_ACK_QUEUE_WINDOW_SECONDS 안에 처리된 메시지 수 + 현재(=1).
+        queue_count = (ledger.count_since(AUTO_ACK_QUEUE_WINDOW_SECONDS) + 1) if ledger else 1
+        ack_text = AUTO_ACK_TEMPLATE.format(queue=queue_count)
+        try:
+            await message.channel.send(ack_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("auto-ack 발송 실패: %s", exc)
 
         if tmux_enabled:
             if not ensure_tmux_session(session_name, claude_bin):
