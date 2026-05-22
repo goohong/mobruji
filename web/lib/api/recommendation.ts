@@ -78,6 +78,11 @@ export type RecommendationCreateRequest = {
  *
  * 옵셔널 처리 이유: 백엔드 PR(#77)이 머지되기 전에 fe(#76)가 먼저 카드 UI를 다듬는다.
  * BE가 필드를 추가하면 SongCard가 응답값을 우선 사용하고, 없으면 client-side fallback한다.
+ *
+ * 이슈 #322 (2026-05-22, BE PR #337 머지):
+ *   - `albumCoverUrl`: 앨범 커버 이미지 URL. BE iTunes Search backfill 로 채워주며,
+ *     backfill 미적용 곡(또는 iTunes fuzzy match 실패)은 null. fe 는 null 이거나
+ *     로딩 실패 시 placeholder(음표 SVG + 그라데이션)로 fallback.
  */
 export type SongResponse = {
   id: number;
@@ -95,6 +100,7 @@ export type SongResponse = {
   lowMidi?: number | null;
   highMidi?: number | null;
   difficulty?: "EASY" | "NORMAL" | "HARD" | null;
+  albumCoverUrl?: string | null;
 };
 
 export type RecommendedSongResponse = {

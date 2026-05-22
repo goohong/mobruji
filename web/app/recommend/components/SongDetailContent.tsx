@@ -170,10 +170,33 @@ type AlbumCoverProps = {
 };
 
 function AlbumCover({ song }: AlbumCoverProps) {
-  // closes #323 PR 1: SongResponse 타입에 albumCoverUrl 이 아직 없다 — 후속 PR(#322)
-  // 에서 타입 확장 + 실제 src 분기 추가. 본 PR 단계에서는 항상 placeholder 만 노출해서
-  // BE 의존 없이 모달 레이아웃을 검증한다.
-  return <AlbumCoverPlaceholder size="large" songTitle={song.title} />;
+  // closes #322 — BE PR #337 에서 Song.albumCoverUrl 컬럼 + iTunes Search backfill 도입.
+  // backfill 미적용/fuzzy match 실패 곡은 null → placeholder. img 로딩 실패(404/CORS)
+  // 시에도 onError 로 placeholder 로 fallback. eager 로드는 모달이 열린 직후만
+  // 발생하므로 lazy 가 아닌 default load 가 자연스럽다 (lazy 는 thumbnail 에서).
+  const url = song.albumCoverUrl ?? null;
+  const [failed, setFailed] = useState(false);
+
+  if (!url || failed) {
+    return <AlbumCoverPlaceholder size="large" songTitle={song.title} />;
+  }
+
+  return (
+    <div className="flex justify-center">
+      {/*
+       * next/image 미사용 의도(closes #322): iTunes CDN 도메인을 next.config.images.domains
+       * 화이트리스트에 추가해야 하는데 next.config.* 가 보호 영역이라 본 PR 범위에서는
+       * <img> 로 유지. 후속 PR 에서 도메인 등록 + next/image 마이그레이션을 별도로 분리.
+       */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={`${song.title} 앨범 커버`}
+        onError={() => setFailed(true)}
+        className="h-48 w-48 rounded-2xl object-cover ring-1 ring-zinc-200 dark:ring-zinc-800"
+      />
+    </div>
+  );
 }
 
 type AlbumCoverPlaceholderProps = {
@@ -606,6 +629,25 @@ type AlbumCoverThumbnailProps = {
  * url 이 있으면 lazy load, 실패/없으면 placeholder.
  */
 export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
-  // closes #323 PR 1: PR 2(#322) 에서 albumCoverUrl 분기 활성화.
-  return <AlbumCoverPlaceholder size="thumbnail" songTitle={song.title} />;
+  // closes #322 — SongCard 좌측 small (48~64px) thumbnail. loading="lazy" 로
+  // 뷰포트 진입 시점에 페치 — 긴 리스트(추천 무한 스크롤, 검색 결과)에서 초기
+  // 네트워크 비용 최소화. onError 시 placeholder 로 fallback.
+  const url = song.albumCoverUrl ?? null;
+  const [failed, setFailed] = useState(false);
+
+  if (!url || failed) {
+    return <AlbumCoverPlaceholder size="thumbnail" songTitle={song.title} />;
+  }
+
+  return (
+    // next/image 미사용 의도: AlbumCover 와 동일 — 후속 PR 에서 도메인 등록 + 마이그레이션.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      loading="lazy"
+      alt={`${song.title} 앨범 커버`}
+      onError={() => setFailed(true)}
+      className="h-14 w-14 rounded-xl object-cover ring-1 ring-zinc-200 dark:ring-zinc-800"
+    />
+  );
 }
