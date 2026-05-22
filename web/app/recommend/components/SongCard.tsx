@@ -538,7 +538,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
  *     ToS·저작권 리스크가 있어 별도 ADR + Song 엔티티 youtubeId 컬럼 추가가 필요하다.
  *   - 본 PR(fe 35)은 BE/legal 변경 없이 가능한 가장 안전한 진입점만 제공: 공식 YouTube 검색 결과 페이지를
  *     새 탭으로 연다. 사용자가 거기서 듣고 카드로 돌아와 좋아요/북마크를 결정한다.
- *   - 후속(fe 36+)에서 BE에 youtubeId 컬럼이 추가되면 lite-embed로 교체 (본진 보고 사항).
+ *   - 후속(fe 36+)에서 BE에 youtubeId 컬럼이 추가되면 lite-embed로 교체 (maestro 보고 사항).
  *
  * 접근성:
  *   - aria-label에 곡 제목 + "(새 탭)" 명시 → 스크린 리더가 새 창임을 알린다.

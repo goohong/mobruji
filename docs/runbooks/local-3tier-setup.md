@@ -123,7 +123,7 @@ cd web && npm install
 - web deps를 추가한 PR이 머지된 직후 (예: PR #150 `pitchy`, PR #194 PWA service-worker).
 - `post-merge-cleanup.sh`는 `node_modules`를 건드리지 않으므로 stale 상태가 누적될 수 있음.
 
-본진이 fe sub-agent를 launch할 때 "직전 사이클에서 web deps 변경 PR이 머지됐다면 `npm install` 1회" 명시.
+maestro이 fe sub-agent를 launch할 때 "직전 사이클에서 web deps 변경 PR이 머지됐다면 `npm install` 1회" 명시.
 
 ### 3-4) `MOBRUJI_ADMIN_TOKEN` blank → 부팅 실패
 **증상**:
@@ -168,7 +168,7 @@ docker compose logs mysql --tail 50
 **회피**:
 1. 에러 메시지의 SQL 줄 확인.
 2. 로컬은 `docker compose down -v` 후 재시도 (데이터 폐기).
-3. 마이그레이션 자체 버그면 PR 코멘트 + 본진에 보고 (rev 사이클의 범주 E 위반).
+3. 마이그레이션 자체 버그면 PR 코멘트 + maestro에 보고 (rev 사이클의 범주 E 위반).
 
 ## 4) 3-tier 일괄 셧다운
 

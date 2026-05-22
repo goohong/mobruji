@@ -5,21 +5,21 @@
 
 ## 0) 운영 모드
 
-3개 세션(be/fe/rev)을 가동하는 방식은 두 가지. **기본은 본진 오케스트레이션.**
+3개 세션(be/fe/rev)을 가동하는 방식은 두 가지. **기본은 maestro 오케스트레이션.**
 
-### 0-1) 본진 오케스트레이션 (기본 / 권장)
+### 0-1) maestro 오케스트레이션 (기본 / 권장)
 
-**본진(`mobruji` 워크트리)의 Claude 세션 하나**가 오케스트레이터 역할을 한다. be/fe/rev 작업은 본진이 `Agent` 도구로 `claude` subagent를 `run_in_background: true`로 띄워 각 워크트리에서 실행하게 한다. 사용자는 본진 한 곳에서 진행 상황을 따라간다.
+**maestro(`mobruji` 워크트리)의 Claude 세션 하나**가 오케스트레이터 역할을 한다. be/fe/rev 작업은 maestro이 `Agent` 도구로 `claude` subagent를 `run_in_background: true`로 띄워 각 워크트리에서 실행하게 한다. 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
 
 사이클:
-1. 백로그 정해지면 본진이 각 워크트리에 `cd`해 `new-session-branch.sh`를 실행 → 이슈/브랜치/Draft PR 사전 스캐폴드.
-2. 본진이 `Agent` 도구로 be/fe/rev 서브에이전트를 동시 background 가동 (3개 병렬).
+1. 백로그 정해지면 maestro이 각 워크트리에 `cd`해 `new-session-branch.sh`를 실행 → 이슈/브랜치/Draft PR 사전 스캐폴드.
+2. maestro이 `Agent` 도구로 be/fe/rev 서브에이전트를 동시 background 가동 (3개 병렬).
 3. 각 서브에이전트는 자기 워크트리에서 코드 작성 → 품질 게이트 → push → `gh pr ready`.
-4. 본진은 완료 통지를 받고 사용자에게 머지 결정 요청.
+4. maestro은 완료 통지를 받고 사용자에게 머지 결정 요청.
 
 서브에이전트 프롬프트에 반드시 포함:
 - `cd <워크트리 절대경로>`로 시작 강제
-- 다른 워크트리/본진 건드리지 마
+- 다른 워크트리/maestro 건드리지 마
 - 메모리(`~/.claude/projects/*/memory/`) 쓰기 금지
 - `--no-verify`로 hook 우회 금지
 - 보호 영역 변경 시 `needs-human-review` 라벨 부여
@@ -28,17 +28,17 @@
 > `공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.`
 > 역할별 추가 룰(워크트리 경로, 작업 가능 경로, 품질 게이트)도 그 문서에 정리되어 있다.
 
-**언제 쓰나**: 사용자가 백로그를 본진에 풀어놓고 한 자리에서 운영하고 싶을 때. 대부분의 경우.
+**언제 쓰나**: 사용자가 백로그를 maestro에 풀어놓고 한 자리에서 운영하고 싶을 때. 대부분의 경우.
 
 ### 0-2) 수동 터미널 (대체)
 
-사용자가 워크트리마다 별도 터미널과 Claude 인스턴스를 띄워 직접 지시한다. 본진은 develop 점유와 공유 영역 관리만 담당.
+사용자가 워크트리마다 별도 터미널과 Claude 인스턴스를 띄워 직접 지시한다. maestro은 develop 점유와 공유 영역 관리만 담당.
 
 사이클: §3 (새 작업 시작)과 §4 (rev 운영) 단계를 사용자가 직접 트리거.
 
 **언제 쓰나**:
-- 서브에이전트가 의도와 다르게 동작해 본진에서 개입이 잦아질 때
-- 본진이 다른 큰 작업을 동시에 진행 중이라 오케스트레이션 부담이 클 때
+- 서브에이전트가 의도와 다르게 동작해 maestro에서 개입이 잦아질 때
+- maestro이 다른 큰 작업을 동시에 진행 중이라 오케스트레이션 부담이 클 때
 - 사람-루프(human-in-the-loop) 빈도를 늘리고 싶을 때
 
 ### 0-3) 모드 전환
@@ -47,32 +47,32 @@
 
 ### 0-4) 사이클 명명
 
-본진 task list에서 사이클을 부를 때 **도메인별 카운트**를 유지한다. 단순함 우선.
+maestro task list에서 사이클을 부를 때 **도메인별 카운트**를 유지한다. 단순함 우선.
 
 - `be 사이클 N`, `fe 사이클 N`, `rev 사이클 N`, `plan 사이클 N` (각자 1부터 카운트)
-- 도메인 간 비교가 필요하면 PR 번호(`#76`, `#81`)로 지칭. 사이클 번호는 본진 내부 task tracking 용도.
+- 도메인 간 비교가 필요하면 PR 번호(`#76`, `#81`)로 지칭. 사이클 번호는 maestro 내부 task tracking 용도.
 - 통합 카운트(예: "전체 사이클 12")는 쓰지 않는다. 도메인이 달라 의미 약함.
 - 표기 패턴: `<도메인> 사이클 <N> (#<PR>) <작업 한 줄>` — 예: `be 사이클 5 (#74) excludeSongIds 영속화`. task list/사용자 보고/PR 본문 일관 적용.
 
 ### 0-5) idle 사이클 룰
 
-세션이 idle 상태(의존 PR 머지 대기, 머지된 PR 없음 등)일 때 본진은 다음 백로그를 자체 진행하도록 지시한다:
+세션이 idle 상태(의존 PR 머지 대기, 머지된 PR 없음 등)일 때 maestro은 다음 백로그를 자체 진행하도록 지시한다:
 
 | 세션 | idle 조건 | 자체 백로그 |
 |---|---|---|
 | **be** | 의존 ADR/spec 머지 대기 | 작은 nit/refactor (Lombok 정리, final 누락 보완, 메서드 네이밍), 백엔드 테스트 회귀 보강(BDD 스타일 누락 케이스) |
 | **fe** | API 의존 또는 디자인 결정 대기 | 컴포넌트 테스트 보강, UX 다듬기(loading/error state), a11y 점검 |
-| **rev** | 머지된 PR 없음 / 리뷰 큐 빔 | `develop` 전체 QA — BE 회귀(`./gradlew test`), FE 게이트(`npm run lint/typecheck/test/build`), 통합 시나리오(`docker compose up` + bootRun + dev), 발견 시 본진에 보고 |
+| **rev** | 머지된 PR 없음 / 리뷰 큐 빔 | `develop` 전체 QA — BE 회귀(`./gradlew test`), FE 게이트(`npm run lint/typecheck/test/build`), 통합 시나리오(`docker compose up` + bootRun + dev), 발견 시 maestro에 보고 |
 | **plan** | 사이클 작업 완료 후 idle | 다음 ADR/spec 후보 발굴, 메모리 → 코드 promote 검토(반복 패턴/preference 코드화), 문서 stale 점검 |
 
 idle 룰 적용 기준:
-- be/fe가 의존성 대기로 30분+ idle이면 본진이 위 백로그 중 하나를 launch
+- be/fe가 의존성 대기로 30분+ idle이면 maestro이 위 백로그 중 하나를 launch
 - rev는 머지 즉시 트리거가 기본이지만, 머지된 PR이 1시간+ 없으면 자체 QA 사이클 launch
 - plan은 사용자가 운영 사이클 종료를 명시할 때까지 백로그 발굴 진행
 
 ### 0-6) 사용자 결정 묶음 질문 패턴
 
-본진이 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스위칭 비용을 줄인다.
+maestro이 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스위칭 비용을 줄인다.
 
 **즉시 묻기 (interrupt-driven)**:
 - PR 머지 / `develop → main` 릴리즈 머지
@@ -88,27 +88,27 @@ idle 룰 적용 기준:
   1. ADR 0006 제목 — "추천 결정성 정책" vs "추천 결정성 + 다양성 정책"?
   2. fe 사이클 9 — 에러 boundary fallback 카피 "다시 시도" vs "재시도"?
   3. ...
-  답을 한 번에 주면 본진이 일괄 적용.
+  답을 한 번에 주면 maestro이 일괄 적용.
   ```
-- 사용자 부재 시: 사용자가 돌아오기 전까지 본진이 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
+- 사용자 부재 시: 사용자가 돌아오기 전까지 maestro이 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
 
-### 0-6-1) 본진 닫혀있을 때 모바일 모니터링
+### 0-6-1) maestro 닫혀있을 때 모바일 모니터링
 
-본진 Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
+maestro Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
 
 ### 0-7) 사이클 완료 후 워크트리 정리
 
-PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 본진은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
+PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 maestro은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
 
 ```bash
 ./scripts/post-merge-cleanup.sh
 ```
 
 동작:
-- 본진 + be/fe/rev/plan 워크트리에서 `git fetch origin develop` + `git checkout --detach origin/develop`
-- 본진에서 `origin/develop`에 머지된 로컬 branch 일괄 삭제 (develop/main 제외, 다른 워크트리 사용 중인 branch는 skip)
+- maestro + be/fe/rev/plan 워크트리에서 `git fetch origin develop` + `git checkout --detach origin/develop`
+- maestro에서 `origin/develop`에 머지된 로컬 branch 일괄 삭제 (develop/main 제외, 다른 워크트리 사용 중인 branch는 skip)
 
-수동으로 본진에서 `git -C ../mobruji-be reset --hard origin/develop` 호출하던 패턴을 대체한다. 사이클 종료 직후 1번만 호출하면 다음 사이클을 clean 상태에서 시작할 수 있다.
+수동으로 maestro에서 `git -C ../mobruji-be reset --hard origin/develop` 호출하던 패턴을 대체한다. 사이클 종료 직후 1번만 호출하면 다음 사이클을 clean 상태에서 시작할 수 있다.
 
 #### 옵션
 
@@ -118,9 +118,9 @@ Usage: post-merge-cleanup.sh [--force]
 ```
 
 - **기본 (안전)**: 워크트리가 dirty(unstaged/staged 변경 또는 untracked 파일)면 detach를 skip + 경고. 사람이 직접 정리.
-- **`--force`**: dirty 무시하고 `git reset --hard origin/develop` + `git clean -fd`로 강제 reset. **stash되지 않은 변경은 영구 손실**. 본진이 명시적 결정 후에만 사용.
+- **`--force`**: dirty 무시하고 `git reset --hard origin/develop` + `git clean -fd`로 강제 reset. **stash되지 않은 변경은 영구 손실**. maestro이 명시적 결정 후에만 사용.
 
-본진이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
+maestro이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
 
 #### fe 워크트리 `node_modules` 동기화
 
@@ -137,11 +137,11 @@ Usage: post-merge-cleanup.sh [--force]
 cd web && npm install
 ```
 
-본진이 fe sub-agent를 launch할 때 prompt에 "직전 사이클에서 web deps 변경 PR(예: #N)이 머지됐다면 `cd web && npm install` 1회 실행"이라고 명시하면 자율적으로 처리한다. 변경이 없는 사이클에서는 생략해도 무방.
+maestro이 fe sub-agent를 launch할 때 prompt에 "직전 사이클에서 web deps 변경 PR(예: #N)이 머지됐다면 `cd web && npm install` 1회 실행"이라고 명시하면 자율적으로 처리한다. 변경이 없는 사이클에서는 생략해도 무방.
 
 ### 0-8) 통지 우선 처리
 
-본진은 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
+maestro은 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
 
 처리 순서:
 1. 결과 보고 — 사용자에게 한두 줄로 요약 (PR 번호 + mergeable 상태 정도)
@@ -149,7 +149,7 @@ cd web && npm install
 3. 다음 sub-agent scaffold + launch — 백로그가 살아있으면 즉시
 4. 자기 작업으로 복귀 — 컨텍스트 회복 후 멈춘 지점에서 계속
 
-본진 작업은 **호흡당 1~2 도구 호출** 단위로 쪼갠다. 긴 단위로 묶으면 통지 도착해도 처리 지연이 늘어난다.
+maestro 작업은 **호흡당 1~2 도구 호출** 단위로 쪼갠다. 긴 단위로 묶으면 통지 도착해도 처리 지연이 늘어난다.
 
 통지 동시 도착 시 우선순위:
 1. 🔴 발견 (spec/비기능 위반) — 즉시 다음 사이클 fix 트리거 결정 필요
@@ -158,7 +158,7 @@ cd web && npm install
 
 ### 0-9) rev 코멘트 자동 등록
 
-rev sub-agent 완료 통지를 받으면 본진은 발견 항목을 **GitHub 이슈로 자동 등록**한다. 사용자가 일일이 트리아지하지 않아도 다음 사이클 백로그가 자동으로 쌓이는 구조.
+rev sub-agent 완료 통지를 받으면 maestro은 발견 항목을 **GitHub 이슈로 자동 등록**한다. 사용자가 일일이 트리아지하지 않아도 다음 사이클 백로그가 자동으로 쌓이는 구조.
 
 분류 기준:
 - 🔴 **spec/비기능 위반** — 각각 **단독 이슈**로 등록. 같은 사이클에 다음 be/fe sub-agent로 즉시 fix 트리거 가능한 것은 1~2건 한정.
@@ -183,7 +183,7 @@ rev sub-agent 완료 통지를 받으면 본진은 발견 항목을 **GitHub 이
 ### 1-1) 워크트리 3개 생성
 
 ```bash
-# 본진은 ~/workspace/github/mobruji 그대로
+# maestro은 ~/workspace/github/mobruji 그대로
 git worktree add --detach ../mobruji-be
 git worktree add --detach ../mobruji-fe
 git worktree add --detach ../mobruji-rev
@@ -202,7 +202,7 @@ git worktree list
 
 ### 1-2) 메모리 디렉토리 공유 (선택)
 
-Claude는 워크트리 경로별로 별 메모리를 갖는다. 본진 메모리(사용자 선호·feedback)를 모든 세션에서 공유하고 싶으면 symlink:
+Claude는 워크트리 경로별로 별 메모리를 갖는다. maestro 메모리(사용자 선호·feedback)를 모든 세션에서 공유하고 싶으면 symlink:
 
 ```bash
 BASE=~/.claude/projects/-Users-goohong-workspace-github-mobruji/memory
@@ -219,7 +219,7 @@ done
 >
 > - **안전한 패턴**: 1인이 한 번에 1세션과만 대화 (사용자 입력 단위로 자연 직렬화).
 > - **위험한 패턴**: `/loop` 같은 자동 스케줄러로 여러 세션을 동시에 작업하게 둘 때, 또는 세 세션을 동시에 같은 토픽으로 직접 입력할 때.
-> - **회피책**: 메모리 갱신이 잦은 세션은 1개로 제한하거나, 세션별 memory 디렉토리를 분리(symlink 대신 별 디렉토리)해서 사용. 두 번째 패턴은 본진 메모리 공유 이점을 잃으므로 첫 번째를 권장.
+> - **회피책**: 메모리 갱신이 잦은 세션은 1개로 제한하거나, 세션별 memory 디렉토리를 분리(symlink 대신 별 디렉토리)해서 사용. 두 번째 패턴은 maestro 메모리 공유 이점을 잃으므로 첫 번째를 권장.
 
 ### 1-3) 라벨 적용
 
@@ -327,7 +327,7 @@ git commit --allow-empty -m "test" && git push 2>&1 | head -5
 # → [BLOCK] rev 세션 워크트리에서는 push 금지. ... 가 출력되고 push 차단됨
 ```
 
-hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mobruji-rev`일 때만 차단하고, 본진/be/fe는 통과한다. 진짜 필요할 때만 `git push --no-verify`로 우회 가능(사후 보고 필요).
+hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mobruji-rev`일 때만 차단하고, maestro/be/fe는 통과한다. 진짜 필요할 때만 `git push --no-verify`로 우회 가능(사후 보고 필요).
 
 > ⚠️ `core.hooksPath`를 바꾸면 기존 `.git/hooks/` 안의 hook은 더 이상 실행되지 않는다. 다른 hook을 쓰고 있었다면 `scripts/git-hooks/`로 옮긴다.
 
@@ -335,10 +335,10 @@ hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mob
 
 | 세션 | 워크트리 | 역할 | 만질 수 있는 파일 | 금지 |
 |---|---|---|---|---|
-| **본진** | `mobruji` | 오케스트레이션·**기획·이슈 등록·백로그 우선순위**·공유 영역 관리·develop 점유 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
-| **be** | `mobruji-be` | 백엔드 **구현 전용** | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치, **기획/이슈 등록(본진에 보고만)** |
-| **fe** | `mobruji-fe` | 프론트엔드 **구현 전용** | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치, **기획/이슈 등록(본진에 보고만)** |
-| **rev** | `mobruji-rev` | 사후 감사 + **QA 실행 검증** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 본진에 보고 |
+| **maestro** | `mobruji` | 오케스트레이션·**기획·이슈 등록·백로그 우선순위**·공유 영역 관리·develop 점유 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
+| **be** | `mobruji-be` | 백엔드 **구현 전용** | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치, **기획/이슈 등록(maestro에 보고만)** |
+| **fe** | `mobruji-fe` | 프론트엔드 **구현 전용** | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치, **기획/이슈 등록(maestro에 보고만)** |
+| **rev** | `mobruji-rev` | 사후 감사 + **QA 실행 검증** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 maestro에 보고 |
 
 ### rev 세션의 QA 책임 (정형화)
 rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용자 결정 2026-05-22, "에러를 막는 것이 1순위"). 코드 리뷰만으로는 런타임 에러 / 환경 의존 / API 통합 실패가 잡히지 않기 때문.
@@ -370,7 +370,7 @@ rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용�
 QA: 🟢/🟡/🔴 <STATUS> — [범주 X] <시나리오 + 결과 1줄>
 ```
 
-**release gate**: `develop → main` release 머지 전 rev가 미QA PR(reviewed:claude 라벨 없음) 일괄 QA 수행. 🔴가 1건이라도 있으면 release 차단 + 본진에 fix 사이클 launch 요청. QA pass PR에는 `reviewed:claude` 라벨 부여.
+**release gate**: `develop → main` release 머지 전 rev가 미QA PR(reviewed:claude 라벨 없음) 일괄 QA 수행. 🔴가 1건이라도 있으면 release 차단 + maestro에 fix 사이클 launch 요청. QA pass PR에는 `reviewed:claude` 라벨 부여.
 
 **워크트리 파일 수정 금지**: `scripts/git-hooks/pre-push`로 강제. 임시 스크립트는 `/tmp/rev-qa-*.sh` 또는 stdin heredoc(`bash <<'EOF' ... EOF`)으로 실행. 워크트리 안에 어떤 파일도 신규 생성·수정하지 않는다.
 
@@ -379,9 +379,9 @@ QA: 🟢/🟡/🔴 <STATUS> — [범주 X] <시나리오 + 결과 1줄>
 **공통 룰**:
 - be/fe 세션은 `origin/develop`에서 분기 (워크트리는 detached HEAD라 develop을 체크아웃하지 않는다).
 - 한 세션의 브랜치에 다른 세션이 직접 push 금지.
-- 공유 영역(`CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/`, root 설정) 변경은 본진에서 처리.
-- 본진은 항상 `develop` 브랜치에 머물러야 한다. 본진에서 다른 세션 브랜치를 체크아웃하면 develop 점유가 해제돼 다른 세션이 stale 참조하는 사고가 생긴다. 본진에서 일회성 PR을 만들어야 할 때는 임시 브랜치 분기 후 머지 즉시 `develop`으로 복귀.
-- **자율 운영**: 사용자 부재 시에도 본진은 sub-agent 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
+- 공유 영역(`CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/`, root 설정) 변경은 maestro에서 처리.
+- maestro은 항상 `develop` 브랜치에 머물러야 한다. maestro에서 다른 세션 브랜치를 체크아웃하면 develop 점유가 해제돼 다른 세션이 stale 참조하는 사고가 생긴다. maestro에서 일회성 PR을 만들어야 할 때는 임시 브랜치 분기 후 머지 즉시 `develop`으로 복귀.
+- **자율 운영**: 사용자 부재 시에도 maestro은 sub-agent 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
 
 ## 3) 새 작업 시작 (be/fe 세션)
 
@@ -437,10 +437,10 @@ gh pr ready <PR번호>   # draft → ready for review
 
 ### 자연스러운 동기화
 - 모든 세션은 GitHub state(PR/이슈/라벨)를 같은 source로 봄.
-- be/fe 워크트리는 detached HEAD 상태이므로 **`git checkout develop`을 쓰지 않는다.** develop은 본진이 점유 중이라 다른 워크트리에서 체크아웃하면 충돌한다.
+- be/fe 워크트리는 detached HEAD 상태이므로 **`git checkout develop`을 쓰지 않는다.** develop은 maestro이 점유 중이라 다른 워크트리에서 체크아웃하면 충돌한다.
 - 작업 시작 직전: 해당 워크트리에서 `git fetch origin develop` → `new-session-branch.sh`가 `origin/develop` 기준으로 새 브랜치를 만든다.
 - 머지 후 동기화:
-  - **본진** 워크트리: `git pull --ff-only`로 develop 최신화.
+  - **maestro** 워크트리: `git pull --ff-only`로 develop 최신화.
   - **be/fe** 워크트리: `git fetch origin develop`만. 이미 작업 브랜치에서 작업 중이라면 필요 시 `git rebase origin/develop`.
 
 ### 자동 충돌 감지

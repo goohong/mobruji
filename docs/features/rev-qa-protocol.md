@@ -21,7 +21,7 @@ last_reviewed: 2026-05-22
 - 정형 룰이 없으면 사이클마다 위임 프롬프트가 흔들리고 QA 누락이 생긴다 → 이 문서가 단일 참조원이다.
 
 ## 2) 사용자 시나리오
-- **시나리오 1 (PR 머지 후)**: rev 세션이 머지 직후 트리거되어 develop tip에서 QA를 수행 → 회귀 발견 시 본진에 핫라인 보고.
+- **시나리오 1 (PR 머지 후)**: rev 세션이 머지 직후 트리거되어 develop tip에서 QA를 수행 → 회귀 발견 시 maestro에 핫라인 보고.
 - **시나리오 2 (release gate)**: `develop → main` 머지 전 rev 세션이 release-candidate QA를 수행 → 모든 reviewed:claude PR이 QA pass여야 사용자에게 release 컨펌 요청.
 - **시나리오 3 (idle 사이클)**: 머지된 PR이 없을 때 rev가 develop 전체 회귀 QA를 수행 → 누적 회귀를 발굴.
 
@@ -32,7 +32,7 @@ last_reviewed: 2026-05-22
 - [ ] smoke 시나리오 라이브러리를 도메인별로 정의 (음역 측정 / 추천 / 좋아요 / 이력).
 - [ ] QA 결과는 PR 코멘트로 남기고 형식은 `🟢/🟡/🔴 + QA 결과 1줄`로 고정.
 - [ ] rev는 워크트리에서 파일을 수정하지 않는다 (pre-push hook 차단됨). 임시 스크립트는 `/tmp/*` 또는 stdin heredoc만 허용.
-- [ ] release gate 차단: 🔴 QA 결과는 release PR을 막고 본진이 fix 사이클을 launch한다.
+- [ ] release gate 차단: 🔴 QA 결과는 release PR을 막고 maestro이 fix 사이클을 launch한다.
 - [ ] 환경 선택 트리 (local 3-tier / dev 서버 / staging) 명시.
 
 ### 비기능 요구사항
@@ -46,7 +46,7 @@ last_reviewed: 2026-05-22
 - rev sub-agent가 따라야 할 QA 결정 트리, 시나리오, 결과 형식.
 - 환경 선택 가이드 (local 3-tier 기본, 외부 의존은 dev 서버).
 - QA 도구 선택 (curl / httpie / Playwright / RestAssured 부재 시 임시 스크립트).
-- 본진이 rev sub-agent를 launch할 때 prompt에 박을 핵심 룰.
+- maestro이 rev sub-agent를 launch할 때 prompt에 박을 핵심 룰.
 
 ### 제외 (Out of Scope)
 - **CI 워크플로우 자동화**: rev QA는 사람(sub-agent) 트리거가 기본. 자동화는 추후 별도 spec.
@@ -344,8 +344,8 @@ rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름**
 `develop → main` release 머지 전 rev 세션이 다음을 수행:
 1. `gh pr list --base develop --state merged --search "merged:>=<이전 release 이후> -label:reviewed:claude"` → 미QA PR 색출
 2. 미QA PR마다 본 spec §5-1 매트릭스 따라 QA 수행
-3. 모든 PR이 🟢 또는 🟡일 때만 본진에 release 컨펌 보고
-4. 🔴가 1건이라도 있으면 → 본진에 fix 사이클 launch 요청, release 차단
+3. 모든 PR이 🟢 또는 🟡일 때만 maestro에 release 컨펌 보고
+4. 🔴가 1건이라도 있으면 → maestro에 fix 사이클 launch 요청, release 차단
 
 QA pass PR에는 `reviewed:claude` 라벨 부여 (라벨 없으면 release gate가 차단).
 

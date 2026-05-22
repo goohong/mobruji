@@ -19,14 +19,14 @@ last_reviewed: 2026-05-21
 - 대상 액터: 오너 (이동 중 모바일 Discord), 백그라운드 에이전트 (plan/rev), 원격 자동화 (scheduled routine).
 
 ## 2) 사용자 시나리오
-- **시나리오 1 — 본진 active**: 오너가 본진 세션을 켠 상태에서 Discord로 "PR #181 머지해줘"를 보낸다. 본진 에이전트가 매 호흡(주요 도구 호출 사이)마다 `fetch_messages`를 호출하여 즉시 수신·응답한다.
-- **시나리오 2 — 본진 idle**: 오너가 노트북을 닫고 외출 중 Discord로 지시를 보낸다. 24/7 데몬이 메시지를 감지하여 GitHub `repo_dispatch` 이벤트로 Claude Code Action을 트리거하고, 작업 결과를 Discord로 회신한다.
+- **시나리오 1 — maestro active**: 오너가 maestro 세션을 켠 상태에서 Discord로 "PR #181 머지해줘"를 보낸다. maestro 에이전트가 매 호흡(주요 도구 호출 사이)마다 `fetch_messages`를 호출하여 즉시 수신·응답한다.
+- **시나리오 2 — maestro idle**: 오너가 노트북을 닫고 외출 중 Discord로 지시를 보낸다. 24/7 데몬이 메시지를 감지하여 GitHub `repo_dispatch` 이벤트로 Claude Code Action을 트리거하고, 작업 결과를 Discord로 회신한다.
 - **시나리오 3 — 장기 plan 세션**: plan 세션이 background job으로 도는 동안 오너가 중간 지시를 추가. `/loop 30s` 또는 MCP polling으로 30초 내 반영.
 
 ## 3) 요구사항
 ### 기능 요구사항
 - [ ] 5개 후보 옵션에 대한 비교표 + 권장 시나리오 명문화
-- [ ] **즉시(이번 주)**: 본진 호흡 끝 `fetch_messages` 컨벤션 + 메모리 `[feedback-discord-polling]` 정착
+- [ ] **즉시(이번 주)**: maestro 호흡 끝 `fetch_messages` 컨벤션 + 메모리 `[feedback-discord-polling]` 정착
 - [ ] **중기(2주 내)**: `plugin_discord` MCP에 polling 패치 PoC (fork or upstream PR) — `subscribe` 액션 추가 또는 fetch 간격 자동화
 - [ ] **장기(1~2개월)**: 사용자 서버(홈서버/VPS)에서 24/7 Discord daemon + GitHub `repo_dispatch` → Claude Code Action 흐름 구축
 - [ ] 각 옵션의 **포기 조건(triggering retreat)** 명시 (예: MCP 패치가 upstream 거절 시 자체 MCP 서버로 전환)
@@ -42,7 +42,7 @@ last_reviewed: 2026-05-21
 ### 포함
 - 5개 옵션의 비교 분석 및 단계별 권장
 - 옵션 4 (24/7 daemon + GitHub Actions) **아키텍처 상세 설계**
-- 옵션 5 (본진 매 호흡 fetch) 즉시 적용 컨벤션
+- 옵션 5 (maestro 매 호흡 fetch) 즉시 적용 컨벤션
 - dedup / 시크릿 관리 / 관측성 요구사항 명문화
 
 ### 제외 (Out of Scope)
@@ -67,14 +67,14 @@ last_reviewed: 2026-05-21
 | 2 | `/loop 30s` 스킬로 fetch_messages 반복 | $0 | 중 (Claude 세션 토큰 소모) | × (세션 종료 시 끊김) | 1) 슬래시 커맨드 1줄. 즉시 가능 |
 | 3 | **자체 MCP server** (Discord Gateway WebSocket 직결) | $0 (자작) | 상 (직접 통제) | △ (MCP 호스트 프로세스 살아있을 때) | 1) Python/Node MCP SDK → 2) discord.py 게이트웨이 클라이언트 → 3) 메시지 push as MCP notification |
 | 4 | **사용자 서버 bot daemon + GitHub Actions trigger (24/7)** ★권장★ | $0 (홈서버) ~ $5/월 (VPS) | 상 (헬스체크 + auto-restart) | ○ (full 24/7) | 1) discord.py daemon (docker-compose) → 2) GitHub repo_dispatch dispatcher → 3) Claude Code Action workflow → 4) Discord 회신 |
-| 5 | 본진 매 호흡 끝 `fetch_messages` (즉시 가능) | $0 | 상 (단순) | × (본진 active만) | 1) 메모리 컨벤션 1건. 즉시 가능 |
+| 5 | maestro 매 호흡 끝 `fetch_messages` (즉시 가능) | $0 | 상 (단순) | × (maestro active만) | 1) 메모리 컨벤션 1건. 즉시 가능 |
 
 > 비교 축 출처: 사용자 메모리 `[feedback-discord-polling] §24/7 옵션` 비교 노트.
 
 ### 5-4) 권장 단계
-- **즉시(this week)**: **옵션 5** — 본진 active 동안은 매 호흡 끝(주요 도구 호출 직전/직후) `fetch_messages` 1회. 비용 0, 효과 즉시.
+- **즉시(this week)**: **옵션 5** — maestro active 동안은 매 호흡 끝(주요 도구 호출 직전/직후) `fetch_messages` 1회. 비용 0, 효과 즉시.
 - **중기(2~4주)**: **옵션 1** PoC. `plugin_discord` MCP fork → `subscribe` 액션 추가 → upstream PR. 거절/지연 시 옵션 3(자체 MCP)으로 전환.
-- **장기(1~2개월)**: **옵션 4** 구축. 본진 idle/외출 중에도 동작하는 24/7 채널 확보. 옵션 5는 본진 active 시의 보조 채널로 유지.
+- **장기(1~2개월)**: **옵션 4** 구축. maestro idle/외출 중에도 동작하는 24/7 채널 확보. 옵션 5는 maestro active 시의 보조 채널로 유지.
 
 ### 5-5) 옵션 4 상세 아키텍처
 ```mermaid
@@ -114,14 +114,14 @@ sequenceDiagram
 - 해당 없음.
 
 ## 6) 작업 분할 (예상 PR 리스트)
-- [ ] **PR A** `docs(infra): 본진 매 호흡 fetch_messages 컨벤션` (즉시, 옵션 5) — `docs/ai-harness/` runbook 패치
+- [ ] **PR A** `docs(infra): maestro 매 호흡 fetch_messages 컨벤션` (즉시, 옵션 5) — `docs/ai-harness/` runbook 패치
 - [ ] **PR B** `feat(infra): plugin_discord MCP subscribe PoC` (옵션 1) — fork 저장소에 작업, 본 리포에는 컨벤션 메모만
 - [ ] **PR C** `feat(infra): discord-daemon 스캐폴딩` (옵션 4 1단계) — `infra/discord-daemon/` 디렉터리, bot.py hello-world, docker-compose
 - [ ] **PR D** `feat(infra): GitHub repo_dispatch dispatcher` (옵션 4 2단계) — dispatcher.py + dedup SQLite
 - [ ] **PR E** `feat(infra): Claude Code Action workflow + Discord 회신` (옵션 4 3단계) — `.github/workflows/discord-dispatch.yml`
 
 ## 7) 테스트 전략
-- **옵션 5**: 본진 세션에서 수동 — Discord 메시지 보내고 30초 내 응답 확인.
+- **옵션 5**: maestro 세션에서 수동 — Discord 메시지 보내고 30초 내 응답 확인.
 - **옵션 1/3**: MCP runtime 로컬 기동 → mock Discord 이벤트 주입 → notification 수신 검증.
 - **옵션 4 daemon**: `pytest` + `discord.py`의 `mock_member` 픽스처. `bot.on_message` 단위 테스트 + dispatcher의 GitHub API 호출은 `responses`로 mock.
 - **옵션 4 워크플로우**: `act` 로컬 실행 또는 dispatch 이벤트 수동 트리거 후 Discord 회신 수신 확인.

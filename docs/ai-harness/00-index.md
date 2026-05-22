@@ -19,7 +19,7 @@
 - `docs/ai-harness/08-code-conventions.md`: 코드 컨벤션 (final/어노테이션/DTO/엔티티/Lombok/null 검증 등)
 - `docs/ai-harness/10-observability.md`: 관측성 (Actuator + Micrometer) — 현재 backend endpoint만 노출, 시각화는 추후
 - `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev) 셋업·운영 런북
-- `docs/ai-harness/12-sub-agent-prompt-template.md`: 본진이 sub-agent launch 시 참조하는 공통 룰 + 역할별 추가 룰
+- `docs/ai-harness/12-sub-agent-prompt-template.md`: maestro이 sub-agent launch 시 참조하는 공통 룰 + 역할별 추가 룰
 - `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스
 - `docs/ai-harness/14-discord-notify-setup.md`: Discord webhook/bot 셋업 및 토큰 관리
 - `docs/ai-harness/15-discord-message-templates.md`: Discord 메시지 템플릿 + 양방향 명령 syntax
