@@ -1,0 +1,86 @@
+/**
+ * ThemeToggle 단위 테스트 (이슈 #319).
+ *
+ * - 초기 모드 시스템 아이콘 + aria-label.
+ * - 클릭 시 모드 순환 + `<html.dark>` 토글.
+ * - a11y: 단일 button, role=button, focus 가능.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+import { ThemeToggle } from "./ThemeToggle";
+import { THEME_DARK_CLASS, THEME_STORAGE_KEY } from "@/lib/theme";
+
+function setOsPrefersDark(prefers: boolean): void {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes("dark") ? prefers : false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  document.documentElement.classList.remove(THEME_DARK_CLASS);
+  setOsPrefersDark(false);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("ThemeToggle", () => {
+  it("초기 렌더 시 system 모드 라벨이 노출된다", () => {
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("aria-label")).toContain("시스템 모드");
+    expect(button.getAttribute("data-theme-mode")).toBe("system");
+  });
+
+  it("클릭 시 모드 순환 + aria-label 갱신 + <html.dark> 토글", () => {
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+
+    // system → light
+    fireEvent.click(button);
+    expect(button.getAttribute("data-theme-mode")).toBe("light");
+    expect(button.getAttribute("aria-label")).toContain("라이트 모드");
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(
+      false,
+    );
+
+    // light → dark — <html.dark> 적용 확인.
+    fireEvent.click(button);
+    expect(button.getAttribute("data-theme-mode")).toBe("dark");
+    expect(button.getAttribute("aria-label")).toContain("다크 모드");
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(
+      true,
+    );
+
+    // dark → system (OS prefers=light → 클래스 제거).
+    fireEvent.click(button);
+    expect(button.getAttribute("data-theme-mode")).toBe("system");
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(
+      false,
+    );
+  });
+
+  it("localStorage 에 마지막 선택이 저장된다 — 다음 방문 보존", () => {
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    fireEvent.click(button); // light
+    fireEvent.click(button); // dark
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+  });
+});

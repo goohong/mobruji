@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/*
+ * 이슈 #319 — 다크 모드 수동 토글.
+ * Tailwind v4 `@custom-variant`로 `dark:` 변형을 class 기반으로 전환.
+ * `<html class="dark">` 가 설정되면 dark variant + CSS 변수 모두 다크값을 사용.
+ * `<html>` 클래스는 `lib/theme.ts` 의 THEME_INIT_SCRIPT(hydration 전) +
+ * `useTheme` 훅이 관리. `prefers-color-scheme` 자동 추종은 system 모드에서만 적용.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -12,11 +21,14 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/*
+ * 이슈 #319: 명시적 `<html class="dark">` 가 설정되면 다크 CSS 변수 적용.
+ * 기존 `@media (prefers-color-scheme: dark)` 자동 분기는 제거 — system 모드는
+ * THEME_INIT_SCRIPT 가 런타임에 `<html.dark>` 를 토글해 동일한 효과를 낸다.
+ */
+:where(html.dark) {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 body {
