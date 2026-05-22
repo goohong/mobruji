@@ -14,9 +14,16 @@ spring:
 # 평문 yml 금지 — 환경변수 MOBRUJI_ADMIN_TOKEN 로 주입.
 # blank/null 이면 부팅 실패 (admin endpoint 무인증 노출 방지).
 # v0.3 후속 PR에서 Spring Security 정식 도입과 함께 제거 예정.
+#
+# CORS 허용 origin (rev 21 QA, #314):
+# - 환경변수 MOBRUJI_CORS_ALLOWED_ORIGINS 로 쉼표 구분 주입 (예: "https://mobruji.com,https://www.mobruji.com").
+# - 기본값은 로컬 Next.js dev 서버(http://localhost:3000) — 운영 환경은 반드시 env override.
+# - 빈 값으로 주입하면 부팅 실패 (의도치 않은 와일드카드 노출 방지).
 mobruji:
   admin:
     token: ${MOBRUJI_ADMIN_TOKEN:}
+  cors:
+    allowed-origins: ${MOBRUJI_CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
 server:
   port: ${SERVER_PORT:8080}
@@ -69,6 +76,22 @@ recommendation:
   # derived(기본): 요청 파라미터 해시에서 seed 도출.
   # random: 디버깅용 비결정 변주(운영 사용 금지).
   seed-strategy: derived
+
+# 곡 카드 앨범 커버 URL backfill 설정 (이슈 #322).
+# 1차 출처는 iTunes Search API (key 불필요, 즉시 호출 가능).
+# - base-url: iTunes Search API 엔드포인트. 운영/테스트에서 override 가능
+#             (테스트는 MockWebServer/WireMock 같은 stub 으로 교체).
+# - country: 검색 country code — 한국 가요 매칭 정확도 위해 KR 기본.
+# - request-timeout: 곡당 호출 timeout. iTunes 응답은 보통 < 500ms 지만 안전 마진.
+# - throttle: 곡 사이 sleep — Apple 공식 rate limit 명시 없으나 1초 1 req 보수적 보호.
+# - thumb-resolution: artworkUrl100 의 `100x100` 을 치환할 해상도 (기본 600x600).
+album-cover:
+  itunes:
+    base-url: ${ITUNES_SEARCH_BASE_URL:https://itunes.apple.com/search}
+    country: ${ITUNES_SEARCH_COUNTRY:KR}
+    request-timeout: 5s
+    throttle: 1s
+    thumb-resolution: 600x600
 
 # Python audio analysis tool (tools/audio-analysis/analyze.py) 호출 설정.
 # spec: docs/features/audio-tooling-bootstrap.md §3

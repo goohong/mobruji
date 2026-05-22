@@ -39,6 +39,8 @@
   - `0006-audio-source-youtube.md` — PoC 단계 audio 출처 = YouTube extract
   - `0007-vocal-difficulty-classification.md` — 곡 난이도 분류 (EASY/NORMAL/HARD)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
+- `docs/runbooks/`: 운영 런북 (로컬 환경 가동 등)
+  - `local-3tier-setup.md` — MySQL + Spring Boot + Next.js 로컬 3-tier 가동 가이드 (rev QA 기본 환경)
 - `CLAUDE.md`: Claude Code 세션 자동 로드 룰 요약
 
 ## 4) 정책 우선순위

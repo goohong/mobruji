@@ -131,6 +131,7 @@
 - 인덱스: `(session_id, created_at)` — 세션별 최신순 조회용.
 - 도메인 메서드: `static create(sessionId, songId)`. toggle 로직은 `LikeService`/`BookmarkService`에 위치.
 - **v0.2 비영향 약속**: 추천 알고리즘 입력에 포함되지 않는다 (`RecommendationService` 어떤 코드도 `LikeRepository`/`BookmarkRepository`를 의존하지 않음).
+- **조회 응답 형태** (PR F, #256): `GET /api/v1/sessions/{id}/likes`, `/bookmarks` 는 곡 메타데이터 join + offset 페이지네이션 + `SessionAuthGuard` 적용. application 레이어가 `SongRepository.findAllById(songIds)` batch lookup 으로 N+1 회피, 컨트롤러는 `LikeWithSongResponse(id, song, likedAt)` / `BookmarkWithSongResponse` 로 합쳐 `LikeListResponse(responses, page, size, totalCount, hasNext)` wrapper 로 응답 (Spring Data `Page<>` 직접 노출은 직렬화 안정성 위해 피함). 곡이 삭제된 orphan songId 는 응답에서 제외하되 `totalCount` 는 count 기준이라 차이날 수 있다.
 
 ### 5-5) `VoiceRangeSnapshot` (PR #231, voice-range-progress.md PR A)
 

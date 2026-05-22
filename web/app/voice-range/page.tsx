@@ -14,7 +14,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
   createVoiceRange,
@@ -22,7 +22,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
-import { midiToNoteName, octaveRangeMidis } from "@/lib/notes";
+import { midiToCombinedNoteName, octaveRangeMidis } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { Button } from "@/components/ui";
 
@@ -32,6 +32,7 @@ const DEFAULT_SOURCE: VoiceRangeSourceMethod = "OCTAVE_PICK";
 
 export default function VoiceRangePage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const setVoiceRangeId = useSessionStore((state) => state.setVoiceRangeId);
 
@@ -55,6 +56,14 @@ export default function VoiceRangePage() {
     mutationFn: (variables) => createVoiceRange(variables),
     onSuccess: (data) => {
       setVoiceRangeId(data.id);
+      // (closes #282) /recommend 진입 시 voice-range GET 왕복을 제거하기 위해
+      // 방금 저장한 응답을 react-query 캐시에 prime 해 둔다. /recommend 의
+      // useQuery(["voice-range", sessionId]) 가 즉시 캐시 히트 → 추천 mutation
+      // 이 GET 왕복 없이 곧바로 발화한다.
+      queryClient.setQueryData<VoiceRangeResponse>(
+        ["voice-range", data.sessionId],
+        data,
+      );
       router.push("/recommend");
     },
   });
@@ -205,7 +214,7 @@ function NoteSelect({ label, value, options, onChange }: NoteSelectProps) {
       >
         {options.map((midi) => (
           <option key={midi} value={midi}>
-            {midiToNoteName(midi)} (MIDI {midi})
+            {midiToCombinedNoteName(midi)} · MIDI {midi}
           </option>
         ))}
       </select>

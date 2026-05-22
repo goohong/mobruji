@@ -41,7 +41,7 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import { useLikesStore } from "@/store/likes";
 
 export default function SongDetailPage() {
@@ -92,7 +92,7 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
           </p>
           <Link
             href="/songs"
-            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600"
           >
             검색으로 돌아가기
           </Link>
@@ -111,9 +111,13 @@ type SongDetailViewProps = {
 function SongDetailView({ song }: SongDetailViewProps) {
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number"
+      ? midiToCombinedNoteName(song.highMidi)
+      : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number"
+      ? midiToCombinedNoteName(song.lowMidi)
+      : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
 
   return (

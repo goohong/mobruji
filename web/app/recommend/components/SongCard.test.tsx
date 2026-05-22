@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { SongCard } from "./SongCard";
+import { SongCard, buildYouTubeSearchUrl } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 import { useBookmarksStore } from "@/store/bookmarks";
@@ -124,10 +124,10 @@ describe("SongCard", () => {
     expect(
       screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = F5
-    expect(screen.getByLabelText(/최고음 F5/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = G3
-    expect(screen.getByText("G3")).toBeInTheDocument();
+    // 최고음 음표명 노출 — MIDI 77 = 파5 (F5) (#318 한국어 (SPN) 병기)
+    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 솔3 (G3)
+    expect(screen.getByText("솔3 (G3)")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
@@ -176,6 +176,68 @@ describe("SongCard", () => {
     expect(screen.getByText("#1")).toBeInTheDocument();
   });
 
+  // closes #323 — onShowDetail이 주어지면 카드 본문 클릭이 모달 트리거(button + aria-haspopup="dialog")가 되고,
+  // 표면에서 score/matchReason/breakdown 패널/YouTube 링크는 숨겨져 요약 룩이 된다.
+  describe("모달 모드 (closes #323)", () => {
+    it("onShowDetail이 있으면 카드 본문이 button으로 감싸지고 클릭 시 콜백이 호출된다", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const trigger = screen.getByRole("button", { name: /테스트 곡 상세 보기/ });
+      expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+      await user.click(trigger);
+      expect(onShowDetail).toHaveBeenCalledTimes(1);
+    });
+
+    it("모달 모드에서는 score/matchReason/breakdown 패널/YouTube 링크가 카드 표면에 노출되지 않는다", () => {
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
+      renderWithQueryClient(
+        <ul>
+          <SongCard
+            item={item}
+            userVoiceRange={{ lowMidi: 48, highMidi: 67 }}
+            onShowDetail={onShowDetail}
+          />
+        </ul>,
+      );
+      // 카드 표면 핵심 정보는 그대로 보인다.
+      expect(screen.getByText("테스트 곡")).toBeInTheDocument();
+      expect(screen.getByText("가수")).toBeInTheDocument();
+      expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+      // 상세는 모달로 위임 — 카드 표면에 없어야 한다.
+      expect(screen.queryByText(/score/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /자세히 보기/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /YouTube에서 듣기/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("모달 모드에서도 좋아요/북마크 액션은 카드 footer에 유지된다", () => {
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 좋아요$/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
+      ).toBeInTheDocument();
+    });
+  });
+
   // closes #141 — matchReason 다중 줄 + 펼침 토글 (Spotify "Why this song?" 영감).
   describe("matchReason expander (closes #141)", () => {
     it("접힘 상태에서 '자세히 보기' 버튼이 보이고 breakdown 패널은 숨겨진다", () => {
@@ -204,9 +266,11 @@ describe("SongCard", () => {
       expect(screen.getByText("키 매칭")).toBeInTheDocument();
       expect(screen.getByText("장르")).toBeInTheDocument();
       expect(screen.getByText("음역 적합")).toBeInTheDocument();
-      // 음역 적합 detail에 사용자/곡 음역이 함께 표시
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (#318: 한국어 (SPN) 병기)
       expect(
-        screen.getByText("사용자 C3-G4 vs 곡 G3-F5"),
+        screen.getByText(
+          "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+        ),
       ).toBeInTheDocument();
       // 추정값 안내 footnote
       expect(
@@ -298,6 +362,48 @@ describe("SongCard", () => {
         screen.getByRole("button", { name: /테스트 곡 좋아요$/ }),
       ).toHaveAttribute("aria-pressed", "false");
     });
+
+    // closes #257 — 실패 시 카드 내 인라인 안내 (role="alert") 가 노출되고,
+    // 재시도(다시 클릭) 시 즉시 제거된다.
+    it("BE mutation 실패 시 인라인 alert 메시지가 노출된다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/좋아요 처리에 실패했어요/);
+    });
+
+    it("재시도 클릭 시 이전 실패 안내가 즉시 사라진다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      // 두 번째 시도는 성공으로 둬서 mutation 진행 중에도 alert가 즉시 사라지는지 검증.
+      toggleLikeMock.mockResolvedValueOnce({ liked: true, songId: 1 });
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+      await screen.findByRole("alert");
+
+      // 재시도.
+      await user.click(button);
+      await waitFor(() => {
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      });
+    });
   });
 
   // closes #184 — 북마크 토글.
@@ -332,6 +438,71 @@ describe("SongCard", () => {
           songId: 1,
         });
       });
+    });
+  });
+
+  // closes #302 — YouTube 검색 링크 (미리듣기 1단계). ADR-0006 범위 밖, BE 변경 없음.
+  describe("YouTube 검색 링크 (closes #302)", () => {
+    it("추천 카드에 'YouTube에서 듣기' 링크가 노출되고 새 탭으로 열린다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const link = screen.getByRole("link", {
+        name: /테스트 곡 YouTube에서 듣기 \(새 탭\)/,
+      });
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      // 검색 URL은 곡 제목 + 아티스트가 search_query로 인코딩되어야 한다.
+      const href = link.getAttribute("href") ?? "";
+      expect(href).toMatch(/^https:\/\/www\.youtube\.com\/results\?/);
+      expect(href).toContain("search_query=");
+    });
+
+    it("검색 컨텍스트(song prop) 카드에도 동일하게 노출된다", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard song={item.song} />
+        </ul>,
+      );
+      expect(
+        screen.getByRole("link", {
+          name: /테스트 곡 YouTube에서 듣기 \(새 탭\)/,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it("href 모드(상세 페이지 링크 카드)에서도 YouTube 링크가 부모 링크 외부에 있어 분리된다", () => {
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} href="/songs/1" />
+        </ul>,
+      );
+      const detailLink = screen.getByRole("link", {
+        name: /테스트 곡 상세 보기/,
+      });
+      const youtubeLink = screen.getByRole("link", {
+        name: /테스트 곡 YouTube에서 듣기 \(새 탭\)/,
+      });
+      expect(detailLink).toHaveAttribute("href", "/songs/1");
+      // 별도 링크여야 한다 (중첩되지 않음).
+      expect(detailLink).not.toContainElement(youtubeLink);
+    });
+
+    it("buildYouTubeSearchUrl: 한글 제목/아티스트도 안전하게 인코딩한다", () => {
+      const url = buildYouTubeSearchUrl("밤편지", "아이유");
+      expect(url).toBe(
+        "https://www.youtube.com/results?search_query=%EB%B0%A4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%B4%EC%9C%A0",
+      );
+    });
+
+    it("buildYouTubeSearchUrl: 특수문자(앰퍼샌드 등)도 안전하게 인코딩한다", () => {
+      const url = buildYouTubeSearchUrl("Me & You", "Artist?");
+      expect(url).toContain("search_query=Me+%26+You+Artist%3F");
     });
   });
 

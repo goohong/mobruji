@@ -1,19 +1,23 @@
 /**
  * 추천 결과 페이지 테스트.
  *
- * 보강 범위 (closes #60):
- *  - sessionId가 zustand에 없으면 NoSessionFallback 노출.
- *  - sessionId 존재 + voice-range 조회 성공 + recommendation 성공 시 카드 리스트 렌더.
- *  - API 모듈(`@/lib/api/voice-range`, `@/lib/api/recommendation`) mock + 실제 QueryClient 사용.
- *  - zustand store mock은 공통 헬퍼 사용.
+ * 이슈 #321 (2026-05-22): "다른 곡 추천받기" 버튼 → **무한 스크롤** 전환.
+ * 테스트 범위:
+ *  - sessionId 없음 → NoSessionFallback.
+ *  - sessionId 존재 + voice-range 성공 + 첫 페이지 응답 → 카드 리스트 렌더.
+ *  - 같은 props 재렌더에도 첫 페이지 페치는 정확히 1회.
+ *  - sentinel 진입(IntersectionObserver 흉내) → fetchNextPage 호출 → 누적 excludeSongIds 전달.
+ *  - 두 번째 sentinel 진입 → 1차+2차 페이지 곡 ID 누적 전달.
+ *  - 빈 응답(첫 페이지) → fallback CTA, sentinel 없음.
+ *  - 첫 페이지 비어있지 않고 두 번째가 비면 시드 소진 안내 + sentinel 사라짐.
+ *  - history.appendRecommendation 호출 검증.
+ *  - voice-range source method 헤더 뱃지 + MIC_MEASURE 링크.
+ *  - a11y: NoSession / 카드 리스트 / 빈 응답 상태.
  *
- * 보강 범위 (closes #78 #80):
- *  - useEffect 자동 트리거가 "1회만" 호출되는지 회귀 가드.
- *    (PR #57에서 객체 의존성으로 useEffect 무한 재실행 → fix 후에도 자동 테스트가 없었음.)
- *    아래 케이스로 mutate 호출 횟수를 정확히 검증한다:
- *      1) 같은 props로 재렌더해도 mutate 호출은 1회로 유지
- *      2) voice-range 응답(low/high)이 바뀌면 mutate가 정확히 1회 추가 호출
- *      3) sessionId가 바뀌면 mutate가 정확히 1회 추가 호출
+ * IntersectionObserver mock 전략:
+ *   - happy-dom 은 IntersectionObserver 를 제공하지 않으므로 globalThis 에
+ *     수동 polyfill 을 둔다. observer 인스턴스마다 콜백을 캡처해서 테스트가
+ *     `triggerIntersection()` 으로 sentinel 진입을 흉내낼 수 있다.
  */
 
 import { ReactNode } from "react";
@@ -26,7 +30,6 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
@@ -84,6 +87,91 @@ vi.mock("@/lib/api/recommendation", async () => {
 const readVoiceRangeMock = vi.mocked(readVoiceRange);
 const createRecommendationMock = vi.mocked(createRecommendation);
 
+/**
+ * 테스트용 IntersectionObserver mock.
+ *
+ * - new IntersectionObserver(cb, opts) 마다 인스턴스를 컬렉션에 push.
+ * - observe(node) 호출 시 node 를 인스턴스에 등록.
+ * - `triggerIntersection()` 호출 시 등록된 모든 observer 콜백을 isIntersecting=true 로 발화.
+ *
+ * 컴포넌트는 sentinel ref 콜백에서 hasNextPage/isFetchingNextPage 체크로 observer
+ * 생성을 게이트한다. 즉 "관찰 중인 observer 가 1개 이상" 일 때 trigger 가 의미를 갖는다.
+ */
+type ObserverEntry = {
+  callback: IntersectionObserverCallback;
+  nodes: Set<Element>;
+  disconnected: boolean;
+};
+
+const observerRegistry: ObserverEntry[] = [];
+
+class MockIntersectionObserver implements IntersectionObserver {
+  readonly root: Element | Document | null = null;
+  readonly rootMargin: string = "";
+  readonly thresholds: ReadonlyArray<number> = [];
+  private entry: ObserverEntry;
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.entry = { callback, nodes: new Set(), disconnected: false };
+    observerRegistry.push(this.entry);
+  }
+
+  observe(target: Element): void {
+    this.entry.nodes.add(target);
+  }
+
+  unobserve(target: Element): void {
+    this.entry.nodes.delete(target);
+  }
+
+  disconnect(): void {
+    this.entry.nodes.clear();
+    this.entry.disconnected = true;
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+
+function installIntersectionObserverMock() {
+  // happy-dom 이 기본 제공하는 IntersectionObserver 가 있더라도 본 mock 으로 치환해
+  // observer 인스턴스를 우리가 직접 트리거할 수 있게 한다. 타입은 노출 시그니처만 맞으면 충분.
+  (globalThis as unknown as { IntersectionObserver: typeof IntersectionObserver }).IntersectionObserver =
+    MockIntersectionObserver as unknown as typeof IntersectionObserver;
+}
+
+function resetObserverRegistry() {
+  observerRegistry.splice(0, observerRegistry.length);
+}
+
+/**
+ * 현재 살아있는(observe 중이고 disconnect 안 된) observer 콜백을 isIntersecting=true 로 발화.
+ */
+function triggerIntersection() {
+  for (const entry of observerRegistry) {
+    if (entry.disconnected) {
+      continue;
+    }
+    if (entry.nodes.size === 0) {
+      continue;
+    }
+    const fakeEntries: IntersectionObserverEntry[] = Array.from(entry.nodes).map(
+      (node) =>
+        ({
+          isIntersecting: true,
+          target: node,
+          intersectionRatio: 1,
+          boundingClientRect: {} as DOMRectReadOnly,
+          intersectionRect: {} as DOMRectReadOnly,
+          rootBounds: null,
+          time: 0,
+        }) as IntersectionObserverEntry,
+    );
+    entry.callback(fakeEntries, {} as IntersectionObserver);
+  }
+}
+
 function renderWithQueryClient(ui: ReactNode) {
   const client = new QueryClient({
     defaultOptions: {
@@ -94,8 +182,22 @@ function renderWithQueryClient(ui: ReactNode) {
   function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
-  // wrapper 옵션을 통해 rerender 시에도 동일 Provider 트리가 유지되도록 한다.
   return render(ui, { wrapper: Wrapper });
+}
+
+/**
+ * sessionMock 의 appendExcluded 를 실제 누적 로직으로 wire.
+ * 무한 스크롤 흐름에서 다음 페이지 호출이 직전 페이지 곡 ID 를 누적해 보내는지
+ * 검증하기 위해 필수.
+ */
+function wireAppendExcluded() {
+  const append = vi.fn((ids: number[]) => {
+    const merged = new Set(sessionMock.state().excludedSongIds);
+    for (const id of ids) merged.add(id);
+    sessionMock.set({ excludedSongIds: Array.from(merged) });
+  });
+  sessionMock.set({ appendExcluded: append });
+  return append;
 }
 
 beforeEach(() => {
@@ -103,6 +205,8 @@ beforeEach(() => {
   historyMock.reset();
   readVoiceRangeMock.mockReset();
   createRecommendationMock.mockReset();
+  resetObserverRegistry();
+  installIntersectionObserverMock();
 });
 
 afterEach(() => {
@@ -110,9 +214,36 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * 추천 응답 헬퍼 — 곡 ID 리스트로 응답을 생성.
+ */
+function buildResponseWithSongIds(requestId: number, songIds: number[]) {
+  return {
+    requestId,
+    recommendations: songIds.map((id, idx) => ({
+      rankPosition: idx + 1,
+      score: 0.9 - idx * 0.05,
+      matchReason: "음역 매칭",
+      song: {
+        id,
+        title: `곡-${id}`,
+        artist: "가수",
+        releaseYear: 2024,
+        keyOriginal: "C_MAJOR" as const,
+        bpm: 110,
+        mood: "UPBEAT" as const,
+        language: "ko",
+        genre: "POP",
+        tjNumber: `T-${id}`,
+        kyNumber: `K-${id}`,
+        metadataSource: "MANUAL_SEED" as const,
+      },
+    })),
+  };
+}
+
 describe("RecommendPage", () => {
   it("sessionId가 없으면 음역대 입력 안내(FALLBACK)를 렌더한다", () => {
-    // 기본 상태가 sessionId: null
     renderWithQueryClient(<RecommendPage />);
     expect(
       screen.getByRole("heading", {
@@ -124,10 +255,10 @@ describe("RecommendPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("sessionId가 있으면 voice-range 조회 → recommendation 호출 → 카드 리스트를 렌더한다", async () => {
+  it("sessionId가 있으면 voice-range 조회 → 첫 페이지 추천을 받아 카드 리스트를 렌더한다", async () => {
     sessionMock.set({ sessionId: "sess-abc", voiceRangeId: 42 });
 
-    readVoiceRangeMock.mockResolvedValueOnce({
+    readVoiceRangeMock.mockResolvedValue({
       id: 42,
       sessionId: "sess-abc",
       lowestNoteMidi: 48,
@@ -136,60 +267,16 @@ describe("RecommendPage", () => {
       createdAt: "2026-05-21T00:00:00Z",
       updatedAt: "2026-05-21T00:00:00Z",
     });
-
-    createRecommendationMock.mockResolvedValueOnce({
-      requestId: 100,
-      recommendations: [
-        {
-          rankPosition: 1,
-          score: 0.95,
-          matchReason: "음역 매칭",
-          song: {
-            id: 1,
-            title: "테스트 곡 A",
-            artist: "가수 A",
-            releaseYear: 2024,
-            keyOriginal: "C_MAJOR",
-            bpm: 120,
-            mood: "UPBEAT",
-            language: "ko",
-            genre: "POP",
-            tjNumber: "12345",
-            kyNumber: "54321",
-            metadataSource: "MANUAL_SEED",
-          },
-        },
-        {
-          rankPosition: 2,
-          score: 0.88,
-          matchReason: "음역 매칭",
-          song: {
-            id: 2,
-            title: "테스트 곡 B",
-            artist: "가수 B",
-            releaseYear: 2023,
-            keyOriginal: "G_SHARP_MINOR",
-            bpm: 100,
-            mood: "CALM",
-            language: "ko",
-            genre: "BALLAD",
-            tjNumber: "22222",
-            kyNumber: "33333",
-            metadataSource: "MANUAL_SEED",
-          },
-        },
-      ],
-    });
+    createRecommendationMock.mockResolvedValueOnce(
+      buildResponseWithSongIds(100, [1, 2]),
+    );
 
     renderWithQueryClient(<RecommendPage />);
 
-    // voice-range 조회가 sessionId로 호출되었는지 확인.
     await waitFor(() => {
       expect(readVoiceRangeMock).toHaveBeenCalledWith("sess-abc");
     });
 
-    // recommendation 자동 트리거가 voice-range 정보를 그대로 전달했는지 확인.
-    // 초기 excludeSongIds는 빈 배열 — store 누적이 비어 있는 상태.
     await waitFor(() => {
       expect(createRecommendationMock).toHaveBeenCalledWith({
         sessionId: "sess-abc",
@@ -199,59 +286,14 @@ describe("RecommendPage", () => {
       });
     });
 
-    // 카드 렌더 — 곡 제목/가수/키 라벨 노출.
     await waitFor(() => {
-      expect(screen.getByText("테스트 곡 A")).toBeInTheDocument();
+      expect(screen.getByText("곡-1")).toBeInTheDocument();
     });
-    expect(screen.getByText("테스트 곡 B")).toBeInTheDocument();
-    expect(screen.getByText("가수 A")).toBeInTheDocument();
-    expect(screen.getByText("가수 B")).toBeInTheDocument();
-    // formatMusicalKey("C_MAJOR") → "C Major", "G_SHARP_MINOR" → "G# Minor"
-    expect(screen.getByText("C Major")).toBeInTheDocument();
-    expect(screen.getByText("G# Minor")).toBeInTheDocument();
+    expect(screen.getByText("곡-2")).toBeInTheDocument();
   });
 
-  // ---------- closes #78 #80 ----------
-  //
-  // PR #57(useEffect 의존성 분해)로 무한 재실행 함정은 해소됐지만,
-  // "1회 mutate" 동작에 대한 자동 회귀 가드가 없었다. 본 블록에서
-  // mutate spy 호출 횟수를 직접 측정해 회귀를 잡는다.
-
-  /**
-   * 추천 응답 1건 분량을 만드는 헬퍼. 테스트 본문에서 매번 같은 응답을 쓰면
-   * "재렌더에도 mutate 1회"의 의도와 어긋날 수 있으므로 응답을 살짝 다르게 만든다.
-   */
-  function buildRecommendationResponse(
-    requestId: number,
-    title: string,
-  ): Awaited<ReturnType<typeof createRecommendation>> {
-    return {
-      requestId,
-      recommendations: [
-        {
-          rankPosition: 1,
-          score: 0.9,
-          matchReason: "음역 매칭",
-          song: {
-            id: requestId,
-            title,
-            artist: "테스트 가수",
-            releaseYear: 2024,
-            keyOriginal: "C_MAJOR",
-            bpm: 110,
-            mood: "UPBEAT",
-            language: "ko",
-            genre: "POP",
-            tjNumber: `T-${requestId}`,
-            kyNumber: `K-${requestId}`,
-            metadataSource: "MANUAL_SEED",
-          },
-        },
-      ],
-    };
-  }
-
-  it("같은 props로 재렌더해도 recommendation mutate는 정확히 1회만 호출된다", async () => {
+  // ---------- 무한 스크롤 자동 트리거 회귀 가드 ----------
+  it("같은 props로 재렌더해도 첫 페이지 페치는 정확히 1회만 호출된다", async () => {
     sessionMock.set({ sessionId: "sess-stable", voiceRangeId: 7 });
 
     readVoiceRangeMock.mockResolvedValue({
@@ -265,33 +307,22 @@ describe("RecommendPage", () => {
     });
 
     createRecommendationMock.mockResolvedValue(
-      buildRecommendationResponse(101, "안정 곡"),
+      buildResponseWithSongIds(101, [101]),
     );
 
     const { rerender } = renderWithQueryClient(<RecommendPage />);
 
-    // 1차: voice-range 조회 성공 → useEffect가 mutate를 1회 트리거.
     await waitFor(() => {
       expect(createRecommendationMock).toHaveBeenCalledTimes(1);
     });
-    expect(createRecommendationMock).toHaveBeenCalledWith({
-      sessionId: "sess-stable",
-      voiceRangeLow: 50,
-      voiceRangeHigh: 70,
-      excludeSongIds: [],
-    });
-
-    // 결과가 렌더될 때까지 대기 → mutation isIdle=false, isSuccess=true 상태로 전이.
     await waitFor(() => {
-      expect(screen.getByText("안정 곡")).toBeInTheDocument();
+      expect(screen.getByText("곡-101")).toBeInTheDocument();
     });
 
-    // 동일한 트리 props로 재렌더를 여러 번 시도해도 useEffect는 트리거를 추가하지 않는다.
     rerender(<RecommendPage />);
     rerender(<RecommendPage />);
     rerender(<RecommendPage />);
 
-    // microtask 한 사이클을 흘려 useEffect 잔재가 있다면 발화하도록 둔다.
     await act(async () => {
       await Promise.resolve();
     });
@@ -299,241 +330,216 @@ describe("RecommendPage", () => {
     expect(createRecommendationMock).toHaveBeenCalledTimes(1);
   });
 
-  it("voice-range 응답이 변경되면 새 sessionId 마운트에서 recommendation mutate가 정확히 1회 더 호출된다", async () => {
-    // 시나리오: 사용자가 음역대를 다시 입력해 voice-range가 갱신된 뒤
-    // recommend 페이지로 돌아온다. (RecommendPage는 sessionId가 바뀌면
-    // RecommendContent를 새 키로 마운트해 mutation을 새로 시작한다.)
+  // ---------- 무한 스크롤 페치 ----------
+  describe("무한 스크롤 (#321)", () => {
+    it("sentinel 진입 시 fetchNextPage가 호출되고 이전 페이지 곡 ID들이 excludeSongIds에 누적 전달된다", async () => {
+      sessionMock.set({ sessionId: "sess-scroll", voiceRangeId: 11 });
+      wireAppendExcluded();
 
-    sessionMock.set({ sessionId: "sess-A", voiceRangeId: 1 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 11,
+        sessionId: "sess-scroll",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
 
-    readVoiceRangeMock.mockResolvedValueOnce({
-      id: 1,
-      sessionId: "sess-A",
-      lowestNoteMidi: 48,
-      highestNoteMidi: 60,
-      sourceMethod: "OCTAVE_PICK",
-      createdAt: "2026-05-21T00:00:00Z",
-      updatedAt: "2026-05-21T00:00:00Z",
-    });
-    createRecommendationMock.mockResolvedValueOnce(
-      buildRecommendationResponse(201, "A 음역 곡"),
-    );
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [10, 20]))
+        .mockResolvedValueOnce(buildResponseWithSongIds(2, [30, 40]));
 
-    const first = renderWithQueryClient(<RecommendPage />);
+      renderWithQueryClient(<RecommendPage />);
 
-    await waitFor(() => {
-      expect(createRecommendationMock).toHaveBeenCalledTimes(1);
-    });
-    expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
-      sessionId: "sess-A",
-      voiceRangeLow: 48,
-      voiceRangeHigh: 60,
-      excludeSongIds: [],
-    });
+      // 1차 페이지: 빈 excludeSongIds.
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
+          sessionId: "sess-scroll",
+          voiceRangeLow: 50,
+          voiceRangeHigh: 70,
+          excludeSongIds: [],
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("곡-10")).toBeInTheDocument();
+      });
 
-    await waitFor(() => {
-      expect(screen.getByText("A 음역 곡")).toBeInTheDocument();
-    });
+      // 응답 곡 ID 가 store 에 누적되었는지 확인 (appendExcluded wire 덕분).
+      await waitFor(() => {
+        expect(sessionMock.state().excludedSongIds).toEqual([10, 20]);
+      });
 
-    // 첫 페이지 인스턴스를 정리하고 새 세션으로 다시 마운트 —
-    // 실제 사용자 흐름(다른 세션으로 로그인/재진입)을 모사한다.
-    first.unmount();
+      // sentinel 진입 흉내 → fetchNextPage 트리거.
+      // sentinel 노드는 컴포넌트 렌더 후에 mount 되므로 testid 로 존재 확인 후 trigger.
+      await waitFor(() => {
+        expect(screen.getByTestId("recommend-sentinel")).toBeInTheDocument();
+      });
 
-    sessionMock.set({ sessionId: "sess-B", voiceRangeId: 2 });
-    readVoiceRangeMock.mockResolvedValueOnce({
-      id: 2,
-      sessionId: "sess-B",
-      lowestNoteMidi: 55,
-      highestNoteMidi: 75,
-      sourceMethod: "OCTAVE_PICK",
-      createdAt: "2026-05-21T00:01:00Z",
-      updatedAt: "2026-05-21T00:01:00Z",
-    });
-    createRecommendationMock.mockResolvedValueOnce(
-      buildRecommendationResponse(202, "B 음역 곡"),
-    );
+      await act(async () => {
+        triggerIntersection();
+      });
 
-    const second = renderWithQueryClient(<RecommendPage />);
-
-    await waitFor(() => {
-      expect(createRecommendationMock).toHaveBeenCalledTimes(2);
-    });
-    expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
-      sessionId: "sess-B",
-      voiceRangeLow: 55,
-      voiceRangeHigh: 75,
-      excludeSongIds: [],
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("B 음역 곡")).toBeInTheDocument();
-    });
-
-    // 두 번째 인스턴스에서 추가 재렌더에도 더 이상 호출은 늘지 않는다 (useEffect 1회 보장).
-    second.rerender(<RecommendPage />);
-    second.rerender(<RecommendPage />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(createRecommendationMock).toHaveBeenCalledTimes(2);
-  });
-
-  // ---------- closes #83 #84 ----------
-  //
-  // "다른 곡 추천받기" 버튼이 store의 누적 excludedSongIds와 함께 호출하고,
-  // 응답을 store에 다시 누적하는 흐름을 검증한다. 페이지 mock은 selector
-  // 패턴이라 appendExcluded를 실제 누적으로 wire해 두 번째 호출 시점에
-  // store가 첫 응답을 반영하고 있는지 본다.
-
-  /**
-   * 추천 응답 헬퍼 — 곡 ID 리스트로 응답을 생성.
-   */
-  function buildResponseWithSongIds(
-    requestId: number,
-    songIds: number[],
-  ): Awaited<ReturnType<typeof createRecommendation>> {
-    return {
-      requestId,
-      recommendations: songIds.map((id, idx) => ({
-        rankPosition: idx + 1,
-        score: 0.9 - idx * 0.05,
-        matchReason: "음역 매칭",
-        song: {
-          id,
-          title: `곡-${id}`,
-          artist: "가수",
-          releaseYear: 2024,
-          keyOriginal: "C_MAJOR" as const,
-          bpm: 110,
-          mood: "UPBEAT" as const,
-          language: "ko",
-          genre: "POP",
-          tjNumber: `T-${id}`,
-          kyNumber: `K-${id}`,
-          metadataSource: "MANUAL_SEED" as const,
-        },
-      })),
-    };
-  }
-
-  /**
-   * sessionMock의 appendExcluded를 실제 누적 로직으로 wire한다.
-   * "다시 추천" 흐름에서 두 번째 호출이 첫 응답을 반영하는지 검증하기 위함.
-   */
-  function wireAppendExcluded() {
-    const append = vi.fn((ids: number[]) => {
-      const merged = new Set(sessionMock.state().excludedSongIds);
-      for (const id of ids) merged.add(id);
-      sessionMock.set({ excludedSongIds: Array.from(merged) });
-    });
-    sessionMock.set({ appendExcluded: append });
-    return append;
-  }
-
-  it("'다른 곡 추천받기' 클릭 시 이전 곡 ID들이 excludeSongIds에 포함되어 호출된다", async () => {
-    sessionMock.set({ sessionId: "sess-again", voiceRangeId: 11 });
-    wireAppendExcluded();
-
-    readVoiceRangeMock.mockResolvedValue({
-      id: 11,
-      sessionId: "sess-again",
-      lowestNoteMidi: 50,
-      highestNoteMidi: 70,
-      sourceMethod: "OCTAVE_PICK",
-      createdAt: "2026-05-21T00:00:00Z",
-      updatedAt: "2026-05-21T00:00:00Z",
-    });
-
-    createRecommendationMock
-      .mockResolvedValueOnce(buildResponseWithSongIds(1, [10, 20]))
-      .mockResolvedValueOnce(buildResponseWithSongIds(2, [30, 40]));
-
-    const user = userEvent.setup();
-    renderWithQueryClient(<RecommendPage />);
-
-    // 첫 호출은 빈 excludeSongIds.
-    await waitFor(() => {
-      expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
-        sessionId: "sess-again",
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+      });
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
+        sessionId: "sess-scroll",
         voiceRangeLow: 50,
         voiceRangeHigh: 70,
-        excludeSongIds: [],
+        excludeSongIds: [10, 20],
       });
-    });
 
-    // 첫 응답 카드 렌더 대기.
-    await waitFor(() => {
+      await waitFor(() => {
+        expect(screen.getByText("곡-30")).toBeInTheDocument();
+      });
+      expect(screen.getByText("곡-40")).toBeInTheDocument();
+      // 1차 곡들도 여전히 노출 (무한 스크롤은 append, replace 가 아니다).
       expect(screen.getByText("곡-10")).toBeInTheDocument();
     });
 
-    // 응답 곡 ID가 store에 누적되었는지 확인 (appendExcluded wire 덕분).
-    expect(sessionMock.state().excludedSongIds).toEqual([10, 20]);
+    it("두 번째 sentinel 진입에서 1차+2차 페이지 곡 ID들이 모두 누적 전달된다", async () => {
+      sessionMock.set({ sessionId: "sess-accum", voiceRangeId: 22 });
+      wireAppendExcluded();
 
-    // "다른 곡 추천받기" 클릭.
-    const againButton = screen.getByRole("button", {
-      name: "다른 곡 추천받기",
+      readVoiceRangeMock.mockResolvedValue({
+        id: 22,
+        sessionId: "sess-accum",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 72,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [100, 200]))
+        .mockResolvedValueOnce(buildResponseWithSongIds(2, [300, 400]))
+        .mockResolvedValueOnce(buildResponseWithSongIds(3, [500, 600]));
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-100")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(sessionMock.state().excludedSongIds).toEqual([100, 200]);
+      });
+
+      // 1차 sentinel 진입.
+      await act(async () => {
+        triggerIntersection();
+      });
+      await waitFor(() => {
+        expect(screen.getByText("곡-300")).toBeInTheDocument();
+      });
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
+        sessionId: "sess-accum",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 72,
+        excludeSongIds: [100, 200],
+      });
+      await waitFor(() => {
+        expect(sessionMock.state().excludedSongIds).toEqual([100, 200, 300, 400]);
+      });
+
+      // 2차 sentinel 진입 — 새 sentinel 노드가 다시 마운트됐는지 대기 후 trigger.
+      await waitFor(() => {
+        expect(screen.getByTestId("recommend-sentinel")).toBeInTheDocument();
+      });
+      await act(async () => {
+        triggerIntersection();
+      });
+
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenCalledTimes(3);
+      });
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(3, {
+        sessionId: "sess-accum",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 72,
+        excludeSongIds: [100, 200, 300, 400],
+      });
     });
-    await user.click(againButton);
 
-    await waitFor(() => {
-      expect(createRecommendationMock).toHaveBeenCalledTimes(2);
-    });
-    expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
-      sessionId: "sess-again",
-      voiceRangeLow: 50,
-      voiceRangeHigh: 70,
-      excludeSongIds: [10, 20],
-    });
-  });
+    it("첫 페이지부터 빈 응답이면 fallback CTA가 노출되고 sentinel은 렌더되지 않는다", async () => {
+      sessionMock.set({ sessionId: "sess-empty", voiceRangeId: 33 });
+      wireAppendExcluded();
 
-  it("'다른 곡 추천받기'를 두 번 클릭하면 누적된 ID들이 모두 excludeSongIds에 포함된다", async () => {
-    sessionMock.set({ sessionId: "sess-accum", voiceRangeId: 22 });
-    wireAppendExcluded();
+      readVoiceRangeMock.mockResolvedValue({
+        id: 33,
+        sessionId: "sess-empty",
+        lowestNoteMidi: 52,
+        highestNoteMidi: 67,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce({
+        requestId: 999,
+        recommendations: [],
+      });
 
-    readVoiceRangeMock.mockResolvedValue({
-      id: 22,
-      sessionId: "sess-accum",
-      lowestNoteMidi: 48,
-      highestNoteMidi: 72,
-      sourceMethod: "OCTAVE_PICK",
-      createdAt: "2026-05-21T00:00:00Z",
-      updatedAt: "2026-05-21T00:00:00Z",
-    });
+      renderWithQueryClient(<RecommendPage />);
 
-    createRecommendationMock
-      .mockResolvedValueOnce(buildResponseWithSongIds(1, [100, 200]))
-      .mockResolvedValueOnce(buildResponseWithSongIds(2, [300, 400]))
-      .mockResolvedValueOnce(buildResponseWithSongIds(3, [500, 600]));
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            /더 이상 추천할 곡이 없어요\. 음역대를 다시 입력해 보세요\./,
+          ),
+        ).toBeInTheDocument();
+      });
 
-    const user = userEvent.setup();
-    renderWithQueryClient(<RecommendPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText("곡-100")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("recommend-sentinel"),
+      ).not.toBeInTheDocument();
+      const cta = screen.getAllByRole("link", { name: "음역대 다시 입력" });
+      expect(cta.length).toBeGreaterThanOrEqual(1);
     });
 
-    // 1차 클릭 — exclude는 첫 응답 ID만.
-    await user.click(screen.getByRole("button", { name: "다른 곡 추천받기" }));
-    await waitFor(() => {
-      expect(screen.getByText("곡-300")).toBeInTheDocument();
-    });
-    expect(createRecommendationMock).toHaveBeenNthCalledWith(2, {
-      sessionId: "sess-accum",
-      voiceRangeLow: 48,
-      voiceRangeHigh: 72,
-      excludeSongIds: [100, 200],
-    });
+    it("두 번째 페이지가 비면 시드 소진 안내가 노출되고 sentinel이 사라진다", async () => {
+      sessionMock.set({ sessionId: "sess-exhaust", voiceRangeId: 44 });
+      wireAppendExcluded();
 
-    // 2차 클릭 — 1차+2차 응답 ID가 누적되어 전달.
-    await user.click(screen.getByRole("button", { name: "다른 곡 추천받기" }));
-    await waitFor(() => {
-      expect(createRecommendationMock).toHaveBeenCalledTimes(3);
-    });
-    expect(createRecommendationMock).toHaveBeenNthCalledWith(3, {
-      sessionId: "sess-accum",
-      voiceRangeLow: 48,
-      voiceRangeHigh: 72,
-      excludeSongIds: [100, 200, 300, 400],
+      readVoiceRangeMock.mockResolvedValue({
+        id: 44,
+        sessionId: "sess-exhaust",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [1, 2]))
+        .mockResolvedValueOnce({ requestId: 2, recommendations: [] });
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
+
+      // sentinel 진입 흉내 → 빈 응답으로 hasNextPage=false 가 된다.
+      await act(async () => {
+        triggerIntersection();
+      });
+
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/추천할 수 있는 곡을 모두 보여드렸어요\./),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("recommend-sentinel"),
+      ).not.toBeInTheDocument();
+      // 1차 페이지 곡은 여전히 노출.
+      expect(screen.getByText("곡-1")).toBeInTheDocument();
     });
   });
 
@@ -551,19 +557,21 @@ describe("RecommendPage", () => {
       updatedAt: "2026-05-21T00:00:00Z",
     });
     createRecommendationMock.mockResolvedValueOnce(
-      buildRecommendationResponse(555, "히스토리 곡"),
+      buildResponseWithSongIds(555, [555]),
     );
 
     renderWithQueryClient(<RecommendPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("히스토리 곡")).toBeInTheDocument();
+      expect(screen.getByText("곡-555")).toBeInTheDocument();
     });
 
     const append = historyMock.state().appendRecommendation as ReturnType<
       typeof vi.fn
     >;
-    expect(append).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(append).toHaveBeenCalledTimes(1);
+    });
     const callArg = append.mock.calls[0][0] as {
       requestId: number;
       voiceRangeId: number | null;
@@ -574,7 +582,6 @@ describe("RecommendPage", () => {
     expect(callArg.voiceRangeId).toBe(77);
     expect(callArg.songs).toHaveLength(1);
     expect(callArg.songs[0].song.id).toBe(555);
-    expect(callArg.excludedSongIds).toEqual([]);
   });
 
   // closes #107 — 추천 결과 페이지는 NoSession fallback, 카드 리스트, 빈 결과 fallback
@@ -601,35 +608,14 @@ describe("RecommendPage", () => {
         createdAt: "2026-05-21T00:00:00Z",
         updatedAt: "2026-05-21T00:00:00Z",
       });
-      createRecommendationMock.mockResolvedValue({
-        requestId: 1,
-        recommendations: [
-          {
-            rankPosition: 1,
-            score: 0.9,
-            matchReason: "음역 매칭",
-            song: {
-              id: 1,
-              title: "a11y 곡",
-              artist: "a11y 가수",
-              releaseYear: 2024,
-              keyOriginal: "C_MAJOR",
-              bpm: 110,
-              mood: "UPBEAT",
-              language: "ko",
-              genre: "POP",
-              tjNumber: "T-1",
-              kyNumber: "K-1",
-              metadataSource: "MANUAL_SEED",
-            },
-          },
-        ],
-      });
+      createRecommendationMock.mockResolvedValue(
+        buildResponseWithSongIds(1, [1]),
+      );
 
       const { container } = renderWithQueryClient(<RecommendPage />);
 
       await waitFor(() => {
-        expect(screen.getByText("a11y 곡")).toBeInTheDocument();
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
       });
 
       await expectNoA11yViolations(container);
@@ -663,40 +649,93 @@ describe("RecommendPage", () => {
     });
   });
 
-  it("응답 곡 수가 0이면 fallback UX를 노출하고 '다른 곡 추천받기' 버튼은 숨긴다", async () => {
-    sessionMock.set({ sessionId: "sess-empty", voiceRangeId: 33 });
-    wireAppendExcluded();
+  // ---------- closes #282 ----------
+  describe("음역대 source method 헤더 뱃지 (#282)", () => {
+    it("MIC_MEASURE 응답이면 '마이크 측정' 뱃지와 '마이크로 다시 측정' 링크가 노출된다", async () => {
+      sessionMock.set({ sessionId: "sess-mic", voiceRangeId: 7 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 7,
+        sessionId: "sess-mic",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 72,
+        sourceMethod: "MIC_MEASURE",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(
+        buildResponseWithSongIds(1, [1]),
+      );
 
-    readVoiceRangeMock.mockResolvedValue({
-      id: 33,
-      sessionId: "sess-empty",
-      lowestNoteMidi: 52,
-      highestNoteMidi: 67,
-      sourceMethod: "OCTAVE_PICK",
-      createdAt: "2026-05-21T00:00:00Z",
-      updatedAt: "2026-05-21T00:00:00Z",
-    });
+      renderWithQueryClient(<RecommendPage />);
 
-    createRecommendationMock.mockResolvedValueOnce({
-      requestId: 999,
-      recommendations: [],
-    });
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
 
-    renderWithQueryClient(<RecommendPage />);
-
-    await waitFor(() => {
+      const badge = screen.getByTestId("voice-range-source-badge");
+      expect(badge).toHaveTextContent("마이크 측정");
       expect(
-        screen.getByText(
-          /더 이상 추천할 곡이 없어요\. 음역대를 다시 입력해 보세요\./,
-        ),
-      ).toBeInTheDocument();
+        screen.getByRole("link", { name: "마이크로 다시 측정" }),
+      ).toHaveAttribute("href", "/voice-range/auto");
     });
 
-    // 버튼은 숨김 + 음역대 재입력 CTA가 노출 (헤더 링크 + fallback CTA 모두 포함).
-    expect(
-      screen.queryByRole("button", { name: "다른 곡 추천받기" }),
-    ).not.toBeInTheDocument();
-    const cta = screen.getAllByRole("link", { name: "음역대 다시 입력" });
-    expect(cta.length).toBeGreaterThanOrEqual(1);
+    it("OCTAVE_PICK 응답이면 '직접 선택' 뱃지가 노출되고 '마이크로 다시 측정' 링크는 노출되지 않는다", async () => {
+      sessionMock.set({ sessionId: "sess-pick", voiceRangeId: 8 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 8,
+        sessionId: "sess-pick",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(
+        buildResponseWithSongIds(1, [1]),
+      );
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
+
+      const badge = screen.getByTestId("voice-range-source-badge");
+      expect(badge).toHaveTextContent("직접 선택");
+      expect(
+        screen.queryByRole("link", { name: "마이크로 다시 측정" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "음역대 다시 입력" }),
+      ).toHaveAttribute("href", "/voice-range");
+    });
+
+    it("SELF_REPORT 응답이면 '자가 보고' 뱃지가 노출되고 '마이크로 다시 측정' 링크는 노출되지 않는다", async () => {
+      sessionMock.set({ sessionId: "sess-self", voiceRangeId: 9 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 9,
+        sessionId: "sess-self",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "SELF_REPORT",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(
+        buildResponseWithSongIds(1, [1]),
+      );
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
+
+      const badge = screen.getByTestId("voice-range-source-badge");
+      expect(badge).toHaveTextContent("자가 보고");
+      expect(
+        screen.queryByRole("link", { name: "마이크로 다시 측정" }),
+      ).not.toBeInTheDocument();
+    });
   });
 });

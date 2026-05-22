@@ -144,7 +144,7 @@ last_reviewed: 2026-05-21
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
 | Q1 | pitch detection 라이브러리 선택 | (a) **Pitchy** (권고) / (b) 자체 autocorrelation 구현 / (c) aubio.js (WASM) | @goohong / PR B 진입 전 |
-| Q2 | 측정 시간 (phase당) | (a) 5초 고정 / (b) 10초 고정 / (c) 사용자가 발성하는 동안 안정 픽 감지되면 조기 종료 (권고) | @goohong / PR C 진입 전 |
+| Q2 | 측정 시간 (phase당) | **(a) 5초 고정 (확정 2026-05-22, §9 참조)** / (b) 10초 고정 / (c) 조기 종료 — 폐기(#313) | 확정 |
 | Q3 | "신뢰도 낮음" 임계 | (a) 분산(MIDI std) > 2 / (b) 안정 픽 미달(연속 N프레임 미충족) / (c) 둘 다 | @goohong / PR C 진입 전 |
 | Q4 | 측정 결과 노출 형태 | (a) 별 결과 페이지(`/voice-range/auto/result`) / (b) 측정 페이지 하단에 그대로 노출 + 저장 CTA (권고, 1페이지 흐름) | @goohong / PR C 진입 전 |
 | Q5 | iOS Safari WebAudio context 자동 시작 제약 회피 | (a) "측정 시작" 버튼 클릭 시 AudioContext.resume() / (b) 페이지 진입 시 lazy init | @goohong / PR C 진입 전 |
@@ -155,3 +155,9 @@ last_reviewed: 2026-05-21
 - 2026-05-21: 초안 작성 (status=draft). plan 사이클 11. 출처: 이슈 #143, PR #144.
   - 영감 출처: `docs/research/external-service-inspirations.md` A-1 (Vanido), F-1 (P1 후보).
   - 라이브러리 권고: Pitchy(§5-3). 확정은 Q1 해소 시 §8 → §9 이동.
+- 2026-05-22: **Q2 = (a) 5초 고정**. 이유: 이전 (c) 조기 종료 채택 시 실측이 1초도 안
+  걸려 5초 안내 vs 실측 시간이 어긋났다 (issue #313). 5초 동안 안정 샘플을 누적한 뒤
+  phase 방향 percentile (low → P5, high → P95) 로 결정하고, 안정 샘플 수가
+  `MIN_STABLE_SAMPLES`(10) 이상이면 `confirmed=true`. 다양한 음역을 시도할 시간을
+  보장하면서 첫 발성/끝맺음 흔들림 outlier를 percentile로 흡수. 출처: PR #313-fix,
+  `web/lib/audio/sampler.ts`.

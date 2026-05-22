@@ -3,10 +3,13 @@ package com.mobruji.song.application;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -74,7 +77,14 @@ public class AudioAnalysisRunner {
         final Path toolDir = Path.of(properties.toolDir());
         if (!Files.isDirectory(toolDir)) {
             throw new AudioAnalysisFailedException(
-                    "audio analysis tool directory not found: " + properties.toolDir());
+                    "audio analysis tool directory not found: " + properties.toolDir()
+                            + " — README 의 '설치' 섹션을 참고해 tools/audio-analysis 를 셋업하거나"
+                            + " audio.analysis.tool-dir (또는 AUDIO_ANALYSIS_TOOL_DIR) 를 올바른 경로로 지정하세요.");
+        }
+        if (!properties.useDocker() && !Files.isRegularFile(toolDir.resolve("analyze.py"))) {
+            throw new AudioAnalysisFailedException(
+                    "analyze.py not found under tool directory: " + properties.toolDir()
+                            + " — git repo 의 tools/audio-analysis 하위에 analyze.py 가 있어야 합니다.");
         }
         final List<String> command = buildCommand(toolArgs);
 
@@ -83,8 +93,7 @@ public class AudioAnalysisRunner {
         try {
             process = startProcess(command, toolDir);
         } catch (final IOException e) {
-            throw new AudioAnalysisFailedException(
-                    "failed to spawn audio analysis process: " + command.get(0), e);
+            throw new AudioAnalysisFailedException(buildSpawnFailureMessage(command, e), e);
         }
 
         final String stdout;
@@ -224,6 +233,57 @@ public class AudioAnalysisRunner {
             return text;
         }
         return text.substring(0, STDERR_SNIPPET_LIMIT) + "...(truncated)";
+    }
+
+    /**
+     * spawn 실패 시 사용자(보통 로컬 개발자/배포 운영자)가 다음 액션을 알 수 있도록 친화 메시지를 만든다.
+     *
+     * <p>전형적 케이스:
+     * <ul>
+     * <li>호스트 모드, pythonCmd 가 ENOENT — Python venv 미설치 또는 경로 오류 → venv 셋업 안내</li>
+     * <li>호스트 모드, AccessDenied — 실행 권한 없음 → chmod 안내</li>
+     * <li>docker 모드, ENOENT — docker CLI 미설치 → docker 설치 안내</li>
+     * </ul>
+     *
+     * <p>부트 fail-fast 가 아닌 first-invocation 시점 안내라는 점에 유의 (spec PR D 정책: 부팅은
+     * 무조건 성공, 호출 시점에 실패).
+     */
+    private String buildSpawnFailureMessage(final List<String> command, final IOException cause) {
+        final String head = command.get(0);
+        final String causeMessage = cause.getMessage() == null ? "" : cause.getMessage();
+        final boolean notFound = cause instanceof NoSuchFileException
+                || causeMessage.toLowerCase(Locale.ROOT).contains("no such file")
+                || causeMessage.toLowerCase(Locale.ROOT).contains("cannot run program");
+        final boolean denied = cause instanceof AccessDeniedException
+                || causeMessage.toLowerCase(Locale.ROOT).contains("permission denied");
+        // denied 우선 — JDK 의 "Cannot run program ..." prefix 는 두 케이스 모두에 붙어
+        // notFound 패턴과 겹친다. errno (error=13 / Permission denied) 기반으로 먼저 분기.
+        if (properties.useDocker()) {
+            if (denied) {
+                return "failed to spawn audio analysis process: docker CLI 실행 권한이 없습니다 ('"
+                        + head + "'). 사용자 계정을 docker 그룹에 추가하거나 sudo 권한을 확인하세요.";
+            }
+            if (notFound) {
+                return "failed to spawn audio analysis process: docker CLI not found ('"
+                        + head + "'). docker desktop 또는 docker engine 을 설치하거나"
+                        + " audio.analysis.use-docker=false 로 호스트 Python 모드를 사용하세요.";
+            }
+            return "failed to spawn audio analysis process: " + head
+                    + " (docker mode) — 원인: " + causeMessage;
+        }
+        if (denied) {
+            return "failed to spawn audio analysis process: Python 실행 파일에 실행 권한이 없습니다 ('"
+                    + head + "'). `chmod +x " + head + "` 로 권한을 부여하거나"
+                    + " venv 를 재생성하세요.";
+        }
+        if (notFound) {
+            return "failed to spawn audio analysis process: Python 실행 파일을 찾을 수 없습니다 ('"
+                    + head + "'). tools/audio-analysis 에 venv 가 없으면 다음을 실행하세요: "
+                    + "`cd tools/audio-analysis && python3 -m venv .venv && source .venv/bin/activate"
+                    + " && pip install -r requirements.txt`. 이후 audio.analysis.python-cmd"
+                    + " (또는 AUDIO_ANALYSIS_PYTHON_CMD) 를 venv 의 python 절대 경로로 지정하세요.";
+        }
+        return "failed to spawn audio analysis process: " + head + " — 원인: " + causeMessage;
     }
 
     /** YouTube URL 원문은 INFO 이상 로깅 금지. host 만 노출 (Python 측 {@code mask_url} 와 정합). */

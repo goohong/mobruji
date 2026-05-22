@@ -72,6 +72,23 @@ function renderWithQueryClient(ui: ReactNode) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
+/**
+ * cache prime 검증용 — 호출자가 client 인스턴스를 직접 들고 setQueryData 가
+ * 일어났는지 확인할 수 있게 한다 (#282).
+ */
+function renderWithExposedQueryClient(ui: ReactNode) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const rendered = render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+  return { ...rendered, client };
+}
+
 function fakeStream(): MediaStream {
   // happy-dom에는 MediaStream 생성자가 없을 수 있으므로 간이 stub.
   return {
@@ -153,6 +170,81 @@ describe("AutoVoiceRangePage 권한 / 안내", () => {
       { timeout: 2500 },
     );
   });
+
+  it("권한 거부 후 '지금 수동 입력으로 이동' 버튼 클릭 시 즉시 /voice-range로 push 한다", async () => {
+    const user = userEvent.setup();
+    const notAllowed = Object.assign(new Error("denied"), {
+      name: "NotAllowedError",
+    });
+    const deps = buildDeps({
+      requestMic: vi.fn().mockRejectedValue(notAllowed),
+    });
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    const manualBtn = await screen.findByRole("button", {
+      name: /지금 수동 입력으로 이동/,
+    });
+    await user.click(manualBtn);
+
+    // setTimeout(1.2s) 만료 전에 즉시 push 가 호출되었는지 확인.
+    expect(pushMock).toHaveBeenCalledWith("/voice-range");
+  });
+});
+
+describe("AutoVoiceRangePage 측정 중 UI", () => {
+  it("측정 중 progress bar 와 마이크 레벨 meter 가 표시된다", async () => {
+    const user = userEvent.setup();
+    // low phase 를 일부러 미해결 promise 로 두어 측정 중 화면을 유지.
+    let resolveLow: (result: MeasurementResult) => void = () => {};
+    const deps = buildDeps({
+      runPhase: vi.fn().mockImplementation((phase, _stream, onSample) => {
+        if (phase === "low") {
+          return new Promise<MeasurementResult>((resolve) => {
+            // 2.5s 경과 시점의 샘플을 1회 흘려보낸다 — progress 50% / clarity 0.95.
+            onSample({
+              elapsedMs: 2500,
+              frequencyHz: 130.81,
+              clarity: 0.95,
+              isStable: true,
+              midi: 48,
+            });
+            resolveLow = resolve;
+          });
+        }
+        return Promise.resolve<MeasurementResult>({
+          midi: 69,
+          confirmed: true,
+          stableSampleCount: 5,
+          totalSampleCount: 5,
+        });
+      }),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // 측정 중 화면 → progressbar 와 meter 가 함께 보인다.
+    const progressBar = await screen.findByRole("progressbar", {
+      name: /가장 낮은 음 측정 진행률/,
+    });
+    expect(progressBar).toHaveAttribute("aria-valuenow", "50");
+
+    const levelMeter = screen.getByRole("meter", {
+      name: /마이크 입력 레벨/,
+    });
+    expect(levelMeter).toHaveAttribute("aria-valuenow", "95");
+    expect(screen.getByTestId("signal-status")).toHaveTextContent(/감지 중/);
+
+    // 측정을 마무리해 테스트가 매달리지 않게 한다.
+    resolveLow({
+      midi: 48,
+      confirmed: true,
+      stableSampleCount: 5,
+      totalSampleCount: 5,
+    });
+  });
 });
 
 describe("AutoVoiceRangePage 측정 흐름", () => {
@@ -168,9 +260,33 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
       ).toBeInTheDocument();
     });
 
-    // 측정 결과: low=48(C3), high=69(A4) 가 슬라이더 표시값에 반영.
-    expect(screen.getByText(/C3 \(MIDI 48\)/)).toBeInTheDocument();
-    expect(screen.getByText(/A4 \(MIDI 69\)/)).toBeInTheDocument();
+    // 측정 결과: low=48(도3/C3), high=69(라4/A4) 가 슬라이더 표시값에 반영.
+    // 이슈 #318: 한국어 음명 병기 + MIDI 숫자.
+    expect(screen.getByText(/도3 \(C3\) · MIDI 48/)).toBeInTheDocument();
+    expect(screen.getByText(/라4 \(A4\) · MIDI 69/)).toBeInTheDocument();
+  });
+
+  it("결과 화면의 '다시 측정하기' 버튼을 누르면 PERMISSION 단계로 돌아간다", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /다시 측정하기/ }));
+
+    // PERMISSION 단계 표지인 "측정 시작" 버튼이 다시 나타난다.
+    expect(
+      screen.getByRole("button", { name: /측정 시작/ }),
+    ).toBeInTheDocument();
+    // 결과 헤딩은 사라진다.
+    expect(
+      screen.queryByRole("heading", { name: /측정 결과/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("수동 보정 슬라이더로 lowMidi 값을 조정할 수 있다", async () => {
@@ -188,7 +304,8 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
     // userEvent의 range 처리가 환경마다 다르므로 fireEvent.change로 직접 값 설정.
     fireEvent.change(lowSlider, { target: { value: "50" } });
 
-    expect(screen.getByText(/D3 \(MIDI 50\)/)).toBeInTheDocument();
+    // 이슈 #318: 한국어 (SPN) · MIDI 형식.
+    expect(screen.getByText(/레3 \(D3\) · MIDI 50/)).toBeInTheDocument();
   });
 });
 
@@ -230,6 +347,43 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(sessionMock.state().setVoiceRangeId).toHaveBeenCalledWith(91);
     });
     expect(pushMock).toHaveBeenCalledWith("/recommend");
+  });
+
+  // (closes #282) /recommend 진입 시 voice-range GET 왕복을 제거하기 위해
+  // 자동 측정 흐름의 mutation onSuccess 도 react-query 캐시를 prime 한다.
+  it("저장 성공 시 응답을 react-query 캐시에 prime 한다 (#282)", async () => {
+    const user = userEvent.setup();
+    const response = {
+      id: 92,
+      sessionId: "test-session-id",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "MIC_MEASURE" as const,
+      createdAt: "2026-05-22T00:00:00Z",
+      updatedAt: "2026-05-22T00:00:00Z",
+    };
+    createVoiceRangeMock.mockResolvedValueOnce(response);
+
+    const { client } = renderWithExposedQueryClient(
+      <AutoVoiceRangePage deps={buildDeps()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /추천 받기/ }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/recommend");
+    });
+
+    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+      response,
+    );
   });
 
   it("API 실패 시 에러 메시지를 노출하고 라우팅하지 않는다", async () => {

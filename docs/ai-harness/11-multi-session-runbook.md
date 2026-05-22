@@ -340,12 +340,41 @@ hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mob
 | **fe** | `mobruji-fe` | 프론트엔드 **구현 전용** | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치, **기획/이슈 등록(본진에 보고만)** |
 | **rev** | `mobruji-rev` | 사후 감사 + **QA 실행 검증** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 본진에 보고 |
 
-### rev 세션의 QA 범위 (확장)
-rev는 read-only 감사 외에 **실행 검증**도 수행한다 (워크트리 안에서 read와 실행만, 파일 수정 금지):
-- 백엔드: `./gradlew test`로 회귀 확인, RestAssured E2E 결과 분석, curl로 머지된 엔드포인트 sample 검증
-- 프론트: `npm run lint/typecheck/test/build`, `npm run dev` 띄우고 curl로 SSR 응답 확인
-- BE+FE 통합: `docker compose up -d` + `./gradlew bootRun` + `npm run dev` 동시 기동 후 흐름 + 결정성 + p95 + 다양성 검증
-- 발견 사항은 PR 코멘트로 남기고, 후속이 필요하면 본진에 보고(이슈 등록은 본진).
+### rev 세션의 QA 책임 (정형화)
+rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용자 결정 2026-05-22, "에러를 막는 것이 1순위"). 코드 리뷰만으로는 런타임 에러 / 환경 의존 / API 통합 실패가 잡히지 않기 때문.
+
+**정형 spec**: `docs/features/rev-qa-protocol.md` — QA 결정 트리, smoke 시나리오, 환경, 도구, 결과 형식이 모두 한 곳에 있다. rev sub-agent는 prompt 외 추가 질문 없이 이 spec만 보고 QA를 수행할 수 있어야 한다.
+
+**PR 범주별 QA 강제 매트릭스** (`rev-qa-protocol.md` §5-1 발췌):
+
+| 범주 | 판별 기준 | QA 단계 |
+|---|---|---|
+| **A. 코드 변경 (BE)** | `backend/**` 변경 | `./gradlew test` + bootRun + 변경 endpoint smoke (curl) |
+| **B. 코드 변경 (FE)** | `web/**` 변경 | `npm run lint/typecheck/test/build` + `npm run dev` + 라우트 smoke |
+| **C. 통합 (FE+BE)** | A+B 동시 또는 contract 변경 | A + B + 도메인 smoke 시나리오 (음역/추천/좋아요/이력) |
+| **D. auth & security** | SessionAuthGuard / AuthFilter / security yml | A 또는 B + 헤더 누락/위조로 401/403 검증 |
+| **E. DB 마이그레이션** | `db/migration/**` 추가 | A + Flyway clean→migrate 재현 |
+| **F. spec & docs only** | `docs/**`만 변경 | **QA 생략**, 감사만 |
+| **G. CI/infra only** | workflows / docker-compose만 변경 | dry-run 또는 라인 리뷰 |
+| **H. 비기능 spec 위반 위험** | 결정성/p95/관측성 도메인 (recommendation, voice) | A + spec §3 비기능 한 줄씩 검증 |
+
+한 PR이 여러 범주에 걸치면 모두 수행 (상위 알파벳 우선 평가).
+
+**결과 형식** (`rev-qa-protocol.md` §5-6 발췌) — PR 코멘트에 다음 마커로 시작:
+- 🟢 **PASS** — 모든 시나리오 통과
+- 🟡 **NOTE** — minor drift/nit. release gate 통과 가능하지만 다음 사이클 fix 권장
+- 🔴 **BLOCK** — 런타임 에러, spec 위반, 회귀. release gate 차단.
+
+형식:
+```
+QA: 🟢/🟡/🔴 <STATUS> — [범주 X] <시나리오 + 결과 1줄>
+```
+
+**release gate**: `develop → main` release 머지 전 rev가 미QA PR(reviewed:claude 라벨 없음) 일괄 QA 수행. 🔴가 1건이라도 있으면 release 차단 + 본진에 fix 사이클 launch 요청. QA pass PR에는 `reviewed:claude` 라벨 부여.
+
+**워크트리 파일 수정 금지**: `scripts/git-hooks/pre-push`로 강제. 임시 스크립트는 `/tmp/rev-qa-*.sh` 또는 stdin heredoc(`bash <<'EOF' ... EOF`)으로 실행. 워크트리 안에 어떤 파일도 신규 생성·수정하지 않는다.
+
+**환경**: 기본은 로컬 3-tier (`docs/runbooks/local-3tier-setup.md`). dev/staging은 인프라 spec 머지 후 추가. 외부 API 의존 PR은 현재 mock 또는 "외부 의존 검증 보류" 🟡 처리.
 
 **공통 룰**:
 - be/fe 세션은 `origin/develop`에서 분기 (워크트리는 detached HEAD라 develop을 체크아웃하지 않는다).

@@ -10,7 +10,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MAX_MIDI, MIN_MIDI, midiToNoteName, octaveRangeMidis } from "./notes";
+import {
+  MAX_MIDI,
+  MIN_MIDI,
+  midiToCombinedNoteName,
+  midiToKoreanNoteName,
+  midiToNoteName,
+  octaveRangeMidis,
+} from "./notes";
 
 describe("midiToNoteName", () => {
   it("MIDI 12를 C0로 변환한다", () => {
@@ -76,5 +83,51 @@ describe("MIDI 상수", () => {
     expect(MAX_MIDI).toBe(119);
     expect(midiToNoteName(MIN_MIDI)).toBe("C0");
     expect(midiToNoteName(MAX_MIDI)).toBe("B8");
+  });
+});
+
+describe("midiToKoreanNoteName (#318)", () => {
+  it("C4 = 도4 (middle C)", () => {
+    expect(midiToKoreanNoteName(60)).toBe("도4");
+  });
+
+  it("A4 = 라4 (440Hz 기준음)", () => {
+    expect(midiToKoreanNoteName(69)).toBe("라4");
+  });
+
+  it("D3 = 레3 (이슈 본문 사용자 피드백 케이스)", () => {
+    expect(midiToKoreanNoteName(50)).toBe("레3");
+  });
+
+  it("E2 = 미2 (이슈 본문 사용자 피드백 케이스)", () => {
+    expect(midiToKoreanNoteName(40)).toBe("미2");
+  });
+
+  it("샤프 노트는 ♯(U+266F) 사용: MIDI 61 → 도♯4", () => {
+    expect(midiToKoreanNoteName(61)).toBe("도♯4");
+  });
+
+  it("옥타브 경계(B3 = 시3, C4 = 도4)", () => {
+    expect(midiToKoreanNoteName(59)).toBe("시3");
+    expect(midiToKoreanNoteName(60)).toBe("도4");
+  });
+
+  it("MIN/MAX 끝값도 안전: MIDI 12 → 도0, MIDI 119 → 시8", () => {
+    expect(midiToKoreanNoteName(MIN_MIDI)).toBe("도0");
+    expect(midiToKoreanNoteName(MAX_MIDI)).toBe("시8");
+  });
+});
+
+describe("midiToCombinedNoteName (#318 A안 — 한국어 (SPN) 병기)", () => {
+  it("MIDI 60 → '도4 (C4)'", () => {
+    expect(midiToCombinedNoteName(60)).toBe("도4 (C4)");
+  });
+
+  it("MIDI 69 → '라4 (A4)'", () => {
+    expect(midiToCombinedNoteName(69)).toBe("라4 (A4)");
+  });
+
+  it("샤프 노트 병기 (MIDI 61 → '도♯4 (C#4)')", () => {
+    expect(midiToCombinedNoteName(61)).toBe("도♯4 (C#4)");
   });
 });

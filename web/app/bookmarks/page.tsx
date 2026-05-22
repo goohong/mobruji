@@ -12,11 +12,13 @@
  *   - 한 화면에 섞으면 카테고리가 흐려진다. spec PR D 결정.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { SongCard } from "@/app/recommend/components/SongCard";
+import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
+import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
 import { ApiError } from "@/lib/api/client";
 import { readBookmarksBySessionId } from "@/lib/api/feedback";
 import { readSongById, type SongResponse } from "@/lib/api/song";
@@ -121,15 +123,7 @@ function BookmarksContent({ bookmarkedSongIds }: BookmarksContentProps) {
         </header>
 
         {songs.length > 0 ? (
-          <ul aria-label="북마크한 곡 목록" className="flex flex-col gap-2">
-            {songs.map((song) => (
-              <SongCard
-                key={song.id}
-                song={song}
-                href={`/songs/${song.id}`}
-              />
-            ))}
-          </ul>
+          <BookmarkSongListWithModal songs={songs} />
         ) : pendingCount === 0 ? (
           <p
             role="status"
@@ -146,6 +140,37 @@ function BookmarksContent({ bookmarkedSongIds }: BookmarksContentProps) {
         ) : null}
       </div>
     </main>
+  );
+}
+
+/**
+ * 북마크 목록의 카드 + 모달 묶음 (closes #323). likes 페이지의 SongListWithModal 과 동일한 패턴.
+ */
+type BookmarkSongListWithModalProps = {
+  songs: SongResponse[];
+};
+
+function BookmarkSongListWithModal({ songs }: BookmarkSongListWithModalProps) {
+  const [selected, setSelected] = useState<SongResponse | null>(null);
+  return (
+    <>
+      <ul aria-label="북마크한 곡 목록" className="flex flex-col gap-2">
+        {songs.map((song) => (
+          <SongCard
+            key={song.id}
+            song={song}
+            onShowDetail={() => setSelected(song)}
+          />
+        ))}
+      </ul>
+      <SongDetailModal
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        titleLabel={selected ? selected.title : ""}
+      >
+        {selected ? <SongDetailContent song={selected} /> : null}
+      </SongDetailModal>
+    </>
   );
 }
 

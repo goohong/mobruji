@@ -24,7 +24,7 @@ import type {
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 
 /**
  * 점수 분해 단일 항목.
@@ -142,10 +142,10 @@ function estimateRangeFit(
   const songSpan = Math.max(1, songHigh - songLow);
   const ratio = Math.min(1, overlapSemitones / songSpan);
 
-  const songLowName = midiToNoteName(songLow);
-  const songHighName = midiToNoteName(songHigh);
-  const userLowName = midiToNoteName(userLow);
-  const userHighName = midiToNoteName(userHigh);
+  const songLowName = midiToCombinedNoteName(songLow);
+  const songHighName = midiToCombinedNoteName(songHigh);
+  const userLowName = midiToCombinedNoteName(userLow);
+  const userHighName = midiToCombinedNoteName(userHigh);
 
   return {
     key: "rangeFit",

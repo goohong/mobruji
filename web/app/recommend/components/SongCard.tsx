@@ -11,19 +11,28 @@
  * 링크로 만든다. href가 주어지면 카드 표면 전체가 `next/link`의 `<Link>`로 감싸지며,
  * 키보드 포커스/엔터/스페이스 활성화는 next/link의 기본 동작을 사용한다.
  *
- * 표시 정보:
+ * 이슈 #323 (2026-05-22): 카드 요약/상세 분리.
+ *   - 카드 표면은 핵심 정보만(제목/아티스트/난이도/최고음/장르 chip + 좋아요/북마크) 노출.
+ *   - 추가 상세(점수 breakdown, matchReason 풀텍스트, YouTube 검색 링크, 메타)는
+ *     `onShowDetail` 콜백을 받은 경우 호출 측이 띄우는 모달로 위임한다.
+ *   - `onShowDetail`이 주어지면 카드 본문 클릭은 페이지 이동 대신 모달 트리거이며,
+ *     카드 표면의 breakdown 패널과 YouTube 검색 링크는 숨겨진다.
+ *   - 기존 `href` 모드(상세 페이지 링크)는 backward-compat로 보존 — history 화면 등
+ *     legacy 경로가 그대로 동작한다.
+ *
+ * 표시 정보 (요약):
  *   - rank position (#1, #2 ...) — 추천 컨텍스트에서만
- *   - 제목 (큰 글씨)
- *   - 아티스트 (작게)
+ *   - 제목 (큰 글씨) / 아티스트
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
  *     · `song.difficulty`가 있으면 그 값을, 없으면 `deriveDifficulty(lowMidi, highMidi)`로 계산.
  *     · 둘 다 없으면(legacy 응답) 라벨을 숨긴다.
- *   - 최고음 음표명 (예: F#5) — `midiToNoteName(highMidi)`
+ *   - 최고음 음표명 (예: "라♯5 (F#5)") — `midiToCombinedNoteName(highMidi)` (#318)
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
  *   - matchReason 한 줄 — 추천 컨텍스트에서만
  *   - 키(키 원본) 라벨
  *   - score — 추천 컨텍스트에서만
+ *   - 좋아요/북마크 액션
  *
  * 호버/포커스 상태는 ring/shadow 변화로 표현. 모바일 우선.
  */
@@ -31,7 +40,13 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -48,7 +63,7 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
@@ -58,6 +73,15 @@ import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
 import { Chip } from "@/components/ui";
+
+import { AlbumCoverThumbnail } from "./SongDetailContent";
+
+/**
+ * 인터랙션 실패(좋아요/북마크) 인라인 안내 자동 dismiss 지속 시간 (closes #257).
+ * 너무 짧으면 사용자가 읽기 전에 사라지고, 너무 길면 다음 카드 탐색을 가린다.
+ * 카드 내부 한 줄 메시지라 3초가 적정.
+ */
+const INTERACTION_FEEDBACK_DURATION_MS = 3000;
 
 /**
  * Props 분기:
@@ -72,18 +96,29 @@ import { Chip } from "@/components/ui";
  * "음역 적합" 항목 계산에 사용된다. 검색 컨텍스트(`song`)나 히스토리에서 voiceRange를
  * 모르는 경우에는 옵셔널로 비워두면 해당 항목이 자동 생략된다.
  */
+/**
+ * `onShowDetail`이 주어지면 카드 본문 클릭이 페이지 이동 대신 모달 트리거가 된다.
+ * 동시에 카드 표면의 breakdown 패널/YouTube 링크는 숨겨져 "요약 카드" 룩이 된다.
+ * (closes #323) 호출 측은 상태와 모달 컴포넌트(`SongDetailModal`)를 직접 관리한다.
+ *
+ * `onShowDetail` + `href` 가 동시에 주어지면 모달이 우선한다. 호출 측이 의도적으로
+ * 두 경로를 모두 노출하고 싶을 때를 위해 빌드 에러는 띄우지 않는다 — 단, 카드 본문
+ * 클릭은 모달로 흘러간다.
+ */
 type SongCardProps =
   | {
       item: RecommendedSongResponse;
       song?: never;
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
+      onShowDetail?: () => void;
     }
   | {
       song: SongResponse;
       item?: never;
       href?: string;
       userVoiceRange?: never;
+      onShowDetail?: () => void;
     };
 
 export function SongCard(props: SongCardProps) {
@@ -93,17 +128,34 @@ export function SongCard(props: SongCardProps) {
   const href: string | undefined = props.href;
   const userVoiceRange: UserVoiceRange | null =
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
+  const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
+  // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
+  const isModalMode = typeof onShowDetail === "function";
   const keyLabel = formatMusicalKey(song.keyOriginal);
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number"
+      ? midiToCombinedNoteName(song.highMidi)
+      : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number"
+      ? midiToCombinedNoteName(song.lowMidi)
+      : null;
 
   const body: ReactNode = (
     <>
       <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1">
+        {/*
+         * closes #322 — 앨범 커버 thumbnail (56px 정사각). 좌측 첫 요소로 두면 카드
+         * 식별성 ↑. albumCoverUrl 가 null 이거나 로딩 실패 시 placeholder 로 fallback
+         * 하므로 레이아웃 jump 없음. flex shrink-0 으로 텍스트가 줄어도 thumbnail 폭은
+         * 유지.
+         */}
+        <div className="shrink-0">
+          <AlbumCoverThumbnail song={song} />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           {item ? (
             <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
               #{item.rankPosition}
@@ -157,13 +209,18 @@ export function SongCard(props: SongCardProps) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
-          {item ? (
+          {/*
+           * matchReason / score 는 모달 모드에서는 카드 표면이 아닌 상세 모달에서
+           * 노출한다 (closes #323). 카드는 "한눈에 보이는 정보" 만 남기는 게 검수
+           * 피드백의 핵심.
+           */}
+          {item && !isModalMode ? (
             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {item.matchReason}
             </span>
           ) : null}
         </div>
-        {item ? (
+        {item && !isModalMode ? (
           <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
             score {item.score.toFixed(2)}
           </span>
@@ -176,18 +233,46 @@ export function SongCard(props: SongCardProps) {
   // 풀어 보여주는 "Why this song?" 패널이라 검색/스켈레톤에서는 의미가 없다.
   // 또한 href 모드에서도 <a> 내부에 button을 두는 것은 HTML 위반이므로 link 외부에
   // 별도 footer로 렌더한다.
-  const breakdownPanel = item ? (
-    <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
-  ) : null;
+  // 모달 모드(closes #323) 에서는 breakdown 도 상세 모달로 위임 — 카드 표면을 가볍게 유지.
+  const breakdownPanel =
+    item && !isModalMode ? (
+      <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
+    ) : null;
 
-  // 좋아요 + 북마크 버튼(closes #176 + #184) — 추천/검색 두 컨텍스트 모두 노출.
-  // href 모드에서는 <a> 안에 button을 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
+  // 좋아요 + 북마크 — 추천/검색/likes/bookmarks 어디서나 카드 footer 에 유지 (사용자 자주 쓰는 액션).
+  // YouTube 검색 링크(closes #302)는 모달 모드에서는 상세 모달로 위임해서 카드를 가볍게 유지한다.
+  // 모달 모드가 아니면 종전대로 카드에서 직접 새 탭으로 검색.
   const feedbackPanel = (
     <div className="flex flex-wrap items-center gap-2">
       <LikeButton songId={song.id} songTitle={song.title} />
       <BookmarkButton songId={song.id} songTitle={song.title} />
+      {!isModalMode ? (
+        <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
+      ) : null}
     </div>
   );
+
+  // 모달 모드(closes #323): 카드 본문 클릭이 페이지 이동 대신 모달 트리거.
+  // 본문은 button 으로 감싸 키보드 접근(Enter/Space) + 스크린 리더(button role) 호환.
+  // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
+  if (isModalMode) {
+    return (
+      <li className="group flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
+        <button
+          type="button"
+          onClick={onShowDetail}
+          aria-label={`${song.title} 상세 보기`}
+          aria-haspopup="dialog"
+          className="flex flex-col gap-3 rounded-2xl p-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+        >
+          {body}
+        </button>
+        <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+          {feedbackPanel}
+        </div>
+      </li>
+    );
+  }
 
   // href가 있으면 본문(body)만 링크로 감싸고, footer(breakdown + 피드백)는 링크 외부에 둔다.
   // 이렇게 하면 펼침/좋아요/북마크 버튼 클릭이 페이지 이동을 트리거하지 않으면서도 본문 클릭은
@@ -251,6 +336,23 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
   const toggleLike = useLikesStore((state) => state.toggleLike);
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const queryClient = useQueryClient();
+  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257). safeLog만으로는 사용자가
+  // 토글 버튼이 원상복귀된 이유를 알 수 없어 가시 피드백을 더한다.
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // 3초 뒤 자동 dismiss. 다음 클릭 시 즉시 클리어되므로 사용자가 새 시도를 해도
+  // 이전 메시지가 남아 혼란을 주지 않는다.
+  useEffect(() => {
+    if (!errorMessage) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setErrorMessage(null);
+    }, INTERACTION_FEEDBACK_DURATION_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorMessage]);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -277,6 +379,7 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
       // 낙관 변경 롤백.
       toggleLike(songId);
       safeLog.error("[SongCard] 좋아요 토글 실패", error);
+      setErrorMessage("좋아요 처리에 실패했어요. 다시 시도해 주세요.");
     },
   });
 
@@ -286,6 +389,8 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
     if (mutation.isPending) {
       return;
     }
+    // 새 시도 시작 시 이전 에러 안내 즉시 제거 — alert 잔존으로 인한 혼란 방지.
+    setErrorMessage(null);
     const sessionId = ensureSessionId();
     mutation.mutate({ sessionId });
   }
@@ -293,22 +398,32 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
   const busy = mutation.isPending;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      aria-pressed={liked}
-      aria-busy={busy}
-      aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
-        liked
-          ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      }`}
-    >
-      <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
-      <span>{liked ? "좋아요 취소" : "좋아요"}</span>
-    </button>
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        aria-pressed={liked}
+        aria-busy={busy}
+        aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+          liked
+            ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
+            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        }`}
+      >
+        <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
+        <span>{liked ? "좋아요 취소" : "좋아요"}</span>
+      </button>
+      {errorMessage ? (
+        <p
+          role="alert"
+          className="text-xs text-rose-700 dark:text-rose-300"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -330,6 +445,20 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
   const toggleBookmark = useBookmarksStore((state) => state.toggleBookmark);
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const queryClient = useQueryClient();
+  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257).
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!errorMessage) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setErrorMessage(null);
+    }, INTERACTION_FEEDBACK_DURATION_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorMessage]);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -351,6 +480,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
     onError: (error) => {
       toggleBookmark(songId);
       safeLog.error("[SongCard] 북마크 토글 실패", error);
+      setErrorMessage("북마크 처리에 실패했어요. 다시 시도해 주세요.");
     },
   });
 
@@ -360,6 +490,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
     if (mutation.isPending) {
       return;
     }
+    setErrorMessage(null);
     const sessionId = ensureSessionId();
     mutation.mutate({ sessionId });
   }
@@ -367,24 +498,84 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
   const busy = mutation.isPending;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      aria-pressed={bookmarked}
-      aria-busy={busy}
-      aria-label={
-        bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
-      }
-      className={`inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
-        bookmarked
-          ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      }`}
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        aria-pressed={bookmarked}
+        aria-busy={busy}
+        aria-label={
+          bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
+        }
+        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+          bookmarked
+            ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
+            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        }`}
+      >
+        <span aria-hidden="true">🔖</span>
+        <span>{bookmarked ? "북마크 해제" : "북마크"}</span>
+      </button>
+      {errorMessage ? (
+        <p
+          role="alert"
+          className="text-xs text-amber-700 dark:text-amber-300"
+        >
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * YouTube 검색 링크 (closes #302) — 추천 카드 미리듣기 1단계.
+ *
+ * 정책 결정:
+ *   - ADR-0006(`docs/decisions/0006-audio-source-youtube.md`)은 **BE 분석 파이프라인의 audio 출처**로
+ *     YouTube를 채택한 결정일 뿐, 프론트 사용자 미리듣기 정책은 정의하지 않는다. iframe embed/lite-embed는
+ *     ToS·저작권 리스크가 있어 별도 ADR + Song 엔티티 youtubeId 컬럼 추가가 필요하다.
+ *   - 본 PR(fe 35)은 BE/legal 변경 없이 가능한 가장 안전한 진입점만 제공: 공식 YouTube 검색 결과 페이지를
+ *     새 탭으로 연다. 사용자가 거기서 듣고 카드로 돌아와 좋아요/북마크를 결정한다.
+ *   - 후속(fe 36+)에서 BE에 youtubeId 컬럼이 추가되면 lite-embed로 교체 (본진 보고 사항).
+ *
+ * 접근성:
+ *   - aria-label에 곡 제목 + "(새 탭)" 명시 → 스크린 리더가 새 창임을 알린다.
+ *   - rel="noopener noreferrer" — window.opener leak 방지(보안).
+ *   - target="_blank" 새 탭이므로 추천 흐름 유지.
+ *   - href 모드의 부모 Link로 이벤트가 새 나가지 않도록 stopPropagation.
+ */
+export function buildYouTubeSearchUrl(title: string, artist: string): string {
+  // YouTube 공식 검색 결과 URL. URLSearchParams로 인코딩 (특수문자/한글 안전).
+  const query = `${title} ${artist}`.trim();
+  const params = new URLSearchParams({ search_query: query });
+  return `https://www.youtube.com/results?${params.toString()}`;
+}
+
+type YouTubeSearchLinkProps = {
+  songTitle: string;
+  songArtist: string;
+};
+
+function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
+  const href = buildYouTubeSearchUrl(songTitle, songArtist);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(event) => {
+        // href 모드 카드에서 부모 <Link>로 이벤트가 새 나가는 것 방지.
+        // preventDefault는 호출하지 않음 — 링크 자체는 정상 동작해야 한다.
+        event.stopPropagation();
+      }}
+      aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
+      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
     >
-      <span aria-hidden="true">🔖</span>
-      <span>{bookmarked ? "북마크 해제" : "북마크"}</span>
-    </button>
+      <span aria-hidden="true">▶</span>
+      <span>YouTube에서 듣기</span>
+    </a>
   );
 }
 
@@ -419,7 +610,7 @@ function MatchReasonExpander({
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="inline-flex items-center gap-1 self-start rounded-full px-2 py-1 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+        className="inline-flex min-h-11 items-center gap-1 self-start rounded-full px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
       >
         <span>{expanded ? "접기" : "자세히 보기"}</span>
         <ChevronDownIcon expanded={expanded} />
@@ -559,6 +750,8 @@ export function SongCardSkeleton() {
   return (
     <li className="flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
       <div className="flex items-start justify-between gap-4">
+        {/* closes #322 — 앨범 커버 thumbnail 자리 (실제 카드와 동일한 56px). */}
+        <div className="h-14 w-14 shrink-0 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="h-3 w-8 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
           <div className="h-5 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />

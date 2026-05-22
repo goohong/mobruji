@@ -26,7 +26,8 @@ public record SongResponse(
         Integer highMidi,
         Difficulty difficulty,
         String lowestNoteName,
-        String highestNoteName
+        String highestNoteName,
+        String albumCoverUrl
 ) {
 
     public static SongResponse from(final Song song) {
@@ -51,6 +52,7 @@ public record SongResponse(
                 songHighMidi,
                 song.getDifficulty(),
                 songLowMidi != null ? NoteName.of(songLowMidi) : null,
-                songHighMidi != null ? NoteName.of(songHighMidi) : null);
+                songHighMidi != null ? NoteName.of(songHighMidi) : null,
+                song.getAlbumCoverUrl());
     }
 }
