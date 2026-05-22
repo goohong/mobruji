@@ -69,6 +69,8 @@ import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
 import { Chip } from "@/components/ui";
 
+import { AlbumCoverThumbnail } from "./SongDetailContent";
+
 /**
  * 인터랙션 실패(좋아요/북마크) 인라인 안내 자동 dismiss 지속 시간 (closes #257).
  * 너무 짧으면 사용자가 읽기 전에 사라지고, 너무 길면 다음 카드 탐색을 가린다.
@@ -135,7 +137,16 @@ export function SongCard(props: SongCardProps) {
   const body: ReactNode = (
     <>
       <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1">
+        {/*
+         * closes #322 — 앨범 커버 thumbnail (56px 정사각). 좌측 첫 요소로 두면 카드
+         * 식별성 ↑. albumCoverUrl 가 null 이거나 로딩 실패 시 placeholder 로 fallback
+         * 하므로 레이아웃 jump 없음. flex shrink-0 으로 텍스트가 줄어도 thumbnail 폭은
+         * 유지.
+         */}
+        <div className="shrink-0">
+          <AlbumCoverThumbnail song={song} />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           {item ? (
             <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
               #{item.rankPosition}
@@ -730,6 +741,8 @@ export function SongCardSkeleton() {
   return (
     <li className="flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
       <div className="flex items-start justify-between gap-4">
+        {/* closes #322 — 앨범 커버 thumbnail 자리 (실제 카드와 동일한 56px). */}
+        <div className="h-14 w-14 shrink-0 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="h-3 w-8 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
           <div className="h-5 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
