@@ -23,7 +23,7 @@ last_reviewed: 2026-05-22
 - (S1) **신규 의존성 추가 회귀 감지**: be 가 spleeter 2.4.0 을 추가하는 PR 을 올린다 → audio-analysis CI 가 의존성 설치 시간 90s → 320s 로 증가한 것을 timing artifact 로 감지 → Discord webhook 알림 → 리뷰어가 "캐시 hit rate 낮음, wheel 빌드 캐시 추가 필요" 코멘트.
 - (S2) **캐시 만료 회복**: pip cache key (lockfile 해시) 가 변하지 않은 PR 인데 GitHub Actions 캐시가 LRU evict 됐다 → 본 PR 의 CI 시간이 cold start 200s 로 튀어 알림 → 인프라 오너가 다음 PR 머지 후 cache warm-up 워크플로우 trigger.
 - (S3) **대안 라이브러리 평가 트리거**: librosa wheel 빌드 + 의존성 합이 400s 를 3주 연속 초과 → §5-5 트리거 조건 충족 → 별도 ADR `0015-audio-analysis-library-alternatives` (가칭) 신설하여 essentia/aubio 와 비교 실험.
-- (S4) **사용자 부재 시 자동 백그라운드**: 본진/be 가 다른 작업 진행 중에도 librosa CI 메트릭이 매 PR 자동 수집되고 회귀 시 Discord 알림이 와 사용자 호출 없이 사이클 흐름이 유지됨.
+- (S4) **사용자 부재 시 자동 백그라운드**: maestro/be 가 다른 작업 진행 중에도 librosa CI 메트릭이 매 PR 자동 수집되고 회귀 시 Discord 알림이 와 사용자 호출 없이 사이클 흐름이 유지됨.
 
 ## 3) 요구사항
 

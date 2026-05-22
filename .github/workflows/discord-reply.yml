@@ -1,0 +1,44 @@
+name: Discord Reply
+
+# maestro 또는 사용자가 ad-hoc 메시지를 #모부르지 채널에 push하기 위한 workflow.
+# 사용 예: 사용자 ping 응답, 사이클 launch 사전 안내 (이슈 생성 직전 컨텍스트 한 줄)
+#
+# 트리거: workflow_dispatch (수동 only). 자동 push는 discord-notify.yml/periodic-summary.yml 담당.
+# secret DISCORD_WEBHOOK_URL 없으면 graceful skip.
+#
+# spec: docs/features/discord-status-push.md §5-3 — webhook URL 단일 SoT 유지
+# (NCP .env 별도 보유 + curl 직접 호출 금지). maestro는 gh workflow run 으로 dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: '#모부르지 채널에 push할 메시지 (≤ 1800자, plain text + Discord markdown)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  reply:
+    runs-on: ubuntu-22.04
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      MESSAGE: ${{ github.event.inputs.message }}
+    steps:
+      - name: Skip notice (no webhook secret)
+        if: env.DISCORD_WEBHOOK_URL == ''
+        run: |
+          echo "DISCORD_WEBHOOK_URL secret이 등록되어 있지 않습니다. reply를 skip합니다."
+          echo "셋업: docs/ai-harness/14-discord-notify-setup.md"
+
+      - name: Send reply
+        if: env.DISCORD_WEBHOOK_URL != ''
+        run: |
+          # Discord content 한도 2000자. 안전 마진 100자 두고 자른다.
+          BODY=$(printf '%s' "$MESSAGE" | head -c 1900)
+          jq -n --arg content "$BODY" '{ content: $content }' > payload.json
+          curl -sS --fail -H "Content-Type: application/json" \
+            -X POST -d @payload.json "$DISCORD_WEBHOOK_URL"
+          echo "reply sent (len=${#BODY})"

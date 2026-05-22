@@ -1,11 +1,11 @@
 # Discord Notify Setup
 
-> 본진(Claude 세션)이 닫혀있을 때 사용자가 모바일 Discord 알림으로 사이클 진행을 모니터링하기 위한 셋업 가이드.
+> maestro(Claude 세션)이 닫혀있을 때 사용자가 모바일 Discord 알림으로 사이클 진행을 모니터링하기 위한 셋업 가이드.
 > workflow 본체는 `.github/workflows/discord-notify.yml`.
 
 ## 1) 왜 필요한가
 
-본진 Claude 세션을 닫으면 background sub-agent도 모두 종료된다 (`docs/ai-harness/11-multi-session-runbook.md §0` 참조). 그래서 사용자가 외출 중일 때는 사이클 진행 상황을 알 방법이 없다.
+maestro Claude 세션을 닫으면 background sub-agent도 모두 종료된다 (`docs/ai-harness/11-multi-session-runbook.md §0` 참조). 그래서 사용자가 외출 중일 때는 사이클 진행 상황을 알 방법이 없다.
 
 단기 보완책으로 **GitHub Actions → Discord webhook → 모바일 push** 흐름을 깐다. 사용자는 핸드폰 Discord 알림으로 PR/이슈/릴리즈 이벤트를 받고, 필요하면 모바일에서 `gh` CLI 또는 GitHub 앱으로 명령을 내린다.
 
@@ -122,9 +122,9 @@ GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 �
 ## 7) mobruji 전용 채널 권장
 
 ### 7-1) 현재 상태 (2026-05-21)
-- mobruji 본진은 사용자 ppiyaki와 **공유 Discord 채널**(channel ID `1492424075677532260`)을 사용 중이다.
+- mobruji maestro은 사용자 ppiyaki와 **공유 Discord 채널**(channel ID `1492424075677532260`)을 사용 중이다.
 - 같은 채널에 ppiyaki 개인 메시지가 섞여 들어와 noise/오작동 위험이 있다.
-- `/discord:access` 정책상 본 채널은 mobruji 본진의 reply 권한이 있는 상태.
+- `/discord:access` 정책상 본 채널은 mobruji maestro의 reply 권한이 있는 상태.
 
 ### 7-2) 권장: mobruji 전용 채널 신설
 혼선을 줄이기 위해 **mobruji 전용 채널 1개**를 별도로 두는 구조로 전환한다.
@@ -137,15 +137,15 @@ GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 �
 | webhook | 공유 webhook | mobruji 전용 webhook (옵션) |
 
 ### 7-3) 사용자 액션
-1. Discord에서 **`#mobruji` 전용 채널**을 새로 만든다 (mobruji 본진 봇이 reply 권한을 가진 서버 내).
+1. Discord에서 **`#mobruji` 전용 채널**을 새로 만든다 (mobruji maestro 봇이 reply 권한을 가진 서버 내).
 2. 새 채널 ID를 복사한다 (채널 우클릭 → "Copy Channel ID", Developer Mode 필요).
-3. 본진 Claude 세션에 채널 ID를 전달한다 → 본진 메모리(`MEMORY.md`)에 `mobruji_discord_channel_id`로 등록.
-4. 본진은 등록된 채널 ID와 일치하지 않는 채널의 메시지는 모두 **무시**(reply하지 않음)한다.
+3. maestro Claude 세션에 채널 ID를 전달한다 → maestro 메모리(`MEMORY.md`)에 `mobruji_discord_channel_id`로 등록.
+4. maestro은 등록된 채널 ID와 일치하지 않는 채널의 메시지는 모두 **무시**(reply하지 않음)한다.
 5. 기존 공유 채널(`1492424075677532260`)에서 사이클 push 알림(`discord-notify.yml` 등)을 받고 있었다면, webhook을 새 채널로 옮기거나 두 채널 모두에 발송하도록 선택한다.
 
 ### 7-4) 운영 룰 (전환 후)
-- 본진 세션은 `mobruji_discord_channel_id`와 다른 chat_id로 도착한 메시지에 reply하지 않는다.
-- 공유 채널에서 mobruji 본진을 호출하고 싶으면, ppiyaki가 메시지를 mobruji 채널로 다시 보낸다 (mention/copy).
+- maestro 세션은 `mobruji_discord_channel_id`와 다른 chat_id로 도착한 메시지에 reply하지 않는다.
+- 공유 채널에서 mobruji maestro을 호출하고 싶으면, ppiyaki가 메시지를 mobruji 채널로 다시 보낸다 (mention/copy).
 - 채널 분리 후 `/discord:access`로 mobruji 전용 채널만 allowlist에 두는 정책도 함께 검토.
 
 ## 8) 한계와 다음 단계
@@ -156,3 +156,15 @@ GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 �
 - 양방향 봇 (Discord slash command → GitHub Actions dispatch): 향후 ADR/Feature Spec 필요
 
 지금은 push만으로도 "사용자가 외출 중 사이클 진행을 인지하고 귀가 후 결정"하는 흐름이 가능하다.
+
+## 9) maestro 사이클 트레일 push 룰
+
+이 문서는 **이벤트 → webhook → 채널** 흐름을 정형화한다. 그 위에 **maestro가 자기 사이클을 GitHub events로 expose하는 의무 룰**은 `docs/features/discord-status-push.md` 에서 다룬다. 두 문서 관계:
+
+| 책임 | 문서 |
+|---|---|
+| webhook workflow 셋업·운영 | 본 문서 (`14-discord-notify-setup.md`) |
+| 어느 이벤트를 발생시킬지 (maestro 의무) | `docs/features/discord-status-push.md` |
+| 사이클 카운트 / sub-agent 운영 | `docs/ai-harness/11-multi-session-runbook.md` |
+
+핵심 매핑은 `11-multi-session-runbook.md §0-6-2` 또는 spec §5-2 표 참조.

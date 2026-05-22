@@ -73,14 +73,14 @@
 ### 8-2) rev QA의 강제 시점
 | 시점 | 트리거 | 범위 |
 |---|---|---|
-| PR 머지 직후 | 본진이 머지 이벤트 감지 시 rev sub-agent launch | 해당 PR 단건 (PR 범주 매트릭스 따라) |
-| release 직전 | 본진이 `develop → main` PR 생성 시 | 미QA PR(reviewed:claude 라벨 없음) 일괄 |
+| PR 머지 직후 | maestro이 머지 이벤트 감지 시 rev sub-agent launch | 해당 PR 단건 (PR 범주 매트릭스 따라) |
+| release 직전 | maestro이 `develop → main` PR 생성 시 | 미QA PR(reviewed:claude 라벨 없음) 일괄 |
 | idle 사이클 | 머지된 PR 1시간+ 없음 | develop 전체 회귀 (BE 테스트, FE 게이트, 통합) |
 
 ### 8-3) rev QA 실패 처리
 - 🟢 PASS → `reviewed:claude` 라벨 부여. 끝.
-- 🟡 NOTE → `reviewed:claude` 라벨 부여 + 본진이 후속 이슈 등록 (다음 사이클 fix).
-- 🔴 BLOCK → 라벨 부여 안 함. **release gate 차단**. 본진이 fix 사이클 즉시 launch.
+- 🟡 NOTE → `reviewed:claude` 라벨 부여 + maestro이 후속 이슈 등록 (다음 사이클 fix).
+- 🔴 BLOCK → 라벨 부여 안 함. **release gate 차단**. maestro이 fix 사이클 즉시 launch.
 
 `reviewed:claude` 라벨이 없는 PR은 release PR 본문에서 색출 가능:
 ```bash

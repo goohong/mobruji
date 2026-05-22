@@ -1,10 +1,10 @@
-# NCP 본진 셋업 런북
+# NCP maestro 셋업 런북
 
-> mobruji **본진(Claude Code interactive)** 을 NCP c2-g3a VM(공인 IP `101.79.20.94`, Ubuntu 24.04)에 셋업하는 절차.
+> mobruji **maestro(Claude Code interactive)** 를 NCP c2-g3a VM(공인 IP `101.79.20.94`, Ubuntu 24.04)에 셋업하는 절차.
 >
 > 본 런북은 [`docs/decisions/0015-hosting-stack.md`](../decisions/0015-hosting-stack.md) 결정의 구현 가이드이며, [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) Phase 1~2의 인프라 토대를 마련한다.
 >
-> Phase 1(§B) 셋업 후 사용자는 `tmux attach -t mobruji`로 본진 console에 직접 들어가 수동 검증한다. Phase 2(§C) 진입 시 systemd unit으로 자동 복구, Phase 3(§D) 진입 시 Discord bridge로 외부 양방향.
+> Phase 1(§B) 셋업 후 사용자는 `tmux attach -t mobruji`로 maestro console에 직접 들어가 수동 검증한다. Phase 2(§C) 진입 시 systemd unit으로 자동 복구, Phase 3(§D) 진입 시 Discord bridge로 외부 양방향.
 
 ## A) 사전 준비 (로컬, 사용자 작업)
 
@@ -20,13 +20,13 @@
 ### A-2) Anthropic API key 발급
 1. https://console.anthropic.com 로그인.
 2. **API Keys** → **Create Key**.
-3. 라벨: `mobruji-bonjin` (회수/회전 시 식별 편의).
+3. 라벨: `mobruji-maestro` (회수/회전 시 식별 편의).
 4. 키 문자열은 1회만 표시됨 — 1Password / Bitwarden / Apple Keychain 등 비밀번호 매니저에 저장. 셋업 직후 `~/.bashrc`에 1회 등록 후 콘솔 history는 삭제.
 5. **결제수단 등록 확인**: Anthropic Console → **Billing**. 무료 한도 초과 시 자동 청구. 사용량 알람(`Usage Alerts`) 임계치 설정 권장(예: 월 $20).
 
 ### A-3) Discord bot 토큰
 - **신규 발급 또는 기존 재사용**:
-  - 기존: `tools/discord-daemon/.env`의 `DISCORD_BOT_TOKEN` (이미 사용자 워크플로우에 통합된 봇). NCP 본진과 같은 토큰을 재사용하면 로컬 daemon은 비활성화해야 함(같은 토큰 2개 프로세스가 같은 채널을 listen하면 중복 처리).
+  - 기존: `tools/discord-daemon/.env`의 `DISCORD_BOT_TOKEN` (이미 사용자 워크플로우에 통합된 봇). NCP maestro와 같은 토큰을 재사용하면 로컬 daemon은 비활성화해야 함(같은 토큰 2개 프로세스가 같은 채널을 listen하면 중복 처리).
   - 신규: https://discord.com/developers/applications → New Application → Bot → Reset Token. 권한: `Send Messages`, `Read Message History`, `Use Slash Commands`. OAuth2 URL Generator로 `#모부르지` 채널이 있는 서버에 초대.
 - 본 런북은 **기존 토큰 재사용 + 로컬 daemon 종료** 가정. 신규 토큰 발급 시 [`feature-discord-driven-mobruji`](../features/discord-driven-mobruji.md) §5-4 환경변수 갱신 필요.
 
@@ -34,7 +34,7 @@
 - **신규 발급 또는 기존 재사용**:
   - 기존: `tools/discord-daemon/.env`의 `GITHUB_PAT` (repository_dispatch 권한 보유). 재사용 가능.
   - 신규: https://github.com/settings/tokens → Generate new token (classic). 권한: `repo`(전체), `workflow`(repository_dispatch). 만료 90일 권장.
-- 본진의 `gh CLI`도 같은 PAT 사용 가능(`gh auth login --with-token`).
+- maestro의 `gh CLI`도 같은 PAT 사용 가능(`gh auth login --with-token`).
 
 ## B) Phase 1 — 1회 셋업 (사용자 실행)
 
@@ -86,7 +86,7 @@ chmod 600 /home/mobruji/.ssh/authorized_keys
 별 터미널에서 `ssh -i ~/workspace/secret/<keyname> mobruji@101.79.20.94` 로 접속 확인.
 
 ### B-5) Swap 1GB 활성화 (root)
-4GB RAM + 본진 + sub-agent 동시 spike 대비. ADR-0015 §Consequences 참조.
+4GB RAM + maestro + sub-agent 동시 spike 대비. ADR-0015 §Consequences 참조.
 ```bash
 fallocate -l 1G /swapfile
 chmod 600 /swapfile
@@ -127,7 +127,7 @@ source ~/.bashrc
 echo "$ANTHROPIC_API_KEY" | head -c 12   # sk-ant-... 확인 (12자만)
 ```
 
-**대안 (더 안전, Phase 2 권장)**: `/etc/mobruji/bonjin.env` (root:mobruji, 0640)에 두고 systemd unit `EnvironmentFile=` 로 주입. Phase 1은 `~/.bashrc` 로 단순화.
+**대안 (더 안전, Phase 2 권장)**: `/etc/mobruji/maestro.env` (root:mobruji, 0640)에 두고 systemd unit `EnvironmentFile=` 로 주입. Phase 1은 `~/.bashrc` 로 단순화.
 
 ### B-9) git / gh 인증 (mobruji)
 ```bash
@@ -151,7 +151,7 @@ git pull
 ```
 
 ### B-11) 워크트리 4개 생성 (mobruji)
-기존 [멀티 세션 런북](../ai-harness/11-multi-session-runbook.md) 답습. 본진은 `~/mobruji`에서 가동, sub-agent는 워크트리에서.
+기존 [멀티 세션 런북](../ai-harness/11-multi-session-runbook.md) 답습. maestro는 `~/mobruji`에서 가동, sub-agent는 워크트리에서.
 ```bash
 cd ~/mobruji
 git worktree add ../mobruji-be develop
@@ -197,13 +197,13 @@ cd ~/mobruji
 tmux new-session -d -s mobruji
 tmux send-keys -t mobruji "cd ~/mobruji && claude" Enter
 
-# attach 해서 본진 console 확인
+# attach 해서 maestro console 확인
 tmux attach -t mobruji
 # (claude TUI가 떠야 함. 'Hello'라고 입력해서 응답 확인.)
 # detach: Ctrl+B → D
 ```
 
-이 시점에서 본진은 가동 중. SSH 연결을 끊어도 tmux 세션은 살아있다(`tmux ls`로 확인).
+이 시점에서 maestro는 가동 중. SSH 연결을 끊어도 tmux 세션은 살아있다(`tmux ls`로 확인).
 
 ### B-15) 동작 검증 체크리스트
 - [ ] `tmux ls` → `mobruji: 1 windows ... (attached/detached)` 표시
@@ -215,7 +215,7 @@ tmux attach -t mobruji
 
 ## C) Phase 2 — systemd 자동 시작
 
-> 사용자 개입 없이 재부팅 후 본진 자동 복구.
+> 사용자 개입 없이 재부팅 후 maestro 자동 복구.
 
 ### C-1) systemd unit 파일 생성 (root)
 **참고**: `ANTHROPIC_API_KEY`를 unit 파일에 평문으로 두는 대신 `EnvironmentFile=`로 분리.
@@ -223,18 +223,18 @@ tmux attach -t mobruji
 ```bash
 # 시크릿 파일
 sudo mkdir -p /etc/mobruji
-sudo tee /etc/mobruji/bonjin.env > /dev/null <<'EOF'
+sudo tee /etc/mobruji/maestro.env > /dev/null <<'EOF'
 ANTHROPIC_API_KEY=<여기에 키>
 EOF
-sudo chown root:mobruji /etc/mobruji/bonjin.env
-sudo chmod 640 /etc/mobruji/bonjin.env
+sudo chown root:mobruji /etc/mobruji/maestro.env
+sudo chmod 640 /etc/mobruji/maestro.env
 ```
 
 ```bash
 # systemd unit
-sudo tee /etc/systemd/system/mobruji-bonjin.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/mobruji-maestro.service > /dev/null <<'EOF'
 [Unit]
-Description=Mobruji 본진 (Claude Code in tmux)
+Description=Mobruji maestro (Claude Code in tmux)
 After=network-online.target
 Wants=network-online.target
 
@@ -243,7 +243,7 @@ Type=forking
 User=mobruji
 Group=mobruji
 WorkingDirectory=/home/mobruji/mobruji
-EnvironmentFile=/etc/mobruji/bonjin.env
+EnvironmentFile=/etc/mobruji/maestro.env
 ExecStart=/usr/bin/tmux new-session -d -s mobruji -c /home/mobruji/mobruji '/home/mobruji/.npm-global/bin/claude'
 ExecStop=/usr/bin/tmux kill-session -t mobruji
 Restart=on-failure
@@ -254,8 +254,8 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now mobruji-bonjin
-sudo systemctl status mobruji-bonjin
+sudo systemctl enable --now mobruji-maestro
+sudo systemctl status mobruji-maestro
 ```
 
 ### C-2) 재부팅 검증
@@ -273,12 +273,12 @@ Phase 1에서 띄운 세션이 systemd unit과 충돌 가능. systemd가 띄운 
 # systemd가 띄운 세션만 남기기
 tmux ls
 # 기존 수동 세션이 따로 있으면 kill (현재 세션 이름이 동일하면 systemd가 부팅 시 실패하므로 unit log 확인)
-sudo journalctl -u mobruji-bonjin -n 50
+sudo journalctl -u mobruji-maestro -n 50
 ```
 
 ## D) Phase 3 — Discord bridge
 
-> 사용자 외출 중 Discord 메시지로 본진 양방향 소통. [`discord-driven-mobruji` spec](../features/discord-driven-mobruji.md) PR B/C 머지 후 진입.
+> 사용자 외출 중 Discord 메시지로 maestro 양방향 소통. [`discord-driven-mobruji` spec](../features/discord-driven-mobruji.md) PR B/C 머지 후 진입.
 
 ### D-1) `.env` flag 활성화 (mobruji)
 ```bash
@@ -292,9 +292,9 @@ nano .env
 sudo tee /etc/systemd/system/mobruji-discord-bridge.service > /dev/null <<'EOF'
 [Unit]
 Description=Mobruji Discord Bridge (Discord → tmux send-keys)
-After=network-online.target mobruji-bonjin.service
+After=network-online.target mobruji-maestro.service
 Wants=network-online.target
-Requires=mobruji-bonjin.service
+Requires=mobruji-maestro.service
 
 [Service]
 Type=simple
@@ -315,24 +315,24 @@ sudo systemctl enable --now mobruji-discord-bridge
 sudo systemctl status mobruji-discord-bridge
 ```
 
-### D-3) Discord → 본진 검증
+### D-3) Discord → maestro 검증
 1. iPhone Discord 앱에서 `#모부르지` 채널에 "테스트" 입력.
 2. NCP VM `journalctl -u mobruji-discord-bridge -f` 에서 메시지 수신 + `tmux send-keys` 로그 확인.
-3. `tmux attach -t mobruji` 로 본진 console에 "테스트" 입력이 도착했는지 확인.
-4. 본진 응답이 `plugin_discord__reply` 로 Discord 채널에 도착하는지 확인.
+3. `tmux attach -t mobruji` 로 maestro console에 "테스트" 입력이 도착했는지 확인.
+4. maestro 응답이 `plugin_discord__reply` 로 Discord 채널에 도착하는지 확인.
 
 ## E) 운영 명령
 
 | 작업 | 명령 |
 |---|---|
-| 본진 console 보기 | `tmux attach -t mobruji` (detach: `Ctrl+B → D`) |
-| 본진 재시작 | `sudo systemctl restart mobruji-bonjin` |
-| 본진 로그 | `sudo journalctl -u mobruji-bonjin -f` |
+| maestro console 보기 | `tmux attach -t mobruji` (detach: `Ctrl+B → D`) |
+| maestro 재시작 | `sudo systemctl restart mobruji-maestro` |
+| maestro 로그 | `sudo journalctl -u mobruji-maestro -f` |
 | Discord bridge 재시작 | `sudo systemctl restart mobruji-discord-bridge` |
 | Discord bridge 로그 | `sudo journalctl -u mobruji-discord-bridge -f` |
 | 시스템 리소스 | `htop` 또는 `free -h && df -h /` |
 | API 사용량 | https://console.anthropic.com → Usage |
-| 본진 `/compact` 강제 (Discord) | `#모부르지` 채널에서 `/system:/compact` 입력 (Phase 3 활성화 후) |
+| maestro `/compact` 강제 (Discord) | `#모부르지` 채널에서 `/system:/compact` 입력 (Phase 3 활성화 후) |
 
 ## F) 트러블슈팅
 
@@ -344,11 +344,11 @@ sudo systemctl status mobruji-discord-bridge
 **확인**:
 ```bash
 echo "$ANTHROPIC_API_KEY" | head -c 12   # sk-ant-... 확인
-sudo systemctl show mobruji-bonjin | grep Environment
-sudo cat /etc/mobruji/bonjin.env   # root 권한
+sudo systemctl show mobruji-maestro | grep Environment
+sudo cat /etc/mobruji/maestro.env   # root 권한
 ```
 
-**회피**: `/etc/mobruji/bonjin.env` 권한(0640 root:mobruji) 확인, `systemctl daemon-reload && systemctl restart mobruji-bonjin`.
+**회피**: `/etc/mobruji/maestro.env` 권한(0640 root:mobruji) 확인, `systemctl daemon-reload && systemctl restart mobruji-maestro`.
 
 ### F-2) tmux session 없음
 **증상**: `tmux attach -t mobruji` → `no server running on /tmp/tmux-1000/default`.
@@ -357,21 +357,21 @@ sudo cat /etc/mobruji/bonjin.env   # root 권한
 
 **확인**:
 ```bash
-sudo systemctl status mobruji-bonjin
-sudo journalctl -u mobruji-bonjin -n 100
+sudo systemctl status mobruji-maestro
+sudo journalctl -u mobruji-maestro -n 100
 ```
 
 **회피**:
 ```bash
-sudo systemctl restart mobruji-bonjin
+sudo systemctl restart mobruji-maestro
 sleep 5
 tmux ls
 ```
 
 ### F-3) 메모리 부족 (OOM)
-**증상**: `dmesg | tail` 에 `Out of memory: Killed process ... claude` 또는 본진 응답 멈춤.
+**증상**: `dmesg | tail` 에 `Out of memory: Killed process ... claude` 또는 maestro 응답 멈춤.
 
-**원인**: 본진 + sub-agent 동시 spike(최대 3개) + Discord bot + tmux + OS = 4GB 초과.
+**원인**: maestro + sub-agent 동시 spike(최대 3개) + Discord bot + tmux + OS = 4GB 초과.
 
 **확인**:
 ```bash
@@ -381,7 +381,7 @@ sudo dmesg | grep -i 'killed process'
 
 **회피**:
 1. swap 확인: `swapon --show`. 1GB 미만이면 §B-5 절차로 증설.
-2. sub-agent 동시 수 제한(본진 행동 정책): `CLAUDE.md` 또는 본진 system prompt에 "동시 sub-agent ≤ 3" 명시 강화.
+2. sub-agent 동시 수 제한(maestro 행동 정책): `CLAUDE.md` 또는 maestro system prompt에 "동시 sub-agent ≤ 3" 명시 강화.
 3. 계속 부족하면 c2-g3a → c2-g3a 상위 사양(4vCPU/8GB) vertical scale. NCP 콘솔에서 서버 정지 → 사양 변경 → 시작 (다운타임 ≈ 2분).
 
 ### F-4) Discord bot 토큰 만료 / 무효
@@ -411,7 +411,7 @@ gh auth refresh   # 또는 gh auth login 재실행
 
 **확인**: https://console.anthropic.com → Billing & Usage.
 
-**회피**: 결제수단 등록 / 한도 증액 / 본진 사용 패턴 조정(자동 loop 빈도 ↓).
+**회피**: 결제수단 등록 / 한도 증액 / maestro 사용 패턴 조정(자동 loop 빈도 ↓).
 
 ### F-7) NCP VM 자체 장애 / 접속 불가
 **증상**: SSH timeout.
@@ -437,43 +437,162 @@ gh auth refresh   # 또는 gh auth login 재실행
 ### G-2) ACG (NCP 방화벽)
 - **Inbound**: TCP 22 (SSH) 만. 사용자 공인 IP 화이트리스트 권장(NCP 콘솔 → ACG → Inbound Rules).
 - **Outbound**: 전체 허용 (Discord WebSocket, GitHub API, Anthropic API, apt 업데이트).
-- 본진 VM에 HTTP/HTTPS inbound 노출 불필요(백/프론트는 별 VM).
+- maestro VM에 HTTP/HTTPS inbound 노출 불필요(백/프론트는 별 VM).
 
 ### G-3) 시크릿 파일 권한
 | 파일 | 소유자 | 권한 |
 |---|---|---|
-| `/etc/mobruji/bonjin.env` | root:mobruji | 0640 |
+| `/etc/mobruji/maestro.env` | root:mobruji | 0640 |
 | `~/.bashrc` (mobruji) | mobruji:mobruji | 0600 |
 | `~/mobruji/tools/discord-daemon/.env` | mobruji:mobruji | 0600 |
 | `~/.ssh/authorized_keys` | mobruji:mobruji | 0600 |
 
 ```bash
 # 일괄 점검
-ls -l /etc/mobruji/bonjin.env ~/.bashrc ~/mobruji/tools/discord-daemon/.env ~/.ssh/authorized_keys
+ls -l /etc/mobruji/maestro.env ~/.bashrc ~/mobruji/tools/discord-daemon/.env ~/.ssh/authorized_keys
 ```
 
 ### G-4) API key 회전
 - Anthropic API key는 6개월마다 회전 권장.
-- 회전 절차: 신규 키 발급 → `/etc/mobruji/bonjin.env` 갱신 → `sudo systemctl restart mobruji-bonjin` → 구 키 폐기.
+- 회전 절차: 신규 키 발급 → `/etc/mobruji/maestro.env` 갱신 → `sudo systemctl restart mobruji-maestro` → 구 키 폐기.
 - Discord bot 토큰 / GitHub PAT도 동일 패턴.
 
 ### G-5) 로그 민감정보
-- `journalctl -u mobruji-bonjin` 에 본진 narration이 일부 노출될 수 있음. 사용자 음역대/기호 등 민감 데이터는 본진 행동 정책(CLAUDE.md §4)에 따라 원문 노출 금지.
+- `journalctl -u mobruji-maestro` 에 maestro narration이 일부 노출될 수 있음. 사용자 음역대/기호 등 민감 데이터는 maestro 행동 정책(CLAUDE.md §4)에 따라 원문 노출 금지.
 - 로그 보존 기간: systemd journal 기본(시스템 디스크 여유에 따라 자동 회전). 별도 영구 보관 불필요.
 
-## H) 다음 단계
+## H) Phase 4 — mobruji dev 배포 (docker 격리)
 
-본 런북 §B(Phase 1) 완료 후:
-1. **PR B**: `tools/discord-daemon/bot.py` 확장 — `TMUX_BRIDGE_ENABLED` flag + `tmux_send_keys` 함수 + dedup ledger. (이슈 #340)
-2. **PR C**: tmux pane stdout capture + 로그 로테이션. (이슈 #341)
-3. **PR D**: systemd unit + 셋업 자동화 스크립트(`tools/ncp-bonjin/install.sh`). 본 런북 §B~C를 스크립트화. (이슈 #342)
-4. **PR E (선택)**: 본진 transcript 무게 모니터 → 자동 `/compact` 트리거.
-5. **PR F (선택)**: swap 추가 + 운측성 metric (CPU/RAM/swap usage Grafana Cloud remote_write).
+Phase 4 는 maestro VM 안에 mobruji backend + web + MySQL + nginx 를 docker container 로 격리해서 같이 올린다. spec: `docs/features/ncp-dev-deployment.md`.
 
-## I) 관련 문서
+### H-1) 부트스트랩 (mobruji 또는 root 1회)
+
+```bash
+cd ~/mobruji
+sudo bash tools/deploy/ncp-bootstrap-dev.sh
+```
+
+스크립트가 멱등하게 수행:
+- `docker.io + docker-compose-v2` 설치
+- `mobruji` user 를 `docker` 그룹에 추가 (재로그인 1회 필요)
+- swap 1GB 활성화 + `/etc/fstab` 등록 (이미 §B-5 에서 활성화돼 있으면 skip)
+- `.env.dev` 가 없으면 `.env.dev.example` 복사 + `chmod 600`
+
+### H-2) `.env.dev` 토큰 입력 (mobruji)
+
+```bash
+nano ~/mobruji/.env.dev
+```
+
+필수 (compose `?:` 표기로 부재 시 fail-fast):
+- `MYSQL_ROOT_PASSWORD` — 영문/숫자 16자 이상 권장
+- `MYSQL_PASSWORD` — 동일
+- `MOBRUJI_ADMIN_TOKEN` — 32자 hex 권장 (`openssl rand -hex 16`)
+
+선택 (default 가 있음):
+- `MOBRUJI_CORS_ALLOWED_ORIGINS` — dev IP/도메인 (기본 `http://101.79.20.94`)
+- `NEXT_PUBLIC_API_BASE_URL` — nginx 가 `/api` proxy 하므로 기본 `/api`
+
+### H-3) 첫 가동 (mobruji)
+
+```bash
+cd ~/mobruji
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
+docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+```
+
+healthcheck 가 모두 `healthy` 되면:
+- `curl http://localhost/_nginx_health` → `ok`
+- `curl http://localhost/actuator/health/liveness` → `{"status":"UP"}`
+- 브라우저: `http://101.79.20.94/`
+
+### H-4) GitHub Actions CD (develop merge → 자동 배포)
+
+develop 머지 시 NCP 자동 배포되도록 secret 3개 등록 (사용자 1회):
+
+```bash
+# 로컬에서 (gh CLI)
+gh secret set NCP_SSH_HOST --repo goohong/mobruji <<< "101.79.20.94"
+gh secret set NCP_SSH_USER --repo goohong/mobruji <<< "mobruji"
+gh secret set NCP_SSH_KEY  --repo goohong/mobruji < ~/workspace/secret/mobruji-key.pem
+```
+
+이후 흐름 (`.github/workflows/cd-dev.yml`):
+- develop push (paths 매치: `backend/**` / `web/**` / `docker-compose.dev.yml` / `nginx/**` / `tools/deploy/**`)
+- SSH NCP → `git pull` → `docker compose build --build-arg GIT_SHA=<short>` → `up -d`
+- `/actuator/health/liveness` 30회 × 5s polling (총 150s window)
+- timeout 시 직전 SHA 로 자동 롤백 + 재빌드 + 재기동
+- secret 부재 시 graceful skip
+
+수동 트리거:
+```bash
+gh workflow run cd-dev.yml --repo goohong/mobruji
+```
+
+### H-5) 운영 명령 (NCP, mobruji)
+
+```bash
+# 상태
+docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+docker stats --no-stream
+
+# 로그
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs -f backend
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs -f web
+
+# 단일 service 재기동 (코드 변경 없이)
+docker compose -f docker-compose.dev.yml --env-file .env.dev restart backend
+
+# 강제 재빌드 + 재기동 (드물게 — CD 가 정상 흐름)
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build --force-recreate
+
+# 수동 롤백 (CD 자동 롤백 실패 시)
+cd ~/mobruji
+git reset --hard <PREV_SHA>
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
+
+# 정지 / 볼륨 삭제 (DB 초기화)
+docker compose -f docker-compose.dev.yml --env-file .env.dev down
+docker volume rm mobruji-mysql-dev  # 신중히
+```
+
+### H-6) 트러블슈팅 — Phase 4
+
+#### `mem_limit` 부족 — 컨테이너 OOMKill
+증상: `docker compose ps` 에서 backend / web 가 `exited` 또는 `restarting`. `dmesg | grep -i oom`.
+원인: maestro Claude 가 평소보다 메모리를 많이 먹는 spike 와 dev container 의 limit 합산이 4GB + swap 1GB 를 넘김.
+대응:
+1. `docker stats` 로 가장 큰 사용자 확인.
+2. 일시적이면 maestro 사이클을 잠시 멈춘 뒤 (`tmux send-keys -t mobruji /exit`) 재기동.
+3. 만성이면 spec §5-2 메모리 매트릭스 재조정 — `docker-compose.dev.yml` 의 `mem_limit` 또는 mysql `innodb-buffer-pool-size`.
+
+#### CD 자동 롤백 발동
+증상: GitHub Actions workflow `CD Dev — NCP` 가 fail, NCP 에서 컨테이너는 직전 SHA 로 돌고 있음.
+원인: 새 SHA 가 부팅에 실패 (DB migration 깨짐, 환경 변수 누락 등).
+대응:
+1. `gh run view <run-id> --log-failed` 로 healthcheck 실패 직전 backend 로그 확인.
+2. develop 에 hotfix 머지 (또는 release 보류) → 다음 CD 가 다시 시도.
+3. 수동 검증: `git checkout origin/develop` 후 NCP 에서 동일 명령으로 재현.
+
+#### nginx 502 / 504
+- 502: backend 또는 web 가 아직 부팅 중 (start_period 60s/30s) — 잠시 대기.
+- 504: backend 응답이 30s 넘음 — `docker compose logs backend` 확인.
+
+#### `.env.dev` 변경했는데 반영 안 됨
+docker compose 의 환경 변수는 컨테이너 생성 시 한 번 inline. 변경 후 `up -d --force-recreate` 또는 service 별 `up -d --no-deps backend`.
+
+## I) 다음 단계
+
+본 런북 §B(Phase 1) ~ §H(Phase 4) 완료 후:
+- Phase 4 dev 환경 사용성 1주 운영 데이터 보고 — `docs/features/deployment-infrastructure.md` (Hetzner CX22 prod) 진행 결정.
+- rev sub-agent 가 dev URL 을 통합 시나리오 QA 에 사용 — `docs/features/rev-qa-protocol.md` §5-4 갱신 (별 PR).
+- (선택) maestro transcript 무게 모니터 → 자동 `/compact` 트리거.
+- (선택) Grafana Cloud remote_write — CPU/RAM/swap/container memory.
+
+## J) 관련 문서
 
 - [`docs/decisions/0015-hosting-stack.md`](../decisions/0015-hosting-stack.md) — 본 런북의 결정 ADR
-- [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) — Discord-driven 본진 spec (#338)
+- [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) — Discord-driven maestro spec (#338)
 - [`docs/features/deployment-infrastructure.md`](../features/deployment-infrastructure.md) — 백/프론트 배포 spec (별 트랙)
 - [`docs/features/discord-daemon-hosting.md`](../features/discord-daemon-hosting.md) — Discord daemon 호스트 (본 ADR로 NCP 동거 갱신됨)
 - [`docs/ai-harness/11-multi-session-runbook.md`](../ai-harness/11-multi-session-runbook.md) — 멀티 세션 워크트리 운영

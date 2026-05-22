@@ -1,0 +1,30 @@
+# Build/cache 디렉토리 — 컨테이너 안에서 새로 빌드.
+.next/
+out/
+node_modules/
+
+# 테스트 산출물.
+coverage/
+
+# IDE / OS 잡파일.
+.idea/
+.vscode/
+.DS_Store
+
+# 로그 / 임시.
+*.log
+.npm/
+
+# 환경 파일 (런타임 주입).
+.env
+.env.local
+.env.*.local
+
+# git 메타.
+.git/
+.gitignore
+
+# 문서 (이미지에 불필요).
+README.md
+AGENTS.md
+CLAUDE.md

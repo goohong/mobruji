@@ -181,7 +181,7 @@ last_reviewed: 2026-05-22
 - [ ] **PR E (docs/feat, v0.4 P3 후보)**: 외부 큐레이션 컨트리뷰션 가이드 (§4-1). v0.4 진입 시점에 별 spec으로 분리 가능.
 
 > 협업 패턴: **AI 1차 제안 → 사용자 검증** 사이클. AI가 단독으로 100곡을 확정해 머지하지 않는다.
-> 사용자 협조 필요: PR B/C는 사용자가 곡 청취·음역 검증을 수행. 본진 AI는 후보 제안/JSON 편집/PR 작성을 담당.
+> 사용자 협조 필요: PR B/C는 사용자가 곡 청취·음역 검증을 수행. maestro AI는 후보 제안/JSON 편집/PR 작성을 담당.
 
 ## 7) 테스트 전략
 - **단위 (PR A)**: `songs-seed.json` 스키마 유효성 — §5-5 룰을 1:1 변환. 모든 곡이 필수 필드 보유, `lowMidi < highMidi`, MIDI 범위, `metadataConfidence` 범위, `genre`/`language` 화이트리스트, `bpm` 범위, `releaseYear` 범위.

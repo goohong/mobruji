@@ -1,0 +1,23 @@
+# Build/cache 디렉토리 — 컨테이너 안에서 새로 빌드.
+build/
+.gradle/
+out/
+
+# IDE / OS 잡파일.
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# 로그 / 임시.
+*.log
+logs/
+tmp/
+
+# 테스트 산출물.
+.gradle-test-kit/
+
+# git 메타 (이미지에 불필요).
+.git/
+.gitignore
+.gitattributes

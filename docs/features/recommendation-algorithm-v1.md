@@ -182,7 +182,7 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
 - 2026-05-21: 추천 응답 UX 보강 — difficulty + 노트명 노출 (PR #96, closes #77, #95).
   - **응답 필드 추가**: `RecommendedSongResponse.song`이 참조하는 `SongResponse`에 `difficulty: Difficulty`(EASY/NORMAL/HARD), `lowMidi`/`highMidi`(MIDI 정수), `lowestNoteName`/`highestNoteName`(예: "E5") 추가.
   - **UX 배경**(이슈 #75/#77, 2026-05-21 사용자 결정): 추천 카드의 음역 막대 그래프를 폐기하고 "가창 난이도 라벨 + 최고음 표기"로 대체. 사람이 즉시 이해할 수 있는 표현 우선.
-  - **분류 룰**: fe(`web/lib/difficulty.ts`)와 1:1 일치. HARD: high≥76(E5) 또는 span≥17, NORMAL: 71~75, EASY: <71. 임계값 영속화는 ADR 0007 후보(본진 후속).
+  - **분류 룰**: fe(`web/lib/difficulty.ts`)와 1:1 일치. HARD: high≥76(E5) 또는 span≥17, NORMAL: 71~75, EASY: <71. 임계값 영속화는 ADR 0007 후보(maestro 후속).
   - **알고리즘 영향 없음**: 본 PR은 응답 표현만 추가. score 산식·다양성 후처리·결정성 어떤 것도 변경하지 않음. 기존 가드 테스트 모두 통과.
 - 2026-05-21: 추천 응답에 score breakdown 분해 노출 (PR #146, closes #145).
   - **배경**: plan 사이클 10 영감 분석 F-2 P2(Spotify "Why this song?"). 기존 응답은 `score`(가중 합산 double) + `matchReason`(한 줄)만이라 사용자가 추천 사유를 펼쳐볼 수단이 없었다. fe 사이클 14(#142)가 client-side로 breakdown을 추정 중인 상황을 backend가 정확히 채우는 방향.

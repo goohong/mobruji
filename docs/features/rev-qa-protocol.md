@@ -21,7 +21,7 @@ last_reviewed: 2026-05-22
 - 정형 룰이 없으면 사이클마다 위임 프롬프트가 흔들리고 QA 누락이 생긴다 → 이 문서가 단일 참조원이다.
 
 ## 2) 사용자 시나리오
-- **시나리오 1 (PR 머지 후)**: rev 세션이 머지 직후 트리거되어 develop tip에서 QA를 수행 → 회귀 발견 시 본진에 핫라인 보고.
+- **시나리오 1 (PR 머지 후)**: rev 세션이 머지 직후 트리거되어 develop tip에서 QA를 수행 → 회귀 발견 시 maestro에 핫라인 보고.
 - **시나리오 2 (release gate)**: `develop → main` 머지 전 rev 세션이 release-candidate QA를 수행 → 모든 reviewed:claude PR이 QA pass여야 사용자에게 release 컨펌 요청.
 - **시나리오 3 (idle 사이클)**: 머지된 PR이 없을 때 rev가 develop 전체 회귀 QA를 수행 → 누적 회귀를 발굴.
 
@@ -32,7 +32,7 @@ last_reviewed: 2026-05-22
 - [ ] smoke 시나리오 라이브러리를 도메인별로 정의 (음역 측정 / 추천 / 좋아요 / 이력).
 - [ ] QA 결과는 PR 코멘트로 남기고 형식은 `🟢/🟡/🔴 + QA 결과 1줄`로 고정.
 - [ ] rev는 워크트리에서 파일을 수정하지 않는다 (pre-push hook 차단됨). 임시 스크립트는 `/tmp/*` 또는 stdin heredoc만 허용.
-- [ ] release gate 차단: 🔴 QA 결과는 release PR을 막고 본진이 fix 사이클을 launch한다.
+- [ ] release gate 차단: 🔴 QA 결과는 release PR을 막고 maestro이 fix 사이클을 launch한다.
 - [ ] 환경 선택 트리 (local 3-tier / dev 서버 / staging) 명시.
 
 ### 비기능 요구사항
@@ -46,7 +46,7 @@ last_reviewed: 2026-05-22
 - rev sub-agent가 따라야 할 QA 결정 트리, 시나리오, 결과 형식.
 - 환경 선택 가이드 (local 3-tier 기본, 외부 의존은 dev 서버).
 - QA 도구 선택 (curl / httpie / Playwright / RestAssured 부재 시 임시 스크립트).
-- 본진이 rev sub-agent를 launch할 때 prompt에 박을 핵심 룰.
+- maestro이 rev sub-agent를 launch할 때 prompt에 박을 핵심 룰.
 
 ### 제외 (Out of Scope)
 - **CI 워크플로우 자동화**: rev QA는 사람(sub-agent) 트리거가 기본. 자동화는 추후 별도 spec.
@@ -201,13 +201,48 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 
 ### 5-4) 환경 선택 가이드
 
-| 환경 | 언제 쓰나 | 셋업 명령 |
-|---|---|---|
-| **local 3-tier (기본)** | 모든 PR QA의 1차 검증 | `docs/runbooks/local-3tier-setup.md` |
-| **dev 서버** | 외부 의존(Spotify/MusicBrainz/YouTube API) 통합 검증 | (별도 인프라 spec 머지 후 추가) |
-| **staging** | release-candidate 최종 검증 | (별도 인프라 spec 머지 후 추가) |
+| 환경 | URL | 언제 쓰나 | 셋업 / 운영 |
+|---|---|---|---|
+| **local 3-tier (기본)** | `http://localhost:3000` + `http://localhost:8080` | 모든 PR QA의 1차 검증 (격리된 컨텍스트, 즉시 가동) | `docs/runbooks/local-3tier-setup.md` |
+| **dev 서버 (NCP)** | `http://101.79.20.94/` (web) + `http://101.79.20.94/api/...` (backend) | 외부 의존(Spotify/MusicBrainz/YouTube) 통합 검증, 사용자 dogfooding, develop tip 회귀 | `docs/runbooks/ncp-maestro-setup.md` §H (Phase 4) |
+| **staging** | (미구축) | release-candidate 최종 검증 | (별도 인프라 spec — `deployment-infrastructure.md` Hetzner CX22 머지 후) |
 
-현재 dev/staging 환경이 없으므로 모든 QA는 **local 3-tier에서 수행**. 외부 API 의존이 강한 PR은 mock 응답 기반으로 검증하거나, dev 환경 생기기 전까지는 "외부 의존 검증 보류" 코멘트와 함께 🟡로 표시.
+### 5-4-1) dev 서버 활용 가이드 (Phase 4 머지 후)
+
+dev 서버는 develop 머지마다 GitHub Actions `cd-dev.yml` 가 자동 배포한다 (`docs/features/ncp-dev-deployment.md` §5-3). 사용 시점:
+
+- **외부 의존 PR**: Spotify Audio Features / MusicBrainz / YouTube API 등 실제 응답을 봐야 하는 회귀. local 3-tier mock 으로는 부족할 때.
+- **사용자 dogfooding**: 모바일 브라우저로 직접 사용해보기 (`http://101.79.20.94/`).
+- **develop tip 통합 회귀**: 머지된 PR 묶음을 통합 환경에서 한 번 더 확인 — rev idle 사이클 (§0-5) 의 자체 백로그.
+
+QA 절차 (rev sub-agent 또는 사용자):
+```bash
+# 1) backend liveness
+curl -sS http://101.79.20.94/actuator/health/liveness
+
+# 2) 추천 API smoke (관리 토큰 불요)
+curl -sS -X POST http://101.79.20.94/api/v1/recommendations \
+  -H 'Content-Type: application/json' \
+  -d '{"voiceRange":{"low":"C3","high":"E4"},"gender":"male"}' | jq
+
+# 3) web 응답 (SSR 200)
+curl -sS -o /dev/null -w "%{http_code}\n" http://101.79.20.94/
+
+# 4) container 상태 (NCP SSH 후)
+docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+```
+
+dev 환경 사용 시 보고서 헤더:
+```
+- 환경: dev (NCP, commit <sha>)
+- container ps: 4/4 healthy
+- BE p95 (smoke): ...ms
+- 결과: 🟢 / 🟡 / 🔴
+```
+
+### 5-4-2) 환경 fallback
+- dev 서버가 down 이면 (`/actuator/health/liveness` 5xx 또는 timeout) → local 3-tier 로 fallback + PR 코멘트에 명시 (`dev 환경 down — local 3-tier 로 검증`).
+- maestro 가 dev CD 자동 롤백 (Phase 4 spec §5-3) 발동 시 GitHub Actions workflow run 결과를 봐서 rev sub-agent 가 dev URL 활용 가능 여부 판단.
 
 ### 5-5) QA 도구
 
@@ -344,8 +379,8 @@ rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름**
 `develop → main` release 머지 전 rev 세션이 다음을 수행:
 1. `gh pr list --base develop --state merged --search "merged:>=<이전 release 이후> -label:reviewed:claude"` → 미QA PR 색출
 2. 미QA PR마다 본 spec §5-1 매트릭스 따라 QA 수행
-3. 모든 PR이 🟢 또는 🟡일 때만 본진에 release 컨펌 보고
-4. 🔴가 1건이라도 있으면 → 본진에 fix 사이클 launch 요청, release 차단
+3. 모든 PR이 🟢 또는 🟡일 때만 maestro에 release 컨펌 보고
+4. 🔴가 1건이라도 있으면 → maestro에 fix 사이클 launch 요청, release 차단
 
 QA pass PR에는 `reviewed:claude` 라벨 부여 (라벨 없으면 release gate가 차단).
 
