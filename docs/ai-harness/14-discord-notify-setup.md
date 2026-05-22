@@ -156,3 +156,15 @@ GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 �
 - 양방향 봇 (Discord slash command → GitHub Actions dispatch): 향후 ADR/Feature Spec 필요
 
 지금은 push만으로도 "사용자가 외출 중 사이클 진행을 인지하고 귀가 후 결정"하는 흐름이 가능하다.
+
+## 9) maestro 사이클 트레일 push 룰
+
+이 문서는 **이벤트 → webhook → 채널** 흐름을 정형화한다. 그 위에 **maestro가 자기 사이클을 GitHub events로 expose하는 의무 룰**은 `docs/features/discord-status-push.md` 에서 다룬다. 두 문서 관계:
+
+| 책임 | 문서 |
+|---|---|
+| webhook workflow 셋업·운영 | 본 문서 (`14-discord-notify-setup.md`) |
+| 어느 이벤트를 발생시킬지 (maestro 의무) | `docs/features/discord-status-push.md` |
+| 사이클 카운트 / sub-agent 운영 | `docs/ai-harness/11-multi-session-runbook.md` |
+
+핵심 매핑은 `11-multi-session-runbook.md §0-6-2` 또는 spec §5-2 표 참조.
