@@ -186,5 +186,100 @@ class PayloadDispatchPathTests(unittest.TestCase):
         send.assert_not_called()
 
 
+class StatusReportTests(unittest.TestCase):
+    """/status 핸들러 결정성 응답 검증 (#354)."""
+
+    def _completed(self, *, rc: int = 0, stdout: str = "", stderr: str = "") -> mock.MagicMock:
+        result = mock.MagicMock()
+        result.returncode = rc
+        result.stdout = stdout
+        result.stderr = stderr
+        return result
+
+    def test_truncate_title_short(self) -> None:
+        self.assertEqual(bot._truncate_title("hello"), "hello")
+
+    def test_truncate_title_long(self) -> None:
+        title = "x" * 80
+        out = bot._truncate_title(title, limit=20)
+        self.assertEqual(len(out), 20)
+        self.assertTrue(out.endswith("…"))
+
+    def test_run_gh_json_success(self) -> None:
+        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(stdout='[{"number":1}]')):
+            out = bot._run_gh_json(["pr", "list"], "pat")
+        self.assertEqual(out, [{"number": 1}])
+
+    def test_run_gh_json_nonzero_returns_none(self) -> None:
+        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(rc=1, stderr="boom")):
+            out = bot._run_gh_json(["pr", "list"], "pat")
+        self.assertIsNone(out)
+
+    def test_run_gh_json_decode_error_returns_none(self) -> None:
+        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(stdout="not json")):
+            out = bot._run_gh_json(["pr", "list"], "pat")
+        self.assertIsNone(out)
+
+    def test_run_gh_json_timeout_returns_none(self) -> None:
+        def boom(*a, **kw):
+            raise bot.subprocess.TimeoutExpired(cmd=["gh"], timeout=1)
+        with mock.patch.object(bot.subprocess, "run", side_effect=boom):
+            self.assertIsNone(bot._run_gh_json(["pr", "list"], "pat"))
+
+    def test_run_gh_json_injects_gh_token(self) -> None:
+        captured: dict = {}
+
+        def fake(cmd, **kwargs):
+            captured["env"] = kwargs.get("env", {})
+            return self._completed(stdout="[]")
+
+        with mock.patch.object(bot.subprocess, "run", side_effect=fake):
+            bot._run_gh_json(["pr", "list"], "secret-pat")
+        self.assertEqual(captured["env"].get("GH_TOKEN"), "secret-pat")
+
+    def test_systemd_is_active_returns_stripped(self) -> None:
+        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(stdout="active\n")):
+            self.assertEqual(bot._systemd_is_active("unit"), "active")
+
+    def test_systemd_is_active_unknown_on_missing(self) -> None:
+        with mock.patch.object(bot.subprocess, "run", side_effect=FileNotFoundError):
+            self.assertEqual(bot._systemd_is_active("unit"), "unknown")
+
+    def test_build_status_report_full(self) -> None:
+        from datetime import datetime as _dt, timezone as _tz
+        fake_now = _dt(2026, 5, 23, 4, 30, tzinfo=_tz.utc)
+        with mock.patch.object(bot, "_run_gh_json") as gh, \
+             mock.patch.object(bot, "_systemd_is_active", side_effect=["active", "active"]):
+            gh.side_effect = [
+                [{"number": 351, "title": "feat(infra): systemd unit", "isDraft": False, "labels": []}],
+                [{"number": 350, "title": "feat(infra): bot.py 확장", "mergedAt": "2026-05-22T15:09:00Z"}],
+                [],
+            ]
+            out = bot.build_status_report("goohong/mobruji", "pat", now=fake_now)
+        self.assertIn("mobruji status", out)
+        self.assertIn("maestro: `active`", out)
+        self.assertIn("#351", out)
+        self.assertIn("#350", out)
+        self.assertIn("알려진 오류: (없음)", out)
+        # KST = UTC + 9, 04:30 UTC → 13:30 KST.
+        self.assertIn("2026-05-23 13:30 KST", out)
+
+    def test_build_status_report_gh_failure_degrades(self) -> None:
+        with mock.patch.object(bot, "_run_gh_json", return_value=None), \
+             mock.patch.object(bot, "_systemd_is_active", return_value="active"):
+            out = bot.build_status_report("goohong/mobruji", "pat")
+        self.assertIn("진행 중 PR: (조회 실패)", out)
+        self.assertIn("최근 머지: (조회 실패)", out)
+        self.assertIn("알려진 오류: (조회 실패)", out)
+
+    def test_build_status_report_truncates_to_discord_limit(self) -> None:
+        long_pr = {"number": 999, "title": "X" * 200, "isDraft": False, "labels": []}
+        with mock.patch.object(bot, "_run_gh_json") as gh, \
+             mock.patch.object(bot, "_systemd_is_active", return_value="active"):
+            gh.side_effect = [[long_pr] * 8, [long_pr] * 5, [long_pr] * 5]
+            out = bot.build_status_report("goohong/mobruji", "pat")
+        self.assertLessEqual(len(out), bot.STATUS_DISCORD_MAX_LEN)
+
+
 if __name__ == "__main__":
     unittest.main()

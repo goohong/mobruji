@@ -29,7 +29,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
 
@@ -48,6 +48,12 @@ DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 PIPE_PANE_ROTATE_INTERVAL_SECONDS: Final[int] = 5 * 60  # 5min
 DEFAULT_PIPE_PANE_MAX_BYTES: Final[int] = 100 * 1024 * 1024  # 100MB
 SENTINEL_PREFIX: Final[str] = "/system:"
+STATUS_COMMAND_PREFIX: Final[str] = "/status"
+STATUS_GH_TIMEOUT_SECONDS: Final[int] = 8
+STATUS_OPEN_PR_LIMIT: Final[int] = 8
+STATUS_MERGED_PR_LIMIT: Final[int] = 5
+STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
+STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -390,6 +396,136 @@ def start_tmux_pipe_pane(
     threading.Thread(target=rotate_loop, name="pipe-pane-rotate", daemon=True).start()
 
 
+def _run_gh_json(args: list[str], github_pat: str) -> list[dict] | None:
+    """gh CLI 호출 후 JSON 배열을 파싱한다. 실패 시 None — 호출부에서 graceful degradation."""
+    env = os.environ.copy()
+    if github_pat:
+        env["GH_TOKEN"] = github_pat
+    try:
+        result = subprocess.run(
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            timeout=STATUS_GH_TIMEOUT_SECONDS,
+            env=env,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        logger.warning("gh 호출 실패: args=%s err=%s", args, exc)
+        return None
+    if result.returncode != 0:
+        logger.warning(
+            "gh 비정상 종료: args=%s rc=%s stderr=%s",
+            args,
+            result.returncode,
+            truncate_for_log(result.stderr),
+        )
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        logger.warning("gh JSON 파싱 실패: %s", exc)
+        return None
+
+
+def _systemd_is_active(unit: str) -> str:
+    """systemctl is-active 결과 한 줄. 실패 시 'unknown'."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return "unknown"
+    return (result.stdout or "").strip() or "unknown"
+
+
+def _truncate_title(title: str, limit: int = 60) -> str:
+    if len(title) <= limit:
+        return title
+    return title[: limit - 1] + "…"
+
+
+def build_status_report(
+    github_repo: str,
+    github_pat: str,
+    *,
+    maestro_unit: str = "mobruji-maestro.service",
+    bridge_unit: str = "mobruji-discord-bridge.service",
+    now: datetime | None = None,
+) -> str:
+    """결정성 /status 응답을 1 메시지로 조립한다.
+
+    구성: maestro/bridge systemd 상태 + 진행 중 PR + 최근 머지 + 오픈 type:bug 이슈.
+    LLM 호출 없음. 외부는 gh CLI + systemctl 만. 실패 항목은 '(조회 실패)'로 표시.
+    """
+    now = now or datetime.now(timezone.utc)
+    repo_args = ["--repo", github_repo]
+
+    open_prs = _run_gh_json(
+        ["pr", "list", *repo_args, "--state", "open", "--limit", str(STATUS_OPEN_PR_LIMIT),
+         "--json", "number,title,isDraft,labels"],
+        github_pat,
+    )
+    merged_prs = _run_gh_json(
+        ["pr", "list", *repo_args, "--state", "merged", "--limit", str(STATUS_MERGED_PR_LIMIT),
+         "--json", "number,title,mergedAt"],
+        github_pat,
+    )
+    bug_issues = _run_gh_json(
+        ["issue", "list", *repo_args, "--state", "open", "--label", "type:bug",
+         "--limit", str(STATUS_BUG_ISSUE_LIMIT), "--json", "number,title"],
+        github_pat,
+    )
+
+    maestro_state = _systemd_is_active(maestro_unit)
+    bridge_state = _systemd_is_active(bridge_unit)
+
+    lines: list[str] = ["🎼 **mobruji status**"]
+    lines.append(
+        f"- maestro: `{maestro_state}` · bridge: `{bridge_state}`"
+    )
+
+    if open_prs is None:
+        lines.append("- 진행 중 PR: (조회 실패)")
+    elif not open_prs:
+        lines.append("- 진행 중 PR: (없음)")
+    else:
+        lines.append(f"- 진행 중 PR ({len(open_prs)}):")
+        for pr in open_prs:
+            draft = " 📝" if pr.get("isDraft") else ""
+            lines.append(f"  • #{pr['number']}{draft} {_truncate_title(pr['title'])}")
+
+    if merged_prs is None:
+        lines.append("- 최근 머지: (조회 실패)")
+    elif not merged_prs:
+        lines.append("- 최근 머지: (없음)")
+    else:
+        lines.append(f"- 최근 머지 ({len(merged_prs)}):")
+        for pr in merged_prs:
+            lines.append(f"  • #{pr['number']} {_truncate_title(pr['title'])}")
+
+    if bug_issues is None:
+        lines.append("- 알려진 오류: (조회 실패)")
+    elif not bug_issues:
+        lines.append("- 알려진 오류: (없음)")
+    else:
+        lines.append(f"- 알려진 오류 ({len(bug_issues)}):")
+        for issue in bug_issues:
+            lines.append(f"  • #{issue['number']} {_truncate_title(issue['title'])}")
+
+    kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
+    lines.append(f"- as of: {kst.strftime('%Y-%m-%d %H:%M %Z')}")
+
+    report = "\n".join(lines)
+    if len(report) > STATUS_DISCORD_MAX_LEN:
+        report = report[: STATUS_DISCORD_MAX_LEN - 1] + "…"
+    return report
+
+
 def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Client:
     """discord.py Client 를 셋업하고 핸들러를 바인딩한다."""
     intents = discord.Intents.default()
@@ -435,6 +571,19 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         message_id = str(message.id)
         if ledger is not None and ledger.is_processed(message_id):
             logger.info("dedup hit: message_id=%s", message_id)
+            return
+
+        # /status — 결정성 빠른 응답. tmux/dispatch 분기 건너뜀.
+        content = (message.content or "").strip()
+        if content.split(maxsplit=1)[:1] == [STATUS_COMMAND_PREFIX]:
+            logger.info("/status 요청: user=%s", message.author.id)
+            report = build_status_report(env["GITHUB_REPO"], env.get("GITHUB_PAT", ""))
+            try:
+                await message.channel.send(report)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("/status 응답 send 실패: %s", exc)
+            if ledger is not None:
+                ledger.mark_processed(message_id)
             return
 
         ts_iso = message.created_at.astimezone(timezone.utc).isoformat()
