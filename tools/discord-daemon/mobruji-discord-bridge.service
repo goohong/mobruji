@@ -1,0 +1,22 @@
+[Unit]
+Description=Mobruji Discord bridge (bot.py — Discord ↔ tmux maestro)
+After=network-online.target mobruji-maestro.service
+Wants=network-online.target
+# 무한 재시작 루프 방어 — 5분(300s) 안에 5회 재시작 실패 시 unit 을 stop.
+# rev 15 #225 결정과 동일 (기존 mobruji-discord-daemon.service 와 같은 윈도우).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=mobruji
+WorkingDirectory=/home/mobruji/mobruji/tools/discord-daemon
+EnvironmentFile=/home/mobruji/mobruji/tools/discord-daemon/.env
+ExecStart=/home/mobruji/mobruji/tools/discord-daemon/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
