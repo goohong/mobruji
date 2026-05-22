@@ -1,7 +1,7 @@
 ---
 feature: rev 세션 QA 실행 검증 프로토콜
 slug: rev-qa-protocol
-status: active
+status: implementing
 owner: @goohong
 scope: infra
 related_issues: []
