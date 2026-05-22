@@ -4,6 +4,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
 import { BottomNav } from "@/components/nav/BottomNav";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -62,6 +64,16 @@ export default function RootLayout({
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/*
+         * 이슈 #319: hydration 전에 `<html class="dark">` 를 결정해 라이트↔다크
+         * FOUC 를 방지한다. localStorage 모드 / system prefers-color-scheme 로
+         * 분기. 본 스크립트는 layout.tsx 외엔 어떤 컴포넌트도 의존하지 않는다.
+         */}
+        <script
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
+      </head>
       {/*
         모바일 BottomNav가 fixed로 깔리므로 main 콘텐츠가 가려지지 않도록 body에
         하단 padding을 둔다. 데스크탑(md:)에선 nav를 숨기므로 padding도 제거.
@@ -69,6 +81,7 @@ export default function RootLayout({
       */}
       <body className="min-h-full flex flex-col pb-20 md:pb-0">
         <Providers>{children}</Providers>
+        <ThemeToggle />
         <BottomNav />
         <ServiceWorkerRegistrar />
       </body>
