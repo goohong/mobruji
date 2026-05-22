@@ -35,9 +35,11 @@ RUN --mount=type=cache,target=/root/.gradle \
 #######################################
 FROM eclipse-temurin:21-jre-noble AS runner
 
-# 보안: non-root user. 21로 고정 (Spring Boot 표준 관례).
-RUN groupadd --system --gid 1000 spring \
-    && useradd --system --uid 1000 --gid spring --no-create-home spring
+# 보안: non-root user. UID/GID 1001 — eclipse-temurin:21-jre-noble 의 ubuntu user 가
+# UID 1000 을 이미 점유해서 1000 사용 시 useradd 실패 (groupadd: GID '1000' already exists).
+# web/Dockerfile (nextjs:nodejs) 와 동일 UID 사용으로 일관성.
+RUN groupadd --system --gid 1001 spring \
+    && useradd --system --uid 1001 --gid spring --no-create-home spring
 
 # 헬스체크용 curl. 이미지 크기 +5MB 이내.
 RUN apt-get update \
