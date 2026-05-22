@@ -124,3 +124,4 @@ sequenceDiagram
 
 ## 9) 결정 로그
 - 2026-05-21: 초안 작성 (status=draft). ADR 0006/0010 후속 spec으로 정식 등재.
+- 2026-05-22 (plan 33): CI 빌드 시간 모니터링 + librosa/spleeter 캐싱 + 대안 라이브러리 평가 트리거 조건은 별 spec `docs/features/librosa-ci-build-monitoring.md` (#209-B) 로 분리. 본 spec 의 §3 비기능 요구사항 (관측성 — `audio_analysis_duration_seconds`, `audio_analysis_failures_total{reason}`) 은 운영 메트릭 한정이며, CI 메트릭 (`audio_analysis_ci.*`) 은 librosa-ci-build-monitoring spec 이 단일 진실. Q1 (spleeter vs demucs 등 모델 대체) 의 트리거 일부도 본 신설 spec §5-7 에서 정량 조건으로 흡수.

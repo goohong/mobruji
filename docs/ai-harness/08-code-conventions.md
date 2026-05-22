@@ -206,6 +206,29 @@ import com.mobruji.song.application.SongService; // BAD — application은 domai
 
 ArchUnit 또는 Spring Modulith로 위 규칙을 테스트 코드로 강제하는 안을 별도 이슈로 추진(ADR 0005 마이그레이션 머지 후).
 
+### A-8) 결정성 패턴 (비결정 호출 금지)
+
+> spec §3 비기능에 "같은 입력 → 같은 결과" 결정성이 명시된 도메인(`recommendation` 등)의 `application` 계층에서는 비결정 호출을 직접 사용하지 않는다.
+
+#### 금지 호출 (서비스 로직 내부)
+- `new Random()` — seed 없음. 호출마다 다른 jitter → 결정성 위반. (rev 사이클 1 🔴, PR #48 fix)
+- `Instant.now()` / `LocalDateTime.now()` / `System.currentTimeMillis()` — 시각 의존. 같은 입력이라도 호출 시각에 따라 결과가 흔들림.
+- `UUID.randomUUID()` — 무작위 ID. 결정성 디버깅을 깬다.
+
+#### 대체 패턴
+- **요청 식별자 기반 seed**: `SeedDeriver.derive(...)` 패턴 — 요청 입력 필드를 정규화 직렬화 → SHA-256 → 상위 8바이트 long → `new Random(seed)`. 자세한 계약은 `docs/features/recommendation-algorithm-v1.md §3 비기능 결정성`.
+- **`Clock` DI**: 시각이 정말 필요하면 `java.time.Clock`을 빈으로 주입(테스트는 `Clock.fixed(...)`). 호출은 `clock.instant()`.
+- **결정적 ID**: UUID가 필요하면 입력 해시 기반 deterministic UUID(`UUID.nameUUIDFromBytes(...)`) 사용. 단 정말 필요한 경우에만.
+
+#### 적용 범위
+- `com.mobruji.<bc>.application.*` (`@Service` 포함). 추천 외 도메인이라도 spec §3 비기능에 결정성이 명시되면 동일 룰.
+- 예외(허용): 테스트 코드(`src/test/**`), 시드 로더(`*SeedLoader` — 시드 데이터 생성용), 마이그레이션·운영 스크립트.
+- 보호 영역(`application.yml` 등) 바인딩값은 부트 fail-fast 목적이라 본 룰과 무관.
+
+#### 자동 강제 (계획)
+- ArchUnit으로 `application` 패키지에서 `java.util.Random`(no-arg constructor) / `java.time.Instant#now` / `java.util.UUID#randomUUID` 직접 호출 금지 룰을 테스트 코드로 강제 (#61).
+- 도입 전까지는 PR 리뷰에서 grep + 수동 확인. rev 세션이 회귀 가드.
+
 ---
 
 ## B. Frontend (Next.js / TypeScript)

@@ -53,6 +53,7 @@ last_reviewed: 2026-05-22
 - 수집기 스택 선택 (ADR-0012) + 단순 대시보드 1개
 - Discord webhook 기반 임계치 알림 1~2 규칙 (외부 API 에러율 등)
 - `10-observability.md` Phase 1 룰 갱신 (베이스라인 반영)
+- **운영 메트릭만** — CI 빌드 시간/캐시 메트릭은 별 spec (`docs/features/librosa-ci-build-monitoring.md`, #209-B). 두 spec 의 메트릭은 의도적으로 분리 (운영 = Micrometer/Grafana / CI = GitHub Actions artifacts).
 
 ### 제외 (Out of Scope)
 
@@ -106,7 +107,7 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 | `mobruji.song.audio.backfill.requested` | counter | — | 스케줄 backfill 1회 trigger | 기존 (#235) |
 | `mobruji.song.audio.backfill.success` | counter | — | backfill 성공 1건 | 기존 |
 | `mobruji.song.audio.backfill.failed` | counter | `reason` (python/io/parse/timeout) | backfill 실패 1건 | 기존 — `reason` 라벨 신설 |
-| `mobruji.song.audio.analysis.duration` | timer | — | librosa 분석 1건 처리 시간 | 신설 (CI 모니터링 #209 와 연계) |
+| `mobruji.song.audio.analysis.duration` | timer | — | librosa 분석 1건 처리 시간 (**운영** 메트릭. CI 빌드 시간은 별도 — `docs/features/librosa-ci-build-monitoring.md`) | 신설 (#209 와 연계) |
 | `mobruji.external.musicbrainz.request` | counter | `outcome` (success/error/ratelimited) | MB 호출 1회 | 신설 (#68 트리거) |
 | `mobruji.external.musicbrainz.request.duration` | timer | `outcome` | MB 호출 응답시간 | 신설 (#68) |
 | `mobruji.external.spotify.request` | counter | `outcome` | Spotify 호출 1회 | 신설 (#69 트리거) |
@@ -119,9 +120,11 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 
 ### 5-4) p95 측정 endpoint 매트릭스 (#62 동기화)
 
+> **추천 POST 임계 단일 진실**: `docs/features/recommendation-p95-regression-guard.md` §5-3. 본 표의 추천 POST 행은 본 spec 머지 후 후속 PR (PR 2) 에서 200ms 로 동기화. 다른 endpoint 는 본 표가 단일 진실 (별 spec 미작성).
+
 | Endpoint | Method | 목표 p95 | 비고 |
 |---|---|---|---|
-| `/api/v1/recommendations` | POST | **300ms** | 추천 v1/v2 산정 + DB 조회. #62 회귀 가드 대상 |
+| `/api/v1/recommendations` | POST | **300ms** (→ 200ms 동기화 예정, recommendation-p95-regression-guard §5-3) | 추천 v1/v2 산정 + DB 조회. #62 회귀 가드 대상 |
 | `/api/v1/recommendations/{id}/like` | POST/DELETE | 150ms | 단순 INSERT/DELETE |
 | `/api/v1/recommendations/{id}/bookmark` | POST/DELETE | 150ms | 단순 INSERT/DELETE |
 | `/api/v1/sessions/{id}/voice-range-history` | GET | 200ms | snapshot 조회 + 정렬 |

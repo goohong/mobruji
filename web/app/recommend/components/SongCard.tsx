@@ -193,12 +193,15 @@ export function SongCard(props: SongCardProps) {
     <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
   ) : null;
 
-  // 좋아요 + 북마크 버튼(closes #176 + #184) — 추천/검색 두 컨텍스트 모두 노출.
-  // href 모드에서는 <a> 안에 button을 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
+  // 좋아요 + 북마크 + YouTube 검색 (closes #176 + #184 + #302) — 추천/검색 두 컨텍스트 모두 노출.
+  // href 모드에서는 <a> 안에 button/a를 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
+  // YouTube 검색 링크는 ADR-0006 범위(BE 분석 파이프라인) 밖이라 클라이언트에서 검색 URL만 조립한다.
+  // embed/youtubeId 컬럼이 추가될 때까지 1단계로 "새 탭으로 검색" 만 제공해 BE/저작권 리스크를 회피.
   const feedbackPanel = (
     <div className="flex flex-wrap items-center gap-2">
       <LikeButton songId={song.id} songTitle={song.title} />
       <BookmarkButton songId={song.id} songTitle={song.title} />
+      <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
     </div>
   );
 
@@ -454,6 +457,56 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * YouTube 검색 링크 (closes #302) — 추천 카드 미리듣기 1단계.
+ *
+ * 정책 결정:
+ *   - ADR-0006(`docs/decisions/0006-audio-source-youtube.md`)은 **BE 분석 파이프라인의 audio 출처**로
+ *     YouTube를 채택한 결정일 뿐, 프론트 사용자 미리듣기 정책은 정의하지 않는다. iframe embed/lite-embed는
+ *     ToS·저작권 리스크가 있어 별도 ADR + Song 엔티티 youtubeId 컬럼 추가가 필요하다.
+ *   - 본 PR(fe 35)은 BE/legal 변경 없이 가능한 가장 안전한 진입점만 제공: 공식 YouTube 검색 결과 페이지를
+ *     새 탭으로 연다. 사용자가 거기서 듣고 카드로 돌아와 좋아요/북마크를 결정한다.
+ *   - 후속(fe 36+)에서 BE에 youtubeId 컬럼이 추가되면 lite-embed로 교체 (본진 보고 사항).
+ *
+ * 접근성:
+ *   - aria-label에 곡 제목 + "(새 탭)" 명시 → 스크린 리더가 새 창임을 알린다.
+ *   - rel="noopener noreferrer" — window.opener leak 방지(보안).
+ *   - target="_blank" 새 탭이므로 추천 흐름 유지.
+ *   - href 모드의 부모 Link로 이벤트가 새 나가지 않도록 stopPropagation.
+ */
+export function buildYouTubeSearchUrl(title: string, artist: string): string {
+  // YouTube 공식 검색 결과 URL. URLSearchParams로 인코딩 (특수문자/한글 안전).
+  const query = `${title} ${artist}`.trim();
+  const params = new URLSearchParams({ search_query: query });
+  return `https://www.youtube.com/results?${params.toString()}`;
+}
+
+type YouTubeSearchLinkProps = {
+  songTitle: string;
+  songArtist: string;
+};
+
+function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
+  const href = buildYouTubeSearchUrl(songTitle, songArtist);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(event) => {
+        // href 모드 카드에서 부모 <Link>로 이벤트가 새 나가는 것 방지.
+        // preventDefault는 호출하지 않음 — 링크 자체는 정상 동작해야 한다.
+        event.stopPropagation();
+      }}
+      aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
+      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+    >
+      <span aria-hidden="true">▶</span>
+      <span>YouTube에서 듣기</span>
+    </a>
   );
 }
 
