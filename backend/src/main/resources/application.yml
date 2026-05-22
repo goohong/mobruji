@@ -38,6 +38,10 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # liveness/readiness probe 활성화 — k8s/container 환경에서 자동 활성되지만
+      # 명시적으로 켜 Docker HEALTHCHECK / nginx /actuator/health/liveness 검증 가능.
+      probes:
+        enabled: true
 
 # 추천 v1/v2 점수 가중치 / 다양성 캡 / 결과 개수 / tempo 설정.
 # spec: docs/features/recommendation-algorithm-v1.md §9
