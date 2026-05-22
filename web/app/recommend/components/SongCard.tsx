@@ -11,19 +11,23 @@
  * 링크로 만든다. href가 주어지면 카드 표면 전체가 `next/link`의 `<Link>`로 감싸지며,
  * 키보드 포커스/엔터/스페이스 활성화는 next/link의 기본 동작을 사용한다.
  *
- * 표시 정보:
+ * 이슈 #323 (2026-05-22): 카드 요약/상세 분리.
+ *   - 카드 표면은 핵심 정보만(제목/아티스트/난이도/최고음/장르 chip + 좋아요/북마크) 노출.
+ *   - 추가 상세(점수 breakdown, matchReason 풀텍스트, YouTube 검색 링크, 메타)는
+ *     `onShowDetail` 콜백을 받은 경우 호출 측이 띄우는 모달로 위임한다.
+ *   - `onShowDetail`이 주어지면 카드 본문 클릭은 페이지 이동 대신 모달 트리거이며,
+ *     카드 표면의 breakdown 패널과 YouTube 검색 링크는 숨겨진다.
+ *   - 기존 `href` 모드(상세 페이지 링크)는 backward-compat로 보존 — history 화면 등
+ *     legacy 경로가 그대로 동작한다.
+ *
+ * 표시 정보 (요약):
  *   - rank position (#1, #2 ...) — 추천 컨텍스트에서만
- *   - 제목 (큰 글씨)
- *   - 아티스트 (작게)
+ *   - 제목 (큰 글씨) / 아티스트
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
- *     · `song.difficulty`가 있으면 그 값을, 없으면 `deriveDifficulty(lowMidi, highMidi)`로 계산.
- *     · 둘 다 없으면(legacy 응답) 라벨을 숨긴다.
- *   - 최고음 음표명 (예: F#5) — `midiToNoteName(highMidi)`
- *   - 최저음 음표명 (작게, 부가)
- *   - 장르 칩 (있으면)
- *   - matchReason 한 줄 — 추천 컨텍스트에서만
- *   - 키(키 원본) 라벨
- *   - score — 추천 컨텍스트에서만
+ *   - 최고음 음표명 (예: F#5)
+ *   - 장르 chip
+ *   - 키 라벨
+ *   - 좋아요/북마크 액션
  *
  * 호버/포커스 상태는 ring/shadow 변화로 표현. 모바일 우선.
  */
@@ -85,18 +89,29 @@ const INTERACTION_FEEDBACK_DURATION_MS = 3000;
  * "음역 적합" 항목 계산에 사용된다. 검색 컨텍스트(`song`)나 히스토리에서 voiceRange를
  * 모르는 경우에는 옵셔널로 비워두면 해당 항목이 자동 생략된다.
  */
+/**
+ * `onShowDetail`이 주어지면 카드 본문 클릭이 페이지 이동 대신 모달 트리거가 된다.
+ * 동시에 카드 표면의 breakdown 패널/YouTube 링크는 숨겨져 "요약 카드" 룩이 된다.
+ * (closes #323) 호출 측은 상태와 모달 컴포넌트(`SongDetailModal`)를 직접 관리한다.
+ *
+ * `onShowDetail` + `href` 가 동시에 주어지면 모달이 우선한다. 호출 측이 의도적으로
+ * 두 경로를 모두 노출하고 싶을 때를 위해 빌드 에러는 띄우지 않는다 — 단, 카드 본문
+ * 클릭은 모달로 흘러간다.
+ */
 type SongCardProps =
   | {
       item: RecommendedSongResponse;
       song?: never;
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
+      onShowDetail?: () => void;
     }
   | {
       song: SongResponse;
       item?: never;
       href?: string;
       userVoiceRange?: never;
+      onShowDetail?: () => void;
     };
 
 export function SongCard(props: SongCardProps) {
@@ -106,6 +121,10 @@ export function SongCard(props: SongCardProps) {
   const href: string | undefined = props.href;
   const userVoiceRange: UserVoiceRange | null =
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
+  const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
+  // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
+  const isModalMode = typeof onShowDetail === "function";
   const keyLabel = formatMusicalKey(song.keyOriginal);
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
@@ -170,13 +189,18 @@ export function SongCard(props: SongCardProps) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
-          {item ? (
+          {/*
+           * matchReason / score 는 모달 모드에서는 카드 표면이 아닌 상세 모달에서
+           * 노출한다 (closes #323). 카드는 "한눈에 보이는 정보" 만 남기는 게 검수
+           * 피드백의 핵심.
+           */}
+          {item && !isModalMode ? (
             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {item.matchReason}
             </span>
           ) : null}
         </div>
-        {item ? (
+        {item && !isModalMode ? (
           <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
             score {item.score.toFixed(2)}
           </span>
@@ -189,21 +213,46 @@ export function SongCard(props: SongCardProps) {
   // 풀어 보여주는 "Why this song?" 패널이라 검색/스켈레톤에서는 의미가 없다.
   // 또한 href 모드에서도 <a> 내부에 button을 두는 것은 HTML 위반이므로 link 외부에
   // 별도 footer로 렌더한다.
-  const breakdownPanel = item ? (
-    <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
-  ) : null;
+  // 모달 모드(closes #323) 에서는 breakdown 도 상세 모달로 위임 — 카드 표면을 가볍게 유지.
+  const breakdownPanel =
+    item && !isModalMode ? (
+      <MatchReasonExpander item={item} userVoiceRange={userVoiceRange} />
+    ) : null;
 
-  // 좋아요 + 북마크 + YouTube 검색 (closes #176 + #184 + #302) — 추천/검색 두 컨텍스트 모두 노출.
-  // href 모드에서는 <a> 안에 button/a를 두면 클릭이 부모 링크로 새 나가므로 link 외부에 둔다.
-  // YouTube 검색 링크는 ADR-0006 범위(BE 분석 파이프라인) 밖이라 클라이언트에서 검색 URL만 조립한다.
-  // embed/youtubeId 컬럼이 추가될 때까지 1단계로 "새 탭으로 검색" 만 제공해 BE/저작권 리스크를 회피.
+  // 좋아요 + 북마크 — 추천/검색/likes/bookmarks 어디서나 카드 footer 에 유지 (사용자 자주 쓰는 액션).
+  // YouTube 검색 링크(closes #302)는 모달 모드에서는 상세 모달로 위임해서 카드를 가볍게 유지한다.
+  // 모달 모드가 아니면 종전대로 카드에서 직접 새 탭으로 검색.
   const feedbackPanel = (
     <div className="flex flex-wrap items-center gap-2">
       <LikeButton songId={song.id} songTitle={song.title} />
       <BookmarkButton songId={song.id} songTitle={song.title} />
-      <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
+      {!isModalMode ? (
+        <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
+      ) : null}
     </div>
   );
+
+  // 모달 모드(closes #323): 카드 본문 클릭이 페이지 이동 대신 모달 트리거.
+  // 본문은 button 으로 감싸 키보드 접근(Enter/Space) + 스크린 리더(button role) 호환.
+  // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
+  if (isModalMode) {
+    return (
+      <li className="group flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
+        <button
+          type="button"
+          onClick={onShowDetail}
+          aria-label={`${song.title} 상세 보기`}
+          aria-haspopup="dialog"
+          className="flex flex-col gap-3 rounded-2xl p-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+        >
+          {body}
+        </button>
+        <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+          {feedbackPanel}
+        </div>
+      </li>
+    );
+  }
 
   // href가 있으면 본문(body)만 링크로 감싸고, footer(breakdown + 피드백)는 링크 외부에 둔다.
   // 이렇게 하면 펼침/좋아요/북마크 버튼 클릭이 페이지 이동을 트리거하지 않으면서도 본문 클릭은

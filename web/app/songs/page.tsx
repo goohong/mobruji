@@ -34,6 +34,8 @@ import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
 import { Chip, Input } from "@/components/ui";
 
 import { SongCard } from "../recommend/components/SongCard";
+import { SongDetailModal } from "../recommend/components/SongDetailModal";
+import { SongDetailContent } from "../recommend/components/SongDetailContent";
 
 const DEBOUNCE_MS = 300;
 const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
@@ -408,12 +410,41 @@ function SearchResult({
           ? `필터 결과 ${songs.length}곡 / 전체 ${rawCount}곡`
           : `${rawCount}곡`}
       </p>
+      <SongSearchResultList songs={songs} />
+    </div>
+  );
+}
+
+/**
+ * 검색 결과 카드 + 상세 모달 묶음 (closes #323).
+ * 카드 클릭 시 페이지 이동 대신 모달이 열린다. /songs/[id] deep-link 직접 접근은
+ * 기존 페이지가 그대로 처리한다.
+ */
+type SongSearchResultListProps = {
+  songs: SongResponse[];
+};
+
+function SongSearchResultList({ songs }: SongSearchResultListProps) {
+  const [selected, setSelected] = useState<SongResponse | null>(null);
+  return (
+    <>
       <ul aria-label="검색 결과" className="flex flex-col gap-3">
         {songs.map((song) => (
-          <SongCard key={song.id} song={song} href={`/songs/${song.id}`} />
+          <SongCard
+            key={song.id}
+            song={song}
+            onShowDetail={() => setSelected(song)}
+          />
         ))}
       </ul>
-    </div>
+      <SongDetailModal
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        titleLabel={selected ? selected.title : ""}
+      >
+        {selected ? <SongDetailContent song={selected} /> : null}
+      </SongDetailModal>
+    </>
   );
 }
 
