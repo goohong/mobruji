@@ -122,6 +122,18 @@ public class Song {
     @Column(length = 16)
     private Difficulty difficulty;
 
+    /**
+     * 곡 카드에 표시할 앨범 커버 이미지 URL. nullable — 외부 매칭 실패 시 null 로 두고 UI 에서
+     * placeholder 로 처리한다.
+     *
+     * <p>이슈 #322 — 1차 출처는 iTunes Search API ({@code ItunesAlbumCoverClient}). 후속 사이클에서
+     * MusicBrainz Cover Art Archive / Spotify 로 우선순위 통합 예정.
+     *
+     * <p>추천 알고리즘 입력에 영향 없음 — UX 표시 전용 (ADR 0010 정합).
+     */
+    @Column(name = "album_cover_url", length = 512)
+    private String albumCoverUrl;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -145,7 +157,8 @@ public class Song {
             final Double metadataConfidence,
             final Integer lowMidi,
             final Integer highMidi,
-            final Difficulty difficulty) {
+            final Difficulty difficulty,
+            final String albumCoverUrl) {
         Objects.requireNonNull(title, "title must not be null");
         Objects.requireNonNull(artist, "artist must not be null");
         Objects.requireNonNull(keyOriginal, "keyOriginal must not be null");
@@ -177,7 +190,28 @@ public class Song {
         return new Song(
                 null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
                 tjNumber, kyNumber, metadataSource, isrc, resolvedConfidence,
-                lowMidi, highMidi, resolvedDifficulty, now, now);
+                lowMidi, highMidi, resolvedDifficulty, albumCoverUrl, now, now);
+    }
+
+    /**
+     * 외부 cover backfill 결과를 적용한다. 이미 albumCoverUrl 이 채워져 있으면 덮어쓰지 않는다
+     * (운영 중 큐레이터가 수정한 값을 자동 backfill 이 갈아치우는 사고 방지). 빈 문자열/blank URL 은
+     * 무효로 간주해 적용하지 않는다.
+     *
+     * <p>이슈 #322 — iTunes Search backfill / 후속 MusicBrainz·Spotify backfill 공용 진입점.
+     *
+     * @return 실제로 적용 (null → 값) 됐는지 여부 — 호출 측 통계/로깅에 사용
+     */
+    public boolean backfillAlbumCoverUrl(final String newAlbumCoverUrl) {
+        if (this.albumCoverUrl != null) {
+            return false;
+        }
+        if (newAlbumCoverUrl == null || newAlbumCoverUrl.isBlank()) {
+            return false;
+        }
+        this.albumCoverUrl = newAlbumCoverUrl;
+        this.updatedAt = LocalDateTime.now();
+        return true;
     }
 
     /**

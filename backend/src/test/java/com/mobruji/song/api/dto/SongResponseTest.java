@@ -23,6 +23,7 @@ class SongResponseTest {
                 .isrc("KRA301200001")
                 .metadataConfidence(0.95)
                 .lowMidi(60).highMidi(76)
+                .albumCoverUrl("https://cdn.example.com/600x600bb.jpg")
                 .build();
 
         // when
@@ -38,6 +39,7 @@ class SongResponseTest {
         assertThat(songResponse.difficulty()).isEqualTo(Difficulty.HARD);
         assertThat(songResponse.isrc()).isEqualTo("KRA301200001");
         assertThat(songResponse.metadataConfidence()).isEqualTo(0.95);
+        assertThat(songResponse.albumCoverUrl()).isEqualTo("https://cdn.example.com/600x600bb.jpg");
     }
 
     @Test
@@ -61,5 +63,6 @@ class SongResponseTest {
         // 신규 필드: 수기 시드 기본값
         assertThat(songResponse.isrc()).isNull();
         assertThat(songResponse.metadataConfidence()).isEqualTo(1.0);
+        assertThat(songResponse.albumCoverUrl()).isNull();
     }
 }

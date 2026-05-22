@@ -1,0 +1,133 @@
+package com.mobruji.song.application.albumcover;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import com.mobruji.song.domain.MetadataSource;
+import com.mobruji.song.domain.MusicalKey;
+import com.mobruji.song.domain.Song;
+import com.mobruji.song.infrastructure.SongRepository;
+
+/**
+ * {@link AlbumCoverBackfillCommand} 단위 테스트. throttle 은 0 으로 설정해 테스트 속도 보장.
+ */
+class AlbumCoverBackfillCommandTest {
+
+    private static final AlbumCoverProperties PROPERTIES = new AlbumCoverProperties(
+            new AlbumCoverProperties.Itunes(
+                    "https://itunes.apple.com/search",
+                    "KR",
+                    Duration.ofSeconds(5),
+                    Duration.ZERO,
+                    "600x600"));
+
+    private static Song seed(final String title) {
+        return Song.builder()
+                .title(title).artist("artist-" + title)
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+    }
+
+    @Test
+    @DisplayName("runBackfill: 매칭 성공 곡은 save 호출, 실패 곡은 missed 카운트")
+    void runBackfill_matched_savesAndCountsCorrectly() {
+        final Song matched = seed("matched");
+        final Song missed = seed("missed");
+        final SongRepository repository = mock(SongRepository.class);
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        when(lookup.lookupAlbumCoverUrl("matched", "artist-matched"))
+                .thenReturn(Optional.of("https://cdn.example.com/600x600bb.jpg"));
+        when(lookup.lookupAlbumCoverUrl("missed", "artist-missed"))
+                .thenReturn(Optional.empty());
+
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        final AlbumCoverBackfillCommand.BackfillSummary summary = command.runBackfill(List.of(matched, missed));
+
+        assertThat(summary.analyzed()).isEqualTo(2);
+        assertThat(summary.matched()).isEqualTo(1);
+        assertThat(summary.updated()).isEqualTo(1);
+        assertThat(summary.missed()).isEqualTo(1);
+        assertThat(matched.getAlbumCoverUrl()).isEqualTo("https://cdn.example.com/600x600bb.jpg");
+        assertThat(missed.getAlbumCoverUrl()).isNull();
+        verify(repository, times(1)).save(matched);
+        verify(repository, never()).save(missed);
+    }
+
+    @Test
+    @DisplayName("runBackfill: 이미 albumCoverUrl 이 있는 곡은 matched 여도 updated 카운트 증가 없음")
+    void runBackfill_alreadyPresent_skipsSave() {
+        final Song existing = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .albumCoverUrl("https://curator.example.com/manual.jpg")
+                .build();
+        final SongRepository repository = mock(SongRepository.class);
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        when(lookup.lookupAlbumCoverUrl("t", "a"))
+                .thenReturn(Optional.of("https://cdn.example.com/new.jpg"));
+
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        final AlbumCoverBackfillCommand.BackfillSummary summary = command.runBackfill(List.of(existing));
+
+        assertThat(summary.matched()).isEqualTo(1);
+        assertThat(summary.updated()).isZero();
+        assertThat(existing.getAlbumCoverUrl()).isEqualTo("https://curator.example.com/manual.jpg");
+        verify(repository, never()).save(any(Song.class));
+    }
+
+    @Test
+    @DisplayName("runBackfill: lookup 이 RuntimeException 던져도 곡 단위 격리, 다음 곡 진행")
+    void runBackfill_lookupThrows_isolatesFailure() {
+        final Song failing = seed("fail");
+        final Song ok = seed("ok");
+        final SongRepository repository = mock(SongRepository.class);
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        when(lookup.lookupAlbumCoverUrl("fail", "artist-fail"))
+                .thenThrow(new RuntimeException("network kaboom"));
+        when(lookup.lookupAlbumCoverUrl("ok", "artist-ok"))
+                .thenReturn(Optional.of("https://cdn.example.com/ok.jpg"));
+
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        final AlbumCoverBackfillCommand.BackfillSummary summary = command.runBackfill(List.of(failing, ok));
+
+        assertThat(summary.analyzed()).isEqualTo(2);
+        assertThat(summary.matched()).isEqualTo(1);
+        assertThat(summary.updated()).isEqualTo(1);
+        assertThat(summary.missed()).isEqualTo(1);
+        verify(repository, times(1)).save(ok);
+    }
+
+    @Test
+    @DisplayName("runBackfill(): selective query (findMissingAlbumCover) 결과만 처리한다")
+    void runBackfill_usesSelectiveQuery() {
+        final Song missing = seed("missing");
+        final SongRepository repository = mock(SongRepository.class);
+        when(repository.findMissingAlbumCover()).thenReturn(List.of(missing));
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        when(lookup.lookupAlbumCoverUrl("missing", "artist-missing"))
+                .thenReturn(Optional.of("https://cdn.example.com/m.jpg"));
+
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+        final AlbumCoverBackfillCommand.BackfillSummary summary = command.runBackfill();
+
+        assertThat(summary.analyzed()).isEqualTo(1);
+        verify(repository).findMissingAlbumCover();
+    }
+}

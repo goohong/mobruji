@@ -61,4 +61,13 @@ public interface SongRepository extends JpaRepository<Song, Long> {
             + "   or s.metadataSource <> com.mobruji.song.domain.MetadataSource.AUDIO_ANALYSIS "
             + "order by s.id asc")
     List<Song> findCandidatesForBackfill(@Param("threshold") double threshold);
+
+    /**
+     * 앨범 커버 backfill 대상 selective query — {@code albumCoverUrl IS NULL} 인 곡만 반환한다.
+     *
+     * <p>이슈 #322 — iTunes Search API backfill 은 selective 하게 누락된 곡만 호출해 외부 API 호출
+     * 횟수를 최소화한다. 이미 채워진 곡은 큐레이터 수정/이전 backfill 결과로 간주하고 보존.
+     */
+    @Query("select s from Song s where s.albumCoverUrl is null order by s.id asc")
+    List<Song> findMissingAlbumCover();
 }
