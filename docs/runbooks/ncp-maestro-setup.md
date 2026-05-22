@@ -461,16 +461,135 @@ ls -l /etc/mobruji/maestro.env ~/.bashrc ~/mobruji/tools/discord-daemon/.env ~/.
 - `journalctl -u mobruji-maestro` 에 maestro narration이 일부 노출될 수 있음. 사용자 음역대/기호 등 민감 데이터는 maestro 행동 정책(CLAUDE.md §4)에 따라 원문 노출 금지.
 - 로그 보존 기간: systemd journal 기본(시스템 디스크 여유에 따라 자동 회전). 별도 영구 보관 불필요.
 
-## H) 다음 단계
+## H) Phase 4 — mobruji dev 배포 (docker 격리)
 
-본 런북 §B(Phase 1) 완료 후:
-1. **PR B**: `tools/discord-daemon/bot.py` 확장 — `TMUX_BRIDGE_ENABLED` flag + `tmux_send_keys` 함수 + dedup ledger. (이슈 #340)
-2. **PR C**: tmux pane stdout capture + 로그 로테이션. (이슈 #341)
-3. **PR D**: systemd unit + 셋업 자동화 스크립트(`tools/ncp-maestro/install.sh`). 본 런북 §B~C를 스크립트화. (이슈 #342)
-4. **PR E (선택)**: maestro transcript 무게 모니터 → 자동 `/compact` 트리거.
-5. **PR F (선택)**: swap 추가 + 운측성 metric (CPU/RAM/swap usage Grafana Cloud remote_write).
+Phase 4 는 maestro VM 안에 mobruji backend + web + MySQL + nginx 를 docker container 로 격리해서 같이 올린다. spec: `docs/features/ncp-dev-deployment.md`.
 
-## I) 관련 문서
+### H-1) 부트스트랩 (mobruji 또는 root 1회)
+
+```bash
+cd ~/mobruji
+sudo bash tools/deploy/ncp-bootstrap-dev.sh
+```
+
+스크립트가 멱등하게 수행:
+- `docker.io + docker-compose-v2` 설치
+- `mobruji` user 를 `docker` 그룹에 추가 (재로그인 1회 필요)
+- swap 1GB 활성화 + `/etc/fstab` 등록 (이미 §B-5 에서 활성화돼 있으면 skip)
+- `.env.dev` 가 없으면 `.env.dev.example` 복사 + `chmod 600`
+
+### H-2) `.env.dev` 토큰 입력 (mobruji)
+
+```bash
+nano ~/mobruji/.env.dev
+```
+
+필수 (compose `?:` 표기로 부재 시 fail-fast):
+- `MYSQL_ROOT_PASSWORD` — 영문/숫자 16자 이상 권장
+- `MYSQL_PASSWORD` — 동일
+- `MOBRUJI_ADMIN_TOKEN` — 32자 hex 권장 (`openssl rand -hex 16`)
+
+선택 (default 가 있음):
+- `MOBRUJI_CORS_ALLOWED_ORIGINS` — dev IP/도메인 (기본 `http://101.79.20.94`)
+- `NEXT_PUBLIC_API_BASE_URL` — nginx 가 `/api` proxy 하므로 기본 `/api`
+
+### H-3) 첫 가동 (mobruji)
+
+```bash
+cd ~/mobruji
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
+docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+```
+
+healthcheck 가 모두 `healthy` 되면:
+- `curl http://localhost/_nginx_health` → `ok`
+- `curl http://localhost/actuator/health/liveness` → `{"status":"UP"}`
+- 브라우저: `http://101.79.20.94/`
+
+### H-4) GitHub Actions CD (develop merge → 자동 배포)
+
+develop 머지 시 NCP 자동 배포되도록 secret 3개 등록 (사용자 1회):
+
+```bash
+# 로컬에서 (gh CLI)
+gh secret set NCP_SSH_HOST --repo goohong/mobruji <<< "101.79.20.94"
+gh secret set NCP_SSH_USER --repo goohong/mobruji <<< "mobruji"
+gh secret set NCP_SSH_KEY  --repo goohong/mobruji < ~/workspace/secret/mobruji-key.pem
+```
+
+이후 흐름 (`.github/workflows/cd-dev.yml`):
+- develop push (paths 매치: `backend/**` / `web/**` / `docker-compose.dev.yml` / `nginx/**` / `tools/deploy/**`)
+- SSH NCP → `git pull` → `docker compose build --build-arg GIT_SHA=<short>` → `up -d`
+- `/actuator/health/liveness` 30회 × 5s polling (총 150s window)
+- timeout 시 직전 SHA 로 자동 롤백 + 재빌드 + 재기동
+- secret 부재 시 graceful skip
+
+수동 트리거:
+```bash
+gh workflow run cd-dev.yml --repo goohong/mobruji
+```
+
+### H-5) 운영 명령 (NCP, mobruji)
+
+```bash
+# 상태
+docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+docker stats --no-stream
+
+# 로그
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs -f backend
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs -f web
+
+# 단일 service 재기동 (코드 변경 없이)
+docker compose -f docker-compose.dev.yml --env-file .env.dev restart backend
+
+# 강제 재빌드 + 재기동 (드물게 — CD 가 정상 흐름)
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build --force-recreate
+
+# 수동 롤백 (CD 자동 롤백 실패 시)
+cd ~/mobruji
+git reset --hard <PREV_SHA>
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
+
+# 정지 / 볼륨 삭제 (DB 초기화)
+docker compose -f docker-compose.dev.yml --env-file .env.dev down
+docker volume rm mobruji-mysql-dev  # 신중히
+```
+
+### H-6) 트러블슈팅 — Phase 4
+
+#### `mem_limit` 부족 — 컨테이너 OOMKill
+증상: `docker compose ps` 에서 backend / web 가 `exited` 또는 `restarting`. `dmesg | grep -i oom`.
+원인: maestro Claude 가 평소보다 메모리를 많이 먹는 spike 와 dev container 의 limit 합산이 4GB + swap 1GB 를 넘김.
+대응:
+1. `docker stats` 로 가장 큰 사용자 확인.
+2. 일시적이면 maestro 사이클을 잠시 멈춘 뒤 (`tmux send-keys -t mobruji /exit`) 재기동.
+3. 만성이면 spec §5-2 메모리 매트릭스 재조정 — `docker-compose.dev.yml` 의 `mem_limit` 또는 mysql `innodb-buffer-pool-size`.
+
+#### CD 자동 롤백 발동
+증상: GitHub Actions workflow `CD Dev — NCP` 가 fail, NCP 에서 컨테이너는 직전 SHA 로 돌고 있음.
+원인: 새 SHA 가 부팅에 실패 (DB migration 깨짐, 환경 변수 누락 등).
+대응:
+1. `gh run view <run-id> --log-failed` 로 healthcheck 실패 직전 backend 로그 확인.
+2. develop 에 hotfix 머지 (또는 release 보류) → 다음 CD 가 다시 시도.
+3. 수동 검증: `git checkout origin/develop` 후 NCP 에서 동일 명령으로 재현.
+
+#### nginx 502 / 504
+- 502: backend 또는 web 가 아직 부팅 중 (start_period 60s/30s) — 잠시 대기.
+- 504: backend 응답이 30s 넘음 — `docker compose logs backend` 확인.
+
+#### `.env.dev` 변경했는데 반영 안 됨
+docker compose 의 환경 변수는 컨테이너 생성 시 한 번 inline. 변경 후 `up -d --force-recreate` 또는 service 별 `up -d --no-deps backend`.
+
+## I) 다음 단계
+
+본 런북 §B(Phase 1) ~ §H(Phase 4) 완료 후:
+- Phase 4 dev 환경 사용성 1주 운영 데이터 보고 — `docs/features/deployment-infrastructure.md` (Hetzner CX22 prod) 진행 결정.
+- rev sub-agent 가 dev URL 을 통합 시나리오 QA 에 사용 — `docs/features/rev-qa-protocol.md` §5-4 갱신 (별 PR).
+- (선택) maestro transcript 무게 모니터 → 자동 `/compact` 트리거.
+- (선택) Grafana Cloud remote_write — CPU/RAM/swap/container memory.
+
+## J) 관련 문서
 
 - [`docs/decisions/0015-hosting-stack.md`](../decisions/0015-hosting-stack.md) — 본 런북의 결정 ADR
 - [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) — Discord-driven maestro spec (#338)
