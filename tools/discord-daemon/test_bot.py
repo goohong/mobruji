@@ -293,5 +293,65 @@ class StatusReportTests(unittest.TestCase):
         self.assertLessEqual(len(out), bot.STATUS_DISCORD_MAX_LEN)
 
 
+class DigestTests(unittest.TestCase):
+    """5분 cron digest 단위 검증 (#362)."""
+
+    def test_build_digest_line_full(self) -> None:
+        from datetime import datetime as _dt, timezone as _tz
+        fake_now = _dt(2026, 5, 23, 4, 42, tzinfo=_tz.utc)  # 13:42 KST
+        with mock.patch.object(bot, "_run_gh_json") as gh:
+            gh.side_effect = [
+                [{"number": 1}, {"number": 2}],  # open PRs: 2
+                [{"number": 3}, {"number": 4}, {"number": 5}],  # merged 24h: 3
+                [],  # bug issues: 0
+            ]
+            line = bot.build_digest_line("goohong/mobruji", "pat", now=fake_now)
+        self.assertEqual(
+            line,
+            "📊 PR open:2 / 머지 24h:3 / type:bug:0 — 13:42 KST",
+        )
+
+    def test_build_digest_line_gh_failure_shows_question_mark(self) -> None:
+        with mock.patch.object(bot, "_run_gh_json", return_value=None):
+            line = bot.build_digest_line("goohong/mobruji", "pat")
+        self.assertIn("PR open:?", line)
+        self.assertIn("머지 24h:?", line)
+        self.assertIn("type:bug:?", line)
+
+    def test_digest_loop_sends_then_sleeps(self) -> None:
+        sent: list[str] = []
+        sleeps: list[int] = []
+
+        class FakeChannel:
+            async def send(self, text):
+                sent.append(text)
+
+        class FakeClient:
+            def get_channel(self, channel_id):
+                return FakeChannel()
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) >= 2:  # initial + 1 iteration
+                raise asyncio.CancelledError
+
+        import asyncio
+        with mock.patch.object(bot, "build_digest_line", return_value="📊 test"), \
+             mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(
+                    bot.digest_loop(
+                        FakeClient(),
+                        channel_id=999,
+                        github_repo="x/y",
+                        github_pat="",
+                        interval=300,
+                        initial_delay=60,
+                    )
+                )
+        self.assertEqual(sent, ["📊 test"])
+        self.assertEqual(sleeps, [60, 300])  # initial_delay, interval
+
+
 if __name__ == "__main__":
     unittest.main()

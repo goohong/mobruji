@@ -20,6 +20,7 @@ spec: docs/features/discord-driven-mobruji.md
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -56,6 +57,9 @@ STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
 STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
 AUTO_ACK_QUEUE_WINDOW_SECONDS: Final[int] = 300  # 5분 안 dedup mark 수 = queue 표시
 AUTO_ACK_TEMPLATE: Final[str] = "📥 받음, maestro 처리 중 (queue: {queue})"
+DIGEST_INTERVAL_SECONDS: Final[int] = 300  # 5분 cron digest 주기
+DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
+DIGEST_MERGED_WINDOW_HOURS: Final[int] = 24  # "최근 머지" 24h 윈도우
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -92,6 +96,7 @@ def load_env() -> dict[str, str]:
     env["TMUX_PIPE_PANE_MAX_BYTES"] = os.environ.get(
         "TMUX_PIPE_PANE_MAX_BYTES", str(DEFAULT_PIPE_PANE_MAX_BYTES)
     )
+    env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "0")
     return env
 
 
@@ -541,6 +546,75 @@ def build_status_report(
     return report
 
 
+def build_digest_line(
+    github_repo: str,
+    github_pat: str,
+    *,
+    now: datetime | None = None,
+) -> str:
+    """5분 cron digest 1줄. /status 보다 압축.
+
+    형식: 📊 PR open:N / 머지 24h:N / type:bug:N — HH:MM KST
+    조회 실패는 '?' 로 표시. LLM 호출 없음.
+    """
+    now = now or datetime.now(timezone.utc)
+    repo_args = ["--repo", github_repo]
+
+    open_prs = _run_gh_json(
+        ["pr", "list", *repo_args, "--state", "open", "--limit", "30", "--json", "number"],
+        github_pat,
+    )
+    since = (now - timedelta(hours=DIGEST_MERGED_WINDOW_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    merged_recent = _run_gh_json(
+        ["pr", "list", *repo_args, "--state", "merged", "--search", f"merged:>{since}",
+         "--limit", "30", "--json", "number"],
+        github_pat,
+    )
+    bug_issues = _run_gh_json(
+        ["issue", "list", *repo_args, "--state", "open", "--label", "type:bug",
+         "--limit", "30", "--json", "number"],
+        github_pat,
+    )
+
+    def fmt(value: list | None) -> str:
+        return "?" if value is None else str(len(value))
+
+    kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
+    return (
+        f"📊 PR open:{fmt(open_prs)} / 머지 {DIGEST_MERGED_WINDOW_HOURS}h:{fmt(merged_recent)} / "
+        f"type:bug:{fmt(bug_issues)} — {kst.strftime('%H:%M')} KST"
+    )
+
+
+async def digest_loop(
+    client: "discord.Client",
+    channel_id: int,
+    github_repo: str,
+    github_pat: str,
+    *,
+    interval: int = DIGEST_INTERVAL_SECONDS,
+    initial_delay: int = DIGEST_INITIAL_DELAY_SECONDS,
+) -> None:
+    """on_ready 직후 launch. interval 초 마다 채널에 digest 1줄 push.
+
+    bot 종료 시 cancel 됨. asyncio.CancelledError 는 외부로 전파.
+    """
+    await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            channel = client.get_channel(channel_id)
+            if channel is None:
+                logger.warning("digest: channel_id=%s 찾을 수 없음 — skip 후 재시도", channel_id)
+            else:
+                line = build_digest_line(github_repo, github_pat)
+                await channel.send(line)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("digest send 실패: %s", exc)
+        await asyncio.sleep(interval)
+
+
 def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Client:
     """discord.py Client 를 셋업하고 핸들러를 바인딩한다."""
     intents = discord.Intents.default()
@@ -561,15 +635,30 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     target_pane = env["TMUX_TARGET_PANE"]
     claude_bin = env["CLAUDE_BIN"]
 
+    digest_enabled = env.get("DIGEST_ENABLED", "0") == "1"
+
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s allowed=%d tmux_bridge=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s allowed=%d tmux_bridge=%s digest=%s",
             client.user,
             target_channel_id,
             len(allowed_user_ids),
             tmux_enabled,
+            digest_enabled,
         )
+        if digest_enabled and not hasattr(client, "_digest_task_started"):
+            # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
+            client._digest_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                digest_loop(
+                    client,
+                    target_channel_id,
+                    env["GITHUB_REPO"],
+                    env.get("GITHUB_PAT", ""),
+                )
+            )
+            logger.info("digest_loop launched: interval=%ds", DIGEST_INTERVAL_SECONDS)
 
     @client.event
     async def on_message(message: discord.Message) -> None:
