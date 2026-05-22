@@ -1,0 +1,109 @@
+# Phase 4 NCP dev 배포 — docs/features/ncp-dev-deployment.md §5-2.
+#
+# 운영 흐름:
+#   sudo bash tools/deploy/ncp-bootstrap-dev.sh  # 최초 1회 (docker + swap)
+#   cp .env.dev.example .env.dev && nano .env.dev  # 비밀번호 채우기
+#   docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
+#
+# 메모리 매트릭스 (NCP 4GB 합산 2.8GB):
+#   mysql 512M + backend 600M + web 256M + nginx 64M = 1.43GB
+
+services:
+  mysql:
+    image: mysql:8.4.6
+    container_name: mobruji-mysql-dev
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set in .env.dev}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-mobruji}
+      MYSQL_USER: ${MYSQL_USER:-mobruji}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env.dev}
+      TZ: Asia/Seoul
+    volumes:
+      - mobruji-mysql-dev:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+09:00
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - mobruji-dev
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: mobruji/backend:${GIT_SHA:-dev}
+    container_name: mobruji-backend-dev
+    restart: unless-stopped
+    mem_limit: 600m
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: ${MYSQL_USER:-mobruji}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env.dev}
+      MOBRUJI_ADMIN_TOKEN: ${MOBRUJI_ADMIN_TOKEN:?MOBRUJI_ADMIN_TOKEN must be set in .env.dev}
+      MOBRUJI_CORS_ALLOWED_ORIGINS: ${MOBRUJI_CORS_ALLOWED_ORIGINS:-http://localhost}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-mobruji}?useSSL=false&serverTimezone=Asia/Seoul
+    networks:
+      - mobruji-dev
+
+  web:
+    build:
+      context: ./web
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost/api}
+    image: mobruji/web:${GIT_SHA:-dev}
+    container_name: mobruji-web-dev
+    restart: unless-stopped
+    mem_limit: 256m
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+    networks:
+      - mobruji-dev
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: mobruji-nginx-dev
+    restart: unless-stopped
+    mem_limit: 64m
+    depends_on:
+      - backend
+      - web
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost/_nginx_health"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    networks:
+      - mobruji-dev
+
+volumes:
+  mobruji-mysql-dev:
+    name: mobruji-mysql-dev
+
+networks:
+  mobruji-dev:
+    name: mobruji-dev
+    driver: bridge
