@@ -2,6 +2,7 @@
 feature: Release Cadence v0.4.0 — cutoff 룰 + 범위 결정
 slug: release-cadence-v0.4.0
 status: draft
+pending: user-decision (v0.4.0 release cut 진행 여부 — rev audit D12, 2026-05-23)
 owner: @goohong
 scope: infra
 related_issues: []
@@ -108,6 +109,7 @@ last_reviewed: 2026-05-23
 - 옵션 C 의 5건 / 20 commit 임계치는 첫 사이클에서 측정 후 조정 가능. v0.5.0 회고 때 재평가.
 - `release:skip` 라벨 강제 룰을 안 두면 docs/test PR 도 모두 changelog 에 나옴 → notes 길어짐 → 사용자 가독성 저하. 첫 release notes 길이 보고 결정.
 - hotfix 별도 branch 정책은 v0.4.1 첫 발생 시 spec 신설.
+- 2026-05-23: rev audit D12 발견 — fix 11 + feat 3 = 14건 (5건 임계치 3배 초과), v0.3.3..origin/develop 56 commit ahead. 자동화 (cron self-trigger) 미구현 → 사용자 결정 대기. v0.4.0 release cut 진행 여부 본진 Discord push 알림 완료.
 
 ## 8) 영향 파일 (코드 변경 없음, 후속 PR 에서 갱신)
 - `docs/ai-harness/02-agent-workflow.md` §8 (PR-2)
