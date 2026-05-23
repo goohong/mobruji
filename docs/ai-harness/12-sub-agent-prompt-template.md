@@ -107,6 +107,17 @@ sub-agent가 maestro에 회신할 때 다음을 포함:
 - 품질 게이트 통과 여부
 - 보호 영역 변경 여부 + `needs-human-review` 부착 여부
 
+### 보고 정중체 표현 (helper/사용자 도달 가능)
+sub-agent → maestro 회신은 maestro 가 helper/사용자 Discord push 로 전달될 수 있다. 영어 동사 `push` / `post` / `send` 사용 금지 — 한국어 정중체 사용 ([[feedback-discord-tone-formal]] §발송 표현).
+
+| 금지 (영어 동사) | 권장 (한국어 정중체) |
+|---|---|
+| "결과 push 합니다" | "결과 알려드리겠습니다" |
+| "보고 push 합니다" | "보고 드리겠습니다" |
+| "1회 push" | "1회 알려드리겠습니다" |
+
+예: ❌ "PR #N 머지 후 결과 push" → ✅ "PR #N 머지 후 결과 알려드리겠습니다".
+
 ## 2) 역할별 추가 룰
 
 ### be (mobruji-be)

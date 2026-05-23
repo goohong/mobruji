@@ -140,6 +140,8 @@ cd web && npm run dev                                                   # FE 실
 
 **helper launch 표현 룰**: helper 본체는 sub-agent launch 안 함 (Agent 도구는 helper sub-agent 가 nmae 동일 권한으로 launch). helper 가 사용자 응답에서 "launch 하겠습니다" 표현 사용 시 주체 혼동 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다" / "nmae 에 알리겠습니다" 로 표현. 메모리 [[feedback-helper-role-boundary]] 참조.
 
+**Discord 발송 약속 표현 룰** (2026-05-24 사용자 정정): helper / nmae 가 미래 Discord 발송 약속 시 영어 동사 `push` / `post` / `send` 금지. 한국어 정중체 사용 — "메시지 드리겠습니다" / "알려드리겠습니다" / "보고 드리겠습니다". 예: ❌ "1회 push 합니다" / ❌ "결과 push 합니다" → ✅ "1회 알려드리겠습니다" / ✅ "결과 알려드리겠습니다". 메모리 [[feedback-discord-tone-formal]] 참조.
+
 ## 12) maestro/helper context% 자기 emit
 mmae(tmux `mobruji:0.0`) + nmae(NCP 호스트 tmux `mobruji:0.0`) + helper(tmux `helper:0.0`) 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 pane 별 독립으로 95% 도달 시 자율 정리 트리거 (PR #865 multi-pane 확장).
 
