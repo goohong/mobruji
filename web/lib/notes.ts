@@ -49,7 +49,20 @@ const KOREAN_PITCH_CLASSES = [
 export const MIN_MIDI = 12; // C0
 export const MAX_MIDI = 119; // B8
 
+/**
+ * 비유한(NaN/Infinity) MIDI 입력에 대한 placeholder (이슈 #757).
+ *
+ * 가드 부재 시 `PITCH_CLASSES[NaN] = undefined`, `Math.floor(NaN) = NaN` 합쳐져
+ * `"undefinedNaN"` 문자열이 UI 에 노출되는 회귀를 1차 방어한다. 호출자가 사전
+ * 필터링하면 보통 도달하지 않으나, audio analyzer (pitchy) 가 silence/noise 시
+ * NaN 을 흘릴 수 있어 라이브러리 측에서 안전 placeholder 를 보장한다.
+ */
+export const INVALID_MIDI_PLACEHOLDER = "--";
+
 export function midiToNoteName(midi: number): string {
+  if (!Number.isFinite(midi)) {
+    return INVALID_MIDI_PLACEHOLDER;
+  }
   const pitchClass = PITCH_CLASSES[((midi % 12) + 12) % 12];
   const octave = Math.floor(midi / 12) - 1;
   return `${pitchClass}${octave}`;
@@ -60,8 +73,13 @@ export function midiToNoteName(midi: number): string {
  *
  * 예: 60 → `"도4"`, 61 → `"도♯4"`, 69 → `"라4"`.
  * 옥타브 숫자는 SPN과 동일 규칙(C0=옥타브 0, C4=middle C=옥타브 4).
+ *
+ * 비유한 입력은 `INVALID_MIDI_PLACEHOLDER` 를 반환한다 (이슈 #757).
  */
 export function midiToKoreanNoteName(midi: number): string {
+  if (!Number.isFinite(midi)) {
+    return INVALID_MIDI_PLACEHOLDER;
+  }
   const pitchClass = KOREAN_PITCH_CLASSES[((midi % 12) + 12) % 12];
   const octave = Math.floor(midi / 12) - 1;
   return `${pitchClass}${octave}`;

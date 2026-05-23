@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  INVALID_MIDI_PLACEHOLDER,
   MAX_MIDI,
   MIN_MIDI,
   midiToCombinedNoteName,
@@ -151,11 +152,42 @@ describe("MIDI 경계 회귀 가드 (#576)", () => {
     expect(midiToKoreanNoteName(-12)).toBe("도-2");
   });
 
-  it("비유한 입력(NaN)은 'undefinedNaN' 문자열을 반환한다 (현재 동작 잠금)", () => {
-    // 가드 함수 부재. PITCH_CLASSES[NaN] = undefined, Math.floor(NaN) = NaN
-    // → 'undefinedNaN'. 호출자가 사전 필터링하지 않으면 표시 깨짐 — 회귀 시
-    // 명세 변경(throw/NaN-safe)이 들어가는지 PR 리뷰에서 강제 가시화 (#745).
-    expect(midiToNoteName(Number.NaN)).toBe("undefinedNaN");
+  it("비유한 입력(NaN/Infinity/-Infinity)은 placeholder 를 반환한다 (#757)", () => {
+    // 이전 동작: `'undefinedNaN'` 문자열이 그대로 UI 에 노출. audio analyzer
+    // (pitchy) 가 silence/noise 시 NaN 을 흘리면 사용자 화면 깨짐. PR #745 가
+    // 기존 동작을 잠갔으나 #757 에서 가드 추가 — placeholder ("--") 반환으로
+    // 변경하고 호출자가 사전 필터링하지 않아도 안전한 표시를 보장한다.
+    expect(midiToNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+    expect(midiToNoteName(Number.POSITIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+    expect(midiToNoteName(Number.NEGATIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+    expect(midiToKoreanNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+    expect(midiToKoreanNoteName(Number.POSITIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+    expect(midiToKoreanNoteName(Number.NEGATIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+  });
+
+  it("유효 정수 입력은 가드 영향 없이 그대로 변환한다 (#757 회귀 가드)", () => {
+    // 가드 추가가 정상 경로(유한 정수)에 영향 주지 않음을 명세.
+    expect(midiToNoteName(60)).toBe("C4");
+    expect(midiToNoteName(69)).toBe("A4");
+    expect(midiToNoteName(0)).toBe("C-1");
+    expect(midiToNoteName(127)).toBe("G9");
+    expect(midiToKoreanNoteName(60)).toBe("도4");
+    expect(midiToKoreanNoteName(69)).toBe("라4");
+  });
+
+  it("midiToCombinedNoteName 도 비유한 입력은 placeholder 병기 (#757)", () => {
+    // Combined 는 두 함수 호출 결합 — 가드가 자연 전파되어 '-- (--)' 형태.
+    expect(midiToCombinedNoteName(Number.NaN)).toBe(
+      `${INVALID_MIDI_PLACEHOLDER} (${INVALID_MIDI_PLACEHOLDER})`,
+    );
   });
 
   it("SPN-한국어 옥타브 일치 round-trip (MIDI 0~127 전수)", () => {
