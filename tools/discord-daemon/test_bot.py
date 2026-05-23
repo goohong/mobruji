@@ -301,22 +301,39 @@ class DigestTests(unittest.TestCase):
         fake_now = _dt(2026, 5, 23, 4, 42, tzinfo=_tz.utc)  # 13:42 KST
         with mock.patch.object(bot, "_run_gh_json") as gh:
             gh.side_effect = [
-                [{"number": 1}, {"number": 2}],  # open PRs: 2
-                [{"number": 3}, {"number": 4}, {"number": 5}],  # merged 24h: 3
+                [  # open PRs: 2
+                    {"number": 1, "title": "feat: A"},
+                    {"number": 2, "title": "fix: B"},
+                ],
+                [  # merged 24h: 3
+                    {"number": 3, "title": "chore: C", "mergedAt": "2026-05-23T04:30:00Z"},
+                    {"number": 4, "title": "docs: D", "mergedAt": "2026-05-23T04:20:00Z"},
+                    {"number": 5, "title": "test: E", "mergedAt": "2026-05-23T04:10:00Z"},
+                ],
                 [],  # bug issues: 0
             ]
             line = bot.build_digest_line("goohong/mobruji", "pat", now=fake_now)
-        self.assertEqual(
-            line,
-            "📊 PR open:2 / 머지 24h:3 / type:bug:0 — 13:42 KST",
-        )
+        # multi-line 형식 (PR #733): 헤더 + 머지/open/bug 블록 + title preview.
+        self.assertIn("📊 **13:42 KST digest**", line)
+        self.assertIn("✅ 머지 24h: 3", line)
+        self.assertIn("🔄 open PR: 2", line)
+        self.assertIn("🐛 없음: 0", line)
+        # 최근 머지 PR title preview (최신순 3개).
+        self.assertIn("  · #3 chore: C", line)
+        self.assertIn("  · #4 docs: D", line)
+        self.assertIn("  · #5 test: E", line)
+        # 백로그 open PR preview.
+        self.assertIn("  · #1 feat: A", line)
+        self.assertIn("  · #2 fix: B", line)
 
     def test_build_digest_line_gh_failure_shows_question_mark(self) -> None:
         with mock.patch.object(bot, "_run_gh_json", return_value=None):
             line = bot.build_digest_line("goohong/mobruji", "pat")
-        self.assertIn("PR open:?", line)
-        self.assertIn("머지 24h:?", line)
-        self.assertIn("type:bug:?", line)
+        # 조회 실패 시 count 자리에 '?' 표기 (multi-line 형식).
+        self.assertIn("✅ 머지 24h: ?", line)
+        self.assertIn("🔄 open PR: ?", line)
+        # bug count='?' 는 코드상 '없음' label 분기 (0/'?' 둘 다 없음 으로 분류).
+        self.assertIn("🐛 없음: ?", line)
 
     def test_digest_loop_sends_then_sleeps(self) -> None:
         sent: list[str] = []
