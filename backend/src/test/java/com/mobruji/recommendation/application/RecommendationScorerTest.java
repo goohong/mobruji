@@ -1,6 +1,7 @@
 package com.mobruji.recommendation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.offset;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -152,19 +153,22 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("score: 음역 완전 일치 + mood 일치 + tempo 완전 일치 시 voiceFit*1 + mood*1 + popularity*1 + tempo*1 ± jitter")
+    @DisplayName("score: 음역 완전 일치 + mood 일치 + tempo 완전 일치 시 voiceFit*0.5 + mood*0.2 + popularity*0.1 + tempo*0.1 정확 = 0.9 (jitter=0)")
     void score_perfectMatch_returnsExpected() {
-        // given: 기본 가중치 voiceFit=0.5, mood=0.2, popularity=0.1, tempoMatch=0.1
+        // given: jitter=0 으로 가중 합산 정확값 검증 (느슨 단언 isBetween(0.89,0.91) 제거)
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
-        final Random fixedRandom = new Random(42);
+        final RecommendationProperties propsNoJitter = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
         // when: UPBEAT mood + preferredBpm=128 → tempoMatch=1.0
-        final RecommendationScorer.Scored scored = scorer(defaultProperties()).score(song, 50, 80,
-                Mood.UPBEAT, 128, fixedRandom);
-        // then: 0.5 + 0.2 + 0.1 + 0.1 = 0.9 ± 0.01
+        final RecommendationScorer.Scored scored = scorer(propsNoJitter)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(42));
+        // then: 0.5*1.0 + 0.2*0 + 0.2*1.0 + 0.1*1.0 + 0.1*1.0 = 0.9 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.voiceRangeFit()).isEqualTo(1.0);
         assertThat(scored.moodMatch()).isEqualTo(1.0);
         assertThat(scored.tempoMatch()).isEqualTo(1.0);
-        assertThat(scored.total()).isBetween(0.89, 0.91);
+        assertThat(scored.total()).isCloseTo(0.9, offset(1e-9));
     }
 
     @Test
@@ -643,6 +647,127 @@ class RecommendationScorerTest {
         assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.B_MAJOR, 0, 127)).isBetween(0.0, 1.0);
         assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.UNKNOWN, -100, 200)).isEqualTo(0.5);
         assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.E_MINOR, 50, 80)).isBetween(0.0, 1.0);
+    }
+
+    @Test
+    @DisplayName("score (정확 합산): 비대칭 가중치 0.4/0.0/0.3/0.2/0.1 + 모든 신호 1.0 (jitter=0) → total 정확히 1.0")
+    void score_asymmetricWeights_exactWeightedSum() {
+        // given: w=(0.4, 0.0, 0.3, 0.2, 0.1). 합 1.0. 신호값 voiceFit=1, genre=0(고정), mood=1, popularity=1, tempo=1
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
+        final RecommendationProperties asymmetric = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.4, 0.0, 0.3, 0.2, 0.1),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(asymmetric)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0));
+        // then: 0.4*1 + 0.0*0 + 0.3*1 + 0.2*1 + 0.1*1 = 1.0 (1 ULP 수준 부동소수점 허용)
+        assertThat(scored.total()).isCloseTo(1.0, offset(1e-9));
+    }
+
+    @Test
+    @DisplayName("score (정확 합산): 신호별 가중치 단독 곱 검증 — voiceFit 0.7 * rangeFit 0.5 = 0.35 (jitter=0)")
+    void score_partialSignal_exactWeightedProduct() {
+        // given: voiceFit 가중치 0.7 단일, 나머지 가중치 0. 곡 음역 53~67, 사용자 60~67 → overlap 7/14 = 0.5
+        final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
+        final RecommendationProperties voiceOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.7, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(voiceOnly)
+                .score(song, 60, 67, null, null, new Random(0));
+        // then: rangeFit=0.5 * 0.7 = 0.35 정확
+        assertThat(scored.voiceRangeFit()).isEqualTo(0.5);
+        assertThat(scored.total()).isEqualTo(0.35);
+    }
+
+    @Test
+    @DisplayName("score (정확 합산): 두 신호 동시 가중 — voiceFit 0.6 * 1.0 + mood 0.3 * 1.0 = 0.9 (jitter=0)")
+    void score_twoSignals_exactWeightedSum() {
+        // given: voiceFit 가중치 0.6 + mood 가중치 0.3. 나머지 0. 완전 매칭
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, null);
+        final RecommendationProperties twoSignals = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.6, 0.0, 0.3, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(twoSignals)
+                .score(song, 50, 80, Mood.UPBEAT, null, new Random(0));
+        // then: 0.6*1.0 + 0.3*1.0 = 0.9 (1 ULP 수준 부동소수점 허용)
+        assertThat(scored.total()).isCloseTo(0.9, offset(1e-9));
+    }
+
+    @Test
+    @DisplayName("score (결정성): seed 1234 고정 + jitter 활성 → 동일 입력 두 호출 결과 total 비트 동일")
+    void score_determinism_withJitterActive() {
+        // given: jitter 활성 (0.01). seed 1234 고정.
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
+        final RecommendationProperties withJitter = defaultProperties();
+        // when: 동일 입력 + 동일 seed
+        final double totalA = scorer(withJitter)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(1234)).total();
+        final double totalB = scorer(withJitter)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(1234)).total();
+        // then: 비트 동일 (jitter 흔들림이 있어도 seed가 같으면 결정적)
+        assertThat(totalA).isEqualTo(totalB);
+    }
+
+    @Test
+    @DisplayName("score (결정성): 다른 seed 는 다른 jitter 를 산출 — 가중 합산 동일이라도 total 은 jitter 만큼 차이")
+    void score_differentSeeds_produceDifferentJitter() {
+        // given: 동일 입력, 가중치 0 (가중 합산 0) + jitter 0.01 → total = jitter 그 자체
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
+        final RecommendationProperties jitterOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final double totalSeed1 = scorer(jitterOnly)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(1)).total();
+        final double totalSeed2 = scorer(jitterOnly)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(2)).total();
+        // then: 서로 다른 jitter 값 + 둘 다 [-0.01, 0.01] 범위 내
+        assertThat(totalSeed1).isNotEqualTo(totalSeed2);
+        assertThat(totalSeed1).isBetween(-0.01, 0.01);
+        assertThat(totalSeed2).isBetween(-0.01, 0.01);
+    }
+
+    @Test
+    @DisplayName("score (결정성): 동일 seed + 다른 곡/입력 매번 → 각 케이스가 호출 간 동일 (반복 호출 안정성)")
+    void score_determinism_acrossDifferentInputs() {
+        // given: 두 가지 케이스. 각각 동일 seed 로 두 번 호출.
+        final Song songA = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final Song songB = buildSong(MusicalKey.G_MAJOR, Mood.CALM, 80);
+        final RecommendationProperties props = defaultProperties();
+        // when: 케이스 A 두 번
+        final RecommendationScorer.Scored a1 = scorer(props).score(songA, 50, 80, Mood.UPBEAT, 120, new Random(99));
+        final RecommendationScorer.Scored a2 = scorer(props).score(songA, 50, 80, Mood.UPBEAT, 120, new Random(99));
+        // 케이스 B 두 번
+        final RecommendationScorer.Scored b1 = scorer(props).score(songB, 60, 74, Mood.CALM, 70, new Random(99));
+        final RecommendationScorer.Scored b2 = scorer(props).score(songB, 60, 74, Mood.CALM, 70, new Random(99));
+        // then: 각 케이스는 호출 간 비트 동일. 케이스 간에는 서로 달라야 함 (다른 입력이면 다른 결과).
+        assertThat(a1.total()).isEqualTo(a2.total());
+        assertThat(a1.breakdown()).isEqualTo(a2.breakdown());
+        assertThat(b1.total()).isEqualTo(b2.total());
+        assertThat(b1.breakdown()).isEqualTo(b2.breakdown());
+        assertThat(a1.total()).isNotEqualTo(b1.total());
+    }
+
+    @Test
+    @DisplayName("score (jitter 범위): jitter 활성 + 동일 가중 합산 베이스 → 100회 반복 모두 base ± jitterMagnitude 범위")
+    void score_jitterRange_alwaysWithinBound() {
+        // given: voiceFit 가중치 1.0, 완전 매칭 → 가중 합산 베이스 1.0. jitter 0.01.
+        final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
+        final RecommendationProperties props = new RecommendationProperties(
+                new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when / then: 100개 seed 반복. 모든 결과는 [0.99, 1.01] 안.
+        for (int seed = 0; seed < 100; seed++) {
+            final double total = scorer(props).score(song, 50, 80, null, null, new Random(seed)).total();
+            assertThat(total).as("seed=%d", seed).isBetween(0.99, 1.01);
+        }
     }
 
     private static Song buildSong(final MusicalKey key, final Mood mood, final Integer bpm) {
