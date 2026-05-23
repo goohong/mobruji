@@ -94,4 +94,21 @@ class VoiceRangeSnapshotTest {
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("voiceRange");
     }
+
+    @Test
+    @DisplayName("create: 경계값 12/119 (C0~B8 닫힌 구간) 이면 정상 생성")
+    void create_atBoundary12And119_succeeds() {
+        final VoiceRangeSnapshot voiceRangeSnapshot = VoiceRangeSnapshot.create(
+                "s-b", 12, 119, VoiceRangeSourceMethod.OCTAVE_PICK);
+        assertThat(voiceRangeSnapshot.getLowMidi()).isEqualTo(12);
+        assertThat(voiceRangeSnapshot.getHighMidi()).isEqualTo(119);
+    }
+
+    @Test
+    @DisplayName("create: low == high (1음만 측정) 이어도 정상 생성")
+    void create_withEqualLowAndHigh_succeeds() {
+        final VoiceRangeSnapshot voiceRangeSnapshot = VoiceRangeSnapshot.create(
+                "s-eq", 60, 60, VoiceRangeSourceMethod.OCTAVE_PICK);
+        assertThat(voiceRangeSnapshot.getLowMidi()).isEqualTo(voiceRangeSnapshot.getHighMidi());
+    }
 }
