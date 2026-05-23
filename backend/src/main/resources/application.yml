@@ -34,7 +34,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        # base default 는 보수적으로 health,info 만 — prod 기본값.
+        # dev/local 개발자 dashboard 용 metrics/prometheus 는 application-local.yml 에서 추가.
+        # 운영 환경에서 dashboard 필요해지면 별도 profile override 또는 환경변수로 명시적 활성화.
+        # 이슈 #395: defense in depth — nginx whitelist 와 함께 두 곳에서 차단.
+        include: health,info
   endpoint:
     health:
       show-details: when-authorized
