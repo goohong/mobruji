@@ -264,7 +264,7 @@ WantedBy=multi-user.target
 | (C) Rolling (2 인스턴스 + sticky session 불요) | 0 | 중 | 인스턴스 2배 (€7.58/월) | v0.4 트래픽 ≥ 10 RPS |
 | (D) Cloudflare Tunnel + ECS Fargate | 0 | 고 | 유료 | 미고려 |
 
-- 1차 (A). PR F 에서 (B) 구현 가능성 + 메모리 측정 후 ADR 추가 (별 ADR 후보 `0016-zero-downtime-deploy.md`).
+- 1차 (A). PR F 에서 (B) 구현 가능성 + 메모리 측정 후 ADR 추가 (별 ADR 후보 `0018-zero-downtime-deploy.md` — ADR-0016 은 maestro-context-percent-estimation 가 점유).
 - (A) 사용 중에도 Cloudflare proxy 의 origin retry (default 3회) + Caddy graceful reload 로 사용자 체감 최소화.
 
 ### 5-7) 백업/복구 (PR G)
@@ -356,7 +356,7 @@ rclone delete --min-age 14d r2:mobruji-backups/db/
 - [ ] **PR C** (`infra`): `.github/workflows/deploy-backend.yml` GitHub Actions CD + GHA secrets 가이드 + Vercel GitHub 연동 셋업 가이드 (`docs/runbooks/deploy-web-vercel.md` 신설). `needs-human-review` (workflow 보호 영역).
 - [ ] **PR D** (`docs`): 도메인/DNS/SSL 셋업 런북 (`docs/runbooks/domain-and-ssl.md`) — Cloudflare Registrar 등록 절차, DNS 레코드, Cloudflare Full(strict) + Origin CA, HSTS preload. 코드 변경 없음.
 - [ ] **PR E** (`infra`): Caddy reverse proxy `Caddyfile` (`tools/deploy/Caddyfile`) — `api.mobruji.app` → `127.0.0.1:8080`, `metrics.mobruji.app` → `127.0.0.1:8081` + admin token 게이트 + Cloudflare Origin CA 설치 안내.
-- [ ] **PR F** (`docs` + 후속 `infra`): 무중단 배포 ADR (`docs/decisions/0016-zero-downtime-deploy.md`) — 옵션 매트릭스 (§5-6) 평가 + 1차 결정 (A) 유지 또는 (B) 채택. 채택 시 후속 구현 PR 분리.
+- [ ] **PR F** (`docs` + 후속 `infra`): 무중단 배포 ADR (`docs/decisions/0018-zero-downtime-deploy.md`) — 옵션 매트릭스 (§5-6) 평가 + 1차 결정 (A) 유지 또는 (B) 채택. 채택 시 후속 구현 PR 분리.
 - [ ] **PR G** (`docs` + `infra`): 백업/복구 spec 부속 런북 (`docs/runbooks/backup-and-restore.md`) + `mobruji-backup.sh` 스크립트 + `cron.d` 파일 + R2 셋업 가이드.
 
 ### PR 라벨 매트릭스

@@ -22,7 +22,7 @@ last_reviewed: 2026-05-22
 
 - (S1) **신규 의존성 추가 회귀 감지**: be 가 spleeter 2.4.0 을 추가하는 PR 을 올린다 → audio-analysis CI 가 의존성 설치 시간 90s → 320s 로 증가한 것을 timing artifact 로 감지 → Discord webhook 알림 → 리뷰어가 "캐시 hit rate 낮음, wheel 빌드 캐시 추가 필요" 코멘트.
 - (S2) **캐시 만료 회복**: pip cache key (lockfile 해시) 가 변하지 않은 PR 인데 GitHub Actions 캐시가 LRU evict 됐다 → 본 PR 의 CI 시간이 cold start 200s 로 튀어 알림 → 인프라 오너가 다음 PR 머지 후 cache warm-up 워크플로우 trigger.
-- (S3) **대안 라이브러리 평가 트리거**: librosa wheel 빌드 + 의존성 합이 400s 를 3주 연속 초과 → §5-5 트리거 조건 충족 → 별도 ADR `0015-audio-analysis-library-alternatives` (가칭) 신설하여 essentia/aubio 와 비교 실험.
+- (S3) **대안 라이브러리 평가 트리거**: librosa wheel 빌드 + 의존성 합이 400s 를 3주 연속 초과 → §5-5 트리거 조건 충족 → 별도 ADR `0019-audio-analysis-library-alternatives` (가칭) 신설하여 essentia/aubio 와 비교 실험.
 - (S4) **사용자 부재 시 자동 백그라운드**: maestro/be 가 다른 작업 진행 중에도 librosa CI 메트릭이 매 PR 자동 수집되고 회귀 시 Discord 알림이 와 사용자 호출 없이 사이클 흐름이 유지됨.
 
 ## 3) 요구사항
@@ -57,7 +57,7 @@ last_reviewed: 2026-05-22
 
 ### 제외 (Out of Scope)
 
-- **대안 라이브러리(essentia/aubio) 비교 실험 자체**: §5-7 트리거 조건 충족 시 별 ADR (`0015-audio-analysis-library-alternatives`) 와 별 spec 으로 분리. 본 spec 은 트리거 조건만.
+- **대안 라이브러리(essentia/aubio) 비교 실험 자체**: §5-7 트리거 조건 충족 시 별 ADR (`0019-audio-analysis-library-alternatives`) 와 별 spec 으로 분리. 본 spec 은 트리거 조건만.
 - **Grafana Cloud 로 CI 메트릭 push**: observability-baseline 의 Phase 2 후보. 현 spec 은 GitHub Actions artifacts + Discord 알림만.
 - **운영 환경 audio analysis 메트릭**: `mobruji.song.audio.analysis.duration` 은 observability-baseline §5-3 표가 단일 진실 (운영 메트릭). 본 spec 은 **CI 메트릭** 전용.
 - **AudioAnalysisRunner @MockBean → @MockitoBean (#207)**: 별 이슈, 별 PR. 본 spec 범위 외.
@@ -231,7 +231,7 @@ cat trend.json | jq '.total_seconds_p95'
 
 ### 5-7) 대안 라이브러리 평가 ADR 트리거 조건
 
-본 spec 은 평가 자체는 하지 않고 **트리거 조건만 정의**한다 — 정량 조건이 충족되면 별 ADR `docs/decisions/0015-audio-analysis-library-alternatives.md` 신설:
+본 spec 은 평가 자체는 하지 않고 **트리거 조건만 정의**한다 — 정량 조건이 충족되면 별 ADR `docs/decisions/0019-audio-analysis-library-alternatives.md` 신설:
 
 - (조건 A) `total_seconds` 3주 (또는 9 PR) 연속 임계 초과
 - (조건 B) wheel cache hit 율이 1개월 평균 < 30% (cache 효과 미미)
@@ -263,7 +263,7 @@ cat trend.json | jq '.total_seconds_p95'
 - [ ] **PR 3 (infra)**: 추세 계산 워크플로우 (`audio-analysis-ci-trend.yml`, 매일 1회 cron) + 3 PR 연속 초과 시 자동 이슈 등록 로직. 보호 영역 라벨 동일.
 - [ ] **PR 4 (infra)**: cache warm-up 워크플로우 (`audio-analysis-cache-warm.yml`, 매일 1회 cron). cache evict 빈도 측정 후 필요 시 도입 — 옵션, default off.
 - [ ] **PR 5 (docs)**: `docs/ai-harness/10-observability.md` §11 "CI 빌드 timing (audio-analysis)" 절 추가 — 조회 가이드 + 알림 룰 요약.
-- [ ] **PR 6 (조건부)**: §5-7 트리거 조건 충족 시 ADR-0015 + 별 spec.
+- [ ] **PR 6 (조건부)**: §5-7 트리거 조건 충족 시 ADR-0019 (`0019-audio-analysis-library-alternatives.md`) + 별 spec. (ADR-0015 는 hosting-stack 점유)
 
 ## 7) 테스트 전략
 
