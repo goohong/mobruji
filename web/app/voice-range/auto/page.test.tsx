@@ -410,6 +410,83 @@ describe("AutoVoiceRangePage 저장", () => {
   });
 });
 
+describe("AutoVoiceRangePage cleanup (#404)", () => {
+  // #404 A-1 회귀 가드: 측정 중 unmount → runPhase 의 AbortSignal 로 sampler 가
+  // 즉시 종료되어야 한다. signal 미주입 회귀가 생기면 이 테스트가 실패한다.
+  it("측정 중 unmount 하면 runPhase 에 전달된 AbortSignal 이 abort 된다", async () => {
+    const user = userEvent.setup();
+    let capturedSignal: AbortSignal | undefined;
+    const deps = buildDeps({
+      runPhase: vi.fn().mockImplementation((_phase, _stream, onSample, signal) => {
+        capturedSignal = signal;
+        // low phase 가 진행 중인 상태로 매달려 있게 둔다 → unmount 가 가능해진다.
+        return new Promise<MeasurementResult>((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              resolve({
+                midi: null,
+                confirmed: false,
+                stableSampleCount: 0,
+                totalSampleCount: 0,
+              });
+            },
+            { once: true },
+          );
+          onSample({
+            elapsedMs: 100,
+            frequencyHz: 130.81,
+            clarity: 0.5,
+            isStable: false,
+            midi: 48,
+          });
+        });
+      }),
+    });
+
+    const { unmount } = renderWithQueryClient(
+      <AutoVoiceRangePage deps={deps} />,
+    );
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // runPhase 호출되어 signal 이 캡처될 때까지 대기.
+    await waitFor(() => {
+      expect(capturedSignal).toBeDefined();
+    });
+    expect(capturedSignal!.aborted).toBe(false);
+
+    unmount();
+
+    // unmount cleanup 에서 controller.abort() 가 호출되어야 한다.
+    expect(capturedSignal!.aborted).toBe(true);
+  });
+
+  // #404 A-2 회귀 가드: requestMic 성공 후 runPhase throw 시 catch 진입 즉시
+  // 마이크 stream.stop() 이 호출되어야 한다. 이전 구현은 unmount cleanup 까지
+  // 약 1.2 초간 마이크 활성이 유지됐다.
+  it("측정 phase 실패 시 catch 에서 stream track.stop() 이 즉시 호출된다", async () => {
+    const user = userEvent.setup();
+    const trackStop = vi.fn();
+    const stream = {
+      getTracks: () => [{ stop: trackStop } as unknown as MediaStreamTrack],
+    } as unknown as MediaStream;
+    const deps = buildDeps({
+      requestMic: vi.fn().mockResolvedValue(stream),
+      runPhase: vi.fn().mockRejectedValue(new Error("analyser boom")),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // catch 블록에서 stream.getTracks().forEach(stop) 가 호출되어야 한다.
+    // 이전 구현은 1.2초 redirect 까지 stop 미호출 — 본 테스트가 즉시 동기적으로
+    // (await catch 후) 호출됨을 검증한다.
+    await waitFor(() => {
+      expect(trackStop).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 describe("AutoVoiceRangePage a11y", () => {
   it("초기 권한 화면에 a11y 위반이 없다", async () => {
     const { container } = renderWithQueryClient(

@@ -53,6 +53,10 @@ type WizardStep =
 /**
  * 측정 의존성 주입 — 테스트에서 Web Audio API 호출 없이 흐름만 검증하기 위함.
  * 운영 코드는 `defaultAutoMeasureDeps`를 사용한다.
+ *
+ * `signal` (#404 A-1): unmount/재시도 시 page 가 abort 하면 `runMeasurementSession`
+ * 의 `setInterval` 이 즉시 종료된다. signal 전달 없이 navigate 떠나면 5초간 timer
+ * 가 잔존하며 unmounted setState 경고가 떴다.
  */
 export interface AutoMeasureDeps {
   requestMic: () => Promise<MediaStream>;
@@ -60,19 +64,21 @@ export interface AutoMeasureDeps {
     phase: MeasurementPhase,
     stream: MediaStream,
     onSample: (sample: PitchSample) => void,
+    signal?: AbortSignal,
   ) => Promise<MeasurementResult>;
 }
 
 const defaultDeps: AutoMeasureDeps = {
   requestMic: () =>
     navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
-  runPhase: async (phase, stream, onSample) => {
+  runPhase: async (phase, stream, onSample, signal) => {
     const analyser = await openMicAnalyser(stream);
     try {
       return await runMeasurementSession({
         phase,
         onSample,
         readFrame: createReadFrameFromAnalyser(analyser),
+        signal,
       });
     } finally {
       await analyser.close();
@@ -103,6 +109,10 @@ export default function AutoVoiceRangePage({
   const [highMidi, setHighMidi] = useState<number>(69);
   const streamRef = useRef<MediaStream | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #404 A-1: 측정 중 페이지 떠남 → unmount 시 abort() 로 sampler 의 setInterval
+  // 을 즉시 종료해 unmounted setState 경고를 막는다. 매 handleStart 호출에서
+  // 새 controller 로 교체해 재시도 시에도 깨끗한 signal 을 보장한다.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // 컴포넌트 언마운트 시 마이크 stream 정리(privacy / 권한 빨간 점 제거).
   useEffect(() => {
@@ -113,6 +123,9 @@ export default function AutoVoiceRangePage({
         clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = null;
       }
+      // 진행 중 측정이 있으면 sampler 의 setInterval 을 즉시 끊는다 (#404 A-1).
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
   }, []);
 
@@ -136,6 +149,10 @@ export default function AutoVoiceRangePage({
 
   const handleStart = useCallback(async () => {
     setPermissionError(null);
+    // 매 측정 시도마다 새 controller. 이전 시도가 진행 중이면 abort 로 sampler 종료.
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
       // iOS Safari §8 Q5(a): user-gesture(클릭) 안에서 getUserMedia 호출.
       const stream = await deps.requestMic();
@@ -145,21 +162,31 @@ export default function AutoVoiceRangePage({
       const lowSamples: PitchSample[] = [];
       setCurrentSample(null);
       setElapsedMs(0);
-      const lowOutcome = await deps.runPhase("low", stream, (sample) => {
-        lowSamples.push(sample);
-        setCurrentSample(sample);
-        setElapsedMs(sample.elapsedMs);
-      });
+      const lowOutcome = await deps.runPhase(
+        "low",
+        stream,
+        (sample) => {
+          lowSamples.push(sample);
+          setCurrentSample(sample);
+          setElapsedMs(sample.elapsedMs);
+        },
+        controller.signal,
+      );
       setLowResult(lowOutcome);
 
       // 측정 phase 2 (high).
       setStep("MEASURE_HIGH");
       setCurrentSample(null);
       setElapsedMs(0);
-      const highOutcome = await deps.runPhase("high", stream, (sample) => {
-        setCurrentSample(sample);
-        setElapsedMs(sample.elapsedMs);
-      });
+      const highOutcome = await deps.runPhase(
+        "high",
+        stream,
+        (sample) => {
+          setCurrentSample(sample);
+          setElapsedMs(sample.elapsedMs);
+        },
+        controller.signal,
+      );
       setHighResult(highOutcome);
 
       // 결과 화면 진입 — 측정 MIDI를 슬라이더 기본값으로 미리 채운다.
@@ -177,6 +204,13 @@ export default function AutoVoiceRangePage({
     } catch (error) {
       // 권한 거부 / 장치 미지원 → fallback 안내 후 수동 입력 페이지로.
       safeLog.error("[voice-range/auto] mic permission/measurement failed", error);
+      // #404 A-2: requestMic 성공 후 runPhase 가 throw 한 경우 stream 이 살아있어
+      // 1.2초 redirect 까지 마이크 빨간 점이 유지된다. catch 진입 즉시 stop.
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      // 진행 중 측정도 함께 끊는다 (signal 미사용 인 경우에도 무해).
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       setPermissionError(
         error instanceof Error && error.name === "NotAllowedError"
           ? "마이크 권한이 거부되었습니다. 수동 입력으로 이동합니다."
