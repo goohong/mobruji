@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # discord-reply.sh — helper 가 직접 bot REST API 로 응답 push.
 #
-# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화):
+# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화 + #987 race condition fix):
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
@@ -125,6 +125,21 @@ THREAD_NAME_MAX_LEN=30
 # 메시지는 push 되도록).
 LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-${HOME:-/tmp}/.mobruji/last-user-msg-id.txt}"
 
+# #987 (2026-05-24) — reply race condition fix.
+# 문제: helper turn 진행 중 새 user msg 도착 → bot.py 가
+# last-user-msg-id.txt 덮어쓰기 → helper 답 push 시 reply 가 엉뚱한 msg 에 걸림.
+# 해결: helper turn 시작 시점에 last-user-msg-id 를 별 파일에 freeze. turn 안
+# 새 user msg 가 와도 helper-current-target.txt 는 안 바뀜.
+#
+# resolve 우선순위 (높음 → 낮음):
+#   1. `--reply-to <id>` CLI flag (명시적 override)
+#   2. `HELPER_TURN_TARGET_MSG_ID` env (sub-agent 가 부모 turn target 받을 때)
+#   3. `~/.mobruji/helper-current-target.txt` (turn-start freeze)
+#   4. `~/.mobruji/helper-queue.jsonl` 마지막 pending entry message_id
+#   5. `~/.mobruji/last-user-msg-id.txt` (기존 fallback — turn-start freeze 안 했을 때)
+HELPER_TARGET_FILE="${HELPER_TARGET_FILE:-${HOME:-/tmp}/.mobruji/helper-current-target.txt}"
+HELPER_QUEUE_FILE="${HELPER_QUEUE_FILE:-${HOME:-/tmp}/.mobruji/helper-queue.jsonl}"
+
 # Discord API retry 설정 (#911 G-6).
 # 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
 # Discord 가 권장하는 retry_after 또는 exponential backoff 로 재시도한다.
@@ -140,11 +155,13 @@ MSG=""
 # --no-reply: 본답 모드에서 message_reference 비활성화. 운영 환경에서
 # last-user-msg-id 가 있어도 standalone push 하고 싶을 때 (예: cron 직접 호출).
 NO_REPLY=0
+# --reply-to <id>: target msg id 명시적 override (#987). resolve 우선순위 최상위.
+REPLY_TO_OVERRIDE=""
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
   echo "  discord-reply.sh \"<메시지>\"" >&2
-  echo "  discord-reply.sh [--no-reply] \"<메시지>\"" >&2
+  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] \"<메시지>\"" >&2
   echo "  discord-reply.sh --ack \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
@@ -152,14 +169,32 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
-# --no-reply 는 선택적 prefix — 다른 flag 보다 먼저 consume.
-if [[ "$1" == "--no-reply" ]]; then
-  NO_REPLY=1
-  shift
-  if [[ $# -eq 0 ]]; then
-    echo "discord-reply.sh: --no-reply 뒤에 메시지가 필요합니다" >&2
-    exit 1
-  fi
+# --no-reply / --reply-to 는 선택적 prefix — 다른 flag 보다 먼저 consume.
+# 두 flag 의 순서는 자유 (--no-reply --reply-to 도, --reply-to --no-reply 도 OK).
+# --no-reply 가 우선 — --reply-to 와 동시 지정 시 standalone (안전한 쪽으로 fail-safe).
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-reply)
+      NO_REPLY=1
+      shift
+      ;;
+    --reply-to)
+      if [[ $# -lt 2 ]]; then
+        echo "discord-reply.sh: --reply-to 뒤에 message_id 가 필요합니다" >&2
+        exit 1
+      fi
+      REPLY_TO_OVERRIDE="$2"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ $# -eq 0 ]]; then
+  echo "discord-reply.sh: prefix flag 뒤에 메시지가 필요합니다" >&2
+  exit 1
 fi
 
 case "$1" in
@@ -314,32 +349,117 @@ post_thread_message() {
     "$body"
 }
 
-# reply 대상 message_id 해석 — last-user-msg-id.txt 읽고 snowflake 검증 (#946, #960).
+# snowflake 유효성 검사 — 17~20 digit 정수. invalid 면 stderr warning + 빈 출력.
+# Discord snowflake = 64bit unsigned = 2015 epoch 이후 항상 17~19 자리 (보수적으로
+# 20 까지 허용). 짧은 정수 ("4" 등) / 비숫자 / 빈 값 → Discord API 10008
+# (Unknown Message). source 인자는 stderr warning 용 label (어디서 온 값인지).
+validate_snowflake() {
+  local raw="$1"
+  local source_label="$2"
+  if [[ "$raw" =~ ^[0-9]{17,20}$ ]]; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  if [[ -n "$raw" ]]; then
+    echo "discord-reply.sh: ${source_label} 비-snowflake (\"$raw\") — 다음 fallback 으로" >&2
+  fi
+  printf ''
+  return 1
+}
+
+# helper-queue.jsonl 마지막 pending entry 의 message_id 추출 (#987).
+# jq 가 있으면 ndjson 파싱 (안전), 없으면 grep + sed 폴백.
+# 빈 출력 = pending entry 없음 또는 파일 부재.
+read_last_pending_queue_msg_id() {
+  if [[ ! -r "$HELPER_QUEUE_FILE" ]]; then
+    return 0
+  fi
+  # jq: status=="pending" 인 entry 만 필터, 마지막 1개의 message_id.
+  # 파일이 빈 jsonl 이거나 entry 가 모두 done 이면 빈 문자열.
+  local last_id
+  last_id=$(jq -r 'select(.status == "pending") | .message_id // empty' \
+    "$HELPER_QUEUE_FILE" 2>/dev/null \
+    | tail -1 \
+    | tr -d '[:space:]' || true)
+  printf '%s' "${last_id:-}"
+}
+
+# reply 대상 message_id 해석 — #946 / #960 / #987 통합 우선순위 체인.
 #
 # 출력: stdout 으로 message_id (정수 문자열) 또는 빈 문자열.
 # 정책:
 #   - $NO_REPLY=1 → 빈 문자열 (명시적 disable).
-#   - 파일 부재 / 빈 값 / 비숫자 → 빈 문자열 (graceful standalone fallback).
-#   - 유효 snowflake (정수) → 그 값 그대로.
+#   - 우선순위 (높음 → 낮음):
+#       1. $REPLY_TO_OVERRIDE (--reply-to flag)
+#       2. $HELPER_TURN_TARGET_MSG_ID env (sub-agent 가 부모 turn target inherit)
+#       3. $HELPER_TARGET_FILE (turn-start freeze)
+#       4. $HELPER_QUEUE_FILE 마지막 pending entry
+#       5. $LAST_USER_MSG_ID_FILE (기존 fallback)
+#   - 각 소스마다 snowflake 검증 → 실패 시 다음 fallback. 마지막까지 실패면 빈 문자열.
 #
 # bare body + ack 모드 모두 동일 로직을 공유하기 위해 함수로 분리.
 resolve_reply_to_id() {
-  local raw_id=""
-  if [[ "$NO_REPLY" -eq 0 && -r "$LAST_USER_MSG_ID_FILE" ]]; then
-    raw_id=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null | tr -d '[:space:]' || true)
-    # Discord snowflake 길이 가드 (#964, 2026-05-24).
-    # snowflake = 64bit unsigned = 2015 epoch 이후 항상 17~19 자리 (보수적으로
-    # 20 까지 허용). 짧은 정수 ("4" 등) / 비숫자 / 빈 값 → Discord API 10008
-    # (Unknown Message) → 채팅창에 "메시지를 불러올 수 없어요" 노출. write 단계
-    # (#964 bot.py 가드) 와 read 단계 모두 방어해 외부 오염 / legacy 파일도
-    # graceful standalone 으로 처리.
-    if [[ "$raw_id" =~ ^[0-9]{17,20}$ ]]; then
-      printf '%s' "$raw_id"
+  if [[ "$NO_REPLY" -eq 1 ]]; then
+    printf ''
+    return 0
+  fi
+
+  local candidate=""
+
+  # 1) --reply-to override (최우선).
+  if [[ -n "$REPLY_TO_OVERRIDE" ]]; then
+    if candidate=$(validate_snowflake "$REPLY_TO_OVERRIDE" "--reply-to"); then
+      printf '%s' "$candidate"
       return 0
-    elif [[ -n "$raw_id" ]]; then
-      echo "discord-reply.sh: last-user-msg-id 비-snowflake (\"$raw_id\") — standalone 으로 push (#964)" >&2
     fi
   fi
+
+  # 2) HELPER_TURN_TARGET_MSG_ID env.
+  if [[ -n "${HELPER_TURN_TARGET_MSG_ID:-}" ]]; then
+    if candidate=$(validate_snowflake \
+        "$HELPER_TURN_TARGET_MSG_ID" \
+        "HELPER_TURN_TARGET_MSG_ID env"); then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  fi
+
+  # 3) helper-current-target.txt (turn-start freeze).
+  if [[ -r "$HELPER_TARGET_FILE" ]]; then
+    local target_raw
+    target_raw=$(head -1 "$HELPER_TARGET_FILE" 2>/dev/null \
+      | tr -d '[:space:]' || true)
+    if [[ -n "$target_raw" ]]; then
+      if candidate=$(validate_snowflake "$target_raw" "helper-current-target.txt"); then
+        printf '%s' "$candidate"
+        return 0
+      fi
+    fi
+  fi
+
+  # 4) helper-queue.jsonl 마지막 pending entry.
+  local queue_id
+  queue_id=$(read_last_pending_queue_msg_id)
+  if [[ -n "$queue_id" ]]; then
+    if candidate=$(validate_snowflake "$queue_id" "helper-queue.jsonl pending entry"); then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  fi
+
+  # 5) last-user-msg-id.txt (기존 fallback).
+  if [[ -r "$LAST_USER_MSG_ID_FILE" ]]; then
+    local last_raw
+    last_raw=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null \
+      | tr -d '[:space:]' || true)
+    if [[ -n "$last_raw" ]]; then
+      if candidate=$(validate_snowflake "$last_raw" "last-user-msg-id.txt"); then
+        printf '%s' "$candidate"
+        return 0
+      fi
+    fi
+  fi
+
   printf ''
 }
 

@@ -610,7 +610,13 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
             "DISCORD_DAEMON_ENV_PATH": str(env_path),
             "PATH": new_path,
             "LAST_USER_MSG_ID_FILE": str(last_id_path),
+            # #987: 신규 우선순위 체인이 운영 ~/.mobruji 파일을 읽지 못하게 격리.
+            "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
+            "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
         })
+        # HELPER_TURN_TARGET_MSG_ID env 가 부모 프로세스에서 흘러들면 #987
+        # 우선순위 2 가 LAST_USER_MSG_ID_FILE 보다 위라 테스트 의도 깨짐 → 명시 제거.
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         result = subprocess.run(
             ["bash", str(self.SCRIPT_PATH), *args],
             capture_output=True,
@@ -843,7 +849,11 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
             "PATH": new_path,
             "LAST_USER_MSG_ID_FILE": str(last_id_path),
             "HELPER_THREAD_FILE": str(thread_file),
+            # #987: 운영 ~/.mobruji 격리.
+            "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
+            "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
         })
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         result = subprocess.run(
             ["bash", str(self.SCRIPT_PATH), "--auto-thread", "stream-line"],
             capture_output=True,
@@ -1033,7 +1043,11 @@ class DiscordReplyAckDeprecationTests(unittest.TestCase):
             # 깨끗한 환경 — 실제 운영 파일 영향 차단.
             "LAST_USER_MSG_ID_FILE": str(Path(tmpdir) / "nonexistent.txt"),
             "HELPER_THREAD_FILE": str(Path(tmpdir) / "helper-current-thread.txt"),
+            # #987: 운영 ~/.mobruji 격리.
+            "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
+            "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
         })
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         return subprocess.run(
             ["bash", str(self.SCRIPT_PATH), flag, "ack-text"],
             capture_output=True,
@@ -1111,7 +1125,11 @@ class DiscordReplyBareBodyTests(unittest.TestCase):
             "DISCORD_DAEMON_ENV_PATH": str(env_path),
             "PATH": new_path,
             "LAST_USER_MSG_ID_FILE": str(Path(tmpdir) / "nonexistent.txt"),
+            # #987: 운영 ~/.mobruji 격리.
+            "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
+            "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
         })
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         result = subprocess.run(
             ["bash", str(self.SCRIPT_PATH), "본답 메시지"],
             capture_output=True,
@@ -1131,6 +1149,201 @@ class DiscordReplyBareBodyTests(unittest.TestCase):
         import json
         payload = json.loads(payloads[0])
         self.assertIn("본답 메시지", payload["content"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #987: reply race condition — resolve_reply_to_id 우선순위 체인
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DiscordReplyResolvePriorityTests(unittest.TestCase):
+    """`resolve_reply_to_id` 우선순위 체인 검증 (#987).
+
+    helper turn 진행 중 새 user msg 도착으로 last-user-msg-id.txt 가 덮어쓰여
+    reply 가 엉뚱한 msg 에 걸리는 race condition 차단.
+
+    우선순위 (높음 → 낮음):
+      1. --reply-to <id>
+      2. HELPER_TURN_TARGET_MSG_ID env
+      3. helper-current-target.txt (turn-start freeze)
+      4. helper-queue.jsonl 마지막 pending entry
+      5. last-user-msg-id.txt
+    """
+
+    SCRIPT_PATH = (
+        Path(__file__).resolve().parent.parent / "discord-reply.sh"
+    )
+
+    def _make_fake_curl(self, tmpdir: str, capture_path: str) -> Path:
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  if [[ \"$1\" == \"-d\" ]]; then\n"
+            "    shift\n"
+            "    PAYLOAD=\"$1\"\n"
+            "  fi\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$PAYLOAD\" >> {capture_path}\n"
+            "printf '{\"id\": \"99999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+        return fake_curl
+
+    def _run(
+        self,
+        *args: str,
+        last_id_content: str | None = None,
+        target_content: str | None = None,
+        queue_lines: list[str] | None = None,
+        extra_env: dict[str, str] | None = None,
+    ):
+        """tmpdir 안에서 fake curl + env + 모든 fallback 파일 setup → 실행.
+
+        last_id_content / target_content / queue_lines 가 None 이면 파일 자체 미생성
+        (resolve_reply_to_id 가 graceful 하게 다음 fallback 으로 넘어가야 함).
+        """
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        capture_path = str(Path(tmpdir) / "payloads.txt")
+        self._make_fake_curl(tmpdir, capture_path)
+
+        env_path = Path(tmpdir) / "test.env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=stub\n"
+            "MOBRUJI_CHANNEL_ID=42\n"
+            "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n",
+            encoding="utf-8",
+        )
+
+        last_id_path = Path(tmpdir) / "last-user-msg-id.txt"
+        if last_id_content is not None:
+            last_id_path.write_text(last_id_content, encoding="utf-8")
+
+        target_path = Path(tmpdir) / "helper-current-target.txt"
+        if target_content is not None:
+            target_path.write_text(target_content, encoding="utf-8")
+
+        queue_path = Path(tmpdir) / "helper-queue.jsonl"
+        if queue_lines is not None:
+            queue_path.write_text(
+                "\n".join(queue_lines) + "\n", encoding="utf-8"
+            )
+
+        new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+        run_env = os.environ.copy()
+        run_env.update({
+            "DISCORD_DAEMON_ENV_PATH": str(env_path),
+            "PATH": new_path,
+            "LAST_USER_MSG_ID_FILE": str(last_id_path),
+            "HELPER_TARGET_FILE": str(target_path),
+            "HELPER_QUEUE_FILE": str(queue_path),
+        })
+        # HELPER_TURN_TARGET_MSG_ID 는 default 로 비움. 호출자가 extra_env 로 지정.
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
+        if extra_env:
+            run_env.update(extra_env)
+
+        result = subprocess.run(
+            ["bash", str(self.SCRIPT_PATH), *args],
+            capture_output=True,
+            text=True,
+            env=run_env,
+            timeout=5,
+        )
+        return result, capture_path
+
+    def _first_payload(self, capture_path: str) -> dict:
+        import json
+        line = Path(capture_path).read_text().splitlines()[0]
+        return json.loads(line)
+
+    def test_reply_to_flag_overrides_all_other_sources(self) -> None:
+        """--reply-to 가 env / file / queue / last-id 모두 무시하고 최우선 적용."""
+        result, capture_path = self._run(
+            "--reply-to",
+            "11111111111111111",
+            "body",
+            last_id_content="22222222222222222",
+            target_content="33333333333333333",
+            queue_lines=['{"message_id":"44444444444444444","status":"pending"}'],
+            extra_env={"HELPER_TURN_TARGET_MSG_ID": "55555555555555555"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._first_payload(capture_path)
+        self.assertIn("message_reference", payload)
+        self.assertEqual(
+            payload["message_reference"]["message_id"], "11111111111111111"
+        )
+
+    def test_env_var_overrides_file_and_last_id(self) -> None:
+        """HELPER_TURN_TARGET_MSG_ID env 가 file / queue / last-id 보다 우선."""
+        result, capture_path = self._run(
+            "body",
+            last_id_content="22222222222222222",
+            target_content="33333333333333333",
+            queue_lines=['{"message_id":"44444444444444444","status":"pending"}'],
+            extra_env={"HELPER_TURN_TARGET_MSG_ID": "55555555555555555"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._first_payload(capture_path)
+        self.assertEqual(
+            payload["message_reference"]["message_id"], "55555555555555555"
+        )
+
+    def test_target_file_freeze_overrides_last_id_race(self) -> None:
+        """helper-current-target.txt freeze 가 last-user-msg-id.txt 보다 우선.
+
+        실제 사고 재현: helper turn 시작에 target 9876... freeze, 도중에 user 새 msg
+        도착해서 last-id 가 1234... 로 갱신 → reply 는 freeze 된 9876... 에 걸려야 함.
+        """
+        result, capture_path = self._run(
+            "body",
+            last_id_content="12345678901234567",  # race condition: 새 user msg
+            target_content="98765432109876543",   # freeze 된 turn target
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._first_payload(capture_path)
+        self.assertEqual(
+            payload["message_reference"]["message_id"], "98765432109876543"
+        )
+
+    def test_queue_last_pending_used_when_target_file_missing(self) -> None:
+        """target file 부재 + queue 마지막 pending entry → queue 값 사용.
+
+        queue 에 여러 entry — pending / done 섞여 있을 때 마지막 pending 만 추출.
+        """
+        result, capture_path = self._run(
+            "body",
+            last_id_content="11111111111111111",
+            queue_lines=[
+                '{"message_id":"22222222222222222","status":"done"}',
+                '{"message_id":"33333333333333333","status":"pending"}',
+                '{"message_id":"44444444444444444","status":"done"}',
+                '{"message_id":"55555555555555555","status":"pending"}',
+            ],
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._first_payload(capture_path)
+        # 마지막 pending = 5555...
+        self.assertEqual(
+            payload["message_reference"]["message_id"], "55555555555555555"
+        )
+
+    def test_falls_through_to_last_id_when_higher_sources_absent(self) -> None:
+        """모든 상위 fallback 부재/실패 → last-user-msg-id.txt 사용 (기존 호환)."""
+        result, capture_path = self._run(
+            "body",
+            last_id_content="99999999999999999",
+            # target_content / queue_lines / env 모두 미설정.
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._first_payload(capture_path)
+        self.assertEqual(
+            payload["message_reference"]["message_id"], "99999999999999999"
+        )
 
 
 if __name__ == "__main__":
