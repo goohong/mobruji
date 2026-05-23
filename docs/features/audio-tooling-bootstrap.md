@@ -1,7 +1,7 @@
 ---
 feature: Python 오디오 분석 툴링 부트스트랩
 slug: audio-tooling-bootstrap
-status: draft
+status: shipped
 owner: @goohong
 scope: song
 related_issues: [180]
@@ -24,13 +24,13 @@ last_reviewed: 2026-05-21
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] `tools/audio-analysis/requirements.txt` — `yt-dlp`, `spleeter`, `librosa`, `numpy` 핀 버전 고정
-- [ ] `tools/audio-analysis/analyze.py` CLI:
+- [x] `tools/audio-analysis/requirements.txt` — `yt-dlp`, `spleeter`, `librosa`, `numpy` 핀 버전 고정
+- [x] `tools/audio-analysis/analyze.py` CLI:
   - 입력: `--song-id <id> --youtube-url <url> --out <path.json>`
   - 단계: (1) yt-dlp로 audio (m4a/webm) 추출 → 임시 디렉터리 (2) spleeter `2stems` 로 vocals.wav 분리 (3) librosa로 pitch detection (`pyin` 또는 `piptrack`) (4) min/max/median Hz + 표준편차 + 평균 RMS → JSON 출력 (5) 임시 audio 파일 즉시 삭제
-- [ ] `tools/audio-analysis/Dockerfile` (옵션, 운영 환경 격리용) — Python 3.11 slim + ffmpeg
-- [ ] `backend/.../application/AudioAnalysisRunner.java` — `ProcessBuilder` 기반 호출, stdout JSON 파싱, exit code/타임아웃 처리
-- [ ] JSON 스키마: `{ songId, pitchMinHz, pitchMaxHz, pitchMedianHz, pitchStdHz, durationSec, analyzedAt, toolingVersion }`
+- [x] `tools/audio-analysis/Dockerfile` (옵션, 운영 환경 격리용) — Python 3.11 slim + ffmpeg
+- [x] `backend/.../application/AudioAnalysisRunner.java` — `ProcessBuilder` 기반 호출, stdout JSON 파싱, exit code/타임아웃 처리
+- [x] JSON 스키마: `{ songId, pitchMinHz, pitchMaxHz, pitchMedianHz, pitchStdHz, durationSec, analyzedAt, toolingVersion }`
 - [ ] 분석 결과는 `song_analysis` 테이블에 upsert (`song-self-analysis-pipeline.md`와 정합)
 
 ### 비기능 요구사항

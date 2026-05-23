@@ -1,7 +1,7 @@
 ---
 feature: 음역대 진행 추적 (Voice Range Progress)
 slug: voice-range-progress
-status: draft
+status: shipped
 owner: @goohong
 scope: voice
 related_issues: [220, 171, 209]
@@ -29,14 +29,14 @@ last_reviewed: 2026-05-21
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] `VoiceRangeSnapshot` 엔티티/테이블 신설.
+- [x] `VoiceRangeSnapshot` 엔티티/테이블 신설.
   - 필드: `id` (PK, auto), `sessionId` (FK 의미상, 인덱스), `lowMidi` (int), `highMidi` (int), `sourceMethod` (enum: `MANUAL` / `AUTO_MIC` / `AUTO_AGGREGATE` — `voice-range-auto-measurement` spec과 정합), `measuredAt` (timestamp, default NOW)
-- [ ] `voice_range` 테이블 변경(insert/update) 발생 시 동일 트랜잭션에서 `voice_range_snapshot`에 **insert-only** 1행 추가. 덮어쓰기 금지.
-- [ ] `GET /api/v1/sessions/{id}/voice-range-history` 신규 엔드포인트.
+- [x] `voice_range` 테이블 변경(insert/update) 발생 시 동일 트랜잭션에서 `voice_range_snapshot`에 **insert-only** 1행 추가. 덮어쓰기 금지.
+- [x] `GET /api/v1/sessions/{id}/voice-range-history` 신규 엔드포인트.
   - 응답: `measuredAt` 오름차순 시계열 배열 `voiceRangeSnapshotResponses`.
   - 각 항목 필드: `lowMidi`, `highMidi`, `sourceMethod`, `measuredAt`.
-- [ ] `web/history` 페이지가 위 API를 호출하여 LocalStorage 대신 backend 데이터를 source-of-truth로 사용. LocalStorage는 **오프라인 fallback**으로만 유지.
-- [ ] fe 표시: 첫 측정 대비 최신 측정의 lowMidi/highMidi delta(반음 단위) 노출.
+- [x] `web/history` 페이지가 위 API를 호출하여 LocalStorage 대신 backend 데이터를 source-of-truth로 사용. LocalStorage는 **오프라인 fallback**으로만 유지.
+- [x] fe 표시: 첫 측정 대비 최신 측정의 lowMidi/highMidi delta(반음 단위) 노출.
 - [x] **session-bound 인증** (§5-2-1): `GET /sessions/{id}/voice-range-history` 호출 시 path sessionId 와 `X-Session-Id` 헤더 일치 검증. 누락/blank/불일치 모두 401. 사양 출처: ADR-0011, 구현: `SessionAuthGuard` (#244, closes #238).
 
 ### 비기능 요구사항

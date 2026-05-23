@@ -1,7 +1,7 @@
 ---
 feature: Phase 4 — NCP maestro VM에 mobruji dev 환경 docker 격리 배포
 slug: ncp-dev-deployment
-status: draft
+status: shipped
 owner: @mobruji-maestro
 scope: infra
 related_issues: [#356]
@@ -31,15 +31,15 @@ last_reviewed: 2026-05-23
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] **Dockerfile (backend)**: `backend/Dockerfile` — Spring Boot bootJar multi-stage 빌드, JRE 21 slim 베이스. AMD64 (NCP VM은 x86_64).
-- [ ] **Dockerfile (web)**: `web/Dockerfile` — Next.js production build, standalone output. Node 22 alpine.
-- [ ] **`docker-compose.dev.yml`**: 4 서비스 (mysql + backend + web + nginx). 메모리 limit 강제. MySQL volume mount.
+- [x] **Dockerfile (backend)**: `backend/Dockerfile` — Spring Boot bootJar multi-stage 빌드, JRE 21 slim 베이스. AMD64 (NCP VM은 x86_64).
+- [x] **Dockerfile (web)**: `web/Dockerfile` — Next.js production build, standalone output. Node 22 alpine.
+- [x] **`docker-compose.dev.yml`**: 4 서비스 (mysql + backend + web + nginx). 메모리 limit 강제. MySQL volume mount.
 - [ ] **`docker-compose.dev.env.example`**: 필수 env 키 (DB 비밀번호, NEXT_PUBLIC_API_URL 등) + 채우는 가이드.
-- [ ] **nginx reverse proxy**: `dev.mobruji.app` → web:3000, `dev-api.mobruji.app` → backend:8080. dev 단계는 plain HTTP 또는 self-signed (운영 도메인 미발급).
-- [ ] **GitHub Actions CD** (`.github/workflows/cd-dev.yml`): `develop` 머지 trigger → SSH로 NCP에 `cd ~/mobruji && git pull && docker compose -f docker-compose.dev.yml up -d --build` → healthcheck (`curl http://localhost:8080/actuator/health`) → Discord 알림 (기존 `discord-notify.yml`이 release 이벤트 잡지만, 별도 webhook은 X — `discord-status-push.md` 룰).
-- [ ] **swap 추가** (NCP 사전 작업): `sudo fallocate -l 1G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile` + `/etc/fstab` 영속화 (PR D, NCP 부트스트랩에 포함).
-- [ ] **docker 설치** (NCP 사전 작업): `apt install docker.io docker-compose-v2` + `usermod -aG docker mobruji` (PR D).
-- [ ] **`docs/runbooks/ncp-maestro-setup.md` 갱신**: docker 설치 + swap + dev 배포 가동 절차 추가.
+- [x] **nginx reverse proxy**: `dev.mobruji.app` → web:3000, `dev-api.mobruji.app` → backend:8080. dev 단계는 plain HTTP 또는 self-signed (운영 도메인 미발급).
+- [x] **GitHub Actions CD** (`.github/workflows/cd-dev.yml`): `develop` 머지 trigger → SSH로 NCP에 `cd ~/mobruji && git pull && docker compose -f docker-compose.dev.yml up -d --build` → healthcheck (`curl http://localhost:8080/actuator/health`) → Discord 알림 (기존 `discord-notify.yml`이 release 이벤트 잡지만, 별도 webhook은 X — `discord-status-push.md` 룰).
+- [x] **swap 추가** (NCP 사전 작업): `sudo fallocate -l 1G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile` + `/etc/fstab` 영속화 (PR D, NCP 부트스트랩에 포함).
+- [x] **docker 설치** (NCP 사전 작업): `apt install docker.io docker-compose-v2` + `usermod -aG docker mobruji` (PR D).
+- [x] **`docs/runbooks/ncp-maestro-setup.md` 갱신**: docker 설치 + swap + dev 배포 가동 절차 추가.
 - [ ] **`docs/features/rev-qa-protocol.md` §5-4 갱신**: dev 환경 row 추가, URL + 사용 가이드.
 
 ### 비기능 요구사항

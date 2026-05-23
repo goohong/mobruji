@@ -1,7 +1,7 @@
 ---
 feature: 추천 알고리즘 v2 (recommendation-algorithm-v2)
 slug: recommendation-algorithm-v2
-status: draft
+status: shipped
 owner: "@goohong"
 scope: recommendation
 related_issues: [219, 222, 273]
@@ -26,11 +26,11 @@ last_reviewed: 2026-05-23
 ## 3) 요구사항
 
 ### 기능 요구사항
-- [ ] **`keyMatch` 활성화** — `RecommendationScorer`에서 `Song.musicalKey`와 사용자 컨텍스트(현재는 `null` 기반 콜드스타트, 후속 spec에서 `preferredKey` 도입 검토) 비교 신호를 0 아닌 값으로 산출. 가중치 `w1` 기본값 (§9 결정 필요, 초안 `0.15`).
-- [ ] **`tempoMatch` 신설** — `RecommendationScorer`에 신호 추가. `Song.tempoBpm`과 `request.preferredBpm`(또는 mood 매핑값) 사이 거리를 0~1로 정규화. 가중치 `w_tempo` 초안 `0.1`.
-- [ ] **API 입력 확장** — `RecommendationCreateRequest.preferredBpm: Integer?` 추가 (nullable, 60~200 검증). 미입력 시 mood 매핑 적용, mood도 없으면 신호 0.5(중립).
-- [ ] **응답 breakdown 확장** — `ScoreBreakdownResponse`에 `tempoMatch` 필드 추가. `keyMatch`는 기존 필드 재사용(이전 항상 0이었음).
-- [ ] **mood → preferredBpm 매핑** — `RecommendationProperties.moodBpm` 맵(예: `신남=130, 잔잔=80, 감성=95`). 매핑 미정 mood는 null로 fallback. (§8 Q1)
+- [x] **`keyMatch` 활성화** — `RecommendationScorer`에서 `Song.musicalKey`와 사용자 컨텍스트(현재는 `null` 기반 콜드스타트, 후속 spec에서 `preferredKey` 도입 검토) 비교 신호를 0 아닌 값으로 산출. 가중치 `w1` 기본값 (§9 결정 필요, 초안 `0.15`).
+- [x] **`tempoMatch` 신설** — `RecommendationScorer`에 신호 추가. `Song.tempoBpm`과 `request.preferredBpm`(또는 mood 매핑값) 사이 거리를 0~1로 정규화. 가중치 `w_tempo` 초안 `0.1`.
+- [x] **API 입력 확장** — `RecommendationCreateRequest.preferredBpm: Integer?` 추가 (nullable, 60~200 검증). 미입력 시 mood 매핑 적용, mood도 없으면 신호 0.5(중립).
+- [x] **응답 breakdown 확장** — `ScoreBreakdownResponse`에 `tempoMatch` 필드 추가. `keyMatch`는 기존 필드 재사용(이전 항상 0이었음).
+- [x] **mood → preferredBpm 매핑** — `RecommendationProperties.moodBpm` 맵(예: `신남=130, 잔잔=80, 감성=95`). 매핑 미정 mood는 null로 fallback. (§8 Q1)
 
 ### 비기능 요구사항
 - **결정성 보존** — `SeedDeriver.derive()` 입력에 `preferredBpm`(정규화된 int, null이면 -1)을 포함해 같은 입력 → 같은 결과. 회귀 가드 테스트로 보장.
