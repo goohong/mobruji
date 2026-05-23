@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # discord-reply.sh — helper 가 직접 bot REST API 로 응답 push.
 #
-# 사용 (이슈 #807 단순화본 + #880 thread stream 확장):
+# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode):
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
@@ -9,6 +9,12 @@
 #           prepend 한다 (#921, 2026-05-24). 이유: jq escape 가 leading
 #           newline 을 strip 해서 ack 와 본답이 Discord 채널에서 시각적으로
 #           붙어 보이는 문제 영구 해결.
+#         → 본답 모드는 또한 `~/.mobruji/last-user-msg-id.txt` (bot.py 가
+#           on_message 시 atomic write — #946) 를 읽어 Discord REST API
+#           `message_reference` 를 payload 에 포함시켜 자동으로 사용자
+#           메시지에 reply (답장) 형태로 push 한다. 파일 부재 / 빈 값
+#           (cron digest 등) 은 graceful standalone fallback.
+#           --no-reply 플래그 또는 LAST_USER_MSG_ID_FILE=/dev/null 로 disable.
 #
 #   2) ack + 새 thread 생성 (#880 thread stream):
 #       THREAD_ID=$(discord-reply.sh --ack "<ack 문구>")
@@ -94,6 +100,13 @@ fi
 HELPER_THREAD_FILE="${HELPER_THREAD_FILE:-$HOME/.mobruji/helper-current-thread.txt}"
 THREAD_NAME_MAX_LEN=30
 
+# helper 본답 → 사용자 메시지 reply (#946, 2026-05-24).
+# bot.py on_message 가 사용자 메시지 forward 시 이 파일에 message_id 를
+# atomic write. 본답 모드가 읽어 Discord `message_reference` payload 에 포함.
+# 파일 부재 / 빈 값 / 비숫자 → graceful standalone (REST API 가 그래도 본답
+# 메시지는 push 되도록).
+LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-$HOME/.mobruji/last-user-msg-id.txt}"
+
 # Discord API retry 설정 (#911 G-6).
 # 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
 # Discord 가 권장하는 retry_after 또는 exponential backoff 로 재시도한다.
@@ -106,15 +119,29 @@ DISCORD_RETRY_BASE_SEC="${DISCORD_RETRY_BASE_SEC:-1}"
 MODE="reply"
 THREAD_ID=""
 MSG=""
+# --no-reply: 본답 모드에서 message_reference 비활성화. 운영 환경에서
+# last-user-msg-id 가 있어도 standalone push 하고 싶을 때 (예: cron 직접 호출).
+NO_REPLY=0
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
   echo "  discord-reply.sh \"<메시지>\"" >&2
+  echo "  discord-reply.sh [--no-reply] \"<메시지>\"" >&2
   echo "  discord-reply.sh --ack \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
   exit 1
+fi
+
+# --no-reply 는 선택적 prefix — 다른 flag 보다 먼저 consume.
+if [[ "$1" == "--no-reply" ]]; then
+  NO_REPLY=1
+  shift
+  if [[ $# -eq 0 ]]; then
+    echo "discord-reply.sh: --no-reply 뒤에 메시지가 필요합니다" >&2
+    exit 1
+  fi
 fi
 
 case "$1" in
@@ -293,7 +320,39 @@ case "$MODE" in
     # ZWSP 는 invisible character — visual padding 없이 빈 줄 효과를 보장.
     # ack / thread 모드는 짧은 단발성 push 라 미적용.
     MSG=$'​\n'"$MSG"
-    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
+
+    # #946: 사용자 메시지에 reply (답장) 형태로 push.
+    # bot.py 가 on_message 시 atomic write 한 LAST_USER_MSG_ID_FILE 에서
+    # message_id 를 읽어 Discord REST `message_reference` 에 포함.
+    # 파일 부재 / 빈 값 / 비숫자 → graceful standalone push (legacy 호환).
+    # --no-reply flag 시에도 standalone.
+    REPLY_TO_ID=""
+    if [[ "$NO_REPLY" -eq 0 && -r "$LAST_USER_MSG_ID_FILE" ]]; then
+      RAW_ID=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null | tr -d '[:space:]' || true)
+      # Discord snowflake = 정수 (보통 17~20자리). 비숫자/빈 값은 무시.
+      if [[ "$RAW_ID" =~ ^[0-9]+$ ]]; then
+        REPLY_TO_ID="$RAW_ID"
+      fi
+    fi
+
+    if [[ -n "$REPLY_TO_ID" ]]; then
+      # fail_if_not_exists: false — referenced message 가 삭제됐어도 본답
+      # 메시지 자체는 정상 push (standalone 으로 표시). Discord 권장 패턴.
+      PAYLOAD=$(jq -nc \
+        --arg c "$MSG" \
+        --arg mid "$REPLY_TO_ID" \
+        --arg cid "$CHANNEL" \
+        '{
+          content: $c,
+          message_reference: {
+            message_id: $mid,
+            channel_id: $cid,
+            fail_if_not_exists: false
+          }
+        }')
+    else
+      PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
+    fi
     post_channel_message "$PAYLOAD"
     ;;
 

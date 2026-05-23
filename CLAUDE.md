@@ -133,7 +133,7 @@ cd web && npm run dev                                                   # FE 실
 2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}`.
 3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문.
 4. **처리** — (a) 직접 / (b) sub-agent·nmae 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push.
-5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작 (ack 와 시각적 분리).
+5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작 (ack 와 시각적 분리). **본답 push 는 자동 Discord reply (사용자 메시지에 답장 형태)**: bot.py 가 `~/.mobruji/last-user-msg-id.txt` 에 message_id 캐시 + `discord-reply.sh` bare body 모드가 자동으로 `message_reference` payload 빌드 (#946). 명시적 disable 필요 시 `--no-reply`.
 6. **queue done + 검증** — message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. 1건이라도 남으면 turn 안 끝남. thread 마지막 줄로 `--auto-thread "[done]"` push 후 종료.
 
 **ack 문구 3종 (확정 — 부가 설명/사과/계획 금지, 한 줄만)**:
