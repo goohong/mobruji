@@ -340,14 +340,20 @@ function RecommendationFeed({
    * 동작은 종전과 동일: 페이지 수 증가 시점에만 메시지 갱신, `isFetchingNextPage`
    * 토글이 아니라 데이터 도착 시점을 기준으로 갱신해 "로딩 중" 메시지와
    * 중복되지 않는다.
+   *
+   * (closes #749) 이전에는 `useRef` 로 prevPageCount 를 추적했으나
+   * `react-hooks/refs` 룰이 렌더 중 ref 접근 자체를 금지한다. React 공식
+   * 권장 패턴은 ref 가 아니라 `useState` 로 prev value 를 보관하는 것이다
+   * (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+   * state 라도 렌더 중 set 호출 시 React 가 현재 렌더를 버리고 즉시
+   * 재렌더하므로 추가 paint 는 발생하지 않는다.
    */
-  const previousPageCountRef = useRef(0);
+  const [previousPageCount, setPreviousPageCount] = useState(0);
   const [liveMessage, setLiveMessage] = useState("");
 
   const pageCount = data?.pages.length ?? 0;
-  if (pageCount !== previousPageCountRef.current) {
-    const previousPageCount = previousPageCountRef.current;
-    previousPageCountRef.current = pageCount;
+  if (pageCount !== previousPageCount) {
+    setPreviousPageCount(pageCount);
     if (pageCount === 0) {
       // 쿼리 reset 등으로 페이지가 사라진 경우 메시지도 초기화.
       setLiveMessage("");
