@@ -640,5 +640,218 @@ class TmuxSendKeysTest(unittest.TestCase):
             self.assertEqual(first_args, ["tmux", "send-keys", "-t", "mobruji:0.0", "-l", "/clear"])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# clear_pane_history (#910 G-1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ClearPaneHistoryTest(unittest.TestCase):
+    """`tmux clear-history -t <pane>` 호출 + 실패 graceful."""
+
+    def test_clear_pane_history_calls_tmux_clear_history(self) -> None:
+        with mock.patch.object(bot.subprocess, "run") as run_mock:
+            run_mock.return_value = mock.MagicMock(returncode=0, stderr="")
+            ok = bot.clear_pane_history("mobruji:0.0")
+            self.assertTrue(ok)
+            run_mock.assert_called_once()
+            args = run_mock.call_args.args[0]
+            self.assertEqual(args, ["tmux", "clear-history", "-t", "mobruji:0.0"])
+
+    def test_clear_pane_history_returns_false_on_failure(self) -> None:
+        with mock.patch.object(bot.subprocess, "run") as run_mock:
+            run_mock.return_value = mock.MagicMock(
+                returncode=1, stderr="no such pane"
+            )
+            ok = bot.clear_pane_history("ghost:0.0")
+            self.assertFalse(ok)
+
+    def test_clear_pane_history_returns_false_on_oserror(self) -> None:
+        with mock.patch.object(
+            bot.subprocess, "run", side_effect=OSError("tmux missing")
+        ):
+            ok = bot.clear_pane_history("mobruji:0.0")
+            self.assertFalse(ok)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G-1: marker stale 시나리오 — /clear 후 clear_pane_history 호출 + 재트리거 시
+#       baseline 이 cleared scrollback 이라 false detect 없음
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ContextAutoClearMarkerStaleTest(unittest.IsolatedAsyncioTestCase):
+    """#910 G-1: CLEAR_READY_MARKER 스크롤백 stale 방지."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._flag_path = Path(self._tmp_dir.name) / "autoclear-paused"
+        self._flag_patcher = mock.patch.object(
+            bot, "AUTOCLEAR_PAUSED_FLAG", self._flag_path
+        )
+        self._flag_patcher.start()
+        self._log_path = Path(self._tmp_dir.name) / "log.md"
+        self._log_patcher = mock.patch.object(
+            bot, "CONTEXT_CLEAR_LOG_PATH", self._log_path
+        )
+        self._log_patcher.start()
+        self._has_session_patcher = mock.patch.object(
+            bot, "tmux_has_session", return_value=True
+        )
+        self._has_session_patcher.start()
+
+    def tearDown(self) -> None:
+        self._flag_patcher.stop()
+        self._log_patcher.stop()
+        self._has_session_patcher.stop()
+        self._tmp_dir.cleanup()
+
+    async def test_clear_pane_history_called_after_marker_detect(self) -> None:
+        """marker 감지 → send_clear_command 호출 직후 clear_pane_history 호출."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+        seq = iter([
+            "===CTX:96%===",  # trigger
+            "===CTX:96%===\n===CLEAR_READY===",  # marker → /clear + clear-history
+            "===CTX:50%===",
+        ])
+
+        def fake_capture(pane: str) -> str:
+            try:
+                return next(seq)
+            except StopIteration:
+                return "===CTX:50%==="
+
+        with mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True), \
+             mock.patch.object(bot, "send_clear_command", return_value=True) as send_clear, \
+             mock.patch.object(bot, "clear_pane_history", return_value=True) as clear_hist:
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_target="mobruji:0.0",
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=10)
+
+        send_clear.assert_called_with("mobruji:0.0")
+        clear_hist.assert_called_with("mobruji:0.0")
+        # send_clear 와 clear_pane_history 호출 횟수가 같아야 한다
+        # (/clear 마다 scrollback cleanup).
+        self.assertEqual(clear_hist.call_count, send_clear.call_count)
+
+    async def test_no_false_detect_when_scrollback_cleaned(self) -> None:
+        """stale marker 시나리오: /clear 후 capture 가 깨끗하면 재트리거 시
+        false detect 로 즉시 /clear 가 한 번 더 나가지 않는다.
+
+        시나리오: trigger → marker → /clear (#1) → clear-history 가 scrollback
+        cleanup → 다음 iter capture 깨끗 → pct 50 (debounce 풀림) → 96 재트리거
+        → awaiting_marker 상태에서 marker 없는 capture → /clear 추가 호출 0.
+        """
+        channel = FakeChannel()
+        client = FakeClient(channel)
+        seq = iter([
+            "===CTX:96%===",  # 1: trigger
+            "===CTX:96%===\n===CLEAR_READY===",  # 2: marker → /clear (#1)
+            "===CTX:50%===",  # 3: 깨끗 (clear-history 시뮬레이션) — debounce 해제
+            "===CTX:96%===",  # 4: 재트리거
+            "===CTX:96%===",  # 5: awaiting_marker — marker 없음 → /clear 추가 X
+            "===CTX:96%===",  # 6: 동일
+        ])
+
+        def fake_capture(pane: str) -> str:
+            try:
+                return next(seq)
+            except StopIteration:
+                return "===CTX:96%==="
+
+        with mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True), \
+             mock.patch.object(bot, "send_clear_command", return_value=True) as send_clear, \
+             mock.patch.object(bot, "clear_pane_history", return_value=True):
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_target="mobruji:0.0",
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=12)
+
+        # /clear 는 정확히 1번 (첫 marker 만). 재트리거 후 marker 없으므로 추가 X.
+        self.assertEqual(send_clear.call_count, 1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G-4: on_ready 한번 skip 후 영구 미가동 방지
+#      → loop 자체 항상 launch, pane 부재 시 loop 내부에서 graceful skip
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class OnReadyAlwaysLaunchTest(unittest.IsolatedAsyncioTestCase):
+    """#910 G-4: 모든 pane 의 tmux 세션 부재해도 loop 는 launch 되어야 한다."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._flag_path = Path(self._tmp_dir.name) / "autoclear-paused"
+        self._flag_patcher = mock.patch.object(
+            bot, "AUTOCLEAR_PAUSED_FLAG", self._flag_path
+        )
+        self._flag_patcher.start()
+        self._log_path = Path(self._tmp_dir.name) / "log.md"
+        self._log_patcher = mock.patch.object(
+            bot, "CONTEXT_CLEAR_LOG_PATH", self._log_path
+        )
+        self._log_patcher.start()
+
+    def tearDown(self) -> None:
+        self._flag_patcher.stop()
+        self._log_patcher.stop()
+        self._tmp_dir.cleanup()
+
+    async def test_loop_launches_then_recovers_when_pane_appears_later(self) -> None:
+        """초기 has-session=False 라도 loop 가 launch 되고, 이후 True 가 되면
+        polling 이 정상 동작한다 (NCP 재부팅 순서 의존성 해소).
+        """
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        # has-session: 첫 3 iter False (세션 없음) → 그 후 True.
+        call_state = {"count": 0}
+
+        def has_session_late(session: str) -> bool:
+            call_state["count"] += 1
+            return call_state["count"] > 3
+
+        capture_calls: list[str] = []
+
+        def fake_capture(pane: str) -> str:
+            capture_calls.append(pane)
+            return "===CTX:96%==="
+
+        with mock.patch.object(bot, "tmux_has_session", side_effect=has_session_late), \
+             mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True) as inject, \
+             mock.patch.object(bot, "send_clear_command", return_value=True), \
+             mock.patch.object(bot, "clear_pane_history", return_value=True):
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_target="mobruji:0.0",
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=20)
+
+        # 초기 세션 부재 동안 capture 호출 0, 세션 등장 후 polling 시작.
+        # → 최소 1번은 capture 가 호출돼야 한다 (loop 가 죽지 않고 살아 있음).
+        self.assertGreaterEqual(len(capture_calls), 1)
+        # 세션 등장 후 96% capture → inject 최소 1번.
+        self.assertGreaterEqual(inject.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
