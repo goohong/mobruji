@@ -21,9 +21,11 @@ spec: docs/features/discord-driven-mobruji.md
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -48,6 +50,18 @@ DEDUP_TTL_SECONDS: Final[int] = 24 * 60 * 60  # 24h
 DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 PIPE_PANE_ROTATE_INTERVAL_SECONDS: Final[int] = 5 * 60  # 5min
 DEFAULT_PIPE_PANE_MAX_BYTES: Final[int] = 100 * 1024 * 1024  # 100MB
+# maestro_response_watcher_loop 튜닝값. tmux pane 캡처 파일을 tail 하여 idle 임계 도달 시
+# 누적 buffer 를 한 응답 chunk 로 push. 노이즈 줄이려고 짧은 chunk skip + sha256 dedup.
+MAESTRO_WATCHER_POLL_INTERVAL_SECONDS: Final[float] = 1.0
+MAESTRO_WATCHER_IDLE_SECONDS: Final[float] = 30.0
+MAESTRO_WATCHER_MIN_CHUNK_LEN: Final[int] = 100  # 이보다 짧은 chunk 는 노이즈로 skip
+MAESTRO_WATCHER_MAX_CHUNK_LEN: Final[int] = 1800  # Discord 한도 2000 여유 200
+MAESTRO_WATCHER_DEDUP_PREFIX: Final[str] = "maestro:"
+# ANSI escape sequence: CSI (`ESC [ ... letter`) + OSC (`ESC ] ... BEL/ST`) + 단일 ESC.
+# claude TUI 가 컬러/커서/타이틀 코드 다수 출력 — Discord 에 raw 노출 방지.
+ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-_])"
+)
 SENTINEL_PREFIX: Final[str] = "/system:"
 STATUS_COMMAND_PREFIX: Final[str] = "/status"
 STATUS_GH_TIMEOUT_SECONDS: Final[int] = 8
@@ -115,6 +129,11 @@ def load_env() -> dict[str, str]:
         "TMUX_PIPE_PANE_MAX_BYTES", str(DEFAULT_PIPE_PANE_MAX_BYTES)
     )
     env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "0")
+    # maestro 응답 자동 캡처 + 메인 채널 push 워처. opt-in (긴급 위임).
+    # TMUX_PIPE_PANE_ENABLED=1 + 동일 capture 파일 사용 전제.
+    env["MAESTRO_RESPONSE_WATCHER_ENABLED"] = os.environ.get(
+        "MAESTRO_RESPONSE_WATCHER_ENABLED", "0"
+    )
     # NOTIFY_CHANNEL_ID — 알림 카테고리(cycle/digest/alert/recovery) 발사 채널.
     # 미설정 시 MOBRUJI_CHANNEL_ID 로 fallback (현재 동작 유지, 채널 분리 전 단계).
     # spec: docs/features/discord-message-style.md §5-2.
@@ -760,6 +779,177 @@ async def digest_loop(
         await asyncio.sleep(interval)
 
 
+def strip_ansi(text: str) -> str:
+    """ANSI escape sequence 제거. claude TUI 출력의 컬러/커서 코드 정리."""
+    return ANSI_ESCAPE_RE.sub("", text)
+
+
+def sanitize_chunk(text: str) -> str | None:
+    """raw tmux pane buffer 를 Discord push 후보로 정리.
+
+    - ANSI escape 제거
+    - 라인 단위로 trim 후 빈 라인 압축 (연속 공백 라인 1개로)
+    - 최소 길이 미만이면 None (노이즈 — 사용자 입력 echo / 짧은 prompt 등)
+    - 최대 길이 초과 시 잘라낸 뒤 `…(truncated)` 표시
+
+    Discord 한도 2000자. 너무 길면 잘라야 send 가 성공.
+    """
+    cleaned = strip_ansi(text)
+    # 라인별 rstrip + 빈 라인 합치기
+    lines: list[str] = []
+    blank_run = 0
+    for raw_line in cleaned.split("\n"):
+        line = raw_line.rstrip()
+        if not line:
+            blank_run += 1
+            if blank_run <= 1:
+                lines.append("")
+            continue
+        blank_run = 0
+        lines.append(line)
+    compact = "\n".join(lines).strip()
+    if len(compact) < MAESTRO_WATCHER_MIN_CHUNK_LEN:
+        return None
+    if len(compact) > MAESTRO_WATCHER_MAX_CHUNK_LEN:
+        compact = compact[: MAESTRO_WATCHER_MAX_CHUNK_LEN - 16] + "\n…(truncated)"
+    return compact
+
+
+def chunk_signature(text: str) -> str:
+    """chunk content 의 안정적 해시. dedup ledger message_id 로 사용.
+
+    `maestro:` prefix 로 사용자 메시지 id 와 namespace 분리.
+    """
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    return f"{MAESTRO_WATCHER_DEDUP_PREFIX}{digest[:32]}"
+
+
+async def maestro_response_watcher_loop(
+    client: "discord.Client",
+    channel_id: int,
+    pipe_pane_path: str,
+    ledger: DedupLedger | None,
+    *,
+    poll_interval: float = MAESTRO_WATCHER_POLL_INTERVAL_SECONDS,
+    idle_seconds: float = MAESTRO_WATCHER_IDLE_SECONDS,
+    time_source=time.monotonic,
+    sleep=asyncio.sleep,
+    initial_offset: int | None = None,
+) -> None:
+    """tmux pipe-pane 캡처 파일을 tail 하여 maestro 응답을 자동 push.
+
+    동작:
+    - poll_interval 마다 파일 size 확인. 새 바이트가 있으면 읽어 buffer 누적.
+    - 마지막 신규 바이트 도착 후 idle_seconds 동안 신규 없음 = "응답 완료" 로 간주.
+    - buffer 를 sanitize → 최소 길이 통과 + dedup miss 면 channel.send + ledger mark.
+    - 사용자 입력 echo 등 짧은 chunk 는 sanitize_chunk 에서 None 으로 skip.
+
+    초기 offset 은 파일 현재 끝 (이미 쌓인 과거 출력을 한꺼번에 push 하지 않음).
+    initial_offset 지정 시 그 값으로 시작 (테스트용).
+
+    bot 종료 시 cancel 됨. asyncio.CancelledError 는 외부로 전파.
+    """
+    path = Path(pipe_pane_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+    except OSError as exc:
+        logger.warning("maestro watcher: 캡처 파일 준비 실패 %s — loop 종료", exc)
+        return
+
+    if initial_offset is None:
+        try:
+            offset = path.stat().st_size
+        except OSError:
+            offset = 0
+    else:
+        offset = initial_offset
+
+    buffer = ""
+    last_new_at: float | None = None
+    logger.info(
+        "maestro_response_watcher_loop 시작: path=%s offset=%d idle=%.0fs poll=%.1fs",
+        pipe_pane_path,
+        offset,
+        idle_seconds,
+        poll_interval,
+    )
+
+    while True:
+        try:
+            try:
+                stat = path.stat()
+            except OSError as exc:
+                logger.debug("maestro watcher: stat 실패 %s", exc)
+                stat = None
+
+            if stat is not None:
+                size = stat.st_size
+                # 파일이 회전(truncate/rotate) 되었거나 새 파일로 교체된 경우 offset 리셋.
+                if size < offset:
+                    logger.info(
+                        "maestro watcher: 파일 회전 감지 (size=%d < offset=%d) — reset",
+                        size,
+                        offset,
+                    )
+                    offset = 0
+                    buffer = ""
+                    last_new_at = None
+
+                if size > offset:
+                    try:
+                        with path.open("rb") as handle:
+                            handle.seek(offset)
+                            new_bytes = handle.read(size - offset)
+                        chunk_text = new_bytes.decode("utf-8", errors="replace")
+                        buffer += chunk_text
+                        offset = size
+                        last_new_at = time_source()
+                    except OSError as exc:
+                        logger.warning("maestro watcher: 파일 read 실패 %s", exc)
+
+            # idle 임계 확인 — 마지막 신규 이후 idle_seconds 경과면 buffer flush 검토.
+            if buffer and last_new_at is not None:
+                idle_for = time_source() - last_new_at
+                if idle_for >= idle_seconds:
+                    candidate = sanitize_chunk(buffer)
+                    buffer = ""
+                    last_new_at = None
+                    if candidate is None:
+                        logger.debug("maestro watcher: chunk skip (length < min)")
+                    else:
+                        sig = chunk_signature(candidate)
+                        if ledger is not None and ledger.is_processed(sig):
+                            logger.info("maestro watcher: dedup hit sig=%s", sig)
+                        else:
+                            channel = client.get_channel(channel_id)
+                            if channel is None:
+                                logger.warning(
+                                    "maestro watcher: channel_id=%s 못 찾음 — skip",
+                                    channel_id,
+                                )
+                            else:
+                                try:
+                                    await channel.send(candidate)
+                                    if ledger is not None:
+                                        ledger.mark_processed(sig)
+                                    logger.info(
+                                        "maestro watcher push: sig=%s len=%d",
+                                        sig,
+                                        len(candidate),
+                                    )
+                                except Exception as exc:  # noqa: BLE001
+                                    logger.warning(
+                                        "maestro watcher send 실패: %s", exc
+                                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("maestro watcher loop 예외: %s", exc)
+
+        await sleep(poll_interval)
+
+
 def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Client:
     """discord.py Client 를 셋업하고 핸들러를 바인딩한다."""
     intents = discord.Intents.default()
@@ -796,6 +986,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     digest_enabled = env.get("DIGEST_ENABLED", "0") == "1"
     digest_interval = resolve_digest_interval(env.get("DIGEST_INTERVAL_SECONDS"))
 
+    maestro_watcher_enabled = env.get("MAESTRO_RESPONSE_WATCHER_ENABLED", "0") == "1"
+    maestro_watcher_path = env.get("TMUX_PIPE_PANE_PATH", "")
+
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
@@ -824,6 +1017,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 notify_channel_id,
                 digest_interval,
                 DIGEST_HEARTBEAT_SECONDS,
+            )
+
+        if (
+            maestro_watcher_enabled
+            and maestro_watcher_path
+            and not hasattr(client, "_maestro_watcher_started")
+        ):
+            client._maestro_watcher_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                maestro_response_watcher_loop(
+                    client,
+                    target_channel_id,
+                    maestro_watcher_path,
+                    ledger,
+                )
+            )
+            logger.info(
+                "maestro_response_watcher_loop launched: channel=%d path=%s",
+                target_channel_id,
+                maestro_watcher_path,
             )
 
     @client.event
@@ -902,9 +1115,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
 def main() -> None:
     env = load_env()
     ledger: DedupLedger | None = None
-    if env["TMUX_BRIDGE_ENABLED"] == "1":
+    # ledger 는 TMUX_BRIDGE_ENABLED 또는 MAESTRO_RESPONSE_WATCHER_ENABLED 중 하나라도 켜져 있으면 필요.
+    # (전자는 사용자 메시지 dedup, 후자는 maestro 응답 chunk dedup.)
+    needs_ledger = (
+        env["TMUX_BRIDGE_ENABLED"] == "1"
+        or env.get("MAESTRO_RESPONSE_WATCHER_ENABLED", "0") == "1"
+    )
+    if needs_ledger:
         ledger = DedupLedger(env["DEDUP_LEDGER_PATH"])
         start_dedup_gc_thread(ledger)
+    if env["TMUX_BRIDGE_ENABLED"] == "1":
         ensure_tmux_session(env["TMUX_SESSION_NAME"], env["CLAUDE_BIN"])
         if env["TMUX_PIPE_PANE_ENABLED"] == "1":
             try:
