@@ -15,10 +15,12 @@ import com.mobruji.recommendation.domain.RecommendationRequestEntity;
  * <p>{@link #recommendations} 의 각 항목은 영속된 {@code Recommendation}(=spec 용어
  * {@code RecommendationResultEntry}) 1건과 1:1 대응되며, breakdown 은 영속하지 않으므로 항상 null 로
  * 노출된다 (fe 는 null 일 경우 펼침 영역을 숨긴다).
+ *
+ * <p>{@code sessionId} 필드는 #406 M4(closes #423) 결정으로 제거되었다. {@code SessionAuthGuard}
+ * 가 이미 path/헤더 일치를 강제하므로 호출자는 자기 sessionId 만 받는다 → 응답 echo 는 dead payload.
  */
 public record RecommendationHistoryResponse(
         Long requestId,
-        String sessionId,
         Integer voiceRangeLow,
         Integer voiceRangeHigh,
         String mood,
@@ -35,7 +37,6 @@ public record RecommendationHistoryResponse(
                 .toList();
         return new RecommendationHistoryResponse(
                 recommendationRequestEntity.getId(),
-                recommendationRequestEntity.getSessionId(),
                 recommendationRequestEntity.getVoiceRangeLow(),
                 recommendationRequestEntity.getVoiceRangeHigh(),
                 recommendationRequestEntity.getMood() == null ? null : recommendationRequestEntity.getMood().name(),
