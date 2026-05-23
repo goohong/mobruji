@@ -273,3 +273,22 @@ describe("apiFetch path query string 가드 (#683)", () => {
     expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
   });
 });
+
+describe("apiFetch non-GET 메서드 body 처리 가드 (#699)", () => {
+  // 현 동작 lock: body 처리 분기는 method 와 무관하게 `body !== undefined` 단일 조건.
+  // PUT/DELETE 도 body 가 있으면 POST 와 동일하게 JSON.stringify + Content-Type 자동 부여,
+  // DELETE without body 는 init.body 없음 + Content-Type 없음 (#685 의 204 케이스 보강).
+  it.each([
+    { label: "PUT + body → JSON.stringify + Content-Type", method: "PUT" as const, body: { id: 1, name: "x" }, expectedBody: '{"id":1,"name":"x"}', expectedHasContentType: true },
+    { label: "DELETE + body → JSON.stringify + Content-Type", method: "DELETE" as const, body: { reason: "duplicate" }, expectedBody: '{"reason":"duplicate"}', expectedHasContentType: true },
+    { label: "DELETE without body → init.body 없음, Content-Type 없음", method: "DELETE" as const, body: undefined, expectedBody: undefined, expectedHasContentType: false },
+  ])("$label", async ({ method, body, expectedBody, expectedHasContentType }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { method, body });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe(method);
+    expect(init.body).toBe(expectedBody);
+    const headers = init.headers as Record<string, string>;
+    expect("Content-Type" in headers).toBe(expectedHasContentType);
+  });
+});
