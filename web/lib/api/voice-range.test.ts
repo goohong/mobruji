@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "./client";
 import {
   createVoiceRange,
   readVoiceRange,
@@ -65,6 +66,43 @@ describe("voice-range API", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/api/v1/voice-ranges/a%2Fb%20c%3Fd");
     expect((init as RequestInit).method ?? "GET").toBe("GET");
+  });
+
+  const baseReq = {
+    sessionId: "sess-1",
+    lowestNoteMidi: 48,
+    highestNoteMidi: 72,
+    sourceMethod: "SELF_REPORT" as const,
+  };
+
+  it("createVoiceRange: 400 응답 시 ApiError(status/message/body) 전파", async () => {
+    const errBody = { message: "lowestNoteMidi must be < highestNoteMidi" };
+    fetchMock.mockResolvedValueOnce(json(errBody, 400));
+    await expect(createVoiceRange(baseReq)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      message: errBody.message,
+      body: errBody,
+    });
+  });
+
+  it("createVoiceRange: 5xx 응답 시 ApiError 전파", async () => {
+    fetchMock.mockResolvedValueOnce(json({}, 503));
+    const p = createVoiceRange(baseReq);
+    await expect(p).rejects.toBeInstanceOf(ApiError);
+    await expect(p).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("createVoiceRange: AbortSignal을 fetch init으로 전달 + abort reject 전파", async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException("Aborted", "AbortError"));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      createVoiceRange(baseReq, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(
+      controller.signal,
+    );
   });
 
   it("updateVoiceRange: PUT /api/v1/voice-ranges/{sessionId} + JSON body", async () => {

@@ -42,10 +42,12 @@ export type VoiceRangeResponse = {
 
 export function createVoiceRange(
   request: VoiceRangeCreateRequest,
+  options: { signal?: AbortSignal } = {},
 ): Promise<VoiceRangeResponse> {
   return apiFetch<VoiceRangeResponse>("/api/v1/voice-ranges", {
     method: "POST",
     body: request,
+    signal: options.signal,
   });
 }
 
