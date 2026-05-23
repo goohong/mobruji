@@ -21,6 +21,8 @@ import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 /**
  * {@link SongAudioBackfillCommand#getLastBackfillCompletedAt()} 정적 상태 회귀 가드.
  *
@@ -81,7 +83,7 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
         when(runner.analyzeByMetadata("ok", "artist-ok"))
                 .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         cmd.runBackfill(0.6);
 
@@ -94,7 +96,7 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final SongRepository repo = mock(SongRepository.class);
         when(repo.findAll()).thenReturn(List.of());
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         assertThat(SongAudioBackfillCommand.getLastBackfillCompletedAt()).isNull();
         cmd.runBackfill(0.6);
@@ -109,7 +111,7 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
         when(runner.analyzeByMetadata(anyString(), anyString()))
                 .thenThrow(new AudioAnalysisFailedException("test failure"));
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBackfill(0.6);
 
@@ -124,7 +126,7 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final SongRepository repo = mock(SongRepository.class);
         when(repo.findAll()).thenReturn(List.of());
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         cmd.runBackfill(0.6);
         final Instant first = SongAudioBackfillCommand.getLastBackfillCompletedAt();
@@ -144,8 +146,10 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final SongRepository repo = mock(SongRepository.class);
         when(repo.findAll()).thenReturn(List.of());
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand instanceA = new SongAudioBackfillCommand(repo, runner);
-        final SongAudioBackfillCommand instanceB = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand instanceA = new SongAudioBackfillCommand(repo, runner,
+                new SimpleMeterRegistry());
+        final SongAudioBackfillCommand instanceB = new SongAudioBackfillCommand(repo, runner,
+                new SimpleMeterRegistry());
 
         assertThat(SongAudioBackfillCommand.getLastBackfillCompletedAt()).isNull();
         instanceA.runBackfill(0.6);
@@ -166,7 +170,7 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final SongRepository repo = mock(SongRepository.class);
         when(repo.findAll()).thenReturn(List.of());
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         final Instant before = Instant.now();
         cmd.runBackfill(0.6);
@@ -184,7 +188,7 @@ class SongAudioBackfillCommandLastCompletedAtTest {
         final SongRepository repo = mock(SongRepository.class);
         when(repo.findAll()).thenReturn(List.of());
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         cmd.runBackfill(0.6);
         final Instant first = SongAudioBackfillCommand.getLastBackfillCompletedAt();

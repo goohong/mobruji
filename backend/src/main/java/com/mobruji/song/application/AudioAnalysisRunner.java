@@ -22,6 +22,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mobruji.song.domain.AudioAnalysisFailedException;
 import com.mobruji.song.domain.AudioAnalysisResult;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
 /**
  * Python audio analysis tool ({@code tools/audio-analysis/analyze.py}) 호출 어댑터.
  *
@@ -42,10 +45,21 @@ public class AudioAnalysisRunner {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int STDERR_SNIPPET_LIMIT = 512;
 
-    private final AudioAnalysisProperties properties;
+    /**
+     * Micrometer timer 이름 — spec {@code docs/features/observability-baseline.md} §5-3 표 단일 진실.
+     * librosa 분석 1건의 wall-clock (Python process spawn + 실행 + JSON parse) 을 측정한다.
+     */
+    static final String METRIC_ANALYSIS_DURATION = "mobruji.song.audio.analysis.duration";
 
-    public AudioAnalysisRunner(final AudioAnalysisProperties properties) {
+    private final AudioAnalysisProperties properties;
+    private final Timer analysisDurationTimer;
+
+    public AudioAnalysisRunner(final AudioAnalysisProperties properties, final MeterRegistry meterRegistry) {
         this.properties = properties;
+        this.analysisDurationTimer = Timer.builder(METRIC_ANALYSIS_DURATION)
+                .description("librosa 기반 audio 분석 1건의 wall-clock (Python spawn + 실행 + JSON parse)")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(meterRegistry);
     }
 
     /**
@@ -59,7 +73,7 @@ public class AudioAnalysisRunner {
         args.add(title);
         args.add("--artist");
         args.add(artist);
-        return execute(args, "meta:" + title + " / " + artist);
+        return measured(() -> execute(args, "meta:" + title + " / " + artist));
     }
 
     /**
@@ -70,7 +84,20 @@ public class AudioAnalysisRunner {
         final List<String> args = new ArrayList<>();
         args.add("--youtube-url");
         args.add(youtubeUrl);
-        return execute(args, "url:" + maskUrl(youtubeUrl));
+        return measured(() -> execute(args, "url:" + maskUrl(youtubeUrl)));
+    }
+
+    /**
+     * {@link #METRIC_ANALYSIS_DURATION} timer 로 wall-clock 을 측정하는 공통 래퍼. 실패(예외) 도 timer 에 기록되어
+     * 전체 호출 분포(p50/p95/p99)를 왜곡 없이 본다. observability-baseline §5-3 표 단일 진실.
+     */
+    private AudioAnalysisResult measured(final java.util.function.Supplier<AudioAnalysisResult> body) {
+        final Timer.Sample sample = Timer.start();
+        try {
+            return body.get();
+        } finally {
+            sample.stop(analysisDurationTimer);
+        }
     }
 
     private AudioAnalysisResult execute(final List<String> toolArgs, final String logTag) {
