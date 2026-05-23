@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,11 +68,15 @@ class RecommendationCreateRequestTest {
     }
 
     @Test
-    @DisplayName("validation 어노테이션 메타데이터: sessionId @NotBlank, voiceRange @NotNull @Min(12) @Max(119), preferredBpm @Min(30) @Max(300)")
+    @DisplayName("validation 어노테이션 메타데이터: sessionId @NotBlank @Size(max=64), voiceRange @NotNull @Min(12) @Max(119), preferredBpm @Min(30) @Max(300)")
     void validationAnnotations_present() throws NoSuchMethodException {
         // record 의 component 어노테이션은 record 컴포넌트 → accessor 메서드로 전파된다.
         assertThat(RecommendationCreateRequest.class.getDeclaredMethod("sessionId").getAnnotation(NotBlank.class))
                 .isNotNull();
+        final Size sessionIdSize = RecommendationCreateRequest.class
+                .getDeclaredMethod("sessionId").getAnnotation(Size.class);
+        assertThat(sessionIdSize).isNotNull();
+        assertThat(sessionIdSize.max()).isEqualTo(64);
 
         final Min voiceRangeLowMin = RecommendationCreateRequest.class
                 .getDeclaredMethod("voiceRangeLow").getAnnotation(Min.class);
