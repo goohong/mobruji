@@ -11,6 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "./client";
 import { readVoiceRangeHistory } from "./voiceRangeHistory";
 
 const fetchMock = vi.fn();
@@ -95,5 +96,47 @@ describe("readVoiceRangeHistory", () => {
     const result = await readVoiceRangeHistory("sess-empty");
 
     expect(result.voiceRangeSnapshotResponses).toEqual([]);
+  });
+
+  it("given path encoding, when called, then X-Session-Id 헤더는 raw sessionId (PR #244 SessionAuthGuard 비교 일치)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ voiceRangeSnapshotResponses: [] }),
+    );
+    await readVoiceRangeHistory("a/b c");
+    const [calledUrl, calledInit] = fetchMock.mock.calls[0];
+    expect(calledUrl).toContain("a%2Fb%20c");
+    expect(calledInit.headers).toMatchObject({ "X-Session-Id": "a/b c" });
+  });
+
+  it("given BE 401 SessionAuthGuard, when called, then ApiError(401) 를 전파한다", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ message: "session mismatch" }, 401),
+    );
+
+    await expect(readVoiceRangeHistory("sess-x")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401,
+    });
+  });
+
+  it("given BE 5xx, when called, then ApiError(500) 를 전파한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "boom" }, 500));
+
+    await expect(readVoiceRangeHistory("sess-x")).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+
+  it("given AbortSignal, when called, then fetch init.signal 로 전달된다", async () => {
+    const controller = new AbortController();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ voiceRangeSnapshotResponses: [] }),
+    );
+
+    await readVoiceRangeHistory("sess-x", controller.signal);
+
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      signal: controller.signal,
+    });
   });
 });
