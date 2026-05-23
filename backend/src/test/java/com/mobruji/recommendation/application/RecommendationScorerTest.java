@@ -213,6 +213,62 @@ class RecommendationScorerTest {
     }
 
     @Test
+    @DisplayName("matchReason (회귀 가드): rangeFit=0.7 임계 inclusive + moodMatch 미달 → 음역 단독 메시지")
+    void toMatchReason_rangeOnly_atBoundary() {
+        // given: rangeFit=0.7 임계 inclusive, moodMatch=0.0 (분기 2)
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.7, 0.0, 0.0, 1.0, 0.5);
+        final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.5, breakdown);
+        // when
+        final String reason = scored.toMatchReason(song, Mood.UPBEAT);
+        // then: rangeFit 메시지만 노출, 분위기/통합 문구 없음
+        assertThat(reason).isEqualTo("원곡 키가 사용자 음역대에 잘 맞음");
+    }
+
+    @Test
+    @DisplayName("matchReason (회귀 가드): rangeFit=0.69 임계 바로 아래 + moodMatch=1.0 → 분위기 단독 메시지(song.mood 노출)")
+    void toMatchReason_moodOnly_belowRangeBoundary() {
+        // given: rangeFit=0.69 (0.7 임계 바로 아래), moodMatch=1.0 (분기 3)
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.CALM, 120);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.69, 0.0, 1.0, 1.0, 0.5);
+        final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.4, breakdown);
+        // when: requestedMood는 UPBEAT지만 코드는 song.getMood() 사용 (라인 207L 회귀 가드)
+        final String reason = scored.toMatchReason(song, Mood.UPBEAT);
+        // then: song.mood인 CALM이 메시지에 노출 (requestedMood 아님)
+        assertThat(reason).isEqualTo("분위기(" + Mood.CALM + ")가 요청과 일치");
+        assertThat(reason).doesNotContain("음역대");
+    }
+
+    @Test
+    @DisplayName("matchReason (회귀 가드): rangeFit·moodMatch 모두 임계 미달 → 폴백 메시지")
+    void toMatchReason_neither_returnsFallback() {
+        // given: rangeFit=0.6, moodMatch=0.0 (분기 4)
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.6, 0.0, 0.0, 1.0, 0.5);
+        final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.3, breakdown);
+        // when
+        final String reason = scored.toMatchReason(song, Mood.UPBEAT);
+        // then
+        assertThat(reason).isEqualTo("전반적 매칭");
+    }
+
+    @Test
+    @DisplayName("matchReason (회귀 가드): bothMatch 통합 메시지는 requestedMood를 노출 (분기 1 정밀)")
+    void toMatchReason_bothMatch_usesRequestedMood() {
+        // given: song.mood와 requestedMood가 다른 상황에서도 moodMatch=1.0이면 분기 1 진입.
+        // 통합 메시지는 코드 라인 201L에서 requestedMood를 사용하므로 회귀 가드.
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.CALM, 120);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.7, 0.0, 1.0, 1.0, 1.0);
+        final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.7, breakdown);
+        // when
+        final String reason = scored.toMatchReason(song, Mood.UPBEAT);
+        // then: requestedMood(UPBEAT) 노출, song.mood(CALM)는 노출되지 않음
+        assertThat(reason).contains(Mood.UPBEAT.toString());
+        assertThat(reason).doesNotContain(Mood.CALM.toString());
+        assertThat(reason).contains("음역대").contains("분위기");
+    }
+
+    @Test
     @DisplayName("가중치 튜닝: voiceFit 비중을 올리면 음역만 맞는 곡이 분위기만 맞는 곡보다 더 높게 나온다")
     void score_weightTuning_voiceFitDominates() {
         // given: 음역만 일치한 곡 A vs 분위기만 일치한 곡 B
