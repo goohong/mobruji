@@ -272,6 +272,35 @@ release tag (`v*`) 푸시 + production deploy 완료 후:
 | `regression:dev` | 단계 2 실패 | dev 환경 회귀 발견 — revert 후보 |
 | `regression:prod` | 단계 3 실패 | production 회귀 발견 — hotfix 트리거 |
 
+#### E-3) rev 큐 스크립트 — 매 사이클 첫 액션 (비협상)
+
+본 절은 사용자 2026-05-24 결정 ("메모리는 계속 까먹으니까 ... 스크립트로 rev해야하는 목록을 관리 ... 물리적 방법이 필요") 박제. **GitHub 라벨 + `tools/rev-queue/rev-queue.sh` 가 single source of truth**. 메모리/룰 학습 의존 X.
+
+§E-2 가 단계별 **절차** (comment + label) 라면, §E-3 는 매 사이클 시작 시 **무엇을 처리할지** 를 알려주는 큐 discovery 단계다. 두 절은 보완 관계 — §E-3 출력 → §E-2 절차 적용 → 라벨 부착 → 다음 §E-3 호출에서 자동 제외.
+
+rev sub-agent 는 **매 사이클 첫 명령**으로 큐 확인:
+
+```bash
+bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all
+```
+
+출력은 3 stage 큐 — `docs/features/rev-e2e-3-stages.md` 의 단계 1/2/3 와 1:1 대응 (`§E-2.1` / `§E-2.2` / `§E-2.3`).
+
+##### E-3.1 처리 순서 (큐 우선)
+
+1. **stage1 후보 ≥ 1** → §E-2.1 단계 1 e2e 절차 수행 ([[feedback-rev-e2e-always]])
+2. **stage2 후보 ≥ 1** → §E-2.2 단계 2 사후 audit 절차 수행
+3. **stage3 후보 ≥ 1** → §E-2.3 단계 3 production 검증 절차 수행
+4. **모두 빈 큐** → 기존 작업 (ADR audit / 도메인 audit / cross-ref 정리 등 — §E-1 보강)
+
+각 단계의 통과/실패 처리는 §E-2 의 코멘트 + 라벨 명령 그대로 사용.
+
+##### E-3.2 영속화 의미
+
+처리 완료 시 PR 에 해당 라벨 부착 (§E-2 절차) → **다음 `rev-queue.sh` 호출에서 자동 제외**. 메모리 학습 불필요, sub-agent 가 매 사이클 다른 사람이어도 큐 보고 §E-2 절차 적용하면 OK. 같은 PR 이 stage 별 다른 라벨 (reviewed:claude / rev-post-merge-pass / rev-prod-pass) 을 가지므로 stage 별 독립 멱등성 보장.
+
+상세 라벨 의미 + 자동화 잠재 확장 (cron + nmae watchdog 통합): `tools/rev-queue/README.md`.
+
 ### plan (mobruji-plan)
 - 워크트리: `/home/mobruji/mobruji-plan` (NCP Linux 호스트)
 - 작업 가능 경로: 큰 docs/spec/ADR — `docs/ai-harness/**`, `docs/features/**`, `docs/decisions/**`, `scripts/**`, `.github/**`(보호 영역 라벨 필수)
@@ -358,4 +387,8 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
 - 2026-05-23 — fe 역할에 의존성 설치 금지 룰 + `node_modules` symlink 보존 룰 추가. 사고: sub-agent `npm install --no-save` 실행으로 외부 디스크 symlink 풀림 (이슈 #187).
 - 2026-05-23 — NCP Linux 워크트리 절대경로 박제 (`/home/mobruji/...`) + §1 maestro 항시 가동 / 워크트리 lock / 5분 reasoning 룰 박스 / fe `npm install` 1회 룰 / §4 sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢) / §5 안티패턴 매트릭스 신설 (이슈 #405, PR TBD). 메모리 [[feedback-keep-4-cycles-active]] [[feedback-worktree-lock]] [[feedback-reasoning-chunk-limit]] [[feedback-sub-agent-launch-mandatory]] 영속화.
+<<<<<<< HEAD
 - 2026-05-24 — rev §E-2 추가: 3단계 e2e 절차 명문화 (단계 1 코멘트 + 라벨 의무 / 단계 2 develop 사후 검사 / 단계 3 release production 검증) + 라벨 reference 표 (`rev-post-merge-pass`, `rev-prod-pass`, `regression:dev|prod`). 트리거: helper 자율 머지가 rev 우회한 사고 → `.github/workflows/rev-gate.yml` 신설로 머지 차단 강제 (이슈 #945).
+=======
+- 2026-05-24 — rev §E-3 추가: 매 사이클 첫 액션으로 `tools/rev-queue/rev-queue.sh all` 호출 의무 (discovery 단계). §E-2 절차의 prelude — 큐 출력 → §E-2 절차 적용 → 라벨 → 다음 호출에서 자동 제외. 메모리/룰 학습 의존 X — GitHub 라벨 + 스크립트가 single source of truth (이슈 #952). 메모리 [[feedback-rev-queue-script]] 영속화.
+>>>>>>> 469c6ba (feat(infra): rev 큐 스크립트 신설 — tools/rev-queue/rev-queue.sh stage1/2/3 (#952))
