@@ -106,6 +106,46 @@ describe("useTheme", () => {
     expect(result.current.mode).toBe("system");
     expect(result.current.isDark).toBe(true);
   });
+
+  it("system 모드 + OS prefers=light → isDark=false (resolveIsDark 분기 명시 가드)", () => {
+    setOsPrefersDark(false);
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.mode).toBe("system");
+    expect(result.current.isDark).toBe(false);
+  });
+
+  it("system 모드 중 matchMedia 'change' 이벤트 발화 시 isDark 가 재계산된다", () => {
+    // 'change' listener 를 capture 해 prefers=light→dark 전환을 시뮬레이션.
+    let changeListener: ((event: MediaQueryListEvent) => void) | null = null;
+    const mqlStub = {
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      onchange: null,
+      addEventListener: vi.fn(
+        (_evt: string, listener: (event: MediaQueryListEvent) => void) => {
+          changeListener = listener;
+        },
+      ),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    };
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: vi.fn(() => mqlStub),
+    });
+
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.isDark).toBe(false);
+
+    act(() => {
+      mqlStub.matches = true;
+      changeListener?.({ matches: true } as MediaQueryListEvent);
+    });
+    expect(result.current.isDark).toBe(true);
+  });
 });
 
 describe("THEME_INIT_SCRIPT", () => {
