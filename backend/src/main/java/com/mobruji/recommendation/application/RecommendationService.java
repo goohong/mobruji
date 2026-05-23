@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 
@@ -55,7 +54,6 @@ public class RecommendationService {
     private final RecommendationProperties recommendationProperties;
 
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
-        Objects.requireNonNull(createRecommendationCommand, "createRecommendationCommand must not be null");
         final long startNanos = System.nanoTime();
         final List<Long> excludeSongIds = createRecommendationCommand.excludeSongIds();
 
@@ -154,7 +152,6 @@ public class RecommendationService {
      */
     @Transactional(readOnly = true)
     public List<RecommendationHistorySnapshot> readHistoryBySessionId(final String sessionId) {
-        Objects.requireNonNull(sessionId, "sessionId must not be null");
         final List<RecommendationRequestEntity> requests = recommendationRequestRepository
                 .findBySessionIdOrderByCreatedAtDescIdDesc(sessionId);
         if (requests.isEmpty()) {
