@@ -77,7 +77,7 @@ last_reviewed: 2026-05-22
 - 기존 `Song` 엔티티에 추가:
   - `valence` — DOUBLE, 0.0~1.0, nullable. Spotify 정의: "musical positiveness". null → "측정 안됨" 또는 Spotify ID 없음.
   - `energy` — DOUBLE, 0.0~1.0, nullable. Spotify 정의: "perceptual measure of intensity and activity".
-  - `metadataSource` enum 에 **신규 값 없음** — `valence`/`energy` 갱신만으로는 `metadataSource` 변경 없음 (이전 source 유지). 곡의 1차 source 는 그대로 `MANUAL_SEED` / `SELF_ANALYSIS` 유지.
+  - `metadataSource` enum 에 **신규 값 없음** — `valence`/`energy` 갱신만으로는 `metadataSource` 변경 없음 (이전 source 유지). 곡의 1차 source 는 그대로 `MANUAL_SEED` / `AUDIO_ANALYSIS` 유지.
 - 도메인 모델 §4 유비쿼터스 랭귀지 추가 후보:
   - **valence (긍정성)** — Spotify 정의에 따른 0.0 (sad/depressed) ~ 1.0 (happy/cheerful) 척도. 본 spec 의 mood signal 입력.
   - **energy (격렬도)** — 0.0 (calm) ~ 1.0 (intense/loud) 척도. 본 spec 의 mood signal 입력.
