@@ -1,7 +1,9 @@
 package com.mobruji.recommendation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -179,6 +181,76 @@ class SeedDeriverTest {
         final String second = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L));
         // then
         assertThat(first).isEqualTo(second).hasSize(16).matches("[0-9a-f]{16}");
+    }
+
+    /**
+     * NPE 가드 회귀: sessionId가 null이면 즉시 {@link NullPointerException}.
+     * 결정성 hash/seed 도출 직전에 fail-fast해야 호출 측 로그에 의미 없는 hash가 남지 않는다.
+     */
+    @Test
+    @DisplayName("derive: sessionId=null → NullPointerException (fail-fast)")
+    void derive_nullSessionId_throwsNpe() {
+        // when / then
+        assertThatNullPointerException()
+                .isThrownBy(() -> SeedDeriver.derive(null, 55, 75, Mood.UPBEAT, 120, List.of()))
+                .withMessageContaining("sessionId");
+    }
+
+    @Test
+    @DisplayName("hashHex16: sessionId=null → NullPointerException (fail-fast)")
+    void hashHex16_nullSessionId_throwsNpe() {
+        // when / then
+        assertThatNullPointerException()
+                .isThrownBy(() -> SeedDeriver.hashHex16(null, 55, 75, Mood.UPBEAT, 120, List.of()))
+                .withMessageContaining("sessionId");
+    }
+
+    /**
+     * excludeSongIds 리스트에 null element가 섞이면 {@code removeIf(Objects::isNull)} 분기로
+     * 제거되어, 의미상 같은 셋(null 빠진 셋)과 같은 seed가 산출되어야 한다. 호출 측이
+     * 임의 컬렉션을 그대로 넘겨도 결정성이 유지된다는 보장.
+     */
+    @Test
+    @DisplayName("derive: excludeSongIds에 null element 섞여도 제거 후 정상 seed")
+    void derive_excludeSongIds_containsNull_isFilteredOut() {
+        // given: null 포함 vs null 빠진 동등 셋 (Arrays.asList는 null 허용)
+        final List<Long> withNull = Arrays.asList(10L, null, 20L);
+        final List<Long> withoutNull = List.of(10L, 20L);
+        // when
+        final long seedWithNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, withNull);
+        final long seedWithoutNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, withoutNull);
+        // then
+        assertThat(seedWithNull).isEqualTo(seedWithoutNull);
+    }
+
+    /**
+     * hashHex16도 excludeSongIds 정규화(정렬·distinct)를 적용해야 결정성 로그가 의미를 가진다.
+     * 호출 측 순서·중복이 달라도 의미상 같은 셋이면 같은 hash. derive와 같은 canonicalize를 공유하는지
+     * 회귀 가드.
+     */
+    @Test
+    @DisplayName("hashHex16: excludeSongIds 순서/중복 차이는 같은 hash (정규화)")
+    void hashHex16_excludeSongIds_orderAndDuplicates_normalized() {
+        // when
+        final String ascending = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L, 20L, 30L));
+        final String descending = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(30L, 20L, 10L));
+        final String withDuplicate = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(20L, 10L, 30L, 10L));
+        // then
+        assertThat(ascending).isEqualTo(descending).isEqualTo(withDuplicate);
+    }
+
+    /**
+     * null 리스트와 빈 리스트는 의미상 동일("제외 없음") → hashHex16도 같은 hash.
+     * derive 쪽 보장이 hashHex16에도 적용되는지 회귀 가드.
+     */
+    @Test
+    @DisplayName("hashHex16: excludeSongIds null과 빈 리스트는 같은 hash (의미 동등)")
+    void hashHex16_excludeSongIds_nullEqualsEmpty() {
+        // when
+        final String nullList = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null);
+        final String emptyList = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        // then
+        assertThat(nullList).isEqualTo(emptyList);
     }
 
     @Test
