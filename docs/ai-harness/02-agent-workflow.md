@@ -148,6 +148,7 @@ gh release create vX.Y.Z --generate-notes
 - 다른 에이전트의 변경을 보고 싶다면: **PR 코멘트**로 제안만 한다. 직접 push 하지 않는다.
 - 사람만이 에이전트 브랜치를 교차로 수정/머지/리베이스할 수 있다.
 - 워크트리 lock: 같은 워크트리(`mobruji-be` 등)에 동시 2 sub-agent launch 금지 (§11 §0-10 워크트리 lock 참조).
+- **5분 reasoning chunk limit**: 단일 sub-agent turn의 reasoning/도구 호출 묶음이 5분을 넘기지 않도록 작업을 쪼갠다. LOC 상한·patch 작업 우선 분할이 1차 수단 (`feedback-reasoning-chunk-limit`, [ADR-0014 §Decision 6](../decisions/0014-multi-agent-worktree-orchestration.md#decision)).
 
 ### 10-2) 에이전트 식별
 - **커밋 trailer**(필수): 모든 AI 작성 커밋에 `Co-Authored-By: <에이전트명> <noreply@...>`를 포함한다.
@@ -184,6 +185,7 @@ maestro 본진은 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 *
 - 본진 자체 작업 default는 메타 (spec/ADR/메모리/orchestration). 코드/테스트/문서 본문 작성은 sub-agent 위임.
 - 통지 우선 처리: sub-agent 완료 통지는 본진 자기 작업보다 우선 (§11 §0-8).
 - 자율 운영: 사용자 부재 시에도 maestro은 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
+- **백로그 발굴 메타 단계**: 백로그 고갈 시 idle로 두지 않고 다음 후보를 순차 탐색한다 — (1) 직전 사이클 follow-up, (2) rev 코멘트 미해결 항목, (3) spec drift(문서 vs 코드 불일치), (4) 테스트 누락. 후보가 잡히면 가치 점검(비용 대비 우선순위 비교) 후 새 이슈 등록까지 한 호흡으로 진행한다 (`feedback-keep-4-cycles-active`, [ADR-0014 §Decision 3](../decisions/0014-multi-agent-worktree-orchestration.md#decision)).
 
 구체 사이클 명명(§11 §0-4) / idle 룰(§0-5) / 사용자 결정 묶음(§0-6) / Discord 가시성(§0-6-1, §0-6-2) / 워크트리 정리(§0-7) / rev 코멘트 자동 등록(§0-9) / 항시 가동 점검 의무(§0-10)는 모두 §11에 정형화. 본 절은 §10 일관성 유지를 위한 한 줄 요약.
 
