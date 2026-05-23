@@ -482,6 +482,49 @@ describe("apiFetch AbortController 타이밍 분기 가드 (#719)", () => {
   });
 });
 
+describe("apiFetch path=URL 객체 cast 가드 (#721)", () => {
+  // 현 동작 lock: `${API_BASE_URL}${path}` interpolation → URL 객체 cast 시 toString() 결과가
+  // base 뒤에 그대로 concat → 호출자는 path string 만 넘겨야 함을 회귀 가드로 명시.
+  it("URL 객체 cast → toString() 결과가 base 뒤에 그대로 concat 된다", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch(new URL("https://other.example.com/api/v1/songs") as unknown as string);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8080https://other.example.com/api/v1/songs", expect.objectContaining({ method: "GET" }));
+  });
+});
+
+describe("apiFetch headers={} vs undefined 분기 가드 (#721)", () => {
+  // 현 동작 lock: headers 옵션이 `{}` 든 `undefined` 든 기본 Accept/Content-Type 헤더는 유지된다.
+  // (`...(headers ?? {})` spread → 빈 객체/undefined 모두 추가 키 없음, 기본값만 남음.)
+  it.each([
+    { label: "headers=undefined → 기본 Accept 만", options: {} as RequestOptionsForTest },
+    { label: "headers={} → 기본 Accept 만 (빈 객체도 동일 결과)", options: { headers: {} } as RequestOptionsForTest },
+  ])("$label", async ({ options }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", options);
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers).toEqual({ Accept: "application/json" });
+  });
+});
+
+describe("apiFetch body=Blob/FormData native 가드 (#721)", () => {
+  // 현 동작 lock: body 분기는 무조건 JSON.stringify → Blob/FormData (toJSON 미정의, enumerable
+  // own property 없음) 는 "{}" 직렬화 → multipart upload 는 apiFetch 우회 필요성 노출.
+  it("body=Blob → JSON.stringify('{}') 동작, native body 우회 불가", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const blob = new Blob(["hello"], { type: "text/plain" });
+    await apiFetch("/api/v1/upload", { method: "POST", body: blob });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe("{}");
+  });
+
+  it("body=FormData → JSON.stringify('{}') 동작, multipart 직렬화 안 됨", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const form = new FormData();
+    form.append("field", "value");
+    await apiFetch("/api/v1/upload", { method: "POST", body: form });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe("{}");
+  });
+});
+
 describe("apiFetch URL path 한글/유니코드 가드 (#713)", () => {
   // 현 동작 lock: client.ts 는 path 를 raw concat 하며 encodeURI/encodeURIComponent 를 수행하지 않는다.
   // 미인코딩 한글 path 는 그대로 fetch URL 에 전달 → 인코딩은 호출자 책임 (encodeURIComponent 권장).
