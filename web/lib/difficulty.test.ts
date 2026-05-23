@@ -46,6 +46,40 @@ describe("deriveDifficulty", () => {
   });
 });
 
+describe("deriveDifficulty 비정상 입력 (회귀 방지 고정)", () => {
+  // 검증 책임은 호출 측에 있지만 헬퍼의 현재 동작을 명시적으로 고정한다.
+  it("NaN 입력은 모든 비교가 false → EASY로 분류", () => {
+    expect(deriveDifficulty(Number.NaN, 80)).toBe("HARD"); // highMidi=80 ≥ 76
+    expect(deriveDifficulty(60, Number.NaN)).toBe("EASY"); // 모든 비교 false
+    expect(deriveDifficulty(Number.NaN, Number.NaN)).toBe("EASY");
+  });
+
+  it("Infinity 입력은 highMidi 무한대 → HARD, low 무한대 → span 음의 무한대로 EASY", () => {
+    expect(deriveDifficulty(60, Number.POSITIVE_INFINITY)).toBe("HARD");
+    expect(deriveDifficulty(Number.NEGATIVE_INFINITY, 60)).toBe("HARD"); // span=+Infinity ≥ 17
+    expect(deriveDifficulty(Number.POSITIVE_INFINITY, 60)).toBe("EASY"); // span=-Infinity
+  });
+
+  it("매우 작은/음수 highMidi 는 highMidi+span 기준 그대로 적용", () => {
+    // low=-100, high=-50: highMidi<71 이지만 span=50 ≥ 17 → HARD
+    expect(deriveDifficulty(-100, -50)).toBe("HARD");
+    // low=-50, high=-40: highMidi<71, span=10<17 → EASY
+    expect(deriveDifficulty(-50, -40)).toBe("EASY");
+    expect(deriveDifficulty(0, 0)).toBe("EASY");
+  });
+
+  it("low > high 역전(span 음수)은 highMidi 기준만 적용", () => {
+    expect(deriveDifficulty(80, 60)).toBe("EASY"); // highMidi=60 < 71
+    expect(deriveDifficulty(90, 76)).toBe("HARD"); // highMidi=76 ≥ 76
+  });
+
+  it("low === high (span=0)은 highMidi 기준만 적용", () => {
+    expect(deriveDifficulty(76, 76)).toBe("HARD");
+    expect(deriveDifficulty(71, 71)).toBe("NORMAL");
+    expect(deriveDifficulty(70, 70)).toBe("EASY");
+  });
+});
+
 describe("difficultyLabel", () => {
   it("난이도 enum을 표시 라벨로 매핑", () => {
     expect(difficultyLabel("EASY")).toBe("Easy");
