@@ -46,6 +46,35 @@ describe("SongDetailModal", () => {
     expect(heading).toHaveAttribute("id", labelId!);
   });
 
+  // aria-labelledby ↔ heading id 매칭 회귀 가드 (closes #546):
+  // 두 모달 동시 마운트 시 useId() 가 인스턴스마다 고유 ID 를 발급하고,
+  // 각 모달의 aria-labelledby 가 자기 heading id 하나하고만 매칭되는지 검증.
+  it("두 모달 동시 오픈 시 aria-labelledby ↔ heading id 가 인스턴스별로 고유 매칭된다", () => {
+    render(
+      <>
+        <SongDetailModal open onClose={vi.fn()} titleLabel="첫 번째 곡">
+          <p>본문 1</p>
+        </SongDetailModal>
+        <SongDetailModal open onClose={vi.fn()} titleLabel="두 번째 곡">
+          <p>본문 2</p>
+        </SongDetailModal>
+      </>,
+    );
+    const dialogs = screen.getAllByRole("dialog");
+    expect(dialogs).toHaveLength(2);
+    const labelIds = dialogs.map((d) => d.getAttribute("aria-labelledby"));
+    expect(labelIds[0]).toBeTruthy();
+    expect(labelIds[1]).toBeTruthy();
+    // panelId unique: 두 모달이 같은 id 를 공유하면 스크린리더가 잘못된 heading 을 읽는다.
+    expect(labelIds[0]).not.toBe(labelIds[1]);
+    // 각 aria-labelledby 가 실제 DOM 에 정확히 1개의 heading 과만 매칭되는지.
+    for (const labelId of labelIds) {
+      const matched = document.querySelectorAll(`#${CSS.escape(labelId!)}`);
+      expect(matched).toHaveLength(1);
+      expect(matched[0].tagName).toBe("H2");
+    }
+  });
+
   it("닫기 버튼 클릭 시 onClose가 호출된다", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
