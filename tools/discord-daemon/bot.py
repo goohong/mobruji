@@ -201,6 +201,14 @@ CYCLE_IDLE_WATCH_STRICT_TEMPLATE: Final[str] = (
 CYCLE_REASON_REQUIRED_DEFAULT: Final[str] = "1"
 # future timestamp ERROR push debounce (#971) — 동일 워크트리 1시간 1회.
 CYCLE_FUTURE_TS_PUSH_DEBOUNCE_SECONDS: Final[int] = 60 * 60  # 1h
+# escalation (#972) — 같은 워크트리 inject N회 연속 후에도 in_progress NULL 이면
+# MOBRUJI_CHANNEL_ID (사용자 채널) 에 직접 push. nmae 무응답 신호.
+CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT: Final[int] = 3
+CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT: Final[int] = 60 * 60  # 1h
+CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE: Final[str] = (
+    "🚨 nmae 무응답 — {workspaces} 워크트리 watchdog inject {count}회 연속 후 "
+    "in_progress 여전히 NULL. nmae 룰 위반 — 사용자 확인 필요"
+)
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -280,6 +288,15 @@ def load_env() -> dict[str, str]:
     # CYCLE_NOTIFY_CHANNEL_ID 부재 시 NOTIFY_CHANNEL_ID fallback.
     env["CYCLE_NOTIFY_CHANNEL_ID"] = os.environ.get(
         "CYCLE_NOTIFY_CHANNEL_ID", env["NOTIFY_CHANNEL_ID"]
+    )
+    # escalation (#972) — env override.
+    env["CYCLE_INJECT_ESCALATION_THRESHOLD"] = os.environ.get(
+        "CYCLE_INJECT_ESCALATION_THRESHOLD",
+        str(CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT),
+    )
+    env["CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS"] = os.environ.get(
+        "CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS",
+        str(CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT),
     )
     return env
 
@@ -1559,6 +1576,9 @@ async def cycle_idle_watch_loop(
     workspaces: list[str] | tuple[str, ...] = ("be", "fe", "rev", "plan"),
     debounce_seconds: int = CYCLE_IDLE_WATCH_DEBOUNCE_SECONDS,
     reason_required: bool = True,
+    escalation_threshold: int = CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT,
+    escalation_debounce_seconds: int = CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT,
+    escalation_channel_id: int | None = None,
     future_ts_debounce_seconds: int = CYCLE_FUTURE_TS_PUSH_DEBOUNCE_SECONDS,
     time_source=time.monotonic,
     now_provider=lambda: datetime.now(timezone.utc),
@@ -1575,13 +1595,23 @@ async def cycle_idle_watch_loop(
       4. debounce 통과한 idle ≥ 1 이면:
          - nmae tmux pane (``inject_target``) 에 `tmux_inject_text` 알림 inject.
          - Discord ``notify_channel_id`` 에 경고 push.
-      5. graceful skip — cycle-status.json 부재/parse fail / tmux session 부재 /
+         - 워크트리별 inject counter += 1 (#972).
+      5. (#972) escalation — counter 가 ``escalation_threshold`` 도달 + in_progress
+         여전히 NULL 이면 ``escalation_channel_id`` (= MOBRUJI_CHANNEL_ID 권장) 에
+         사용자 직접 push. escalation push 자체도 워크트리 별 1h debounce.
+      6. 워크트리가 active 로 돌아오면 (idle list 에서 빠짐) counter 자동 0 리셋.
+      7. graceful skip — cycle-status.json 부재/parse fail / tmux session 부재 /
          Discord channel 미발견 시 warn 1회 후 skip.
-      6. ``threshold_minutes <= 0`` 이면 disabled — 즉시 return (테스트 용).
+      8. ``threshold_minutes <= 0`` 이면 disabled — 즉시 return (테스트 용).
 
     asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
 
     Args:
+        escalation_threshold: 같은 워크트리에 inject 가 N회 연속 발사 + in_progress
+            NULL 유지 시 사용자 채널 push. 0 이면 escalation 비활성 (테스트 용).
+        escalation_debounce_seconds: 같은 워크트리 escalate push 사이 최소 간격.
+        escalation_channel_id: 사용자 직접 push 채널 (MOBRUJI_CHANNEL_ID).
+            None 이면 escalation 비활성 (graceful — 환경 미설정 시 silent).
         time_source: debounce 비교용 monotonic 시각 source. 테스트 stub.
         now_provider: idle 판정용 wall-clock provider (aware datetime).
     """
@@ -1591,11 +1621,15 @@ async def cycle_idle_watch_loop(
 
     inject_session = inject_target.split(":", 1)[0]
     last_alert_at: dict[str, float] = {}
+    # escalation (#972) 상태 — 워크트리 별 누적 inject 횟수 + 마지막 escalate 시각.
+    inject_count: dict[str, int] = {}
+    last_escalate_at: dict[str, float] = {}
     # #971: future timestamp ERROR push debounce — 동일 워크트리 1h 1회.
     last_future_ts_push_at: dict[str, float] = {}
     missing_session_warned = False
     missing_channel_warned = False
     missing_status_warned = False
+    missing_escalation_channel_warned = False
 
     while True:
         try:
@@ -1624,6 +1658,12 @@ async def cycle_idle_watch_loop(
                 len(idle_all),
                 ",".join(e["workspace"] for e in idle_all) or "none",
             )
+            # (#972) escalation counter 리셋 — 이번 iter 에 idle 아닌 워크트리는
+            # nmae 가 정상 launch 한 것으로 간주, inject_count 0 으로 reset.
+            idle_workspaces_now = {e["workspace"] for e in idle_all}
+            for ws_name in list(inject_count.keys()):
+                if ws_name not in idle_workspaces_now:
+                    inject_count[ws_name] = 0
 
             # #971 — future timestamp 발견 시 별 ERROR Discord push.
             # idle alert 와 독립 debounce (1h) — KST as Z hand-edit 사고 즉시
@@ -1751,11 +1791,51 @@ async def cycle_idle_watch_loop(
             now_mono = time_source()
             for entry in fresh_idle:
                 last_alert_at[entry["workspace"]] = now_mono
+                # (#972) escalation counter += 1 — fresh idle 발사한 워크트리만.
+                ws_name = entry["workspace"]
+                inject_count[ws_name] = inject_count.get(ws_name, 0) + 1
             logger.info(
-                "cycle_idle_watch_loop: idle alert workspaces=%s strict=%s",
+                "cycle_idle_watch_loop: idle alert workspaces=%s strict=%s inject_counts=%s",
                 workspaces_label,
                 ", ".join(e["workspace"] for e in strict_idle) or "none",
+                ",".join(f"{w}={inject_count.get(w, 0)}" for w in idle_workspaces_now),
             )
+
+            # (#972) escalation — threshold 도달 워크트리 사용자 채널 직접 push.
+            # escalation_channel_id None / threshold<=0 이면 graceful skip.
+            if escalation_channel_id is None or escalation_threshold <= 0:
+                continue
+            escalate_workspaces = [
+                entry["workspace"]
+                for entry in fresh_idle
+                if inject_count.get(entry["workspace"], 0) >= escalation_threshold
+                and (now_mono - last_escalate_at.get(entry["workspace"], 0.0))
+                >= escalation_debounce_seconds
+            ]
+            if not escalate_workspaces:
+                continue
+            escalation_channel = client.get_channel(escalation_channel_id)
+            if escalation_channel is None:
+                if not missing_escalation_channel_warned:
+                    logger.warning(
+                        "cycle_idle_watch_loop: escalation channel 부재 — skip (channel_id=%s)",
+                        escalation_channel_id,
+                    )
+                    missing_escalation_channel_warned = True
+                continue
+            missing_escalation_channel_warned = False
+            for ws_name in escalate_workspaces:
+                escalate_text = CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE.format(
+                    workspaces=ws_name,
+                    count=inject_count.get(ws_name, 0),
+                )
+                await send_with_retry(escalation_channel, content=escalate_text)
+                last_escalate_at[ws_name] = now_mono
+                logger.warning(
+                    "cycle_idle_watch_loop: escalation push ws=%s count=%d",
+                    ws_name,
+                    inject_count.get(ws_name, 0),
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -1851,6 +1931,20 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             notify_channel_id,
         )
         cycle_notify_channel_id = notify_channel_id
+    # (#972) escalation env — threshold + debounce 정수 파싱 + 사용자 채널.
+    cycle_escalation_threshold = _resolve_int_env(
+        "CYCLE_INJECT_ESCALATION_THRESHOLD",
+        CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT,
+    )
+    cycle_escalation_debounce = _resolve_int_env(
+        "CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS",
+        CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT,
+        allow_zero=False,
+    )
+    # escalation push 채널 = MOBRUJI_CHANNEL_ID (사용자 채널). notify 와 분리 의무
+    # (#972) — watchdog 일반 알림은 NOTIFY (운영 진단용), escalation 은 사용자 본
+    # 채널 — 깜깜이 방지.
+    cycle_escalation_channel_id: int | None = target_channel_id
 
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
@@ -1951,16 +2045,22 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     poll_interval=cycle_idle_poll_interval,
                     workspaces=cycle_workspaces,
                     reason_required=cycle_reason_required,
+                    escalation_threshold=cycle_escalation_threshold,
+                    escalation_debounce_seconds=cycle_escalation_debounce,
+                    escalation_channel_id=cycle_escalation_channel_id,
                 )
             )
             logger.info(
-                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s reason_required=%s",
+                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s reason_required=%s escalation=(threshold=%d debounce=%ds channel=%s)",
                 cycle_notify_channel_id,
                 cycle_idle_poll_interval,
                 cycle_idle_threshold_minutes,
                 cycle_inject_target,
                 ",".join(cycle_workspaces),
                 cycle_reason_required,
+                cycle_escalation_threshold,
+                cycle_escalation_debounce,
+                cycle_escalation_channel_id,
             )
         elif not cycle_idle_watch_enabled:
             logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
