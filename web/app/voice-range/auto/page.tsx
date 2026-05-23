@@ -51,6 +51,20 @@ type WizardStep =
   | "RESULT";
 
 /**
+ * 단계 전환 시 status live region 으로 흘려보낼 한국어 안내. (#454)
+ *
+ * 외곽 wrapper 의 aria-live 를 제거하고 이 한 줄짜리 status region 으로
+ * 단계 전환 announce 를 일원화한다. nested aria-live(외곽 polite + MeasureStep
+ * polite + 카운트다운 polite) 가 SR 마다 동작이 미정의였던 문제 해소.
+ */
+const STEP_STATUS_MESSAGES: Readonly<Record<WizardStep, string>> = {
+  PERMISSION: "마이크 권한 안내 화면입니다.",
+  MEASURE_LOW: "낮은 음 측정을 시작합니다. 5초간 발성해주세요.",
+  MEASURE_HIGH: "높은 음 측정을 시작합니다. 5초간 발성해주세요.",
+  RESULT: "측정이 완료되었습니다. 결과를 확인하세요.",
+};
+
+/**
  * 측정 의존성 주입 — 테스트에서 Web Audio API 호출 없이 흐름만 검증하기 위함.
  * 운영 코드는 `defaultAutoMeasureDeps`를 사용한다.
  *
@@ -289,8 +303,23 @@ export default function AutoVoiceRangePage({
           </p>
         </header>
 
-        <section
+        {/*
+          #454: wizard wrapper 의 aria-live="polite" 를 제거하고 단계 전환
+          announce 는 아래 별도 status region (data-testid="auto-step-status") 으로
+          일원화한다. 외곽이 polite live 였을 때 children 전체 교체가 너무 큰
+          DOM 변화라 SR 별로 무시되거나 헤딩만 읽히는 케이스가 있었다.
+        */}
+        <div
+          role="status"
           aria-live="polite"
+          aria-atomic="true"
+          data-testid="auto-step-status"
+          className="sr-only"
+        >
+          {STEP_STATUS_MESSAGES[step]}
+        </div>
+        <section
+          aria-label="음역대 자동 측정"
           className="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
         >
           {step === "PERMISSION" ? (
@@ -406,10 +435,12 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         편한 모음(예: &quot;아&quot;) 으로 길게 내주세요.
       </p>
-      <div
-        className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
-        aria-live="polite"
-      >
+      {/*
+        #454: 외곽 wrapper 의 aria-live 제거에 맞춰 이 박스도 중첩 aria-live 를
+        해제. 카운트다운 <p aria-live="polite"> 와 page 상단 status region 만
+        남겨서 SR announce 채널을 단순화한다.
+      */}
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
         <div className="flex items-center justify-between">
           <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             현재 음
