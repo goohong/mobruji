@@ -11,11 +11,11 @@ import static org.mockito.Mockito.verify;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -26,6 +26,8 @@ import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 import com.mobruji.voice.infrastructure.VoiceRangeRepository;
 import com.mobruji.voice.infrastructure.VoiceRangeSnapshotRepository;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 @ExtendWith(MockitoExtension.class)
 class VoiceRangeServiceTest {
 
@@ -35,8 +37,15 @@ class VoiceRangeServiceTest {
     @Mock
     private VoiceRangeSnapshotRepository voiceRangeSnapshotRepository;
 
-    @InjectMocks
+    private SimpleMeterRegistry meterRegistry;
     private VoiceRangeService voiceRangeService;
+
+    @BeforeEach
+    void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        voiceRangeService = new VoiceRangeService(
+                voiceRangeRepository, voiceRangeSnapshotRepository, meterRegistry);
+    }
 
     @Test
     @DisplayName("createOrReplace: 신규 sessionId면 save 호출 후 도메인 객체 반환 + snapshot 1행 insert")
