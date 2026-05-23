@@ -548,6 +548,57 @@ describe("SongCard", () => {
       });
     });
 
+    // closes #521 — 회귀 가드: 북마크 mutation 실패 시 낙관 변경 원복.
+    // 좋아요 쪽에는 같은 가드가 있었으나 북마크에는 alert aria-live 만 검증되어 있었다.
+    // onMutate/onError 양쪽이 toggle 을 짝맞춰 부르는 패턴이 깨지면 store/UI 가 잘못된 상태로 굳는다.
+    it("BE mutation 실패 시 북마크 낙관적 변경을 롤백한다", async () => {
+      const user = userEvent.setup();
+      toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 북마크$/ });
+      await user.click(button);
+
+      // 실패 후 store/aria-pressed 모두 원상복귀.
+      await waitFor(() => {
+        expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([]);
+      });
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+
+    // closes #521 — 회귀 가드: 이미 bookmarked=true 상태에서 토글(해제) 실패.
+    it("이미 bookmarked=true 상태에서 토글 실패 시 다시 bookmarked=true 로 복원된다", async () => {
+      const user = userEvent.setup();
+      useBookmarksStore.setState({ bookmarkedSongIds: [1] });
+      toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", {
+        name: /테스트 곡 북마크 해제/,
+      });
+      expect(button).toHaveAttribute("aria-pressed", "true");
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([1]);
+      });
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 북마크 해제/ }),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+
     // closes #486 — BookmarkButton 실패 안내도 LikeButton 과 동일하게
     // aria-live="assertive" 를 부여한다. 회귀 가드.
     it("BE mutation 실패 시 alert에 aria-live=\"assertive\" 가 부여된다", async () => {
