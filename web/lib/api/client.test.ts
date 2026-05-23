@@ -661,3 +661,38 @@ describe("apiFetch JSON content-type variants 가드 (#727)", () => {
     await expect(apiFetch("/api/v1/probe")).resolves.toEqual(expected);
   });
 });
+
+describe("apiFetch body=URLSearchParams/Map/Set → JSON.stringify '{}' lock (#729)", () => {
+  // 현 동작 lock: body !== undefined 면 무조건 JSON.stringify. URLSearchParams/Map/Set 는
+  // own enumerable property 가 없어 JSON.stringify → "{}". fetch native body 우회 불가 명시.
+  it.each([
+    { label: "URLSearchParams", body: new URLSearchParams({ q: "love" }) as unknown },
+    { label: "Map", body: new Map([["k", "v"]]) as unknown },
+    { label: "Set", body: new Set([1, 2, 3]) as unknown },
+  ])("body=$label → init.body='{}'", async ({ body }: { body: unknown }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { method: "POST", body });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe("{}");
+  });
+});
+
+describe("apiFetch body=Date → ISO string 직렬화 lock (#729)", () => {
+  // 현 동작 lock: Date.prototype.toJSON 호출 → JSON.stringify 결과는 따옴표 포함 ISO 문자열.
+  it("body=Date → init.body='\"<ISO>\"'", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const date = new Date("2026-05-23T00:00:00.000Z");
+    await apiFetch("/api/v1/probe", { method: "POST", body: date });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe('"2026-05-23T00:00:00.000Z"');
+  });
+});
+
+describe("apiFetch headers Accept:undefined → default 덮어쓰기 lock (#729)", () => {
+  // 현 동작 lock: init.headers 는 plain object spread. 호출 측에서 Accept:undefined 를 넘기면
+  // default 'application/json' 가 undefined 로 덮인다 (key 제거 아님, undefined 값으로 존재).
+  it("headers={Accept: undefined} → init.headers.Accept === undefined", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { headers: { Accept: undefined as unknown as string } });
+    const sentHeaders = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string | undefined>;
+    expect(sentHeaders.Accept).toBeUndefined();
+  });
+});
