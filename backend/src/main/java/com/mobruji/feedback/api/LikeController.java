@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.feedback.api.dto.LikeListResponse;
 import com.mobruji.feedback.api.dto.LikeToggleRequest;
 import com.mobruji.feedback.api.dto.LikeToggleResponse;
@@ -20,6 +19,7 @@ import com.mobruji.feedback.application.LikeService;
 import com.mobruji.feedback.application.LikeService.LikePageSlice;
 import com.mobruji.feedback.application.ToggleResult;
 import com.mobruji.song.domain.Song;
+import com.mobruji.user.application.SessionAuthGuard;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

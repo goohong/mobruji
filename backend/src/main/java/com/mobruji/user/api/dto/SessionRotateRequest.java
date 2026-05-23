@@ -13,7 +13,7 @@ import com.mobruji.user.domain.AnonymousSession;
  *
  * <ul>
  * <li>{@code currentSessionId}: 회전 전 sessionId. 헤더 {@code X-Session-Id} 와 일치해야 함
- * ({@link com.mobruji.auth.SessionAuthGuard} 가 검증). UUIDv4 포맷 강제 — 임의 문자열 거부.</li>
+ * ({@link com.mobruji.user.application.SessionAuthGuard} 가 검증). UUIDv4 포맷 강제 — 임의 문자열 거부.</li>
  * <li>{@code dataMode}: 데이터 처리 모드. v0.3 은 {@code DELETE} 만 지원 — {@code ANONYMIZE} 는
  * v0.4 후속. nullable 허용 (default DELETE).</li>
  * </ul>

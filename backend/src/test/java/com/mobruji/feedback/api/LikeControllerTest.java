@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,13 +21,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.feedback.application.LikeService;
 import com.mobruji.feedback.application.LikeService.LikePageSlice;
 import com.mobruji.feedback.application.ToggleResult;
@@ -35,20 +36,20 @@ import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
+import com.mobruji.user.application.SessionAuthGuard;
 
 /**
  * {@link LikeController} MockMvc 슬라이스 가드.
  *
  * <p>spec: docs/features/recommendation-history-and-feedback.md §5-2 + §5-2-1(ADR-0011). PR #258 후속으로 적용된
- * {@link SessionAuthGuard}
- * 와이어링과 응답 직렬화(liked, songId, responses[].song 등) 회귀를 빠르게 잡는 용도.
+ * {@link SessionAuthGuard} 와이어링과 응답 직렬화(liked, songId, responses[].song 등) 회귀를 빠르게 잡는 용도.
  * 통합 테스트({@code LikeFeedbackIntegrationTest})는 full context 부팅이 필요해 회귀 감지 비용이 크다.
  *
- * <p>실제 {@code SessionAuthGuard} 를 {@link Import} 해 401 가드 동작도 함께 검증한다
- * ({@code VoiceRangeHistoryControllerTest} 동일 패턴).
+ * <p>PR 3 (#924) 부터 {@link SessionAuthGuard} 는 AnonymousSessionRepository 등 의존성이 늘었기 때문에
+ * 슬라이스 컨텍스트에서 실 빈으로 띄우기 까다롭다. {@link MockitoBean} 으로 mock 화 — verify() 는 default
+ * no-op 라 success 시나리오에 영향 없음. 401 케이스는 명시적으로 {@code willThrow} 한다.
  */
 @WebMvcTest(LikeController.class)
-@Import(SessionAuthGuard.class)
 @ActiveProfiles("test")
 class LikeControllerTest {
 
@@ -57,6 +58,9 @@ class LikeControllerTest {
 
     @MockitoBean
     private LikeService likeService;
+
+    @MockitoBean
+    private SessionAuthGuard sessionAuthGuard;
 
     @Test
     @DisplayName("POST /api/v1/likes: body sessionId == header → 200 + liked/songId 직렬화")
@@ -77,6 +81,9 @@ class LikeControllerTest {
     @Test
     @DisplayName("POST /api/v1/likes: X-Session-Id 헤더 누락 → 401 (service 미호출)")
     void toggle_missingHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id"))
+                .given(sessionAuthGuard).verify("s-1", null);
+
         mockMvc.perform(post("/api/v1/likes")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
@@ -88,6 +95,9 @@ class LikeControllerTest {
     @Test
     @DisplayName("POST /api/v1/likes: body/header sessionId 불일치 → 401")
     void toggle_mismatchedHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
+                .given(sessionAuthGuard).verify("s-1", "s-other");
+
         mockMvc.perform(post("/api/v1/likes")
                 .header("X-Session-Id", "s-other")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -128,6 +138,9 @@ class LikeControllerTest {
     @Test
     @DisplayName("GET /api/v1/sessions/{id}/likes: path/header sessionId 불일치 → 401")
     void readBySessionId_mismatchedHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
+                .given(sessionAuthGuard).verify("s-path", "s-other");
+
         mockMvc.perform(get("/api/v1/sessions/{sessionId}/likes", "s-path")
                 .header("X-Session-Id", "s-other"))
                 .andExpect(status().isUnauthorized());

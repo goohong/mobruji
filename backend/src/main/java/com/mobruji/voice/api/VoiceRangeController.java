@@ -11,16 +11,15 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.mobruji.auth.SessionAuthGuard;
+import com.mobruji.user.application.SessionAuthGuard;
 import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
 import com.mobruji.voice.api.dto.VoiceRangeResponse;
 import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
+import com.mobruji.voice.application.VoiceRangeService;
+import com.mobruji.voice.domain.VoiceRange;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-
-import com.mobruji.voice.application.VoiceRangeService;
-import com.mobruji.voice.domain.VoiceRange;
 
 /**
  * 세션 음역(VoiceRange) CRUD 엔드포인트.

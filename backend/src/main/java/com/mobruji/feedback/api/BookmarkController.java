@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.feedback.api.dto.BookmarkListResponse;
 import com.mobruji.feedback.api.dto.BookmarkToggleRequest;
 import com.mobruji.feedback.api.dto.BookmarkToggleResponse;
@@ -20,6 +19,7 @@ import com.mobruji.feedback.application.BookmarkService;
 import com.mobruji.feedback.application.BookmarkService.BookmarkPageSlice;
 import com.mobruji.feedback.application.ToggleResult;
 import com.mobruji.song.domain.Song;
+import com.mobruji.user.application.SessionAuthGuard;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

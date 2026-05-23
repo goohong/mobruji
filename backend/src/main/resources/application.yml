@@ -42,6 +42,10 @@ mobruji:
     ttl-days: ${MOBRUJI_SESSION_TTL_DAYS:180}
     cleanup-cron: ${MOBRUJI_SESSION_CLEANUP_CRON:0 0 4 * * *}
     cleanup-max-per-run: ${MOBRUJI_SESSION_CLEANUP_MAX:10000}
+    # SessionActivityTracker 5분 캐시 윈도우 (PR 3, #924, spec §5-2 / §5-8).
+    # 매 요청마다 AnonymousSession.lastSeenAt 을 DB UPDATE 하면 sliding TTL write 부담이 큼.
+    # 같은 sessionId 가 이 간격 안에 재요청하면 in-memory 캐시 hit → DB skip.
+    activity-flush-interval: ${MOBRUJI_SESSION_ACTIVITY_FLUSH_INTERVAL:PT5M}
 
 server:
   port: ${SERVER_PORT:8080}
