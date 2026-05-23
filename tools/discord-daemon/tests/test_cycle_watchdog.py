@@ -182,6 +182,32 @@ class DetectIdleWorktreesTest(unittest.TestCase):
         )
         self.assertEqual([e["workspace"] for e in idle], ["fe"])
 
+    def test_future_completed_at_treated_as_idle(self) -> None:
+        # #969 root cause — completed_at 이 now 보다 미래 (clock skew / KST 시각을
+        # Z suffix 로 잘못 적은 경우) 면 elapsed 가 음수라 silently pass 됐다.
+        # 보수적으로 idle 로 간주해 watchdog 침묵 회피.
+        future_ts = (self.now + timedelta(hours=9)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        status = {
+            "be": {
+                "in_progress": None,
+                "last_completed": {
+                    "pr": "#000",
+                    "title": "future skew",
+                    "completed_at": future_ts,
+                },
+            },
+        }
+        idle = bot.detect_idle_worktrees(
+            status,
+            threshold_minutes=10,
+            now=self.now,
+            workspaces=["be"],
+        )
+        self.assertEqual([e["workspace"] for e in idle], ["be"])
+        self.assertEqual(idle[0]["last_completed_title"], "future skew")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4) cycle_idle_watch_loop — 5건 (asyncio mock)

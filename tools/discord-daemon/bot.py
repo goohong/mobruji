@@ -1469,6 +1469,24 @@ def detect_idle_worktrees(
             continue
 
         elapsed = (now - completed_at).total_seconds()
+        # 미래 timestamp (negative elapsed) — clock skew 또는 작성자 timestamp
+        # 형식 오류 (예: KST 시각을 Z suffix 로 적음) 방어. 보수적으로 idle 간주.
+        # #969 root cause — detect 가 silently pass 해서 watchdog 침묵.
+        if elapsed < 0:
+            logger.warning(
+                "detect_idle_worktrees: 미래 completed_at 감지 ws=%s completed_at=%s now=%s — idle 로 간주",
+                ws,
+                completed_at.isoformat(),
+                now.isoformat(),
+            )
+            idle.append({
+                "workspace": ws,
+                "last_completed_title": title_text,
+                "last_completed_at": completed_at,
+                "note": note_text,
+                "idle_since": idle_since_text,
+            })
+            continue
         if elapsed > cutoff_seconds:
             idle.append({
                 "workspace": ws,
@@ -1586,6 +1604,13 @@ async def cycle_idle_watch_loop(
                 threshold_minutes=threshold_minutes,
                 now=now_provider(),
                 workspaces=workspaces,
+            )
+            # #969 — 매 iter INFO log (observability). idle=0 이어도 loop alive 확인.
+            logger.info(
+                "cycle_idle_watch_loop: detect summary checked=%d idle=%d (workspaces=%s)",
+                len(workspaces),
+                len(idle_all),
+                ",".join(e["workspace"] for e in idle_all) or "none",
             )
             if not idle_all:
                 continue
