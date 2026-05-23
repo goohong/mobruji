@@ -44,16 +44,19 @@ public class AnonymousSessionTtlCleanup {
 
     private final AnonymousSessionRepository anonymousSessionRepository;
     private final SessionDataCascadeDeleter sessionDataCascadeDeleter;
+    private final SessionActivityTracker sessionActivityTracker;
     private final AnonymousSessionProperties anonymousSessionProperties;
     private final Counter ttlExpiredCounter;
 
     public AnonymousSessionTtlCleanup(
             final AnonymousSessionRepository anonymousSessionRepository,
             final SessionDataCascadeDeleter sessionDataCascadeDeleter,
+            final SessionActivityTracker sessionActivityTracker,
             final AnonymousSessionProperties anonymousSessionProperties,
             final MeterRegistry meterRegistry) {
         this.anonymousSessionRepository = anonymousSessionRepository;
         this.sessionDataCascadeDeleter = sessionDataCascadeDeleter;
+        this.sessionActivityTracker = sessionActivityTracker;
         this.anonymousSessionProperties = anonymousSessionProperties;
         this.ttlExpiredCounter = Counter.builder(METRIC_EXPIRED)
                 .description("Anonymous session revoke count, labeled by reason")
@@ -95,6 +98,9 @@ public class AnonymousSessionTtlCleanup {
             try {
                 totalDeletedRows += sessionDataCascadeDeleter.cascadeDelete(sessionId);
                 revokeOne(sessionId);
+                // revoke 성공 후 in-memory activity 캐시 evict (spec §5-2 메모리 누수 방어, PR #937 follow-up).
+                // batch 가 매일 1회 도는 동안 누적된 inactive sessionId 의 캐시 잔존을 일괄 해소.
+                sessionActivityTracker.evict(sessionId);
                 ttlExpiredCounter.increment();
                 expiredCount++;
             } catch (final RuntimeException e) {

@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
 import com.mobruji.user.application.AnonymousSessionTtlCleanup;
+import com.mobruji.user.application.SessionActivityTracker;
 import com.mobruji.user.domain.AnonymousSession;
 import com.mobruji.user.domain.RevokedReason;
 import com.mobruji.user.infrastructure.AnonymousSessionRepository;
@@ -32,9 +33,13 @@ class AnonymousSessionTtlCleanupIntegrationTest {
     @Autowired
     private AnonymousSessionRepository anonymousSessionRepository;
 
+    @Autowired
+    private SessionActivityTracker sessionActivityTracker;
+
     @BeforeEach
     void setUp() {
         anonymousSessionRepository.deleteAll();
+        sessionActivityTracker.clearCache();
     }
 
     @Test
@@ -67,6 +72,25 @@ class AnonymousSessionTtlCleanupIntegrationTest {
         assertThat(summary.expiredSessionCount()).isZero();
         assertThat(summary.deletedRowCount()).isZero();
         assertThat(summary.isEmpty()).isTrue();
+    }
+
+    @Test
+    @DisplayName("runOnce: 만료된 sessionId 의 in-memory activity cache 도 evict (메모리 누수 방어, PR #937 follow-up)")
+    void runOnce_evictsActivityCacheForExpiredSessions() {
+        // given: 만료 1건 — cache 에 미리 markActive 로 채워 둠.
+        persistWithOldLastSeen("expired-cache-1", LocalDateTime.now().minusDays(200));
+        // markActive 가 flushOne → touch() 로 lastSeenAt = now() 로 갱신해 cutoff 회피하므로,
+        // markActive 후 다시 lastSeenAt 을 과거로 박아 만료 대상 자격을 복원한다 (테스트 한정 시나리오).
+        sessionActivityTracker.markActive("expired-cache-1");
+        assertThat(sessionActivityTracker.cacheSize()).isEqualTo(1);
+        rewindLastSeen("expired-cache-1", LocalDateTime.now().minusDays(200));
+
+        // when
+        final AnonymousSessionTtlCleanup.BatchSummary summary = anonymousSessionTtlCleanup.runOnce();
+
+        // then: revoke + cache evict.
+        assertThat(summary.expiredSessionCount()).isEqualTo(1);
+        assertThat(sessionActivityTracker.cacheSize()).isZero();
     }
 
     @Test
@@ -103,5 +127,20 @@ class AnonymousSessionTtlCleanupIntegrationTest {
             throw new IllegalStateException("test setup failed", e);
         }
         return anonymousSessionRepository.save(anonymousSession);
+    }
+
+    /**
+     * 이미 영속된 행의 lastSeenAt 을 과거로 되돌린다 — markActive 의 touch() 부작용 회피용.
+     */
+    private void rewindLastSeen(final String sessionId, final LocalDateTime lastSeenAt) {
+        final AnonymousSession anonymousSession = anonymousSessionRepository.findById(sessionId).orElseThrow();
+        try {
+            final Field lastSeenAtField = AnonymousSession.class.getDeclaredField("lastSeenAt");
+            lastSeenAtField.setAccessible(true);
+            lastSeenAtField.set(anonymousSession, lastSeenAt);
+        } catch (final ReflectiveOperationException e) {
+            throw new IllegalStateException("test setup failed", e);
+        }
+        anonymousSessionRepository.save(anonymousSession);
     }
 }
