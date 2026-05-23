@@ -46,14 +46,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import {
-  toggleBookmark as toggleBookmarkApi,
-  toggleLike as toggleLikeApi,
-} from "@/lib/api/feedback";
-import { safeLog } from "@/lib/logging";
-import { useAutoDismissMessage } from "@/lib/useAutoDismissMessage";
 import type {
   RecommendedSongResponse,
   SongResponse,
@@ -63,25 +56,19 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
+import {
+  useBookmarkToggleMutation,
+  useLikeToggleMutation,
+} from "@/lib/hooks/useFeedbackToggleMutation";
 import { midiToCombinedNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
-import { useBookmarksStore } from "@/store/bookmarks";
-import { useLikesStore } from "@/store/likes";
-import { useSessionStore } from "@/store/session";
 import { Chip } from "@/components/ui";
 
 import { AlbumCoverThumbnail } from "./SongDetailContent";
-
-/**
- * 인터랙션 실패(좋아요/북마크) 인라인 안내 자동 dismiss 지속 시간 (closes #257).
- * 너무 짧으면 사용자가 읽기 전에 사라지고, 너무 길면 다음 카드 탐색을 가린다.
- * 카드 내부 한 줄 메시지라 3초가 적정.
- */
-const INTERACTION_FEEDBACK_DURATION_MS = 3000;
 
 /**
  * Props 분기:
@@ -332,71 +319,26 @@ type LikeButtonProps = {
 };
 
 function LikeButton({ songId, songTitle }: LikeButtonProps) {
-  const liked = useLikesStore((state) => state.likedSongIds.includes(songId));
-  const toggleLike = useLikesStore((state) => state.toggleLike);
-  const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
-  const queryClient = useQueryClient();
-  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257). safeLog만으로는 사용자가
-  // 토글 버튼이 원상복귀된 이유를 알 수 없어 가시 피드백을 더한다.
-  // 3초 뒤 자동 dismiss 패턴은 BookmarkButton 과 공유 — `useAutoDismissMessage` hook 으로
-  // 추출 (rev 19 / #295 항목 1 후속).
-  const {
-    message: errorMessage,
-    setMessage: setErrorMessage,
-    clear: clearErrorMessage,
-  } = useAutoDismissMessage(INTERACTION_FEEDBACK_DURATION_MS);
-
-  const mutation = useMutation({
-    mutationFn: ({ sessionId }: { sessionId: string }) =>
-      toggleLikeApi({ sessionId, songId }),
-    onMutate: () => {
-      // 낙관적 토글 — UI 응답성 우선.
-      toggleLike(songId);
-      // 롤백 시 다시 토글하면 원상복귀되므로 별도 snapshot 불필요.
-      return { rolledBack: false };
-    },
-    onSuccess: async (response, { sessionId }) => {
-      // BE 응답이 낙관값과 일치하지 않으면 보정.
-      const currentlyLiked = useLikesStore
-        .getState()
-        .likedSongIds.includes(songId);
-      if (currentlyLiked !== response.liked) {
-        toggleLike(songId);
-      }
-      await queryClient.invalidateQueries({
-        queryKey: ["likes", sessionId],
-      });
-    },
-    onError: (error) => {
-      // 낙관 변경 롤백.
-      toggleLike(songId);
-      safeLog.error("[SongCard] 좋아요 토글 실패", error);
-      setErrorMessage("좋아요 처리에 실패했어요. 다시 시도해 주세요.");
-    },
-  });
+  // closes #846 — mutation 라이프사이클(낙관 토글 + BE 호출 + 응답 보정 + 롤백 + safeLog +
+  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화. 본 컴포넌트는 className/
+  // 라벨 등 표면 표현만 책임진다.
+  const { liked, toggle, isPending, errorMessage } =
+    useLikeToggleMutation(songId);
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
-    if (mutation.isPending) {
-      return;
-    }
-    // 새 시도 시작 시 이전 에러 안내 즉시 제거 — alert 잔존으로 인한 혼란 방지.
-    clearErrorMessage();
-    const sessionId = ensureSessionId();
-    mutation.mutate({ sessionId });
+    toggle();
   }
-
-  const busy = mutation.isPending;
 
   return (
     <div className="flex flex-col gap-1">
       <button
         type="button"
         onClick={handleClick}
-        disabled={busy}
+        disabled={isPending}
         aria-pressed={liked}
-        aria-busy={busy}
+        aria-busy={isPending}
         aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
         className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
           liked
@@ -432,65 +374,24 @@ type BookmarkButtonProps = {
 };
 
 function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
-  const bookmarked = useBookmarksStore((state) =>
-    state.bookmarkedSongIds.includes(songId),
-  );
-  const toggleBookmark = useBookmarksStore((state) => state.toggleBookmark);
-  const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
-  const queryClient = useQueryClient();
-  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257). 3초 자동 dismiss 패턴은
-  // LikeButton 과 공유 — `useAutoDismissMessage` hook 으로 추출.
-  const {
-    message: errorMessage,
-    setMessage: setErrorMessage,
-    clear: clearErrorMessage,
-  } = useAutoDismissMessage(INTERACTION_FEEDBACK_DURATION_MS);
-
-  const mutation = useMutation({
-    mutationFn: ({ sessionId }: { sessionId: string }) =>
-      toggleBookmarkApi({ sessionId, songId }),
-    onMutate: () => {
-      toggleBookmark(songId);
-    },
-    onSuccess: async (response, { sessionId }) => {
-      const currentlyBookmarked = useBookmarksStore
-        .getState()
-        .bookmarkedSongIds.includes(songId);
-      if (currentlyBookmarked !== response.bookmarked) {
-        toggleBookmark(songId);
-      }
-      await queryClient.invalidateQueries({
-        queryKey: ["bookmarks", sessionId],
-      });
-    },
-    onError: (error) => {
-      toggleBookmark(songId);
-      safeLog.error("[SongCard] 북마크 토글 실패", error);
-      setErrorMessage("북마크 처리에 실패했어요. 다시 시도해 주세요.");
-    },
-  });
+  // closes #846 — useBookmarkToggleMutation 으로 mutation 전체 캡슐화 (LikeButton 과 대칭).
+  const { bookmarked, toggle, isPending, errorMessage } =
+    useBookmarkToggleMutation(songId);
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
-    if (mutation.isPending) {
-      return;
-    }
-    clearErrorMessage();
-    const sessionId = ensureSessionId();
-    mutation.mutate({ sessionId });
+    toggle();
   }
-
-  const busy = mutation.isPending;
 
   return (
     <div className="flex flex-col gap-1">
       <button
         type="button"
         onClick={handleClick}
-        disabled={busy}
+        disabled={isPending}
         aria-pressed={bookmarked}
-        aria-busy={busy}
+        aria-busy={isPending}
         aria-label={
           bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
         }
