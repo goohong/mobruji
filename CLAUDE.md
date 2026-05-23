@@ -199,7 +199,15 @@ helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또�
 - `in_progress: null` 진입 시 cycle-status.json `note` 필드 의무 (사유 또는 다음 launch 후보).
 - 미명시 시 watchdog `cycle_idle_watch_loop` 가 **STRICT relaunch prompt** 즉시 inject.
 - 갱신: `tools/cycle-status/update.sh <ws> set-idle --note "..."` (수동 JSON 편집 금지).
-- 검증: `tools/cycle-status/validate.sh` — idle note 누락 detect.
+- 검증: `tools/cycle-status/validate.sh` — idle note 누락 + timestamp sanity 동시 detect.
 - env: `CYCLE_REASON_REQUIRED=1` default. 후방호환 off (=0) 가능.
 
 Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리별 `idle_since` / reason 한 줄.
+
+### 수동 cycle-status.json 편집 절대 금지 (#971 회귀 방지)
+**사용자 2026-05-24 정정: PR #970 회귀 사고 ("KST 시각을 Z suffix 로 hand-edit → future timestamp → detect 차단").**
+
+- nmae / helper / mmae 모두 `tools/cycle-status/update.sh` 만 사용. `vim` / `cat <<EOF >` / `jq` 직접 편집 금지.
+- 위반 시 timestamp 가 잘못된 timezone (예: KST 시각을 Z suffix 로) 들어가면 watchdog detect 차단 — 핵심 회귀 사례.
+- `validate.sh` 가 매 update 후 sanity 검증 — fail 시 (a) 절차 위반 또는 (b) 시스템 시각 문제. 둘 중 어떤 경우든 즉시 root cause 조사.
+- bot.py `detect_idle_worktrees` 도 future timestamp 발견 시 ERROR 로그 + Discord push (#971) — 사용자 즉시 가시화.
