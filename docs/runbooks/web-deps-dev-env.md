@@ -1,8 +1,17 @@
-# 런북 — fe(web) 의존성 개발 환경 진단
+# 런북 — fe(web) 의존성 개발 환경 진단 / 복구
 
-> 관련 이슈: #439
+> 관련 이슈: #439 (최초 진단), #736 (본 spec 갱신)
 > 적용 대상: `mobruji-fe` worktree (`/home/mobruji/mobruji-fe/web`)
-> 작성일: 2026-05-23
+> 최초 작성: 2026-05-23
+> 최종 갱신: 2026-05-23
+
+## 0) TL;DR
+
+- **증상**: `npm test` (vitest run) 가 `ERR_MODULE_NOT_FOUND: '@vitest/utils'` 로 fail.
+- **잘못된 진단** (2026-05-23 초기): vitest 4.x bug / 다운그레이드 / overrides / mount 폐기. **모두 폐기.**
+- **실제 원인**: 외부 `node_modules` 가 **symlink** 로 노출되었고, Node ESM resolver 가 **동일 패키지를 두 가지 realpath 로 중복 해석**해 `@vitest/utils` 의 subpath import 가 무효화됨.
+- **실제 해결**: 외부 target 디렉토리 **이름 자체를 rename** (`/data/node_modules/fe-web/` → `/data/node_modules/`)해 symlink resolution 의 realpath 일관성을 확보. 이후 `npm ci` 재실행.
+- **임시 우회**: `NODE_OPTIONS=--preserve-symlinks` (PR #734). 정상화 이후 cleanup 후보.
 
 ## 1) 배경
 
@@ -12,119 +21,81 @@ fe 워크트리에서 `npm test` (vitest run) 실행 시 다음 에러로 fail.
 Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@vitest/utils' imported from /data/node_modules/fe-web/vitest/dist/cli.js
 ```
 
-`npm cache clean --force` + `rm -rf node_modules` + `npm ci` 반복 후에도 동일 재현. fe sub-agent 들이 품질 게이트 fail 로 작업 시간 낭비 중이라 진단 spec 신설.
+`npm cache clean --force` + `rm -rf node_modules` + `npm ci` 반복 후에도 동일 재현. fe sub-agent 들이 품질 게이트 fail 로 작업 시간을 낭비해 진단 spec 신설.
 
 ## 2) 환경 토폴로지
 
-NCP 인스턴스(또는 로컬 다중 워크트리)는 디스크 공간 절약을 위해 워크트리별 `node_modules` 를 **외부 디스크에 별도 저장**한다. 본인 자체 점검 결과:
+NCP 인스턴스(또는 로컬 다중 워크트리)는 디스크 공간 절약을 위해 워크트리별 `node_modules` 를 **외부 디스크 + symlink** 로 운영한다.
 
 | 항목 | 값 |
 | --- | --- |
 | Node.js | v22.22.2 |
 | npm | 10.9.7 |
-| `web/node_modules` 실제 경로 | `/data/node_modules/fe-web/` |
+| 워크트리 내부 경로 | `/home/mobruji/mobruji-fe/web/node_modules` |
+| 외부 실제 경로 (구) | `/data/node_modules/fe-web/` |
+| 외부 실제 경로 (신, 해결 후) | `/data/node_modules/` |
 | `/data` 파일시스템 | XFS (20GB, /dev/vdb) |
-| vitest binary | `/data/node_modules/fe-web/vitest/dist/cli.js` |
+| 노출 방식 | `web/node_modules` → 외부 경로 symlink |
 
-`web/node_modules` 자체는 디렉토리지만, 그 하위 패키지들이 `/data/node_modules/fe-web/` 로 redirect 되는 구조다. (npm `--prefix` 또는 mount 설정 추정 — `.npmrc` 는 부재하므로 외부 install 스크립트 / docker volume 가능성 점검 필요.)
+## 3) 실제 원인 — symlink + 디렉토리 이름 충돌
 
-## 3) 재현 절차
+Node.js ESM resolver 는 import 의 base URL 을 `realpath` 로 normalize 한 뒤 패키지 lookup 을 수행한다. `/data/node_modules/fe-web/` 라는 **외부 이름이 워크트리 내부 `node_modules` 와 다른 prefix** 를 가지면 다음이 발생한다.
+
+1. `vitest/dist/cli.js` 는 `web/node_modules` 를 통해 import 됨 → resolver 가 본인 위치를 `/data/node_modules/fe-web/vitest/dist/cli.js` 로 `realpath` 해석.
+2. cli.js 가 `@vitest/utils` 를 import → resolver 가 `/data/node_modules/fe-web/` 에서 `@vitest/utils` 를 찾으려 함.
+3. 그런데 일부 transitive 의존성은 워크트리 prefix 로 hoist 되어 두 가지 realpath 가 공존, ESM resolver 의 패키지 식별 (name + realpath) 이 깨져 `subpath exports` lookup 실패.
+
+→ ESM resolver 가 `@vitest/utils` 의 subpath (예: `@vitest/utils/helpers`) 를 못 찾는 것으로 표면화. 이전에 의심한 vitest 4.x bug / subpath exports 누락 / 버전 불일치는 **모두 무관**했다.
+
+## 4) 실제 해결 — 외부 target 디렉토리 rename
+
+워크트리 내부 `node_modules` 가 가리키는 외부 target 의 **이름 자체를 단순화**해 symlink resolution 의 realpath 일관성을 확보.
+
+```bash
+# (구) /data/node_modules/fe-web/  →  (신) /data/node_modules/
+mv /data/node_modules/fe-web /tmp/_old-fe-web   # backup
+# 또는 직접 rename 후 워크트리 symlink 재연결
+```
+
+이후 워크트리에서:
 
 ```bash
 cd /home/mobruji/mobruji-fe/web
-npm test
-# → ERR_MODULE_NOT_FOUND: '@vitest/utils' from vitest/dist/cli.js
+rm -rf node_modules
+ln -s /data/node_modules node_modules
+npm ci
+npm test   # → PASS
 ```
 
-## 4) 진단 절차
+본 변경은 **fe 워크트리 시스템 설정**(symlink target) 변경이며, repo 코드 변경 없이 해결된다. NCP 인스턴스 provisioning 스크립트가 있다면 거기 반영 필요.
 
-### 4-1) 패키지 존재 확인
+## 5) 폐기된 진단 후보 (참고용 — 적용 금지)
 
-```bash
-ls /data/node_modules/fe-web/@vitest/   # utils, expect, runner, ... 모두 존재
-ls /data/node_modules/fe-web/@vitest/utils/
-cat /data/node_modules/fe-web/@vitest/utils/package.json | jq '.version, .exports'
-```
+초기 진단에서 제시됐으나 모두 실제 원인과 무관했음. 동일 함정 재발 방지 목적으로만 남긴다.
 
-`@vitest/utils` 디렉토리 자체는 존재한다. ESM resolver 가 못 찾는다는 것은 다음 중 하나:
+| 후보 | 내용 | 폐기 사유 |
+| --- | --- | --- |
+| A | vitest 4.x → 3.x 다운그레이드 | vitest 자체 bug 아님. ESM resolver 의 realpath 문제. |
+| B | `npm overrides` 로 `@vitest/utils` 강제 hoist | hoist 위치와 무관. 두 realpath 가 공존하는 한 동일 fail. |
+| C | `/data` mount 정책 폐기 + 워크트리 로컬 `node_modules` 복귀 | symlink 자체를 없애면 해결되지만, target rename 만으로 충분하므로 과한 변경. |
+| D | pnpm 전환 (장기) | 별 ADR 으로 검토 가능하나 본 fail 의 해결책은 아님. |
 
-1. **subpath exports 누락** — vitest 가 `@vitest/utils/helpers` 를 import 하지만 utils 의 `package.json` `exports` 필드에 `./helpers` 정의 없음.
-2. **버전 불일치** — vitest 4.1.7 이 요구하는 `@vitest/utils` 버전과 hoist 된 버전 불일치 (peer 강제).
-3. **nested node_modules 충돌** — `/data/node_modules/fe-web/vitest/node_modules/` 에 자체 의존성 있을 시 resolver 가 거기서 우선 탐색.
+## 6) 임시 우회 — `NODE_OPTIONS=--preserve-symlinks`
 
-### 4-2) vitest 자체 의존성 트리
+PR #734 (`fix(web): NODE_OPTIONS=--preserve-symlinks 4 scripts 추가`) 가 머지된 시점은 root cause 파악 전이었다. `--preserve-symlinks` 는 resolver 가 realpath 변환을 생략하게 만들어 두 realpath 가 분리되지 않게 한다.
 
-```bash
-cd /home/mobruji/mobruji-fe/web
-npm ls vitest @vitest/utils 2>&1 | head -20
-ls /data/node_modules/fe-web/vitest/node_modules/ 2>&1
-```
-
-### 4-3) ESM resolver dry run
-
-```bash
-cd /home/mobruji/mobruji-fe/web
-node --input-type=module -e "import('@vitest/utils/helpers').then(m => console.log('OK', Object.keys(m)))" 2>&1
-```
-
-OK 면 vitest 자체 bug, fail 면 install 구조 문제.
-
-### 4-4) package-lock 무결성
-
-```bash
-cd /home/mobruji/mobruji-fe/web
-npm ci --dry-run 2>&1 | tail -20
-# 또는
-npm audit signatures 2>&1 | tail -20
-```
-
-## 5) 복구 후보 (결정 대기)
-
-본 런북은 진단 + 후보 제시만 한다. 실제 적용은 사용자 / 별 PR.
-
-### 후보 A — vitest 4.1.x 핫픽스 대기 / 4.0.x 다운그레이드
-- vitest 4.x 가 출시된 지 얼마 안 되었으므로 4.0.x LTS 라인이 안정적일 가능성.
-- `web/package.json` 의 `"vitest": "^4.1.7"` → `"vitest": "^3.2.0"` 등 다운그레이드 시도.
-- 위험: vitest 4.x API 변경 사용 코드 있으면 회귀.
-
-### 후보 B — npm `overrides` 로 `@vitest/utils` 강제 hoist
-```json
-{
-  "overrides": {
-    "@vitest/utils": "$@vitest/utils 의 vitest 4.1.7 peer 버전"
-  }
-}
-```
-
-### 후보 C — `/data` mount 정책 폐기, 워크트리 로컬 `node_modules` 복귀
-- NCP 디스크 공간 점검 후 가능 시 가장 안전.
-- 단점: 워크트리 4개 x ~500MB = 2GB 추가.
-
-### 후보 D — pnpm 전환 (장기)
-- pnpm 의 content-addressable store 가 디스크 절약 + symlink 정합성 보장.
-- 별 ADR 필요. 단기 fix 아님.
-
-## 6) 즉시 적용 우회 (sub-agent 게이트 통과용)
-
-품질 게이트 통과가 시급하면 다음 우회:
-
-```bash
-cd /home/mobruji/mobruji-fe/web
-npm test -- --reporter=verbose 2>&1 | tee /tmp/test-output.log
-# vitest 가 실행 자체 못 하면 fe sub-agent 는 게이트 통과 보고 시 본 런북 #439 링크로 wait
-```
-
-또는 PR description 에 `[blocked-by #439]` 명시하고 게이트 fail 인 채 머지 대기.
+- 실제 해결 (§4) 적용 후 `--preserve-symlinks` 는 **불필요**.
+- cleanup 후보: `web/package.json` 4 scripts 에서 `NODE_OPTIONS=--preserve-symlinks` 제거.
+- 단, `web/package.json` 은 **보호 영역**이므로 cleanup PR 시 `needs-human-review` 라벨 필수.
 
 ## 7) 후속 작업
 
-- [ ] 4-1 ~ 4-4 진단 결과를 #439 코멘트로 누적
-- [ ] 후보 A~D 중 사용자 결정
-- [ ] 결정된 후보 별 PR (scope: web 또는 infra)
-- [ ] fe 사이클 게이트 통과 확인 후 본 런북 §6 우회 절차 삭제
+- [ ] NCP provisioning 스크립트에 `/data/node_modules/` 표준 경로 반영
+- [ ] `web/package.json` `NODE_OPTIONS=--preserve-symlinks` 제거 cleanup PR (보호 영역, `needs-human-review`)
+- [ ] 신규 워크트리 (be/rev/plan) 의 `node_modules` symlink 도 동일 구조인지 확인 — 다른 워크트리는 vitest 실행 안 하므로 영향 없을 가능성 높음
 
 ## 8) 참고
 
-- vitest 4.x 릴리즈 노트: https://github.com/vitest-dev/vitest/releases
 - Node.js ESM resolver: https://nodejs.org/api/esm.html#resolution-algorithm
-- npm `overrides`: https://docs.npmjs.com/cli/v10/configuring-npm/package-json#overrides
+- `--preserve-symlinks`: https://nodejs.org/api/cli.html#--preserve-symlinks
+- 관련 PR: #442 (최초 spec), #734 (우회 적용), #736 (본 spec 갱신)
