@@ -25,7 +25,7 @@ NCP maestro tmux pane이 컨텍스트 사용량 95%에 도달하면 **bot.py가 
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] **컨텍스트 사용량 polling**: bot.py가 tmux pane stdout (`tmux capture-pane -t mobruji:0.0 -p`) 5~10초 간격 tail. footer/marker 패턴 `[NN% context used]` 또는 `Context: NN%` 파싱.
+- [ ] **컨텍스트 사용량 polling**: bot.py가 tmux pane stdout (`tmux capture-pane -t mobruji:0.0 -p`) 5~10초 간격 tail. **maestro self-emit marker `===CTX:NN%===` 파싱** (옵션 A — §5-6 에서 확정. footer-scrape 폐기. regex `r'===CTX:(\d{1,3})%==='`). maestro 본진(`mobruji:0.0`) 만 marker emit (`CLAUDE.md §11`).
 - [ ] **95% 트리거 + hysteresis**: 사용량 ≥ 95% 도달 시 1회 trigger. 트리거 후 사용량 ≤ 80% 떨어질 때까지 재트리거 차단 (debounce flag).
 - [ ] **maestro inject prompt 표준**:
   ```
