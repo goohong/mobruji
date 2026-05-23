@@ -56,6 +56,45 @@ describe("apiFetch error mapping", () => {
     await expect(promise).rejects.toMatchObject({
       status: 500,
       message: "Request failed: 500 Internal Server Error",
+      body: "Internal Server Error",
+    });
+  });
+
+  it.each([
+    {
+      label: "text/plain 4xx 본문은 ApiError.body 문자열로 보존된다",
+      contentType: "text/plain; charset=utf-8",
+      body: "rate limited: try later",
+      status: 429,
+      statusText: "Too Many Requests",
+      expectedBody: "rate limited: try later",
+    },
+    {
+      label: "text/html 게이트웨이 에러 본문도 string으로 보존된다",
+      contentType: "text/html",
+      body: "<html><body><h1>502 Bad Gateway</h1></body></html>",
+      status: 502,
+      statusText: "Bad Gateway",
+      expectedBody: "<html><body><h1>502 Bad Gateway</h1></body></html>",
+    },
+    {
+      label: "application/json인데 깨진 JSON이면 body=null fallback",
+      contentType: "application/json",
+      body: "{not json",
+      status: 500,
+      statusText: "Internal Server Error",
+      expectedBody: null,
+    },
+  ])("$label", async ({ contentType, body, status, statusText, expectedBody }) => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(body, { status, statusText, headers: { "Content-Type": contentType } }),
+    );
+
+    await expect(apiFetch("/api/v1/probe")).rejects.toMatchObject({
+      name: "ApiError",
+      status,
+      message: `Request failed: ${status} ${statusText}`,
+      body: expectedBody,
     });
   });
 
