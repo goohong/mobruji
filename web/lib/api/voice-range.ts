@@ -53,9 +53,11 @@ export function createVoiceRange(
 
 export function readVoiceRange(
   sessionId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<VoiceRangeResponse> {
   return apiFetch<VoiceRangeResponse>(
     `/api/v1/voice-ranges/${encodeURIComponent(sessionId)}`,
+    { signal: options.signal },
   );
 }
 
