@@ -5,6 +5,10 @@
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
+#         → 본답 모드는 자동으로 leading ZWSP(U+200B) + \n 를 메시지 앞에
+#           prepend 한다 (#921, 2026-05-24). 이유: jq escape 가 leading
+#           newline 을 strip 해서 ack 와 본답이 Discord 채널에서 시각적으로
+#           붙어 보이는 문제 영구 해결.
 #
 #   2) ack + 새 thread 생성 (#880 thread stream):
 #       THREAD_ID=$(discord-reply.sh --ack "<ack 문구>")
@@ -257,6 +261,12 @@ atomic_write_thread_file() {
 
 case "$MODE" in
   reply)
+    # 본답 모드: 자동 leading ZWSP(U+200B) + \n prepend (#921, 2026-05-24).
+    # 이유: jq escape 가 leading/trailing \n strip 해서 ack 메시지와 본답
+    # 메시지가 Discord 채널에서 시각적으로 붙어 보이는 문제 영구 해결.
+    # ZWSP 는 invisible character — visual padding 없이 빈 줄 효과를 보장.
+    # ack / thread 모드는 짧은 단발성 push 라 미적용.
+    MSG=$'​\n'"$MSG"
     PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
     post_channel_message "$PAYLOAD"
     ;;
