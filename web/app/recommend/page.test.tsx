@@ -216,10 +216,18 @@ afterEach(() => {
 
 /**
  * 추천 응답 헬퍼 — 곡 ID 리스트로 응답을 생성.
+ *
+ * issue #422: BE `requestId` 가 UUIDv7 문자열로 전환됨에 따라 헬퍼 시그니처도
+ * `string` 으로 통일. 기존 정수 seed 입력 호출처가 많아 동일 호출부를 유지하도록
+ * `ridFromSeed()` 로 결정적 UUID 문자열을 만들어 넣는다.
  */
-function buildResponseWithSongIds(requestId: number, songIds: number[]) {
+function ridFromSeed(seed: number): string {
+  return `01933b1c-7f8a-7c2d-9b3e-${seed.toString(16).padStart(12, "0")}`;
+}
+
+function buildResponseWithSongIds(seed: number, songIds: number[]) {
   return {
-    requestId,
+    requestId: ridFromSeed(seed),
     recommendations: songIds.map((id, idx) => ({
       rankPosition: idx + 1,
       score: 0.9 - idx * 0.05,
@@ -476,7 +484,7 @@ describe("RecommendPage", () => {
         updatedAt: "2026-05-21T00:00:00Z",
       });
       createRecommendationMock.mockResolvedValueOnce({
-        requestId: 999,
+        requestId: ridFromSeed(999),
         recommendations: [],
       });
 
@@ -513,7 +521,10 @@ describe("RecommendPage", () => {
 
       createRecommendationMock
         .mockResolvedValueOnce(buildResponseWithSongIds(1, [1, 2]))
-        .mockResolvedValueOnce({ requestId: 2, recommendations: [] });
+        .mockResolvedValueOnce({
+          requestId: ridFromSeed(2),
+          recommendations: [],
+        });
 
       renderWithQueryClient(<RecommendPage />);
 
@@ -573,12 +584,13 @@ describe("RecommendPage", () => {
       expect(append).toHaveBeenCalledTimes(1);
     });
     const callArg = append.mock.calls[0][0] as {
-      requestId: number;
+      requestId: string;
       voiceRangeId: number | null;
       songs: { song: { id: number } }[];
       excludedSongIds: number[];
     };
-    expect(callArg.requestId).toBe(555);
+    // issue #422: requestId 는 BE UUIDv7 문자열 그대로 전달.
+    expect(callArg.requestId).toBe(ridFromSeed(555));
     expect(callArg.voiceRangeId).toBe(77);
     expect(callArg.songs).toHaveLength(1);
     expect(callArg.songs[0].song.id).toBe(555);
@@ -711,7 +723,7 @@ describe("RecommendPage", () => {
         updatedAt: "2026-05-21T00:00:00Z",
       });
       createRecommendationMock.mockResolvedValueOnce({
-        requestId: 1,
+        requestId: ridFromSeed(1),
         recommendations: [],
       });
 

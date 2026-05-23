@@ -39,7 +39,8 @@ describe("readRecommendationHistory", () => {
     const payload = {
       recommendationHistoryResponses: [
         {
-          requestId: 42,
+          // issue #422: BE UUIDv7 문자열. 형식만 모사.
+          requestId: "01933b1c-7f8a-7c2d-9b3e-000000000042",
           sessionId: "sess-abc",
           voiceRangeLow: 52,
           voiceRangeHigh: 70,

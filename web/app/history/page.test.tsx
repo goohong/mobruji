@@ -80,6 +80,15 @@ vi.mock("@/lib/api/recommendationHistory", () => ({
   readRecommendationHistory: readRecommendationHistoryMock,
 }));
 
+/**
+ * issue #422 후속: BE `requestId` 가 UUIDv7 문자열로 전환됨에 따라 fixture 헬퍼.
+ * 정수 시드로 결정적 UUID 문자열을 만든다 — 호출부의 의미(어떤 번호 entry 인지)를
+ * 보존하면서 string 타입 정합성을 맞춘다.
+ */
+function ridFromSeed(seed: number): string {
+  return `01933b1c-7f8a-7c2d-9b3e-${seed.toString(16).padStart(12, "0")}`;
+}
+
 function buildEntry(
   id: string,
   requestedAt: string,
@@ -89,7 +98,7 @@ function buildEntry(
   return {
     id,
     requestedAt,
-    requestId: parseInt(id.replace(/\D/g, ""), 10) || 1,
+    requestId: ridFromSeed(parseInt(id.replace(/\D/g, ""), 10) || 1),
     voiceRangeId: 42,
     excludedSongIds: [],
     songs: songIds.map((songId, idx) => ({
@@ -362,7 +371,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 9001,
+            requestId: ridFromSeed(9001),
             sessionId: "sess-be",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -414,7 +423,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 1,
+            requestId: ridFromSeed(1),
             sessionId: "sess-be",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -496,7 +505,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 1,
+            requestId: ridFromSeed(1),
             sessionId: "sess-meta",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -542,7 +551,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 7,
+            requestId: ridFromSeed(7),
             sessionId: "sess-clear-label",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -632,7 +641,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 1,
+            requestId: ridFromSeed(1),
             sessionId: "sess-live",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -690,7 +699,7 @@ describe("HistoryPage", () => {
       ).toISOString();
       const input: RecommendationHistoryInput = {
         voiceRangeId: 1,
-        requestId: 1,
+        requestId: ridFromSeed(1),
         songs: buildEntry("e-1", tenMinutesAgo, [1, 2, 3, 4]).songs,
         excludedSongIds: [99],
       };

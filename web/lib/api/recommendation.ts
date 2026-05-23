@@ -110,8 +110,16 @@ export type RecommendedSongResponse = {
   rankPosition: number;
 };
 
+/**
+ * 추천 응답 envelope.
+ *
+ * issue #422 (BE PR #417 후속): BE `requestId` 가 number → UUIDv7 string 으로
+ * 전환됨에 따라 fe 타입도 `string` 으로 통일. localStorage 영속, 페이지 라우팅
+ * (`/recommendations/{id}`), 로깅 마스킹 (`safeLog` SENSITIVE_KEYS) 모두 string
+ * 가정으로 동작한다. 단건 조회는 GET path 그대로 string 을 끼워 호출한다.
+ */
 export type RecommendationResponse = {
-  requestId: number;
+  requestId: string;
   recommendations: RecommendedSongResponse[];
 };
 
@@ -124,8 +132,17 @@ export function createRecommendation(
   });
 }
 
+/**
+ * 단건 추천 조회.
+ *
+ * issue #422: id 는 UUIDv7 문자열. `encodeURIComponent` 로 안전 인코딩한다 —
+ * UUID 자체는 URL safe 한 hex+`-` 조합이지만 향후 BE id 형식이 바뀔 가능성을
+ * 대비한 방어 인코딩이다 (recommendationHistory.ts sessionId 와 동일 패턴).
+ */
 export function readRecommendation(
-  id: number,
+  id: string,
 ): Promise<RecommendationResponse> {
-  return apiFetch<RecommendationResponse>(`/api/v1/recommendations/${id}`);
+  return apiFetch<RecommendationResponse>(
+    `/api/v1/recommendations/${encodeURIComponent(id)}`,
+  );
 }

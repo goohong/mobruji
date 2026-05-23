@@ -75,8 +75,12 @@ function generateSessionId(): string {
  * - byte 6: 상위 4비트를 `0100` (v4) 로 고정.
  * - byte 8: 상위 2비트를 `10` (RFC 4122 variant) 로 고정.
  * - 결과 포맷: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx` (y ∈ {8,9,a,b}).
+ *
+ * `export` 인 이유: PR #769 fallback 패턴을 history store 의 `generateEntryId()` 가
+ * 그대로 재사용한다 — sessionId / entry id 둘 다 RFC 4122 v4 보장이 필요해서다
+ * (issue #422 후속, sessionId/requestId/entry-id 형식 일관성).
  */
-function randomUuidV4FromBytes(): string {
+export function randomUuidV4FromBytes(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
