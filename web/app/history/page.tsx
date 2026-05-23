@@ -179,7 +179,21 @@ export default function HistoryPage() {
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             받은 추천 다시 보기
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {/*
+            (closes #435) 카운트 영역을 스크린 리더 라이브 영역으로 마킹한다.
+            BE 응답 도착(source 분기 + 건수 변화) 또는 localStorage entry 변경 시
+            메시지가 바뀌므로 polite live 로 알린다. PR #428/#433 와 동일 패턴 —
+            /recommend, /likes, /bookmarks 와 일관성 확보.
+            시각 표시는 그대로 유지하고 `aria-live` 만 부여 — 별도 sr-only 영역을
+            중복으로 두면 시각/SR 텍스트가 어긋날 위험이 있어 헤더 카피에 직접 부여.
+          */}
+          <p
+            data-testid="history-count-live"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="text-sm text-zinc-600 dark:text-zinc-400"
+          >
             {isBackendSource
               ? `세션 ID 기준 ${displayEntries.length}건의 추천을 서버에서 불러왔어요.`
               : `최근 ${displayEntries.length}건의 추천을 기록해두었어요. 최대 20건까지 보관됩니다.`}
