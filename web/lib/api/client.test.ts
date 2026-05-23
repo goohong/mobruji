@@ -335,6 +335,38 @@ describe("apiFetch non-falsy primitive/Array body 가드 (#706)", () => {
   });
 });
 
+describe("ApiError prototype chain 가드 (#709)", () => {
+  // ES2015+ extends Error 는 transpile target 에 따라 prototype chain 이 끊길 수 있다.
+  // instanceof 양방향 + name 보존을 명시 lock → 운영 분기 (try { ... } catch (e) { if (e instanceof ApiError) ... }) 동작 보증.
+  it("instanceof Error 와 instanceof ApiError 가 모두 truthy 이고 name='ApiError' 보존", () => {
+    const error = new ApiError(418, "I am a teapot", { hint: "rfc2324" });
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.name).toBe("ApiError");
+    expect(error.message).toBe("I am a teapot");
+  });
+
+  it("apiFetch 가 던지는 ApiError 도 instanceof ApiError + instanceof Error 양쪽 truthy", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "boom" }), { status: 500, headers: { "Content-Type": "application/json" } }),
+    );
+    await expect(apiFetch("/api/v1/probe")).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e instanceof Error && (e as ApiError).name === "ApiError",
+    );
+  });
+});
+
+describe("apiFetch JSON.stringify circular body 가드 (#709)", () => {
+  // body 가 circular reference 객체면 JSON.stringify 가 TypeError 를 던진다.
+  // 현 동작 lock: apiFetch 는 이를 swallow 하지 않고 호출자에게 propagate (fetch 도 호출되지 않음).
+  it("circular ref body → TypeError propagate + fetch 미호출", async () => {
+    const circular: Record<string, unknown> = { name: "x" };
+    circular.self = circular;
+    await expect(apiFetch("/api/v1/probe", { method: "POST", body: circular })).rejects.toBeInstanceOf(TypeError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("apiFetch non-GET 메서드 body 처리 가드 (#699)", () => {
   // 현 동작 lock: body 처리 분기는 method 와 무관하게 `body !== undefined` 단일 조건.
   // PUT/DELETE 도 body 가 있으면 POST 와 동일하게 JSON.stringify + Content-Type 자동 부여,
