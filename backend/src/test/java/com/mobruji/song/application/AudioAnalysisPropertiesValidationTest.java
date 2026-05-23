@@ -132,16 +132,41 @@ class AudioAnalysisPropertiesValidationTest {
     }
 
     @Test
-    @DisplayName("timeout=0s 도 @NotNull 통과 — Duration 자체가 non-null 이면 binding 성공")
-    void zeroDurationTimeout_succeeds() {
-        // 회귀 가드: @NotNull 은 null 만 막는다. 0초 timeout 은 운영상 무의미하지만 boot 단계에서는 통과하며,
-        // 추후 의미론적 검증 (@DurationMin 등) 을 추가하면 본 테스트가 fail 하면서 새 가드를 강제하게 된다.
+    @DisplayName("timeout=0s 면 @DurationMin(1s) 위반으로 startup fail (#653)")
+    void zeroDurationTimeout_failsStartup() {
+        // 회귀 가드: 0초 timeout 은 외부 process 가 즉시 destroyForcibly 되어 운영상 무의미.
+        // #653 에서 @DurationMin 으로 의미론 가드 도입.
         contextRunner
                 .withPropertyValues(propsWithOverrides("audio.analysis.timeout=0s"))
                 .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("timeout=-1s 음수면 @DurationMin(1s) 위반으로 startup fail (#653)")
+    void negativeDurationTimeout_failsStartup() {
+        // 회귀 가드: 음수 timeout 은 정의 불가. 새 의미론 가드가 누락되거나 완화되면 본 테스트 fail.
+        contextRunner
+                .withPropertyValues(propsWithOverrides("audio.analysis.timeout=-1s"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("timeout=1s 정확한 하한, 정상 기동 (#653 boundary)")
+    void timeoutAtMin_succeeds() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("audio.analysis.timeout=1s"))
+                .run(context -> {
                     assertThat(context).hasNotFailed();
                     final AudioAnalysisProperties properties = context.getBean(AudioAnalysisProperties.class);
-                    assertThat(properties.timeout()).isEqualTo(Duration.ZERO);
+                    assertThat(properties.timeout()).isEqualTo(Duration.ofSeconds(1));
                 });
     }
 
