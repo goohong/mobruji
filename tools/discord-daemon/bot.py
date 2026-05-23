@@ -601,18 +601,19 @@ def build_digest_payload(
     repo_args = ["--repo", github_repo]
 
     open_prs = _run_gh_json(
-        ["pr", "list", *repo_args, "--state", "open", "--limit", "30", "--json", "number"],
+        ["pr", "list", *repo_args, "--state", "open", "--limit", "30",
+         "--json", "number,title"],
         github_pat,
     )
     since = (now - timedelta(hours=DIGEST_MERGED_WINDOW_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     merged_recent = _run_gh_json(
         ["pr", "list", *repo_args, "--state", "merged", "--search", f"merged:>{since}",
-         "--limit", "30", "--json", "number"],
+         "--limit", "30", "--json", "number,title,mergedAt"],
         github_pat,
     )
     bug_issues = _run_gh_json(
         ["issue", "list", *repo_args, "--state", "open", "--label", "type:bug",
-         "--limit", "30", "--json", "number"],
+         "--limit", "30", "--json", "number,title"],
         github_pat,
     )
 
@@ -624,10 +625,50 @@ def build_digest_payload(
     bug_count = fmt(bug_issues)
 
     kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
-    line = (
-        f"📊 PR open:{open_count} / 머지 {DIGEST_MERGED_WINDOW_HOURS}h:{merged_count} / "
-        f"bug:{bug_count} — {kst.strftime('%H:%M')} KST"
-    )
+
+    # 최근 머지 PR 3개 title preview (가장 최신 순). 데이터 없으면 라인 생략.
+    recent_lines: list[str] = []
+    if merged_recent:
+        sorted_recent = sorted(
+            merged_recent,
+            key=lambda pr: pr.get("mergedAt", ""),
+            reverse=True,
+        )[:3]
+        for pr in sorted_recent:
+            title = pr.get("title", "")
+            if len(title) > 60:
+                title = title[:60] + "…"
+            recent_lines.append(f"  · #{pr.get('number')} {title}")
+
+    # 백로그 시그널: open PR 3개 title preview.
+    backlog_lines: list[str] = []
+    if open_prs:
+        for pr in open_prs[:3]:
+            title = pr.get("title", "")
+            if len(title) > 60:
+                title = title[:60] + "…"
+            backlog_lines.append(f"  · #{pr.get('number')} {title}")
+
+    bug_lines: list[str] = []
+    if bug_issues:
+        for issue in bug_issues[:3]:
+            title = issue.get("title", "")
+            if len(title) > 60:
+                title = title[:60] + "…"
+            bug_lines.append(f"  · #{issue.get('number')} {title}")
+
+    parts = [
+        f"📊 **{kst.strftime('%H:%M')} KST digest**",
+        f"✅ 머지 {DIGEST_MERGED_WINDOW_HOURS}h: {merged_count}",
+    ]
+    parts.extend(recent_lines)
+    parts.append(f"🔄 open PR: {open_count}")
+    parts.extend(backlog_lines)
+    bug_label = "🐛 OPEN" if bug_count not in {"0", "?"} else "🐛 없음"
+    parts.append(f"{bug_label}: {bug_count}")
+    parts.extend(bug_lines)
+
+    line = "\n".join(parts)
     signature = f"open={open_count}|merged{DIGEST_MERGED_WINDOW_HOURS}={merged_count}|bug={bug_count}"
     return line, signature
 
