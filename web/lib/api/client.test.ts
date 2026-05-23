@@ -579,3 +579,46 @@ describe("ApiError(status, message, undefined) body 가드 (#723)", () => {
     expect(JSON.parse(serialized)).not.toHaveProperty("body");
   });
 });
+
+describe("apiFetch generic 미지정 반환 타입 가드 (#725)", () => {
+  // 현 동작 lock: `apiFetch<T>` generic 미지정 시 TResponse 는 unknown 으로 추론된다.
+  // 호출 측은 즉시 사용 불가 → 도메인 함수가 generic 명시(`apiFetch<SongResponse>`) 또는
+  // `apiFetch<void>` (204 case) 패턴을 강제하는 이유를 회귀 가드로 명시.
+  it("generic 미지정 → 반환값 unknown, 명시 사용 불가 (런타임은 payload 그대로 통과)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const result = await apiFetch("/api/v1/probe");
+    expect(result).toEqual({ ok: true });
+  });
+});
+
+describe("apiFetch non-Error throw propagate 가드 (#725)", () => {
+  // 현 동작 lock: client.ts 는 fetch reject 값을 try/catch 로 래핑하지 않는다.
+  // fetch 가 string/number/객체 등 non-Error 를 reject 해도 ApiError 로 감싸지 않고 원본 그대로 propagate.
+  it.each([
+    { label: "string reject → 원본 string 그대로 propagate", rejectValue: "raw network failure" },
+    { label: "객체 reject → 원본 객체 그대로 propagate", rejectValue: { code: "ECONNRESET" } },
+  ])("$label", async ({ rejectValue }: { rejectValue: unknown }) => {
+    fetchMock.mockRejectedValueOnce(rejectValue);
+    const promise = apiFetch("/api/v1/songs");
+    await expect(promise).rejects.toBe(rejectValue);
+    await expect(promise).rejects.not.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("apiFetch error response body=Array message 추출 가드 (#725)", () => {
+  // 현 동작 lock: error path 의 message 추출은 `"message" in payload` 분기.
+  // payload 가 array (typeof === "object") 면 in 연산자가 false → fallback message 적용,
+  // body 는 array 그대로 보존. validation error 가 array 형태로 와도 회귀하지 않음.
+  it("4xx + JSON array payload → fallback message + body=array 보존", async () => {
+    const body = [{ field: "lowestNote", error: "required" }];
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(body), { status: 400, statusText: "Bad Request", headers: { "Content-Type": "application/json" } }),
+    );
+    await expect(apiFetch("/api/v1/voice-range")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      message: "Request failed: 400 Bad Request",
+      body,
+    });
+  });
+});
