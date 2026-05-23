@@ -534,6 +534,75 @@ describe("HistoryPage", () => {
       // "잔잔한 · 85 BPM" 형태 — 정확한 문구가 카드 부제목에 등장한다.
       expect(screen.getByText(/잔잔한.*85 BPM/)).toBeInTheDocument();
     });
+
+    it("BE source 일 때 하단 삭제 버튼 라벨이 '이 기기 캐시 비우기' 로 분기되고 confirm 문구에 서버 데이터 잔존 안내가 포함된다 (#295 항목 3)", async () => {
+      // BE entries 가 있으면 "전체 삭제" 라는 라벨이 사용자 기대치(서버 영구 삭제)와 어긋남.
+      // 라벨을 "이 기기 캐시 비우기" 로 분기하고 confirm 문구에 "다음 방문 시 다시 보입니다" 명시.
+      sessionMock.set({ sessionId: "sess-clear-label" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: 7,
+            sessionId: "sess-clear-label",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: null,
+            preferredBpm: null,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 500,
+                  title: "BE곡-500",
+                  artist: "가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: null,
+                  mood: null,
+                  language: "ko",
+                  genre: "POP",
+                  tjNumber: null,
+                  kyNumber: null,
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.9,
+                matchReason: "음역 일치",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+      // 명시적으로 (message: string) => boolean 시그니처를 부여 — 그래야
+      // mock.calls 가 [string][] 로 추론되어 첫 호출의 message 를 type-safe 하게 꺼낼 수 있다.
+      const confirmMock = vi.fn<(message?: string) => boolean>(() => true);
+      vi.stubGlobal("confirm", confirmMock);
+      const user = userEvent.setup();
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE entries 로딩 완료 후 라벨이 분기되어야 한다.
+      await screen.findByText("BE곡-500");
+      const clearBtn = await screen.findByRole("button", {
+        name: "이 기기 캐시 비우기",
+      });
+      // 분기 후 기존 라벨은 더 이상 노출되지 않는다.
+      expect(
+        screen.queryByRole("button", { name: "전체 삭제" }),
+      ).not.toBeInTheDocument();
+
+      await user.click(clearBtn);
+
+      // confirm 에 "서버"/"다시 보입니다" 안내가 포함된 분기 문구가 전달되어야 한다.
+      expect(confirmMock).toHaveBeenCalledTimes(1);
+      const passedMessage = confirmMock.mock.calls[0]?.[0] ?? "";
+      expect(passedMessage).toMatch(/서버/);
+      expect(passedMessage).toMatch(/다음 방문/);
+      // clearHistory 는 localStorage 만 비우는 기존 동작 그대로 (회귀 없음).
+      expect(historyMock.state().clearHistory).toHaveBeenCalledTimes(1);
+
+      vi.unstubAllGlobals();
+    });
   });
 
   describe("a11y", () => {
