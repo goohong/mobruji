@@ -6,10 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "lint": "NODE_OPTIONS=--preserve-symlinks eslint",
+    "typecheck": "NODE_OPTIONS=--preserve-symlinks tsc --noEmit",
+    "test": "NODE_OPTIONS=--preserve-symlinks vitest run",
+    "test:watch": "NODE_OPTIONS=--preserve-symlinks vitest"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.11",
