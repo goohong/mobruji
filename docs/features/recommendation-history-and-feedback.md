@@ -117,6 +117,7 @@ last_reviewed: 2026-05-23
   - `X-Session-Id` 헤더 누락 / blank → **401 Unauthorized** ("missing session id")
   - 헤더와 path/body/query sessionId 불일치 → **401 Unauthorized** ("session id mismatch") — 403 이 아닌 이유는 ADR-0011 §Alternatives (D)
   - 정상 → **200/201** (해당 sessionId 의 리소스가 0건이어도 빈 배열/페이지 반환, 404 아님). POST toggle 케이스 (같은 (session, song) 재호출) 는 200 + `{liked|bookmarked: boolean}` (상태 회신).
+  - 단 body 자체가 spec violation (blank/null/format 위반) 이면 400 (`@NotBlank` validation, `MethodArgumentNotValidException`), 헤더 위치 불일치 또는 누락은 401 (`SessionAuthGuard`). 운영상 body sessionId 위조는 헤더와 일치해야 가능하므로 실 영향 없음.
 - 로그 정책: sessionId 원문은 로그/예외 메시지/응답에 노출하지 않는다. 디버깅용으로는 prefix 8 자만 노출. `04-security-policy.md §3` 준수.
 - admin 인증(#229 — `X-Admin-Token`)과는 **별 트랙**이다. 한 endpoint 가 두 인증을 동시에 요구하지 않는다.
 - 향후 정식 인증(Spring Security 도입) 시에는 본 절을 ADR-0011 후속 결정으로 대체한다.
