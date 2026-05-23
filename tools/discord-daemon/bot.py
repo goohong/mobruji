@@ -58,6 +58,12 @@ REPLY_CONTEXT_PREFIX_TEMPLATE: Final[str] = "[답장→ {preview}] {body}"
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
 DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 push
+
+# Discord API resilience (#911 G-6) — channel.send 시 429 / 5xx 명시적 retry.
+# discord.py 가 라이브러리 차원 ratelimiter 를 가지지만 갑작스러운 5xx /
+# transient HTTP error 는 그대로 raise. defense-in-depth 로 명시적 retry 추가.
+DISCORD_SEND_RETRY_MAX: Final[int] = 3
+DISCORD_SEND_RETRY_BASE_SEC: Final[float] = 1.0
 DEFAULT_CYCLE_STATUS_PATH: Final[str] = os.path.expanduser("~/.mobruji/cycle-status.json")
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
 CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
@@ -722,6 +728,95 @@ def resolve_digest_interval(env_value: str | None) -> int:
     return parsed
 
 
+async def send_with_retry(
+    channel: "discord.abc.Messageable",
+    *,
+    content: str | None = None,
+    embed: "discord.Embed | None" = None,
+    max_attempts: int = DISCORD_SEND_RETRY_MAX,
+    base_sleep: float = DISCORD_SEND_RETRY_BASE_SEC,
+    sleeper=asyncio.sleep,
+) -> bool:
+    """Discord ``channel.send`` 호출 + 429/5xx 재시도 (#911 G-6).
+
+    - 429: ``HTTPException.retry_after`` (discord.py 가 응답에서 추출) 가 있으면
+      그 초만큼 sleep, 없으면 ``base_sleep`` 사용.
+    - 5xx: exponential backoff (``base_sleep * 2 ** (i-1)``).
+    - 4xx 등 retry 불가 상태: 즉시 False 반환 + warning log.
+    - ``max_attempts`` 회 시도 후에도 실패하면 False.
+
+    호출부는 성공 여부만 알면 충분하므로 bool 반환. (raise 하지 않음 — 호출부는
+    이미 broad ``except`` 안에서 호출되며, retry 후에도 실패하면 다음 iter 에서
+    자연 회복하길 기대.)
+
+    sleeper 인자는 테스트 용 — 실제 sleep 없이 path 만 검증할 때 stub.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if embed is not None:
+                await channel.send(content=content, embed=embed)
+            else:
+                # content is required when no embed; assume caller guarantees this.
+                await channel.send(content)
+            return True
+        except discord.HTTPException as exc:
+            last_exc = exc
+            status = getattr(exc, "status", None)
+            if status == 429:
+                retry_after = getattr(exc, "retry_after", None)
+                sleep_sec = (
+                    float(retry_after)
+                    if retry_after is not None
+                    else base_sleep
+                )
+                logger.warning(
+                    "send_with_retry: 429 rate limit — retry %d/%d after %.2fs",
+                    attempt,
+                    max_attempts,
+                    sleep_sec,
+                )
+            elif status is not None and 500 <= status < 600:
+                sleep_sec = base_sleep * (2 ** (attempt - 1))
+                logger.warning(
+                    "send_with_retry: %d server error — retry %d/%d after %.2fs",
+                    status,
+                    attempt,
+                    max_attempts,
+                    sleep_sec,
+                )
+            else:
+                # 4xx etc — retry 무의미.
+                logger.warning(
+                    "send_with_retry: non-retryable HTTPException status=%s err=%s",
+                    status,
+                    exc,
+                )
+                return False
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # 네트워크 layer 예외 (ConnectionError, TimeoutError 등) — backoff retry.
+            last_exc = exc
+            sleep_sec = base_sleep * (2 ** (attempt - 1))
+            logger.warning(
+                "send_with_retry: transient error — retry %d/%d after %.2fs err=%s",
+                attempt,
+                max_attempts,
+                sleep_sec,
+                exc,
+            )
+        # 마지막 attempt 직후엔 sleep 안 함 — 의미 없음 (어차피 더 시도 안 함).
+        if attempt < max_attempts:
+            await sleeper(sleep_sec)
+    logger.warning(
+        "send_with_retry: %d 회 시도 후 실패 last_err=%s",
+        max_attempts,
+        last_exc,
+    )
+    return False
+
+
 async def digest_loop(
     client: "discord.Client",
     channel_id: int,
@@ -775,10 +870,19 @@ async def digest_loop(
                     reason = "heartbeat"
 
                 if should_push:
-                    await channel.send(embed=embed)
-                    last_signature = signature
-                    last_pushed_at = now_ts
-                    logger.info("digest push: reason=%s signature=%s", reason, signature)
+                    # #911 G-6: 429/5xx retry. 실패 시 last_signature 갱신 안 함
+                    # → 다음 iter 에서 동일 signature 로 재시도 (delta 유지).
+                    sent = await send_with_retry(channel, embed=embed)
+                    if sent:
+                        last_signature = signature
+                        last_pushed_at = now_ts
+                        logger.info("digest push: reason=%s signature=%s", reason, signature)
+                    else:
+                        logger.warning(
+                            "digest push 실패 (retry 소진) reason=%s signature=%s — 다음 iter 에 재시도",
+                            reason,
+                            signature,
+                        )
                 else:
                     logger.debug(
                         "digest skip: signature unchanged (%s), since_last=%.0fs",
@@ -994,8 +1098,13 @@ async def context_auto_clear_loop(
                     last_pct_text = "?" if pct is None else f"{pct}%"
                     channel = client.get_channel(channel_id)
                     if channel is not None:
-                        await channel.send(
-                            f"🧹 {pane} 정리 완료 → /clear 전송 (마지막 context {last_pct_text})"
+                        # #911 G-6: 429/5xx retry.
+                        await send_with_retry(
+                            channel,
+                            content=(
+                                f"🧹 {pane} 정리 완료 → /clear 전송 "
+                                f"(마지막 context {last_pct_text})"
+                            ),
                         )
                     else:
                         logger.warning(
@@ -1022,8 +1131,10 @@ async def context_auto_clear_loop(
                 if not st["debounced"] and pct >= trigger_pct:
                     channel = client.get_channel(channel_id)
                     if channel is not None:
-                        await channel.send(
-                            f"🧠 {pane} context {pct}% → 자율 정리 시작"
+                        # #911 G-6: 429/5xx retry.
+                        await send_with_retry(
+                            channel,
+                            content=f"🧠 {pane} context {pct}% → 자율 정리 시작",
                         )
                     else:
                         logger.warning(

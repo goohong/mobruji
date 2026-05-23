@@ -76,6 +76,13 @@ fi
 HELPER_THREAD_FILE="${HELPER_THREAD_FILE:-$HOME/.mobruji/helper-current-thread.txt}"
 THREAD_NAME_MAX_LEN=30
 
+# Discord API retry 설정 (#911 G-6).
+# 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
+# Discord 가 권장하는 retry_after 또는 exponential backoff 로 재시도한다.
+# 환경변수로 외부화 — 테스트에서 max=1, base=0 으로 강제해 fast fail 가능.
+DISCORD_RETRY_MAX="${DISCORD_RETRY_MAX:-3}"
+DISCORD_RETRY_BASE_SEC="${DISCORD_RETRY_BASE_SEC:-1}"
+
 # ─── mode dispatch ────────────────────────────────────────────────────────────
 
 MODE="reply"
@@ -125,18 +132,84 @@ fi
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
-# JSON escape via jq -Rn (raw input + null入). 단일 인자에 멀티라인/따옴표 안전.
+# JSON escape via jq -Rn (raw input + null입). 단일 인자에 멀티라인/따옴표 안전.
 json_escape() {
   jq -Rn --arg s "$1" '$s'
+}
+
+# Discord REST 호출 + 429/5xx retry (#911 G-6).
+#
+# 인자: METHOD URL BODY
+# stdout: 마지막 시도의 응답 본문 (JSON 가정). 호출부는 기존처럼 jq 로 파싱.
+# 종료코드: 마지막 시도가 2xx 면 0, 그 외면 1.
+#
+# 정책:
+#   - 2xx → 즉시 반환 (0).
+#   - 429 → JSON `retry_after` (Discord 권고) 가 있으면 그 초만큼 sleep, 없으면
+#           DISCORD_RETRY_BASE_SEC 사용. retry_after 는 정수/소수 모두 허용.
+#   - 5xx → exponential backoff (base * 2^(i-1)).
+#   - 그 외 (4xx 등) → retry 무의미 → 즉시 종료 (1) + 응답 그대로 반환.
+#   - DISCORD_RETRY_MAX 회 시도 후 실패 → stderr warning + 1 반환.
+discord_curl_with_retry() {
+  local method="$1"
+  local url="$2"
+  local body="$3"
+  local response status payload retry_after sleep_sec i
+
+  for ((i = 1; i <= DISCORD_RETRY_MAX; i++)); do
+    # -w '\n%{http_code}' 로 마지막 줄에 status code append.
+    response=$(curl -sS -X "$method" "$url" \
+      -H "Authorization: Bot ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      -w $'\n%{http_code}' \
+      -d "$body" 2>/dev/null || true)
+
+    status="${response##*$'\n'}"
+    payload="${response%$'\n'*}"
+
+    if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+      printf '%s' "$payload"
+      return 0
+    fi
+
+    if [[ "$status" == "429" ]]; then
+      # Discord 권고 retry_after — JSON 본문에 초 단위로 옴.
+      retry_after=$(printf '%s' "$payload" \
+        | jq -r '.retry_after // empty' 2>/dev/null || true)
+      if [[ -z "$retry_after" || "$retry_after" == "null" ]]; then
+        sleep_sec="$DISCORD_RETRY_BASE_SEC"
+      else
+        sleep_sec="$retry_after"
+      fi
+      echo "discord-reply.sh: 429 rate limit — retry ${i}/${DISCORD_RETRY_MAX} after ${sleep_sec}s" >&2
+      sleep "$sleep_sec"
+      continue
+    fi
+
+    if [[ "$status" =~ ^5[0-9][0-9]$ ]]; then
+      sleep_sec=$(awk -v base="$DISCORD_RETRY_BASE_SEC" -v exp="$((i - 1))" \
+        'BEGIN { printf "%.2f", base * (2 ^ exp) }')
+      echo "discord-reply.sh: ${status} server error — retry ${i}/${DISCORD_RETRY_MAX} after ${sleep_sec}s" >&2
+      sleep "$sleep_sec"
+      continue
+    fi
+
+    # 4xx 등 — retry 무의미.
+    printf '%s' "$payload"
+    return 1
+  done
+
+  echo "discord-reply.sh: ${DISCORD_RETRY_MAX} 회 retry 실패 (last status=${status})" >&2
+  printf '%s' "$payload"
+  return 1
 }
 
 # 메인 채널에 메시지 push. stdout = REST 응답 raw (JSON).
 post_channel_message() {
   local body="$1"
-  curl -sS -X POST "https://discord.com/api/v10/channels/${CHANNEL}/messages" \
-    -H "Authorization: Bot ${TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "$body"
+  discord_curl_with_retry POST \
+    "https://discord.com/api/v10/channels/${CHANNEL}/messages" \
+    "$body"
 }
 
 # 메시지에서 thread 시작 (해당 메시지 아래에 붙는 thread).
@@ -147,21 +220,37 @@ start_thread_from_message() {
   local thread_name="$2"
   local body
   body=$(jq -nc --arg n "$thread_name" '{name: $n, auto_archive_duration: 1440}')
-  curl -sS -X POST \
+  discord_curl_with_retry POST \
     "https://discord.com/api/v10/channels/${CHANNEL}/messages/${message_id}/threads" \
-    -H "Authorization: Bot ${TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "$body"
+    "$body"
 }
 
 # thread 안 push. thread 자체가 channel snowflake 처럼 동작 (Discord API spec).
 post_thread_message() {
   local thread_id="$1"
   local body="$2"
-  curl -sS -X POST "https://discord.com/api/v10/channels/${thread_id}/messages" \
-    -H "Authorization: Bot ${TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "$body"
+  discord_curl_with_retry POST \
+    "https://discord.com/api/v10/channels/${thread_id}/messages" \
+    "$body"
+}
+
+# helper-current-thread.txt atomic write (#911 G-5).
+#
+# 동시에 두 helper turn 이 --ack 를 호출하면 read/write 순서가 어긋나 마지막
+# write 가 부분 파일을 남길 수 있다 (또는 두 writer 가 동일 path 에 동시에
+# write 하면 reader 가 일부만 본 채로 thread id 를 잘못 파싱).
+# `mktemp + mv` 패턴으로 같은 파일시스템 안에서 atomic rename 을 보장한다.
+# (POSIX rename(2) atomicity — 같은 디렉터리/파일시스템 내부 필수).
+atomic_write_thread_file() {
+  local thread_id="$1"
+  local thread_file="$2"
+  local dir tmp
+  dir="$(dirname "$thread_file")"
+  mkdir -p "$dir"
+  # mktemp 를 동일 디렉터리에 만들어 cross-fs rename 회피.
+  tmp=$(mktemp "${thread_file}.XXXXXX")
+  printf '%s\n' "$thread_id" > "$tmp"
+  mv "$tmp" "$thread_file"
 }
 
 # ─── mode 실행 ────────────────────────────────────────────────────────────────
@@ -200,8 +289,8 @@ case "$MODE" in
     fi
 
     # 4) 현재 thread 파일에 1줄 저장 (helper 가 다음 turn 에 환경변수 잃어도 복구).
-    mkdir -p "$(dirname "$HELPER_THREAD_FILE")"
-    printf '%s\n' "$NEW_THREAD_ID" > "$HELPER_THREAD_FILE"
+    #    동시 --ack 호출 race 회피를 위해 mktemp+mv atomic write (#911 G-5).
+    atomic_write_thread_file "$NEW_THREAD_ID" "$HELPER_THREAD_FILE"
 
     # 5) stdout 으로 thread id 만 출력.
     printf '%s\n' "$NEW_THREAD_ID"
