@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # discord-reply.sh — helper 가 직접 bot REST API 로 응답 push.
 #
-# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode):
+# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장):
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
@@ -16,24 +16,31 @@
 #           (cron digest 등) 은 graceful standalone fallback.
 #           --no-reply 플래그 또는 LAST_USER_MSG_ID_FILE=/dev/null 로 disable.
 #
-#   2) ack + 새 thread 생성 (#880 thread stream):
+#   2) ack + 새 thread 생성 (#880 thread stream + #960 ack reply):
 #       THREAD_ID=$(discord-reply.sh --ack "<ack 문구>")
 #         → 메인 채널에 ack 메시지 push + 그 메시지에 thread 생성.
 #         → stdout 으로 thread_id 만 출력 (캐치하기 쉽게).
 #         → thread 이름 = ack 문구 첫 30자 + ISO timestamp 짧은 형식.
 #         → 본 호출 결과는 ~/.mobruji/helper-current-thread.txt 에도 1줄로 저장
 #           (helper 가 다음 turn 에 환경변수 잃어도 복구 가능).
+#         → ack push 자체도 본답 모드와 동일하게 `message_reference` 자동
+#           적용 — 사용자 메시지에 답장 형태로 ack 가 붙어 어떤 메시지에 대한
+#           ack 인지 시각적으로 식별 가능 (#960, 2026-05-24).
+#           --no-reply flag 로 disable 가능.
 #
 #   3) thread 안 진행 stream (#880 thread stream):
 #       discord-reply.sh --thread <id> "<진행 줄>"
 #         → 해당 thread 에만 push (메인 채널 잡음 없음).
+#         → thread 자체는 사용자 메시지에 붙은 컨텍스트 안에서 흐르므로
+#           message_reference 미적용 (회귀 가드 테스트 존재).
 #
-#   4) auto-ack + thread (#947 helper 자동 활용):
+#   4) auto-ack + thread (#947 helper 자동 활용 + #960 ack reply):
 #       discord-reply.sh --auto-ack-thread "<ack 문구>"
 #         → 동작은 --ack 와 동일하나 helper 본체 룰 (CLAUDE.md §11) 직설 명명.
 #         → ack push + thread 생성 + thread_id 를 ~/.mobruji/helper-current-thread.txt
 #           에 atomic 저장 + stdout 으로 thread_id 출력.
 #         → helper 가 stdout 캡쳐를 잊어도 다음 --auto-thread 호출이 파일에서 복구.
+#         → ack push 도 `message_reference` 자동 적용 (#960).
 #
 #   5) auto-thread (#947 helper 자동 활용):
 #       discord-reply.sh --auto-thread "<진행 줄>"
@@ -97,15 +104,17 @@ if [[ -z "$CHANNEL" ]]; then
   exit 1
 fi
 
-HELPER_THREAD_FILE="${HELPER_THREAD_FILE:-$HOME/.mobruji/helper-current-thread.txt}"
+# $HOME 이 unbound 환경 (예: 테스트 / systemd unit 일부) 에서 set -u 로 죽지
+# 않도록 명시적 default. 운영에서 $HOME 은 항상 존재 — 이 default 는 안전망.
+HELPER_THREAD_FILE="${HELPER_THREAD_FILE:-${HOME:-/tmp}/.mobruji/helper-current-thread.txt}"
 THREAD_NAME_MAX_LEN=30
 
-# helper 본답 → 사용자 메시지 reply (#946, 2026-05-24).
+# helper 본답/ack → 사용자 메시지 reply (#946 본답, #960 ack 확장, 2026-05-24).
 # bot.py on_message 가 사용자 메시지 forward 시 이 파일에 message_id 를
-# atomic write. 본답 모드가 읽어 Discord `message_reference` payload 에 포함.
-# 파일 부재 / 빈 값 / 비숫자 → graceful standalone (REST API 가 그래도 본답
+# atomic write. 본답/ack 모드가 읽어 Discord `message_reference` payload 에 포함.
+# 파일 부재 / 빈 값 / 비숫자 → graceful standalone (REST API 가 그래도 본답/ack
 # 메시지는 push 되도록).
-LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-$HOME/.mobruji/last-user-msg-id.txt}"
+LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-${HOME:-/tmp}/.mobruji/last-user-msg-id.txt}"
 
 # Discord API retry 설정 (#911 G-6).
 # 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
@@ -291,6 +300,63 @@ post_thread_message() {
     "$body"
 }
 
+# reply 대상 message_id 해석 — last-user-msg-id.txt 읽고 snowflake 검증 (#946, #960).
+#
+# 출력: stdout 으로 message_id (정수 문자열) 또는 빈 문자열.
+# 정책:
+#   - $NO_REPLY=1 → 빈 문자열 (명시적 disable).
+#   - 파일 부재 / 빈 값 / 비숫자 → 빈 문자열 (graceful standalone fallback).
+#   - 유효 snowflake (정수) → 그 값 그대로.
+#
+# bare body + ack 모드 모두 동일 로직을 공유하기 위해 함수로 분리.
+resolve_reply_to_id() {
+  local raw_id=""
+  if [[ "$NO_REPLY" -eq 0 && -r "$LAST_USER_MSG_ID_FILE" ]]; then
+    raw_id=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null | tr -d '[:space:]' || true)
+    # Discord snowflake 길이 가드 (#964, 2026-05-24).
+    # snowflake = 64bit unsigned = 2015 epoch 이후 항상 17~19 자리 (보수적으로
+    # 20 까지 허용). 짧은 정수 ("4" 등) / 비숫자 / 빈 값 → Discord API 10008
+    # (Unknown Message) → 채팅창에 "메시지를 불러올 수 없어요" 노출. write 단계
+    # (#964 bot.py 가드) 와 read 단계 모두 방어해 외부 오염 / legacy 파일도
+    # graceful standalone 으로 처리.
+    if [[ "$raw_id" =~ ^[0-9]{17,20}$ ]]; then
+      printf '%s' "$raw_id"
+      return 0
+    elif [[ -n "$raw_id" ]]; then
+      echo "discord-reply.sh: last-user-msg-id 비-snowflake (\"$raw_id\") — standalone 으로 push (#964)" >&2
+    fi
+  fi
+  printf ''
+}
+
+# reply 적용 payload 빌더 — message_id 있으면 message_reference 포함, 없으면 단순 content (#946, #960).
+#
+# 인자: CONTENT REPLY_TO_ID
+# 출력: jq -nc 로 빌드한 JSON payload (stdout 1줄).
+#
+# fail_if_not_exists: false — referenced message 가 삭제됐어도 본 메시지
+# 자체는 정상 push (standalone 으로 표시). Discord 권장 패턴.
+build_reply_payload() {
+  local content="$1"
+  local reply_to_id="$2"
+  if [[ -n "$reply_to_id" ]]; then
+    jq -nc \
+      --arg c "$content" \
+      --arg mid "$reply_to_id" \
+      --arg cid "$CHANNEL" \
+      '{
+        content: $c,
+        message_reference: {
+          message_id: $mid,
+          channel_id: $cid,
+          fail_if_not_exists: false
+        }
+      }'
+  else
+    jq -nc --arg c "$content" '{content: $c}'
+  fi
+}
+
 # helper-current-thread.txt atomic write (#911 G-5).
 #
 # 동시에 두 helper turn 이 --ack 를 호출하면 read/write 순서가 어긋나 마지막
@@ -326,46 +392,17 @@ case "$MODE" in
     # message_id 를 읽어 Discord REST `message_reference` 에 포함.
     # 파일 부재 / 빈 값 / 비숫자 → graceful standalone push (legacy 호환).
     # --no-reply flag 시에도 standalone.
-    REPLY_TO_ID=""
-    if [[ "$NO_REPLY" -eq 0 && -r "$LAST_USER_MSG_ID_FILE" ]]; then
-      RAW_ID=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null | tr -d '[:space:]' || true)
-      # Discord snowflake 길이 가드 (#964, 2026-05-24).
-      # snowflake = 64bit unsigned = 2015 epoch 이후 항상 17~19 자리 (보수적으로
-      # 20 까지 허용). 짧은 정수 ("4" 등) / 비숫자 / 빈 값 → Discord API 10008
-      # (Unknown Message) → 채팅창에 "메시지를 불러올 수 없어요" 노출. write 단계
-      # (#964 bot.py 가드) 와 read 단계 모두 방어해 외부 오염 / legacy 파일도
-      # graceful standalone 으로 처리.
-      if [[ "$RAW_ID" =~ ^[0-9]{17,20}$ ]]; then
-        REPLY_TO_ID="$RAW_ID"
-      elif [[ -n "$RAW_ID" ]]; then
-        echo "discord-reply.sh: last-user-msg-id 비-snowflake (\"$RAW_ID\") — standalone 으로 push (#964)" >&2
-      fi
-    fi
-
-    if [[ -n "$REPLY_TO_ID" ]]; then
-      # fail_if_not_exists: false — referenced message 가 삭제됐어도 본답
-      # 메시지 자체는 정상 push (standalone 으로 표시). Discord 권장 패턴.
-      PAYLOAD=$(jq -nc \
-        --arg c "$MSG" \
-        --arg mid "$REPLY_TO_ID" \
-        --arg cid "$CHANNEL" \
-        '{
-          content: $c,
-          message_reference: {
-            message_id: $mid,
-            channel_id: $cid,
-            fail_if_not_exists: false
-          }
-        }')
-    else
-      PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
-    fi
+    REPLY_TO_ID=$(resolve_reply_to_id)
+    PAYLOAD=$(build_reply_payload "$MSG" "$REPLY_TO_ID")
     post_channel_message "$PAYLOAD"
     ;;
 
   ack)
+    # #960: ack 도 사용자 메시지에 reply (답장) 형태로 push — 어떤 메시지에
+    # 대한 ack 인지 시각적 식별. bare body 모드와 동일한 헬퍼 공유.
+    REPLY_TO_ID=$(resolve_reply_to_id)
     # 1) ack 메시지 push.
-    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
+    PAYLOAD=$(build_reply_payload "$MSG" "$REPLY_TO_ID")
     ACK_RESPONSE=$(post_channel_message "$PAYLOAD")
     MSG_ID=$(echo "$ACK_RESPONSE" | jq -r '.id // empty')
     if [[ -z "$MSG_ID" ]]; then

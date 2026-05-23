@@ -72,6 +72,19 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 - be/fe/rev는 **이슈 등록 금지** (maestro에 보고만). 기능/스펙 의사결정은 maestro가 한다.
 - plan은 docs/spec/ADR 작업 일환으로 이슈를 직접 등록할 수 있다.
 
+### PR 생성 표준 명령 (`--base develop` 강제)
+
+- `gh pr create` 호출 시 **항상 `--base develop` 명시**. 생략 시 GitHub repo default(`main`) 로 PR 이 만들어져 `main` 직접 변경 사고로 이어진다 (`CLAUDE.md §4 main 직접 push 금지` 위반과 동급 risk).
+- 2026-05-24 본 룰 박제 사유: PR #957 가 초기에 `--base develop` 누락 → `main` base 로 생성된 후 재타겟 필요했다. base 재타겟 자체는 가능하지만 (a) 라벨 자동 부착 오작동 (b) rev gate workflow 가 base=main PR 을 skip (c) `develop ← feature` head/base diff 가 일시적으로 main 기준이 되어 reviewer anchoring 오염 등 부작용.
+- 표준 명령 (사이클 type 별 차이 없음, base 는 무조건 `develop`):
+  ```bash
+  gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --body "$(cat <<'EOF'
+  ...
+  EOF
+  )"
+  ```
+- release PR (`develop → main`) 은 §8 release 절차에서만 `--base main` 사용. sub-agent 는 release PR 작성 금지 (maestro 전용).
+
 ### 푸시 + ready 전환 표준 명령
 ```bash
 git push
@@ -161,8 +174,11 @@ sub-agent가 maestro에 회신할 때 다음을 포함:
 | DB | 새 마이그레이션 / DDL / `fetch.*EAGER` / N+1 의심 쿼리 | `06-domain-model.md`, `03-quality-gates.md` |
 | 의존성 | `package.json` / `build.gradle*` diff 시 신규 라이브러리 라이선스 + CVE | `02-license-agpl-3-0` ADR, `04-security-policy.md` |
 | 마이그레이션 안전성 | DDL 변경 시 rollback 가능 여부 + zero-downtime 검증 | `03-quality-gates.md` |
+| 중복 / 회귀 (develop diff) | PR 의 추가 파일/심볼이 이미 `develop` 에 존재하는지 (`git fetch origin develop && git grep -n "<신규 hook/메서드명>" origin/develop`). 회귀 / 성능 저하 의심 시 `git log origin/develop -- <파일>` 으로 직전 변경 commit 추적 + 회귀 원인 PR 식별 | `02-agent-workflow.md` |
 
-> 보고 형식 예: `보안 grep: 0건 / 로그 grep: 2건 (log.info 2건, trace ID 미포함 — 보강 권장)`.
+> 보고 형식 예: `보안 grep: 0건 / 로그 grep: 2건 (log.info 2건, trace ID 미포함 — 보강 권장) / 중복 grep: develop 에 동일 hook 존재 — 본 PR redundant 가능`.
+
+> 사례 (2026-05-24 박제 사유): (a) PR #408 — rev 가 develop grep 없이 audit 진행, 동일 hook 이 이미 develop 에 도입된 redundant PR 을 LGTM 처리. (b) k6-load 회귀 PR — rev 가 회귀 commit 을 추적하지 않아 misdiagnosis. 두 사례 모두 "develop 기준 grep + 회귀 commit 추적" 1단계로 사전 차단 가능했다.
 
 ##### E-1.2 LGTM self-guard (rev 필수)
 

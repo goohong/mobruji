@@ -190,6 +190,15 @@ CYCLE_IDLE_WATCH_INJECT_TEMPLATE: Final[str] = (
     "{summary}. keep-4-cycles 룰 위반. "
     "즉시 다음 백로그 launch 또는 root cause 보고."
 )
+# STRICT mode (#956) — idle 발견 + note 미명시 시 별 prompt. reason 의무 위반.
+CYCLE_IDLE_WATCH_STRICT_TEMPLATE: Final[str] = (
+    "[watchdog STRICT {date}] cycle-status.json idle 발견 — {workspaces}. "
+    "{summary}. note 필드 미명시 — keep-4-cycles 룰 + reason 의무 룰 동시 위반. "
+    "즉시 다음 백로그 launch + cycle-status.json note 필드 기록 의무 "
+    "(tools/cycle-status/update.sh <ws> set-idle --note '...' 사용)."
+)
+# CYCLE_REASON_REQUIRED env default — note 미명시 idle 을 strict 로 처리할지.
+CYCLE_REASON_REQUIRED_DEFAULT: Final[str] = "1"
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -1416,6 +1425,8 @@ def detect_idle_worktrees(
                 "workspace": ws,
                 "last_completed_title": "없음",
                 "last_completed_at": None,
+                "note": None,
+                "idle_since": None,
             })
             continue
         in_progress_raw = entry.get("in_progress")
@@ -1436,12 +1447,24 @@ def detect_idle_worktrees(
             if isinstance(title_raw, str) and title_raw.strip():
                 title_text = title_raw.strip()
 
+        # note / idle_since 추출 (#956). note 빈 string / whitespace → None.
+        note_raw = entry.get("note")
+        note_text: str | None = None
+        if isinstance(note_raw, str) and note_raw.strip():
+            note_text = note_raw.strip()
+        idle_since_raw = entry.get("idle_since")
+        idle_since_text: str | None = None
+        if isinstance(idle_since_raw, str) and idle_since_raw.strip():
+            idle_since_text = idle_since_raw.strip()
+
         if completed_at is None:
             # last_completed 부재 / completed_at 없음 → idle 로 간주.
             idle.append({
                 "workspace": ws,
                 "last_completed_title": title_text,
                 "last_completed_at": None,
+                "note": note_text,
+                "idle_since": idle_since_text,
             })
             continue
 
@@ -1451,6 +1474,8 @@ def detect_idle_worktrees(
                 "workspace": ws,
                 "last_completed_title": title_text,
                 "last_completed_at": completed_at,
+                "note": note_text,
+                "idle_since": idle_since_text,
             })
     return idle
 
@@ -1479,6 +1504,23 @@ def tmux_inject_text(pane_target: str, text: str) -> bool:
     return tmux_send_payload(pane_target, text)
 
 
+def _format_workspace_reason_line(entry: dict) -> str:
+    """Discord push 용 워크트리 1줄 — workspace + idle_since + reason 표시.
+
+    spec: docs/features/nmae-cycle-watchdog.md §5-8 strict mode (#956).
+    """
+    ws = entry.get("workspace", "?")
+    note = entry.get("note")
+    idle_since = entry.get("idle_since")
+    if note:
+        reason_text = f"reason: {note}"
+    else:
+        reason_text = "reason 없음 — STRICT relaunch"
+    if idle_since:
+        return f"- {ws}: IDLE {idle_since}~ ({reason_text})"
+    return f"- {ws}: IDLE ({reason_text})"
+
+
 async def cycle_idle_watch_loop(
     client: "discord.Client",
     notify_channel_id: int,
@@ -1489,6 +1531,7 @@ async def cycle_idle_watch_loop(
     poll_interval: int = CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS,
     workspaces: list[str] | tuple[str, ...] = ("be", "fe", "rev", "plan"),
     debounce_seconds: int = CYCLE_IDLE_WATCH_DEBOUNCE_SECONDS,
+    reason_required: bool = True,
     time_source=time.monotonic,
     now_provider=lambda: datetime.now(timezone.utc),
 ) -> None:
@@ -1567,13 +1610,37 @@ async def cycle_idle_watch_loop(
                 continue
             missing_session_warned = False
 
+            # STRICT 분류 (#956) — reason_required=True 이고 note 미명시인 idle.
+            # STRICT 이면 별 prompt (즉시 launch + note 기록 의무 명시) inject.
+            strict_idle = [
+                entry for entry in fresh_idle
+                if reason_required and not entry.get("note")
+            ]
+            soft_idle = [
+                entry for entry in fresh_idle if entry not in strict_idle
+            ]
+
             workspaces_label = ", ".join(e["workspace"] for e in fresh_idle)
-            summary = _format_idle_summary(fresh_idle)
             today = now_provider().strftime("%Y-%m-%d")
-            inject_text = CYCLE_IDLE_WATCH_INJECT_TEMPLATE.format(
-                date=today, workspaces=workspaces_label, summary=summary
-            )
-            tmux_inject_text(inject_target, inject_text)
+
+            if strict_idle:
+                strict_label = ", ".join(e["workspace"] for e in strict_idle)
+                strict_summary = _format_idle_summary(strict_idle)
+                strict_text = CYCLE_IDLE_WATCH_STRICT_TEMPLATE.format(
+                    date=today,
+                    workspaces=strict_label,
+                    summary=strict_summary,
+                )
+                tmux_inject_text(inject_target, strict_text)
+            if soft_idle:
+                soft_label = ", ".join(e["workspace"] for e in soft_idle)
+                soft_summary = _format_idle_summary(soft_idle)
+                soft_text = CYCLE_IDLE_WATCH_INJECT_TEMPLATE.format(
+                    date=today,
+                    workspaces=soft_label,
+                    summary=soft_summary,
+                )
+                tmux_inject_text(inject_target, soft_text)
 
             channel = client.get_channel(notify_channel_id)
             if channel is None:
@@ -1585,18 +1652,27 @@ async def cycle_idle_watch_loop(
                     missing_channel_warned = True
             else:
                 missing_channel_warned = False
-                discord_text = (
-                    f"⚠️ nmae watchdog — {len(fresh_idle)} 워크트리 idle "
-                    f"({workspaces_label}) — nmae 에 알림 inject 완료"
-                )
+                lines: list[str] = [
+                    f"⚠️ nmae watchdog — {len(fresh_idle)} 워크트리 idle"
+                ]
+                if strict_idle:
+                    lines.append(
+                        f"STRICT relaunch ({len(strict_idle)}): "
+                        + ", ".join(e["workspace"] for e in strict_idle)
+                    )
+                for entry in fresh_idle:
+                    lines.append(_format_workspace_reason_line(entry))
+                lines.append("→ nmae 에 알림 inject 완료")
+                discord_text = "\n".join(lines)
                 await send_with_retry(channel, content=discord_text)
 
             now_mono = time_source()
             for entry in fresh_idle:
                 last_alert_at[entry["workspace"]] = now_mono
             logger.info(
-                "cycle_idle_watch_loop: idle alert workspaces=%s",
+                "cycle_idle_watch_loop: idle alert workspaces=%s strict=%s",
                 workspaces_label,
+                ", ".join(e["workspace"] for e in strict_idle) or "none",
             )
         except asyncio.CancelledError:
             raise
@@ -1679,6 +1755,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         "CYCLE_INJECT_TARGET", CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET
     )
     cycle_workspaces = resolve_cycle_targets(env.get("CYCLE_WATCH_WORKSPACES"))
+    # CYCLE_REASON_REQUIRED (#956) — note 미명시 idle 을 strict 로 처리할지.
+    cycle_reason_required = (
+        env.get("CYCLE_REASON_REQUIRED", CYCLE_REASON_REQUIRED_DEFAULT) == "1"
+    )
     cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(notify_channel_id))
     try:
         cycle_notify_channel_id = int(cycle_notify_raw)
@@ -1788,15 +1868,17 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     threshold_minutes=cycle_idle_threshold_minutes,
                     poll_interval=cycle_idle_poll_interval,
                     workspaces=cycle_workspaces,
+                    reason_required=cycle_reason_required,
                 )
             )
             logger.info(
-                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s",
+                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s reason_required=%s",
                 cycle_notify_channel_id,
                 cycle_idle_poll_interval,
                 cycle_idle_threshold_minutes,
                 cycle_inject_target,
                 ",".join(cycle_workspaces),
+                cycle_reason_required,
             )
         elif not cycle_idle_watch_enabled:
             logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")

@@ -425,5 +425,279 @@ class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel.sent, [])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 5) reason note 검사 — 3건 (#956)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DetectIdleNoteFieldTest(unittest.TestCase):
+    """detect_idle_worktrees 가 note / idle_since 를 idle dict 에 전파하는지."""
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _entry(self, *, note=None, idle_since=None) -> dict:
+        old_ts = (self.now - timedelta(minutes=30)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        result = {
+            "in_progress": None,
+            "last_completed": {
+                "pr": "#1",
+                "title": "old",
+                "completed_at": old_ts,
+            },
+        }
+        if note is not None:
+            result["note"] = note
+        if idle_since is not None:
+            result["idle_since"] = idle_since
+        return result
+
+    def test_note_present_propagated(self) -> None:
+        status = {
+            "be": self._entry(
+                note="다음 launch 후보: PR #857", idle_since="2026-05-24T02:14:00Z"
+            )
+        }
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now, workspaces=["be"]
+        )
+        self.assertEqual(len(idle), 1)
+        self.assertEqual(idle[0]["note"], "다음 launch 후보: PR #857")
+        self.assertEqual(idle[0]["idle_since"], "2026-05-24T02:14:00Z")
+
+    def test_note_absent_is_none(self) -> None:
+        status = {"be": self._entry()}
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now, workspaces=["be"]
+        )
+        self.assertEqual(len(idle), 1)
+        self.assertIsNone(idle[0]["note"])
+        self.assertIsNone(idle[0]["idle_since"])
+
+    def test_note_empty_string_is_none(self) -> None:
+        # 빈 string / whitespace → None 으로 정규화 (strict 처리 대상).
+        status = {"be": self._entry(note="   ")}
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now, workspaces=["be"]
+        )
+        self.assertEqual(len(idle), 1)
+        self.assertIsNone(idle[0]["note"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6) STRICT relaunch trigger — 2건 (#956)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CycleStrictRelaunchTest(unittest.IsolatedAsyncioTestCase):
+
+    def _write_status(self, dir_path: Path, payload: dict) -> Path:
+        path = dir_path / "cycle.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    async def test_strict_template_when_note_absent(self) -> None:
+        """note 없으면 STRICT template 사용 (note 기록 의무 문구 포함)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                    # note 없음 → STRICT 대상.
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    reason_required=True,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            self.assertGreaterEqual(inject.call_count, 1)
+            inject_text = inject.call_args_list[0].args[1]
+            self.assertIn("STRICT", inject_text)
+            self.assertIn("be", inject_text)
+            self.assertIn("note", inject_text)
+
+    async def test_soft_template_when_note_present(self) -> None:
+        """note 명시되어 있으면 일반 (soft) template 사용 — STRICT 문구 없음."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                    "note": "다음 launch 후보: PR #857 audit",
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    reason_required=True,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            self.assertGreaterEqual(inject.call_count, 1)
+            inject_text = inject.call_args_list[0].args[1]
+            # 일반 template — STRICT 문구 없어야 함.
+            self.assertNotIn("STRICT", inject_text)
+            self.assertIn("watchdog", inject_text)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7) Discord push reason 표시 — 2건 (#956)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CycleDiscordReasonPushTest(unittest.IsolatedAsyncioTestCase):
+
+    def _write_status(self, dir_path: Path, payload: dict) -> Path:
+        path = dir_path / "cycle.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    async def test_discord_push_includes_reason_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                    "note": "be cache eviction 완료 후 audit",
+                    "idle_since": "2026-05-24T02:17:00Z",
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    reason_required=True,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            self.assertEqual(len(channel.sent), 1)
+            discord_text = channel.sent[0]
+            self.assertIn("be cache eviction 완료 후 audit", discord_text)
+            self.assertIn("2026-05-24T02:17:00Z", discord_text)
+            # STRICT 라벨 없어야 함 (note 명시 idle).
+            self.assertNotIn("STRICT relaunch", discord_text)
+
+    async def test_discord_push_includes_strict_label_when_note_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                    # note 없음.
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    reason_required=True,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            self.assertEqual(len(channel.sent), 1)
+            discord_text = channel.sent[0]
+            self.assertIn("STRICT relaunch (1): be", discord_text)
+            self.assertIn("reason 없음", discord_text)
+
+
 if __name__ == "__main__":
     unittest.main()
