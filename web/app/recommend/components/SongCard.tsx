@@ -418,6 +418,7 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
       {errorMessage ? (
         <p
           role="alert"
+          aria-live="assertive"
           className="text-xs text-rose-700 dark:text-rose-300"
         >
           {errorMessage}
@@ -520,6 +521,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
       {errorMessage ? (
         <p
           role="alert"
+          aria-live="assertive"
           className="text-xs text-amber-700 dark:text-amber-300"
         >
           {errorMessage}

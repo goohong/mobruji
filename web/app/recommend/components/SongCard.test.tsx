@@ -486,6 +486,26 @@ describe("SongCard", () => {
         expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       });
     });
+
+    // closes #486 — /songs, /songs/[id] 페이지의 alert 패턴과 일관성 유지.
+    // role="alert" 단독은 일부 SR 환경에서 즉시 announce 되지 않을 수 있어
+    // aria-live="assertive" 를 함께 명시한다. 회귀 가드.
+    it("실패 안내 alert에 aria-live=\"assertive\" 가 부여된다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveAttribute("aria-live", "assertive");
+    });
   });
 
   // closes #184 — 북마크 토글.
@@ -520,6 +540,27 @@ describe("SongCard", () => {
           songId: 1,
         });
       });
+    });
+
+    // closes #486 — BookmarkButton 실패 안내도 LikeButton 과 동일하게
+    // aria-live="assertive" 를 부여한다. 회귀 가드.
+    it("BE mutation 실패 시 alert에 aria-live=\"assertive\" 가 부여된다", async () => {
+      const user = userEvent.setup();
+      toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", {
+        name: /테스트 곡 북마크$/,
+      });
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveAttribute("aria-live", "assertive");
     });
   });
 

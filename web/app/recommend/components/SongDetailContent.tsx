@@ -493,7 +493,11 @@ function DetailLikeButton({ songId, songTitle }: DetailFeedbackButtonProps) {
         <span>{liked ? "좋아요 취소" : "좋아요"}</span>
       </button>
       {errorMessage ? (
-        <p role="alert" className="text-xs text-rose-700 dark:text-rose-300">
+        <p
+          role="alert"
+          aria-live="assertive"
+          className="text-xs text-rose-700 dark:text-rose-300"
+        >
           {errorMessage}
         </p>
       ) : null}
@@ -580,7 +584,11 @@ function DetailBookmarkButton({ songId, songTitle }: DetailFeedbackButtonProps) 
         <span>{bookmarked ? "북마크 해제" : "북마크"}</span>
       </button>
       {errorMessage ? (
-        <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+        <p
+          role="alert"
+          aria-live="assertive"
+          className="text-xs text-amber-700 dark:text-amber-300"
+        >
           {errorMessage}
         </p>
       ) : null}
