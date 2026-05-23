@@ -144,13 +144,71 @@ maestro이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 �
 - web deps를 추가한 PR이 머지된 직후 (예: PR #150 `pitchy`, PR #194 PWA service-worker)
 - `package.json` / `package-lock.json`이 develop에서 갱신되었는데 fe 워크트리의 설치본은 이전 버전
 
-이 경우 fe 세션은 작업 시작 전에 다음을 1회 실행한다:
+##### 누가 install 하는가 — sub-agent는 직접 install 금지 (핵심 룰)
+
+fe sub-agent의 prompt에는 **`npm install` / `npm ci` / `pnpm install` / `yarn` 등 의존성 설치 명령을 직접 실행하지 않는다**를 명시한다. 의존성 누락(`Cannot find module 'pitchy'` 등)을 발견하면 **maestro에 보고하고 사이클을 일시 멈춘다**. maestro이 직접 install을 실행하거나 사용자 결정 후 진행한다.
+
+이유: fe 워크트리의 `web/node_modules`는 외부 데이터 디스크 symlink로 운영되는 경우가 많다(아래 §node_modules 저장 위치 참조). sub-agent가 `--no-save`/`--legacy-peer-deps` 등 옵션으로 무심코 `npm install`을 돌리면 npm이 symlink를 일반 디렉토리로 재생성하면서 외부 디스크 마운트가 끊긴다. 한 번 깨지면 모든 fe 워크트리에 영향을 주고 복구는 maestro 권한에서 swap + symlink 재생성이 필요하다 (아래 §복구 절차).
+
+maestro 권한에서 install이 필요한 경우:
 
 ```bash
-cd web && npm install
+# maestro 워크트리에서 (fe 워크트리 아님)
+cd /home/mobruji/mobruji/web && npm install
 ```
 
-maestro이 fe sub-agent를 launch할 때 prompt에 "직전 사이클에서 web deps 변경 PR(예: #N)이 머지됐다면 `cd web && npm install` 1회 실행"이라고 명시하면 자율적으로 처리한다. 변경이 없는 사이클에서는 생략해도 무방.
+`mobruji` 워크트리의 `web/node_modules`도 같은 외부 디스크 symlink (`/data/node_modules/web`)를 가리키도록 셋업되어 있으면, 한 번의 install이 모든 fe 워크트리에 즉시 반영된다.
+
+##### `node_modules` 저장 위치 (외부 디스크 운영 시)
+
+NCP maestro 등 루트 디스크가 작은 환경에서는 `node_modules`를 별도 데이터 디스크에 두고 워크트리에서 symlink로 참조한다.
+
+```bash
+# 한 번 셋업
+sudo mkdir -p /data/node_modules/web /data/node_modules/fe-web
+sudo chown -R mobruji:mobruji /data/node_modules
+
+# 각 워크트리에서 symlink 연결
+ln -snf /data/node_modules/web      ~/mobruji/web/node_modules
+ln -snf /data/node_modules/fe-web   ~/mobruji-fe/web/node_modules
+```
+
+확인:
+```bash
+ls -la ~/mobruji-fe/web/node_modules
+# lrwxrwxrwx ... web/node_modules -> /data/node_modules/fe-web
+```
+
+##### 복구 절차 — symlink가 풀렸을 때
+
+증상:
+- `ls -la web/node_modules`가 디렉토리(`drwx...`)로 보임 (symlink였어야 함)
+- 또는 외부 디스크 사용량은 그대론데 워크트리 루트 디스크가 갑자기 부풀어 오름
+- sub-agent 로그에 `npm install` 또는 `npm ci` 실행 흔적
+
+복구 (maestro 권한):
+
+```bash
+# 1. 깨진 디렉토리를 외부 디스크로 이동 (이미 install된 내용 보존)
+mv ~/mobruji-fe/web/node_modules /data/node_modules/fe-web-recovered
+rm -rf /data/node_modules/fe-web
+mv /data/node_modules/fe-web-recovered /data/node_modules/fe-web
+
+# 2. symlink 재생성
+ln -snf /data/node_modules/fe-web ~/mobruji-fe/web/node_modules
+
+# 3. 확인
+ls -la ~/mobruji-fe/web/node_modules
+# lrwxrwxrwx ... -> /data/node_modules/fe-web
+```
+
+복구 후 sub-agent prompt에 "이전 사이클에서 symlink 사고가 있었음. 의존성 누락 시 본진 보고만"이라고 명시해 재발 방지.
+
+##### maestro이 fe sub-agent prompt에 박을 한 줄
+
+`cd web && npm install` 직접 실행 금지. 의존성 누락 시 maestro에 보고. 직전 사이클에서 web deps 변경 PR이 머지됐고 누락이 의심되면 그것도 보고.
+
+변경이 없는 사이클에서는 install 자체가 불필요하므로 sub-agent는 평소대로 `npm run lint / typecheck / test`만 돌리면 된다.
 
 ### 0-8) 통지 우선 처리
 
