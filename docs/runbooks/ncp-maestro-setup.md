@@ -688,25 +688,29 @@ sudo rm -rf /var/lib/docker
 ### I-5) Frontend `node_modules` symlink (다운타임 0)
 fe 의 `node_modules` (수백 MB) 만 따로 옮기면 dev 디스크가 더 가벼워진다. fe dev 가 안 도는 시점(또는 무관)에 진행 가능.
 
+> **표준 target 경로 — `/data/node_modules/`**: 본진 실측(#439, #736)으로 외부 target 디렉토리 이름이 워크트리 내부 `node_modules` 와 다른 prefix(예: `/data/web-node_modules/` 또는 `/data/node_modules/fe-web/`) 를 가지면 Node.js ESM resolver 가 동일 패키지를 두 가지 realpath 로 중복 해석해 `vitest` 등 subpath exports lookup 이 깨진다(`ERR_MODULE_NOT_FOUND: '@vitest/utils'`). target 이름을 **`/data/node_modules/`** 로 단순화해 realpath 일관성을 확보한 것이 실제 해결이었다. 신규 setup 은 처음부터 본 경로로 통일한다. 진단 상세: [`docs/runbooks/web-deps-dev-env.md`](./web-deps-dev-env.md).
+
 ```bash
-# 1) 옮길 대상 만들기
-sudo mkdir -p /data/web-node_modules
-sudo chown mobruji:mobruji /data/web-node_modules
+# 1) 옮길 대상 만들기 (표준 경로 — 다른 이름 쓰지 말 것, §I-5 가드 참조)
+sudo mkdir -p /data/node_modules
+sudo chown mobruji:mobruji /data/node_modules
 
 # 2) 기존 node_modules 가 있으면 옮기고, 없으면 (대상이 빈 상태로) 다음 install 이 채움
 sudo -u mobruji bash <<'EOF'
 cd ~/mobruji/web
 if [ -d node_modules ] && [ ! -L node_modules ]; then
-  mv node_modules/* /data/web-node_modules/ 2>/dev/null || true
-  mv node_modules/.[!.]* /data/web-node_modules/ 2>/dev/null || true
+  mv node_modules/* /data/node_modules/ 2>/dev/null || true
+  mv node_modules/.[!.]* /data/node_modules/ 2>/dev/null || true
   rmdir node_modules
 fi
-ln -s /data/web-node_modules node_modules
+ln -s /data/node_modules node_modules
 ls -la node_modules
 EOF
 ```
 
 이후 `npm ci` / `npm install` 은 자동으로 `/data` 디스크에 쌓이고 root 디스크는 영향 없다. CD 가 컨테이너 안 빌드만 쓴다면(현재 dev 흐름) 본 단계는 호스트 fe 디버깅용으로만 의미가 있고 생략 가능.
+
+> **회귀 가드 — target 이름 prefix 정렬 필수**: `/data/<something>/` 형태로 두 단계 prefix 를 두면 ESM resolver realpath 가 깨질 수 있다(#736 §3). 워크트리 여러 개를 같은 디스크에 두려면 각 워크트리의 외부 target 을 모두 `/data/<단일-디렉토리>/` 로 두되, 서로 다른 워크트리가 같은 target 을 공유하지 않도록 한 워크트리당 한 target 으로 운영한다. 현재 fe 만 본 패턴을 쓰므로 `/data/node_modules/` 하나로 충분.
 
 ### I-6) 정량 결과 / 검증 체크리스트
 - [ ] `df -h /` → 사용률 **88% → 63%** 수준으로 떨어졌다 (Docker overlay 가 옮겨졌으므로)
