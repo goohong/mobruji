@@ -15,13 +15,9 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 /**
  * {@link AudioAnalysisProperties} Bean Validation + compact constructor 회귀 (#644).
  *
- * <p>의도: Python audio analysis tool 호출 설정이 누락/공백이면 컨텍스트 기동이 fail-fast 한다는 계약을 박제한다.
- * 또한 compact constructor 의 {@code dockerComposeService} 기본값 치환 ("audio-analysis") 분기가 회귀로
- * 제거되거나 약화되어도 본 테스트가 잡는다 — 운영 시 use-docker=true 인데 service 이름이 비어 있으면
- * docker compose 호출이 실패하므로 부팅 단계의 보호망이 중요하다.
- *
- * <p>레퍼런스: {@code CorsPropertiesValidationTest} (#640), {@code AlbumCoverPropertiesValidationTest} (#482),
- * {@code AdminAuthPropertiesValidationTest} (#637), {@code RecommendationPropertiesValidationTest} (#465 / #551).
+ * <p>의도: Python audio analysis tool 호출 설정이 누락/공백이면 컨텍스트 기동이 fail-fast 한다는 계약,
+ * 그리고 compact constructor 의 {@code dockerComposeService} 기본값 치환 ("audio-analysis") 분기가 회귀로
+ * 제거되어도 잡히도록 박제한다. 패턴 레퍼런스: {@code CorsPropertiesValidationTest} / {@code AlbumCoverPropertiesValidationTest}.
  */
 class AudioAnalysisPropertiesValidationTest {
 
