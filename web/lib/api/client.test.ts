@@ -274,6 +274,35 @@ describe("apiFetch path query string 가드 (#683)", () => {
   });
 });
 
+describe("apiFetch falsy primitive body 가드 (#702)", () => {
+  // 현 동작 lock: body 처리 분기는 `body !== undefined` 단일 조건이므로 falsy primitive 도
+  // JSON.stringify 를 통과해 init.body 와 Content-Type 이 동일하게 부여된다.
+  it.each([
+    { label: "body=0 → '0' stringify + Content-Type", body: 0 as unknown, expectedBody: "0" },
+    { label: 'body="" → \'""\' stringify + Content-Type', body: "" as unknown, expectedBody: '""' },
+    { label: "body=false → 'false' stringify + Content-Type", body: false as unknown, expectedBody: "false" },
+  ])("$label", async ({ body, expectedBody }: { body: unknown; expectedBody: string }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { method: "POST", body });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe(expectedBody);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+});
+
+describe("apiFetch 200 OK 빈 body 분기 가드 (#702)", () => {
+  // 204 는 short-circuit 되지만 200 + 빈 body 는 contentType 분기에 따라 처리된다.
+  it("200 + application/json + 빈 본문 → JSON.parse 실패 catch → null fallback", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(apiFetch("/api/v1/probe")).resolves.toBeNull();
+  });
+
+  it("200 + text/plain + 빈 본문 → text() 빈 문자열 그대로 리턴", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 200, headers: { "Content-Type": "text/plain" } }));
+    await expect(apiFetch<string>("/api/v1/probe")).resolves.toBe("");
+  });
+});
+
 describe("apiFetch non-GET 메서드 body 처리 가드 (#699)", () => {
   // 현 동작 lock: body 처리 분기는 method 와 무관하게 `body !== undefined` 단일 조건.
   // PUT/DELETE 도 body 가 있으면 POST 와 동일하게 JSON.stringify + Content-Type 자동 부여,
