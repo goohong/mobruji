@@ -31,6 +31,7 @@ public final class SeedDeriver {
     private static final String HASH_ALGORITHM = "SHA-256";
     private static final String FIELD_SEPARATOR = "|";
     private static final String LIST_DELIMITER = ",";
+    private static final int INPUT_HASH_HEX_LENGTH = 16;
 
     private SeedDeriver() {
     }
@@ -59,6 +60,29 @@ public final class SeedDeriver {
                 sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds);
         final byte[] digest = sha256(canonical);
         return toLongBigEndian(digest);
+    }
+
+    /**
+     * 추천 요청 입력의 SHA-256 hash 앞 {@value #INPUT_HASH_HEX_LENGTH}자(hex)를 반환한다.
+     *
+     * <p>관측성 로그(`event=recommendation.created`)에 PII 없이 같은 입력을 식별하기 위한 용도.
+     * spec: {@code docs/features/recommendation-algorithm-v1.md} §3 비기능 (d) 결정성 로그.
+     * 입력 정규화 규칙은 {@link #derive} 와 동일하므로, 같은 입력은 같은 seed + 같은 hash 를 산출한다.
+     *
+     * @return 16자 lowercase hex 문자열.
+     */
+    public static String hashHex16(
+            final String sessionId,
+            final int voiceRangeLow,
+            final int voiceRangeHigh,
+            final Mood mood,
+            final Integer preferredBpm,
+            final List<Long> excludeSongIds) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        final String canonical = canonicalize(
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds);
+        final byte[] digest = sha256(canonical);
+        return toHexPrefix(digest, INPUT_HASH_HEX_LENGTH);
     }
 
     private static String canonicalize(
@@ -108,5 +132,22 @@ public final class SeedDeriver {
             seed = (seed << 8) | (digest[i] & 0xFFL);
         }
         return seed;
+    }
+
+    /**
+     * digest 의 앞 N hex 자(소문자)를 반환한다. N 이 홀수면 마지막 nibble 은 high-nibble 만 사용.
+     * Apache Commons / Guava 의존을 새로 끌어오지 않기 위해 인라인 구현.
+     */
+    private static String toHexPrefix(final byte[] digest, final int hexLength) {
+        final char[] hex = new char[hexLength];
+        final char[] alphabet = "0123456789abcdef".toCharArray();
+        for (int i = 0; i < hexLength; i++) {
+            final int byteIndex = i / 2;
+            final int nibble = (i % 2 == 0)
+                    ? (digest[byteIndex] >>> 4) & 0x0F
+                    : digest[byteIndex] & 0x0F;
+            hex[i] = alphabet[nibble];
+        }
+        return new String(hex);
     }
 }

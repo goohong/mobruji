@@ -219,3 +219,10 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
     - **PR B** (`test:recommendation`): `RecommendationDeterminismTest.determinism_differentInput_yieldsDifferentOrder` 단정 안정화 — entropy 단정은 `SeedDeriverTest`로 이동, E2E는 같은 입력 회귀만.
     - **PR C** (`test:infra`): ArchUnit 룰 — `com.mobruji..application..` 패키지에서 `java.util.Random`/`java.time.Instant.now()`/`java.util.UUID.randomUUID()` 직접 호출 금지 (#61 묶음).
   - **결정성 영향 없음 (본 docs PR)**: 코드 변경 0. spec 정합화만.
+- 2026-05-23: **결정성 관측성 로그 구현 — PR A 분리분 (closes #298)**.
+  - **AS-IS**: `RecommendationService.create(...)` 가 결정성 관측 로그를 남기지 않아, 운영 중 결과 차이 원인을 입력 hash + seed 로 재현할 수 없었다.
+  - **TO-BE**: 응답 직전 INFO 1줄 — `event=recommendation.created request.input.hash=<sha256-16> seed=<long> algoVersion=v2 resultCount=<n> durationMs=<ms>`. PII 원문(sessionId / voiceRange 수치 / 곡 메타) 미노출. `SeedDeriver.hashHex16(...)` 가 같은 canonical 입력에서 같은 hash 산출 (seed 와 1:1 대응).
+  - **algoVersion**: 1차로 service 내부 상수 (`v2` — tempoMatch default 활성). properties 노출은 `application.yml` 보호 영역 변경을 동반하므로 v3 분기 도입 시 함께 진행. 본 PR 범위에서 제외.
+  - **seedStrategy=RANDOM** 분기에서는 hash="-" 로 표기해 운영자가 비결정 분기를 즉시 식별. seed 는 새 `new Random()` 의 `nextLong()` 값을 로그·jitter 양쪽에 동일 노출.
+  - **회귀 가드**: `RecommendationServiceDeterminismLogTest` 4건 (형식 · PII 미노출 · 결정성 hash/seed 동일 · RANDOM 분기) + `SeedDeriverTest.hashHex16` 2건 (결정성 · entropy).
+  - **결정성 영향 없음**: 로그 추가만. `SeedDeriver.derive` / `canonicalize` / seed 산식 무변경. 응답 페이로드 무변경.

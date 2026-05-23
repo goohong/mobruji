@@ -160,4 +160,40 @@ class SeedDeriverTest {
         // then
         assertThat(first).isEqualTo(second);
     }
+
+    /**
+     * 결정성 로그({@code event=recommendation.created request.input.hash=...}) 용 hash 가드.
+     *
+     * <p>spec: {@code docs/features/recommendation-algorithm-v1.md} §3 비기능 (d).
+     * 같은 입력 → 같은 hash, 다른 입력 → 다른 hash, 길이는 항상 16 lowercase hex.
+     */
+    @Test
+    @DisplayName("hashHex16: 같은 입력은 같은 16자 hex hash")
+    void hashHex16_sameInput_returnsSameHash() {
+        // when
+        final String first = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L));
+        final String second = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L));
+        // then
+        assertThat(first).isEqualTo(second).hasSize(16).matches("[0-9a-f]{16}");
+    }
+
+    @Test
+    @DisplayName("hashHex16: 다른 입력은 다른 hash (sessionId/voiceRange/mood/bpm/exclude 모두)")
+    void hashHex16_differentInputs_returnDifferentHashes() {
+        // given
+        final String base = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        // when
+        final String diffSession = SeedDeriver.hashHex16("t", 55, 75, Mood.UPBEAT, 120, List.of());
+        final String diffVoice = SeedDeriver.hashHex16("s", 56, 75, Mood.UPBEAT, 120, List.of());
+        final String diffMood = SeedDeriver.hashHex16("s", 55, 75, Mood.CALM, 120, List.of());
+        final String diffBpm = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 140, List.of());
+        final String diffExclude = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(1L));
+        // then
+        assertThat(base)
+                .isNotEqualTo(diffSession)
+                .isNotEqualTo(diffVoice)
+                .isNotEqualTo(diffMood)
+                .isNotEqualTo(diffBpm)
+                .isNotEqualTo(diffExclude);
+    }
 }
