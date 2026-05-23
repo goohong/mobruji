@@ -194,6 +194,25 @@ describe("apiFetch headers spread + 204 + body 가드 (#685)", () => {
   });
 });
 
+describe("ApiError JSON.stringify 보존 가드 (#689)", () => {
+  // 운영 로그/Sentry payload 에서 ApiError 가 어떤 필드를 보존하는지 동작 lock.
+  // - Error.prototype.message 는 non-enumerable → 직렬화 결과에 포함되지 않는다.
+  // - status/body 는 인스턴스 필드(enumerable) → 직렬화·round-trip 보존.
+  it("string body: status/body round-trip 보존, message 는 제외", () => {
+    const error = new ApiError(404, "Not found", "raw text");
+    const parsed = JSON.parse(JSON.stringify(error)) as Record<string, unknown>;
+    expect(parsed).toMatchObject({ status: 404, body: "raw text" });
+    expect(parsed.message).toBeUndefined();
+  });
+
+  it("object body: round-trip 후 객체 동등성 유지", () => {
+    const body = { error: "x", details: [1, 2, 3] };
+    const error = new ApiError(500, "boom", body);
+    const parsed = JSON.parse(JSON.stringify(error)) as Record<string, unknown>;
+    expect(parsed).toEqual({ status: 500, body });
+  });
+});
+
 describe("apiFetch path query string 가드 (#683)", () => {
   // 현 동작 lock: client.ts는 URL/URLSearchParams 변환 없이 path를 raw concat한다.
   // → query string은 호출자가 미리 조립·인코딩한 형태 그대로 fetch URL에 전달된다.
