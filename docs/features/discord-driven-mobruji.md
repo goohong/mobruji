@@ -141,8 +141,8 @@ DEDUP_LEDGER_PATH=~/.mobruji/discord-bridge.sqlite
 
 ## 6) 작업 분할 (예상 PR 리스트)
 - [ ] **PR A (본 PR)**: spec 작성 (#TBD)
-- [ ] **PR B**: `bot.py` 확장 — `TMUX_BRIDGE_ENABLED` flag + `tmux_send_keys` 함수 + dedup ledger. 단위 테스트(tmux mock).
-- [ ] **PR C**: tmux pane stdout capture (`tmux pipe-pane`) 로깅 + 로그 로테이션. Phase 2 마커 룰 준비.
+- [x] **PR B**: `bot.py` 확장 — `TMUX_BRIDGE_ENABLED` flag + `tmux_send_keys` 함수 + dedup ledger. 단위 테스트(tmux mock).
+- [x] **PR C**: tmux pane stdout capture (`tmux pipe-pane`) 로깅 + 로그 로테이션. Phase 2 마커 룰 준비.
 - [ ] **PR D**: LaunchAgent plist 확장(또는 신규 `com.mobruji.claude-tmux.plist`) + `setup-tmux-bridge.sh` 런북. 재부팅 자동 복구 검증 절차 포함.
 - [ ] **PR E (선택, Phase 2)**: 응답 마커 룰 + ANSI 필터링 → bot이 stdout 캡처 → Discord 자동 회신. maestro 행동 변경(`CLAUDE.md`에 마커 룰 명시) 동반.
 - [ ] **PR F (선택, Phase 2)**: maestro transcript 무게 모니터 → 임계치 초과 시 자동 `/compact` send-keys.

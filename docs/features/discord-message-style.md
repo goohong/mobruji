@@ -125,7 +125,7 @@ P1 이상은 알림 + 메인 동시. P2/P3 은 알림 만.
 
 ## 7) 작업 분할 (PR 리스트)
 - [x] **PR A (본 PR)**: spec 신설 + 메모리 [[feedback-discord-status-push]] cross-ref
-- [ ] **PR B**: `bot.py` `NOTIFY_CHANNEL_ID` env 분기 + `.env.example` + test_bot.py
+- [x] **PR B**: `bot.py` `NOTIFY_CHANNEL_ID` env 분기 + `.env.example` + test_bot.py
 - [ ] **PR C (선택)**: `tools/maestro/push.sh` shell helper (카테고리 별 wrapper)
 - [ ] **PR D (선택)**: spec 룰을 [[feedback-discord-status-push]] 에 cross-ref + 메모리 갱신
 

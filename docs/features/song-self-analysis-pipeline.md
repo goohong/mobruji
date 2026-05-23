@@ -118,7 +118,7 @@ last_reviewed: 2026-05-22
 
 ## 6) 작업 분할 (예상 PR 리스트)
 - [ ] PR A (docs): 본 spec 초안 — 본 PR #99.
-- [ ] PR B (chore:song): Python worker 부트스트랩(yt-dlp + Spleeter + Librosa 환경) + 단일 곡 end-to-end smoke 스크립트.
+- [x] PR B (chore:song): Python worker 부트스트랩(yt-dlp + Spleeter + Librosa 환경) + 단일 곡 end-to-end smoke 스크립트.
 - [x] PR C (feat:song, #204): `metadata_source = AUDIO_ANALYSIS` 추가 + 분석 결과 ingest 경로 (`Song.applyAudioAnalysisResult` + `AudioAnalysisRunner`).
 - [ ] PR D (chore:song): 시드 100곡 큐레이션 JSON + YouTube URL 매핑.
 - [ ] PR E (chore:infra): batch 실행 자동화 (cron 또는 수동 트리거).
