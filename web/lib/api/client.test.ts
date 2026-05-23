@@ -158,3 +158,18 @@ describe("apiFetch path leading-slash 가드 (#680)", () => {
     expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
   });
 });
+
+describe("apiFetch path query string 가드 (#683)", () => {
+  // 현 동작 lock: client.ts는 URL/URLSearchParams 변환 없이 path를 raw concat한다.
+  // → query string은 호출자가 미리 조립·인코딩한 형태 그대로 fetch URL에 전달된다.
+  it.each([
+    { label: "단일 `?key=val` → raw concat", path: "/api/v1/songs?q=love", expected: "http://localhost:8080/api/v1/songs?q=love" },
+    { label: "다중 query `?a=1&b=2` → 구분자 보존", path: "/api/v1/songs?genre=ballad&limit=10", expected: "http://localhost:8080/api/v1/songs?genre=ballad&limit=10" },
+    { label: "한글 query 미인코딩 → 호출자가 encode하지 않으면 그대로 붙는다 (인코딩은 호출자 책임)", path: "/api/v1/songs?q=발라드", expected: "http://localhost:8080/api/v1/songs?q=발라드" },
+    { label: "한글 query encodeURIComponent → 인코딩된 형태 보존", path: `/api/v1/songs?q=${encodeURIComponent("발라드")}`, expected: "http://localhost:8080/api/v1/songs?q=%EB%B0%9C%EB%9D%BC%EB%93%9C" },
+  ])("$label", async ({ path, expected }: { path: string; expected: string }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch(path);
+    expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
+  });
+});
