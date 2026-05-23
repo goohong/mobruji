@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   log:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - name: Echo received payload (no secrets)
@@ -39,3 +39,9 @@ jobs:
         run: |
           echo "TODO: 후속 PR 에서 명령 prefix (do/fix/status/branch) 라우팅 추가"
           echo "TODO: Discord 채널에 결과 회신 (webhook 또는 bot.py 측 followup)"
+          # TODO: 라우팅 도입 전 payload 검증 step 명시:
+          #   (1) MESSAGE_ID 정수 체크 ([[ "$MESSAGE_ID" =~ ^[0-9]+$ ]])
+          #   (2) AUTHOR GitHub user whitelist 검증 (env 또는 repo var 기반)
+          #   (3) TEXT 명령 prefix allowlist 명시 (do|fix|status|branch 등)
+          # 위 검증 통과 못한 payload 는 silent drop (exit 0) + 로그만 남기고
+          # 라우팅 step 으로 진입 금지. spec: docs/features/discord-driven-mobruji.md 갱신 같이.
