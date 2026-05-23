@@ -4,9 +4,9 @@ slug: recommendation-p95-regression-guard
 status: draft
 owner: "@goohong"
 scope: recommendation
-related_issues: [62, 253, 242]
+related_issues: [62, 253, 242, 273]
 related_prs: []
-last_reviewed: 2026-05-22
+last_reviewed: 2026-05-23
 ---
 
 # 추천 API p95 응답시간 회귀 가드 (k6 + Micrometer 이원화)
@@ -105,12 +105,12 @@ last_reviewed: 2026-05-22
 | `http_req_duration{endpoint:recommendation}` p99 | **< 400 ms** | (k6 한정) | p95 의 2배 휴리스틱. |
 | `http_req_failed` rate | **< 1 %** | (k6 한정) | k6 워크로드 가용성. |
 | `checks` rate | **> 99 %** | (k6 한정) | k6 응답 구조 검증 (status 201, requestId 존재, recommendations array). |
-| `mobruji.recommendation.request.duration` p95 (운영) | (운영 모니터링 한정) | **>= 400 ms 5분 연속** | k6 임계 200ms × 2 = 400ms. observability-baseline §5-6 의 600ms 는 본 spec 갱신 후 동기화 필요 (오픈 질문 Q1). |
+| `mobruji.recommendation.request.duration` p95 (운영) | (운영 모니터링 한정) | **>= 400 ms 5분 연속** | k6 임계 200ms × 2 = 400ms. observability-baseline §5-6 동기화 완료 (2026-05-23, §9 결정 로그 참조). |
 
 > **임계값 결정 근거**:
 > - **200ms**: rev 사이클 6 회귀 미감지 시점의 baseline 측정값 ~80ms + 안전 마진 2.5배. v1/v2 spec 합치.
-> - **observability-baseline §5-4 의 300ms 목표값과 충돌**: 본 spec 머지 후 observability-baseline 을 200ms 로 보수적 갱신하는 것이 단일 진실 원칙에 부합. v3 알고리즘 + DB 카탈로그 1000곡 확장 시 베이스라인 갱신 절차(§6)로 200→300ms 상향 가능 — 의도된 변화 명시 필수.
-> - **운영 알림 임계 = CI 임계 × 2**: CI 임계는 합성 분포(분산 좁음), 운영은 실제 분포(분산 넓음). 알림이 너무 자주 울리면 무시되므로 ×2 마진. observability-baseline §5-6 의 600ms (= 300ms × 2) 가 본 spec 200ms 기준으로는 400ms 로 조정 필요.
+> - **observability-baseline §5-4 단일 진실 박제 (2026-05-23, closes #273)**: observability-baseline §5-4 가 본 spec §5-3 (200ms) 을 단일 진실로 cross-ref. 역참조 금지 — 추천 POST p95 변경은 본 spec 갱신 1곳에서만. v3 알고리즘 + DB 카탈로그 1000곡 확장 시 베이스라인 갱신 절차(§6)로 200→상향 가능 — 의도된 변화 명시 필수.
+> - **운영 알림 임계 = CI 임계 × 2**: CI 임계는 합성 분포(분산 좁음), 운영은 실제 분포(분산 넓음). 알림이 너무 자주 울리면 무시되므로 ×2 마진. observability-baseline §5-6 의 알림 임계 = 200ms × 2 = **400ms** 박제 완료 (2026-05-23).
 
 ### 5-4) k6 워크로드 표
 
@@ -181,7 +181,7 @@ last_reviewed: 2026-05-22
 
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | observability-baseline §5-4 의 추천 endpoint 목표 p95 = 300ms 와 본 spec §5-3 의 200ms 중 어느 쪽이 단일 진실인가? | (a) 200ms — v1/v2 spec 합치 + k6 운영 중 / (b) 300ms — observability-baseline 우선 / (c) v3 진입 시 측정 후 결정 | @goohong / PR 1 머지 직후 |
+| ~~Q1~~ | ~~observability-baseline §5-4 의 추천 endpoint 목표 p95 = 300ms 와 본 spec §5-3 의 200ms 중 어느 쪽이 단일 진실인가?~~ | **resolved (2026-05-23, closes #273)**: (a) 200ms 확정. observability-baseline §5-4 가 본 spec §5-3 을 단일 진실로 cross-ref. §5-6 알림 임계도 400ms 동기화. | — |
 | Q2 | 본 spec §5-3 표와 k6 스크립트 임계 동기화를 ArchUnit/PR lint 로 자동 강제할 것인가? | (a) v0.4 후보 (현재는 PR review) / (b) v0.3 P3 안에 도입 | @goohong / v0.3 P3 회고 |
 | Q3 | k6 워크로드 `Math.random` 시드 고정으로 결정적 재현 가능하게 할 것인가? | (a) 부수효과 분석 후 v0.4 / (b) 분산 허용 유지 (현행) / (c) 옵션 env 로 둘 다 지원 | @goohong / v0.4 P1 |
 | Q4 | k6 워크로드에 `preferredBpm` 직접 주입 변주 추가 (v2 tempoMatch 회귀 가드 강화) 우선순위? | (a) PR 3 으로 본 spec 후속 / (b) v3 알고리즘 PR 과 묶기 / (c) v0.4 미루기 | @goohong / 본 spec 머지 직후 |
@@ -197,3 +197,4 @@ last_reviewed: 2026-05-22
   - **알림 임계 = CI 임계 × 2 비례 룰**: observability-baseline §5-6 의 600ms 는 300ms × 2 휴리스틱. 본 spec 200ms 기준으로는 400ms 로 조정 필요 (PR 2 범위).
   - **#253 의존성 없음**: 본 spec 측정 endpoint 는 추천 POST 1개. admin endpoint 비사용.
   - **baseline 갱신 절차 6단계 (§6)** 를 단일 진실 경로로 확정. 어기면 spec 간 불일치 재발.
+- **2026-05-23 (plan)**: 단일 진실 박제 (closes #273). 잠정 결정이었던 200ms p95 / 400ms p99 를 단일 진실로 확정하고 observability-baseline §5-4 (목표 p95) / §5-6 (알림 임계 = 400ms) 를 한 PR 에 동기화. §5-3 노트의 "오픈 질문 Q1" / "동기화 필요" 잔재 문구 정리, §8 Q1 resolved 표시. rev audit 누차 발견 (200ms ↔ 300ms / 400ms ↔ 600ms drift) 종결. 후속: 의도된 변화 시 §6 baseline 갱신 절차로만 변경 가능 — 다른 spec 의 직접 갱신 금지.
