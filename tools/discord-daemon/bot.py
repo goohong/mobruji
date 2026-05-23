@@ -58,6 +58,13 @@ MAESTRO_WATCHER_MIN_CHUNK_LEN: Final[int] = 100  # 이보다 짧은 chunk 는 �
 MAESTRO_WATCHER_MAX_CHUNK_LEN: Final[int] = 1800  # Discord 한도 2000 여유 200
 MAESTRO_WATCHER_DEDUP_PREFIX: Final[str] = "maestro:"
 MAESTRO_WATCHER_SEND_MAX_RETRIES: Final[int] = 3  # transient send 실패 시 최대 재시도 횟수
+# 재시도 사이 exponential backoff. 실제 sleep = BASE ** retry_count
+# (retry 1 → 2s, retry 2 → 4s). poll_interval 과는 독립. #764 (rev round 2).
+MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE: Final[float] = 2.0
+# pending 재시도 중 새 chunk 가 무한 누적되어 메모리 폭주하는 것을 방지.
+# Discord 장기 outage 시나리오. MAX_CHUNK_LEN * 10 = 18000 char.
+# 초과 시 oldest(앞쪽) 절반을 drop 하고 WARN. #764 (rev round 2).
+MAESTRO_WATCHER_MAX_BUFFER_LEN: Final[int] = MAESTRO_WATCHER_MAX_CHUNK_LEN * 10
 # context_auto_clear_loop 튜닝값. maestro 가 매 turn 끝에 emit 하는 `===CTX:NN%===` 마커를
 # pipe-pane capture 파일에서 tail 하여 95% 도달 시 정리 prompt inject, ===CLEAR_READY===
 # 마커 감지 시 /clear 전송. spec: docs/features/context-auto-clear.md §5-6 옵션 A.
@@ -1140,6 +1147,16 @@ def chunk_signature(text: str) -> str:
     return f"{MAESTRO_WATCHER_DEDUP_PREFIX}{digest[:32]}"
 
 
+# maestro watcher 운영 카운터. test 와 운영 진단(향후 metric export)에서 참조.
+# - send_drop: MAX_RETRIES 초과로 chunk 영구 폐기한 횟수.
+# - buffer_overflow_drop: MAX_BUFFER_LEN 초과로 oldest buffer 잘라낸 횟수.
+# 둘 다 단순 in-process int. 영속성 없음. #764 (rev round 2).
+maestro_watcher_counters: dict[str, int] = {
+    "send_drop": 0,
+    "buffer_overflow_drop": 0,
+}
+
+
 async def maestro_response_watcher_loop(
     client: "discord.Client",
     channel_id: int,
@@ -1225,6 +1242,20 @@ async def maestro_response_watcher_loop(
                         buffer += chunk_text
                         offset = size
                         last_new_at = time_source()
+                        # buffer 무한 누적 방지 (#764). Discord 장기 outage 로
+                        # pending 재시도가 길어지는 동안 새 chunk 가 계속 들어와도
+                        # MAX_BUFFER_LEN 을 초과하지 않도록 앞쪽(oldest) 절반 drop.
+                        if len(buffer) > MAESTRO_WATCHER_MAX_BUFFER_LEN:
+                            dropped_bytes = len(buffer) - MAESTRO_WATCHER_MAX_BUFFER_LEN // 2
+                            buffer = buffer[-(MAESTRO_WATCHER_MAX_BUFFER_LEN // 2):]
+                            maestro_watcher_counters["buffer_overflow_drop"] += 1
+                            logger.warning(
+                                "maestro watcher: buffer overflow — oldest %d bytes drop "
+                                "(cap=%d, total_drop=%d)",
+                                dropped_bytes,
+                                MAESTRO_WATCHER_MAX_BUFFER_LEN,
+                                maestro_watcher_counters["buffer_overflow_drop"],
+                            )
                     except OSError as exc:
                         logger.warning("maestro watcher: 파일 read 실패 %s", exc)
 
@@ -1260,15 +1291,22 @@ async def maestro_response_watcher_loop(
                         # 채널 미발견은 transient 가능 (bot 아직 ready 전 등) → 재시도 카운트.
                         pending_retry_count += 1
                         if pending_retry_count >= MAESTRO_WATCHER_SEND_MAX_RETRIES:
+                            maestro_watcher_counters["send_drop"] += 1
                             logger.error(
-                                "maestro watcher: send drop (channel 미발견 %d회 연속) sig=%s len=%d",
+                                "maestro watcher: send drop (channel 미발견 %d회 연속) "
+                                "sig=%s len=%d total_drop=%d",
                                 pending_retry_count,
                                 pending_sig,
                                 len(pending_candidate),
+                                maestro_watcher_counters["send_drop"],
                             )
                             pending_candidate = None
                             pending_sig = None
                             pending_retry_count = 0
+                        else:
+                            # exponential backoff: 다음 재시도 전 추가 sleep (#764).
+                            backoff = MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE ** pending_retry_count
+                            await sleep(backoff)
                     else:
                         try:
                             await channel.send(pending_candidate)
@@ -1286,23 +1324,30 @@ async def maestro_response_watcher_loop(
                         except Exception as exc:  # noqa: BLE001
                             pending_retry_count += 1
                             if pending_retry_count >= MAESTRO_WATCHER_SEND_MAX_RETRIES:
+                                maestro_watcher_counters["send_drop"] += 1
                                 logger.error(
-                                    "maestro watcher: send drop (%d회 연속 실패) sig=%s len=%d 마지막 예외=%s",
+                                    "maestro watcher: send drop (%d회 연속 실패) "
+                                    "sig=%s len=%d total_drop=%d 마지막 예외=%s",
                                     pending_retry_count,
                                     pending_sig,
                                     len(pending_candidate),
+                                    maestro_watcher_counters["send_drop"],
                                     exc,
                                 )
                                 pending_candidate = None
                                 pending_sig = None
                                 pending_retry_count = 0
                             else:
+                                # exponential backoff: 다음 재시도 전 추가 sleep (#764).
+                                backoff = MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE ** pending_retry_count
                                 logger.warning(
-                                    "maestro watcher send 실패 (재시도 %d/%d): %s",
+                                    "maestro watcher send 실패 (재시도 %d/%d, backoff=%.1fs): %s",
                                     pending_retry_count,
                                     MAESTRO_WATCHER_SEND_MAX_RETRIES,
+                                    backoff,
                                     exc,
                                 )
+                                await sleep(backoff)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
