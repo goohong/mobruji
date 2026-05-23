@@ -30,7 +30,7 @@ last_reviewed: 2026-05-21
 ## 3) 요구사항
 ### 기능 요구사항
 - [x] `VoiceRangeSnapshot` 엔티티/테이블 신설.
-  - 필드: `id` (PK, auto), `sessionId` (FK 의미상, 인덱스), `lowMidi` (int), `highMidi` (int), `sourceMethod` (enum: `MANUAL` / `AUTO_MIC` / `AUTO_AGGREGATE` — `voice-range-auto-measurement` spec과 정합), `measuredAt` (timestamp, default NOW)
+  - 필드: `id` (PK, auto), `sessionId` (FK 의미상, 인덱스), `lowMidi` (int), `highMidi` (int), `sourceMethod` (enum: `SELF_REPORT` / `OCTAVE_PICK` / `MIC_MEASURE` — `VoiceRangeSourceMethod` 재사용, `voice-range-input.md §9 Q1` 결정 정합), `measuredAt` (timestamp, default NOW)
 - [x] `voice_range` 테이블 변경(insert/update) 발생 시 동일 트랜잭션에서 `voice_range_snapshot`에 **insert-only** 1행 추가. 덮어쓰기 금지.
 - [x] `GET /api/v1/sessions/{id}/voice-range-history` 신규 엔드포인트.
   - 응답: `measuredAt` 오름차순 시계열 배열 `voiceRangeSnapshotResponses`.
