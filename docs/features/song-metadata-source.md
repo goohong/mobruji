@@ -27,10 +27,10 @@ last_reviewed: 2026-05-23
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] 곡 메타데이터를 `Song` 엔티티 형태로 영속화한다.
-- [ ] 곡 식별자(내부 ID) + 외부 식별자(예: ISRC, Spotify ID, TJ 번호, 금영 번호)를 동시에 보관한다.
-- [ ] 곡 음역(`SongRange`)을 곡당 1쌍(최저, 최고 MIDI note)으로 보관한다.
-- [ ] 메타데이터 출처(`source`) 및 신뢰도 표기를 곡 레코드에 남긴다 (`MANUAL`, `EXTERNAL_API`, `INFERRED` 등).
+- [x] 곡 메타데이터를 `Song` 엔티티 형태로 영속화한다.
+- [x] 곡 식별자(내부 ID) + 외부 식별자(예: ISRC, Spotify ID, TJ 번호, 금영 번호)를 동시에 보관한다.
+- [x] 곡 음역(`SongRange`)을 곡당 1쌍(최저, 최고 MIDI note)으로 보관한다.
+- [x] 메타데이터 출처(`source`) 및 신뢰도 표기를 곡 레코드에 남긴다 (`MANUAL`, `EXTERNAL_API`, `INFERRED` 등).
 - [ ] PoC 단계에선 신곡 추가/보정이 **DB 직접 또는 시드 SQL/JSON** 으로 가능하면 충분 (관리자 UI는 비범위).
 - [x] (PR #96, closes #77) 곡 음역(`lowMidi`/`highMidi`)으로부터 가창 난이도(EASY/NORMAL/HARD)를 자동 분류하여 영속하고 응답으로 노출. 분류 룰은 fe `web/lib/difficulty.ts`와 1:1 일치 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
 - [x] (PR #96) 응답에 `lowestNoteName`/`highestNoteName` 음표명 표기 노출 (예: "C4", "E5"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기).
