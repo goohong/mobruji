@@ -507,3 +507,262 @@ def attempt_recovery(
 - `backend/` 가 아닌 `tools/discord-daemon/tests/` 하위에 위치 (bot.py 내장 안 — §11-5 권장).
 - `requirements-dev.txt` 에 `pytest`, `pytest-mock` 추가.
 - CI 게이트: 별 GitHub Actions job (`resilience-tests`) — 본 PR 범위 외, 구현 PR 에서 추가.
+
+### 11-7) 구현 가이드 (be 사이클 입력)
+
+§11-1~§11-6 을 실제 코드로 옮길 때 막힐 가능성이 높은 4개 지점에 대한 보일러플레이트/디렉토리 구조/권한 매핑. 본 절은 spec 이지만 코드 스니펫을 그대로 복붙해도 동작하도록 작성한다.
+
+#### 11-7-a) 디렉토리 구조
+
+`tools/discord-daemon/` 에 신규 서브패키지 `resilience/` 를 둔다. bot.py 의 라인수 증가(현재 850) 를 막고, 회귀 테스트 mock target import path 를 안정화하기 위함.
+
+```
+tools/discord-daemon/
+├── bot.py                          # resilience_monitor_loop launch 만 추가 (§11-7-b)
+├── resilience/
+│   ├── __init__.py                 # public API: resilience_monitor_loop, attempt_recovery
+│   ├── monitor.py                  # resilience_monitor_loop 본체 (§11-1)
+│   ├── checks.py                   # _check_wake_stuck / _check_context_heavy / ... (§11-2)
+│   ├── recovery.py                 # attempt_recovery + 회복 매트릭스 (§11-4)
+│   ├── state.py                    # JSON state 로드/저장 (atomic write) (§11-1)
+│   ├── push.py                     # delta-only push helper + heartbeat (§11-3)
+│   └── constants.py                # 임계/타임아웃/메시지 템플릿 — 외부화 (§11-2/§11-3)
+└── tests/
+    ├── __init__.py
+    ├── conftest.py                 # fixture: tmp state_path, mock channel, mock subprocess
+    ├── test_checks.py              # §11-6-b 시나리오 매트릭스 (5 × 4 = 20 케이스)
+    ├── test_recovery.py            # §11-6-c 위험별 회복 mock
+    ├── test_state.py               # ledger 직렬화 / atomic write / cooldown
+    └── test_push.py                # delta 판정 / heartbeat / 멘션 포함 여부
+```
+
+원칙: **`resilience/` 는 discord.py 에 직접 의존 안 함** — `channel.send` 는 `push.py` 의 `PushSink` 추상화 1단계 뒤로 둔다 (테스트가 Discord client mock 없이 동작 가능). bot.py 만 `discord.Client.get_channel(...)` 으로 `PushSink` 인스턴스를 만들어 inject.
+
+```python
+# resilience/push.py
+class PushSink(Protocol):
+    async def send(self, message: str) -> None: ...
+
+# bot.py 에서
+sink = DiscordChannelSink(client.get_channel(notify_channel_id))
+client.loop.create_task(resilience_monitor_loop(sink, state_path=...))
+```
+
+#### 11-7-b) bot.py 진입점 (digest_loop 패턴 답습)
+
+`digest_loop` 와 동일한 launch 패턴 — `on_ready` 에서 `client.loop.create_task(...)`. env 변수 검증은 `resolve_digest_interval` 처럼 별 함수로 분리해 회귀 테스트 가능하게.
+
+```python
+# bot.py (추가 영역만 — 기존 build_client/digest_loop 는 손대지 않음)
+RESILIENCE_INTERVAL_SEC_DEFAULT = 300
+RESILIENCE_STATE_PATH_DEFAULT = Path.home() / ".claude/state/resilience.json"
+
+def resolve_resilience_interval(env_value: str | None) -> int:
+    """RESILIENCE_INTERVAL_SECONDS env. resolve_digest_interval 와 동일 패턴."""
+    # digest 와 같은 검증 로직 (정수 / 양수 / 부재 → default).
+    ...
+
+def resolve_resilience_auto_recover(env_value: str | None) -> bool:
+    """RESILIENCE_AUTO_RECOVER env. truthy string ('1','true','yes') 만 True. 기본 False (§11-4-b opt-in)."""
+    ...
+
+# on_ready 핸들러 내부 (digest_loop launch 직후)
+if env.get("RESILIENCE_ENABLED", "0") in ("1", "true", "yes"):
+    from resilience import resilience_monitor_loop, DiscordChannelSink
+    sink = DiscordChannelSink(client.get_channel(target_channel_id))
+    client.loop.create_task(
+        resilience_monitor_loop(
+            sink,
+            state_path=Path(env.get("RESILIENCE_STATE_PATH", str(RESILIENCE_STATE_PATH_DEFAULT))),
+            interval_sec=resolve_resilience_interval(env.get("RESILIENCE_INTERVAL_SECONDS")),
+            auto_recover=resolve_resilience_auto_recover(env.get("RESILIENCE_AUTO_RECOVER")),
+            dry_run=env.get("RESILIENCE_DRY_RUN", "0") in ("1", "true", "yes"),
+        )
+    )
+    logger.info("resilience_monitor_loop launched (auto_recover=%s, dry_run=%s)", ...)
+```
+
+기본값 = **disabled**. opt-in 명시적 — 초기 배포 시 `RESILIENCE_ENABLED=1 RESILIENCE_DRY_RUN=1` 로 1일 관찰 → `RESILIENCE_DRY_RUN=0` 전환 → 1주 후 `RESILIENCE_AUTO_RECOVER=1`.
+
+#### 11-7-c) sudoers.d/mobruji-resilience whitelist
+
+§11-4-a 의 회복 command 중 sudo 필요 항목만 정확히 화이트리스트. **wildcards 최소화** — `*` 는 mobruji-* 컨테이너에만 한정.
+
+```
+# /etc/sudoers.d/mobruji-resilience (0440 root:root)
+# bot 이 사용하는 ubuntu user 가 회복 command 만 NOPASSWD 로 실행 가능.
+# 본 파일은 systemd setup-gcp-systemd.sh 와 동일한 setup script 에서 visudo -c 검증 후 설치.
+
+# docker compose 제어 (mobruji 프로젝트 디렉토리 한정)
+ubuntu ALL=(root) NOPASSWD: /usr/bin/docker compose -f /home/ubuntu/mobruji/docker-compose.yml restart mysql
+ubuntu ALL=(root) NOPASSWD: /usr/bin/docker compose -f /home/ubuntu/mobruji/docker-compose.yml restart backend
+ubuntu ALL=(root) NOPASSWD: /usr/bin/docker compose -f /home/ubuntu/mobruji/docker-compose.yml up -d mobruji-backend
+ubuntu ALL=(root) NOPASSWD: /usr/bin/docker compose -f /home/ubuntu/mobruji/docker-compose.yml up -d mobruji-mysql
+ubuntu ALL=(root) NOPASSWD: /usr/bin/docker compose -f /home/ubuntu/mobruji/docker-compose.yml up -d mobruji-discord-bridge
+
+# docker prune (디스크 위험 #1)
+ubuntu ALL=(root) NOPASSWD: /usr/bin/docker system prune -af --volumes
+
+# journalctl rotation (디스크 위험 #1)
+ubuntu ALL=(root) NOPASSWD: /usr/bin/journalctl --vacuum-time=7d
+
+# systemd 단위 제어 (bridge 한정)
+ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl restart mobruji-discord-bridge
+ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl is-active mobruji-discord-bridge
+```
+
+**보안 주의**:
+- 절대 `ubuntu ALL=(root) NOPASSWD: /usr/bin/docker *` 같은 broad 룰 금지 — 컨테이너 escape 위험.
+- `npm cache clean --force` 는 sudo 불필요 (ubuntu user 권한으로 충분) → whitelist 제외.
+- `mysql -e "SELECT 1"` 검증은 docker exec 통해 컨테이너 내부에서 → sudo 불필요.
+- 설치 검증: `sudo visudo -c -f /etc/sudoers.d/mobruji-resilience` → exit 0 확인 필수.
+
+#### 11-7-d) 회복 command 실행 helper
+
+`recovery.py` 내부 공통 helper. timeout / dry-run / stdout-stderr 캡처 / Discord push 시점 분리.
+
+```python
+# resilience/recovery.py
+@dataclass(frozen=True)
+class RecoveryResult:
+    attempted: bool
+    command: list[str]
+    returncode: int | None
+    stdout: str
+    stderr: str
+    duration_sec: float
+    recovered: bool  # 후속 검증 결과 (caller 가 채움)
+    escalated: bool  # 실패 시 사용자 멘션 push 여부
+
+async def run_recovery_command(
+    cmd: list[str],
+    *,
+    timeout_sec: float = 30.0,
+    dry_run: bool = False,
+) -> RecoveryResult:
+    """sudo 포함 command 1건 실행. timeout / 캡처 / dry-run 일원화."""
+    if dry_run:
+        return RecoveryResult(attempted=False, command=cmd, returncode=None,
+                              stdout=f"[DRY-RUN] would execute: {' '.join(cmd)}",
+                              stderr="", duration_sec=0.0, recovered=False, escalated=False)
+    start = time.monotonic()
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return RecoveryResult(attempted=True, command=cmd, returncode=None,
+                              stdout="", stderr=f"timeout after {timeout_sec}s",
+                              duration_sec=time.monotonic() - start, recovered=False, escalated=True)
+    return RecoveryResult(
+        attempted=True, command=cmd, returncode=proc.returncode,
+        stdout=stdout_b.decode("utf-8", errors="replace")[:2000],
+        stderr=stderr_b.decode("utf-8", errors="replace")[:2000],
+        duration_sec=time.monotonic() - start, recovered=False, escalated=False,
+    )
+```
+
+#### 11-7-e) unittest 보일러플레이트
+
+`conftest.py` 1개 + 시나리오 1건만 spec 에 둔다. 나머지 19건은 같은 패턴 반복 — be 사이클이 작성.
+
+```python
+# tests/conftest.py
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock
+import pytest
+
+@pytest.fixture
+def state_path(tmp_path: Path) -> Path:
+    return tmp_path / "resilience.json"
+
+@pytest.fixture
+def fresh_state(state_path: Path) -> dict:
+    state = {
+        "schema_version": 1,
+        "last_heartbeat_ts": 0.0,
+        "risks": {
+            "wake_stuck":          {"last_triggered_ts": 0, "last_recovered_ts": 0, "active": False},
+            "context_heavy":       {"last_triggered_ts": 0, "last_recovered_ts": 0, "active": False},
+            "oauth_conflict":      {"last_triggered_ts": 0, "last_recovered_ts": 0, "active": False},
+            "claude_json_corrupt": {"last_triggered_ts": 0, "last_recovered_ts": 0, "active": False},
+        },
+    }
+    state_path.write_text(json.dumps(state))
+    return state
+
+@pytest.fixture
+def mock_sink():
+    sink = AsyncMock()
+    sink.send = AsyncMock(return_value=None)
+    return sink
+
+@pytest.fixture
+def mock_subprocess(monkeypatch):
+    """asyncio.create_subprocess_exec 를 mock. tests 마다 returncode/stdout 주입."""
+    mock = AsyncMock()
+    monkeypatch.setattr("asyncio.create_subprocess_exec", mock)
+    return mock
+```
+
+```python
+# tests/test_checks.py (1건만 예시)
+import pytest
+from resilience.checks import check_wake_stuck
+
+@pytest.mark.asyncio
+async def test_wake_stuck_under_threshold_no_push(mock_sink, fresh_state, monkeypatch):
+    """given 마지막 wake 30분 전 (임계 90분 미만) when check 실행 then push 없음 + state 불변."""
+    monkeypatch.setattr("resilience.checks._extract_last_wake_ts",
+                        AsyncMock(return_value=time.time() - 1800))
+    result = await check_wake_stuck(mock_sink, state=fresh_state, dry_run=True)
+    assert result.active is False
+    mock_sink.send.assert_not_awaited()
+```
+
+#### 11-7-f) docker / subprocess mock 패턴
+
+§11-6-c 의 mock 예시를 unittest 코드로 1:1 매핑. 핵심: `asyncio.create_subprocess_exec` 가 반환하는 proc 객체의 `communicate()` 를 AsyncMock 으로 교체.
+
+```python
+# tests/test_recovery.py 일부
+@pytest.mark.asyncio
+async def test_docker_prune_success(mock_subprocess):
+    """given disk_pct=92 when docker prune when 재측정 80 then recovered=True."""
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(return_value=(b"reclaimed 12GB", b""))
+    proc.returncode = 0
+    mock_subprocess.return_value = proc
+
+    result = await run_recovery_command(
+        ["sudo", "/usr/bin/docker", "system", "prune", "-af", "--volumes"],
+        timeout_sec=60.0,
+    )
+    assert result.attempted is True
+    assert result.returncode == 0
+    assert "reclaimed" in result.stdout
+```
+
+#### 11-7-g) 구현 PR 분할 권장
+
+§11-4~§11-6 + §11-7 을 단일 PR 로 하면 600~800 LOC. 다음 3개로 분할 권장:
+
+1. **PR B-1**: `resilience/` 디렉토리 + `state.py` + `push.py` + `monitor.py` 골격 + `_check_wake_stuck` 1건 + 회복 X (alert push 만). 회귀 테스트 5건. **~250 LOC.**
+2. **PR B-2**: 나머지 4개 check 함수 + heartbeat + cooldown ledger. 회귀 테스트 15건 추가. **~300 LOC.**
+3. **PR B-3**: `recovery.py` + sudoers.d 파일 + setup script 갱신 + `RESILIENCE_AUTO_RECOVER` env. 회귀 테스트 회복 매트릭스 20건. **~350 LOC.**
+
+각 PR 라벨: `type:feat` `scope:infra` `ai-generated` `needs-human-review` (sudoers / docker compose 변경 → 보호 영역).
+
+#### 11-7-h) 구현 시 막힐 가능성이 높은 지점 사전 답변
+
+| 막힘 | 해결 |
+|---|---|
+| `tmux capture-pane` 가 maestro 외 다른 user 의 세션을 보지 못함 | bot 가 `ubuntu` user 로 실행 — maestro tmux 도 `ubuntu` 소유면 OK. 다른 user 면 `sudo -u <maestro_user> tmux capture-pane ...` 필요 → sudoers 추가. |
+| `psutil.virtual_memory()` 가 컨테이너 내부 메모리만 반환 | bot 가 host 에서 실행 (systemd) 이므로 host 메모리 정상 측정. heap_pct 는 backend `/actuator/metrics/jvm.memory.used` 로 별도 측정 (docker exec 불필요). |
+| state 파일 race (digest_loop 와 동시 write) | `digest_loop` 는 state 파일 안 씀 — 충돌 없음. 단일 task 단일 writer 보장. |
+| `discord.Client.get_channel` 이 `on_ready` 이전엔 None 반환 | `on_ready` 핸들러 내부에서만 launch (digest_loop 와 동일) — None 보장 안 됨. |
+| dry-run 으로 1일 관찰 시 false alarm 분류 | push 본문에 `[DRY-RUN]` prefix 추가 → 사용자가 silent 학습 후 enabled 전환. |
