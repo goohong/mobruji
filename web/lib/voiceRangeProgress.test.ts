@@ -19,7 +19,8 @@ function buildEntry(
   return {
     id,
     requestedAt,
-    requestId: 1,
+    // issue #422: requestId 는 UUIDv7 문자열. id 를 시드로 결정적 UUID 생성.
+    requestId: `01933b1c-7f8a-7c2d-9b3e-${id.padStart(12, "0").slice(-12)}`,
     voiceRangeId: 42,
     songs: [],
     excludedSongIds: [],

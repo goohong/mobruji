@@ -34,8 +34,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// issue #422: requestId 는 UUIDv7 문자열. fixture 는 BE 가 발급하는 형식과
+// 동일한 길이/하이픈 패턴을 모사한다 (실제 v7 검증은 BE 책임).
+const SAMPLE_REQUEST_ID = "01933b1c-7f8a-7c2d-9b3e-0123456789ab";
+
 const sampleResponse: RecommendationResponse = {
-  requestId: 1,
+  requestId: SAMPLE_REQUEST_ID,
   recommendations: [],
 };
 
@@ -72,12 +76,27 @@ describe("readRecommendation", () => {
   it("GET /api/v1/recommendations/{id} 로 호출하고 응답을 그대로 돌려준다", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse));
 
-    const result = await readRecommendation(42);
+    const result = await readRecommendation(SAMPLE_REQUEST_ID);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toMatch(/\/api\/v1\/recommendations\/42$/);
+    expect(url).toMatch(
+      new RegExp(`/api/v1/recommendations/${SAMPLE_REQUEST_ID}$`),
+    );
     expect((init as RequestInit).method ?? "GET").toBe("GET");
     expect(result).toEqual(sampleResponse);
+    // issue #422: 응답 requestId 가 string(UUID) 형식으로 통과해야 한다.
+    expect(typeof result.requestId).toBe("string");
+    expect(result.requestId).toBe(SAMPLE_REQUEST_ID);
+  });
+
+  it("id 에 URL 특수 문자가 섞여도 encodeURIComponent 로 안전하게 호출한다", async () => {
+    // 방어 인코딩 가드 — BE id 형식 변경(예: prefix 추가) 대비.
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse));
+
+    await readRecommendation("foo/bar baz");
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/recommendations\/foo%2Fbar%20baz$/);
   });
 });
 
@@ -102,7 +121,9 @@ describe("recommendation API 경계 가드", () => {
       status: 400,
     });
     fetchMock.mockResolvedValueOnce(jsonResponse({ message: "nope" }, 404));
-    await expect(readRecommendation(99999)).rejects.toBeInstanceOf(ApiError);
+    await expect(
+      readRecommendation("does-not-exist-uuid"),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 
   it("excludeSongIds 생략 시 body 에서 키 자체가 빠진다 (BE SeedDeriver default seed 경로)", async () => {
