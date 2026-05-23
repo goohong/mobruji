@@ -70,6 +70,10 @@ STATUS_MERGED_PR_LIMIT: Final[int] = 5
 STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
 STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
 AUTO_ACK_QUEUE_WINDOW_SECONDS: Final[int] = 300  # 5분 안 dedup mark 수 = queue 표시
+# `/system:status <msg>` — 사용자가 maestro 진척을 강제로 채널에 push 하고 싶을 때.
+# 일반 메시지 dispatch (tmux/repository_dispatch) 는 건너뛰고 reply 카테고리로만 발화.
+# maestro 자신이 자기 진척을 알릴 때도 (tmux pane 에 이 prefix 로 입력) 같은 경로로 push 됨.
+STATUS_PROGRESS_PREFIX: Final[str] = "/system:status"
 
 # 7 카테고리 emoji prefix — spec: docs/features/discord-message-style.md §3.
 # 한 메시지 = 한 카테고리. 첫 줄 emoji 만 보고 사용자가 종류 즉시 식별 (시나리오 S1).
@@ -85,8 +89,12 @@ MESSAGE_PREFIX: Final[dict[str, str]] = {
 
 # auto-ack 은 reply 카테고리 — 사용자 메시지에 즉시 응답하는 maestro 답이므로 spec §3 reply 분류.
 # template §4-1 에 따라 첫 줄 `💬 reply: {요약}` 형식.
+# ETA 표기: 사용자가 "처리 중" 만 보고 무한정 기다리는 무의미한 ack 가 안 되도록
+# 일반 응답(1-5분) / sub-agent 가동 시(5-15분) 범위를 같이 노출.
+# 추가 진척이 필요하면 `/system:status <msg>` 로 ad-hoc push 가능 (STATUS_PROGRESS_PREFIX).
 AUTO_ACK_TEMPLATE: Final[str] = (
-    f"{MESSAGE_PREFIX['reply']} reply: 받음, maestro 처리 중 (queue: {{queue}})"
+    f"{MESSAGE_PREFIX['reply']} reply: 받음, maestro 처리 중 "
+    f"(queue: {{queue}}, ETA 1-5분 · sub-agent 가동 시 5-15분)"
 )
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분 cron digest 주기 (env override 가능)
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
@@ -346,6 +354,25 @@ def resolve_sentinel(text: str) -> list[str] | None:
         return None
     key = text[len(SENTINEL_PREFIX):].strip().lower()
     return SENTINEL_KEYS.get(key)
+
+
+def parse_status_progress(text: str) -> str | None:
+    """`/system:status <msg>` 면 메시지 본문을 반환. 아니면 None.
+
+    maestro 진척 ad-hoc push 용. on_message 에서 가로채서 dispatch (tmux/repository_dispatch)
+    를 건너뛰고 reply 카테고리(📡 status) 메시지만 채널에 send 한다.
+    본문 없는 (`/system:status` 단독) 경우는 None 반환 — 의미 없는 빈 push 방지.
+    """
+    if not text.startswith(STATUS_PROGRESS_PREFIX):
+        return None
+    remainder = text[len(STATUS_PROGRESS_PREFIX):]
+    # prefix 뒤가 공백 또는 EOL 이어야 정확한 매칭 (예: `/system:statusxyz` 는 거부).
+    if remainder and not remainder[0].isspace():
+        return None
+    body = remainder.strip()
+    if not body:
+        return None
+    return body
 
 
 def tmux_send_payload(target_pane: str, text: str) -> bool:
@@ -1065,6 +1092,25 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 await message.channel.send(report)
             except Exception as exc:  # noqa: BLE001
                 logger.error("/status 응답 send 실패: %s", exc)
+            if ledger is not None:
+                ledger.mark_processed(message_id)
+            return
+
+        # /system:status <msg> — maestro 진척 ad-hoc push. dispatch 건너뜀.
+        # reply 카테고리(📡 status: ...) 한 줄로 채널에 push. ledger mark 로 dedup.
+        status_body = parse_status_progress(content)
+        if status_body is not None:
+            logger.info(
+                "/system:status push: user=%s preview=%r",
+                message.author.id,
+                truncate_for_log(status_body),
+            )
+            try:
+                await message.channel.send(
+                    f"{MESSAGE_PREFIX['reply']} status: {status_body}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("/system:status send 실패: %s", exc)
             if ledger is not None:
                 ledger.mark_processed(message_id)
             return
