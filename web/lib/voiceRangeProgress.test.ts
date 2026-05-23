@@ -283,4 +283,49 @@ describe("extractVoiceRangeProgressFromSnapshots", () => {
     expect(result!.minLowMidi).toBe(48);
     expect(result!.maxHighMidi).toBe(74);
   });
+
+  // ---- range / clamp boundary guards (#636) ----
+
+  it("[guard #636] MIDI 경계값(0, 127)은 정상 datapoint 로 인정된다", () => {
+    // 0/127 은 MIDI 표준 범위의 경계. 정상 점으로 보존되고 min/max 도 정확.
+    const result = extractVoiceRangeProgressFromSnapshots([
+      buildSnapshot({ id: 1, lowMidi: 0, highMidi: 127, measuredAt: "2026-05-21T08:00:00" }),
+      buildSnapshot({ id: 2, lowMidi: 60, highMidi: 72, measuredAt: "2026-05-21T10:00:00" }),
+    ]);
+    expect(result).not.toBeNull();
+    expect(result!.points).toHaveLength(2);
+    expect(result!.minLowMidi).toBe(0);
+    expect(result!.maxHighMidi).toBe(127);
+    expect(result!.earliestSpanSemitones).toBe(127);
+  });
+
+  it("[guard #636] 현재 구현은 NaN MIDI 를 거르지 않는다 — 정책 변경 시 본 테스트가 깨지며 의식적 결정 강제", () => {
+    // typeof NaN === "number" 이므로 NaN 도 datapoint 에 섞인다. 본 테스트는 현재 동작을
+    // lock-in 한다: 향후 NaN 필터를 추가하면 본 케이스가 깨지므로 그때 정책을 의식적으로 결정.
+    const result = extractVoiceRangeProgress([
+      buildEntry("nan", "2026-05-21T12:00:00Z", {
+        voiceRangeLowMidi: Number.NaN,
+        voiceRangeHighMidi: 72,
+      }),
+      buildEntry("ok", "2026-05-21T10:00:00Z", {
+        voiceRangeLowMidi: 50,
+        voiceRangeHighMidi: 72,
+      }),
+    ]);
+    expect(result).not.toBeNull();
+    expect(result!.points).toHaveLength(2);
+    // NaN 은 비교 연산 모두 false → min/max 스캔에서 갱신되지 않아 첫 점 값이 보존된다.
+    expect(result!.minLowMidi).toBe(50);
+  });
+
+  it("[guard #636] 현재 구현은 범위 외 MIDI(음수/>127)도 거르지 않는다 — 동작 lock-in", () => {
+    // 음수/초과값도 그대로 통과해 min/max 에 반영된다. 정책 변경(클램프/거르기) 시 본 테스트가 깨짐.
+    const result = extractVoiceRangeProgressFromSnapshots([
+      buildSnapshot({ id: 1, lowMidi: -5, highMidi: 200, measuredAt: "2026-05-21T08:00:00" }),
+      buildSnapshot({ id: 2, lowMidi: 60, highMidi: 72, measuredAt: "2026-05-21T10:00:00" }),
+    ]);
+    expect(result).not.toBeNull();
+    expect(result!.minLowMidi).toBe(-5);
+    expect(result!.maxHighMidi).toBe(200);
+  });
 });
