@@ -129,4 +129,14 @@ describe("SongDetailContent", () => {
       screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
     ).toHaveAttribute("aria-pressed", "false");
   });
+
+  // closes #535 — YouTubeSearchLink 는 새 탭으로 외부 사이트(youtube.com) 를 열기 때문에
+  // reverse tabnabbing 방지를 위해 rel="noopener noreferrer" 가 반드시 함께 있어야 한다.
+  // 누군가 rel 을 누락하거나 target 을 바꿔도 사일런트 회귀라 명시적 가드를 둔다.
+  it("YouTubeSearchLink: target=_blank 와 rel=noopener noreferrer 를 함께 가진다", () => {
+    renderWithQueryClient(<SongDetailContent song={SONG} />);
+    const link = screen.getByRole("link", { name: /테스트 곡 YouTube에서 듣기/ });
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
 });
