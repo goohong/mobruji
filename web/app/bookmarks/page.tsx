@@ -116,7 +116,18 @@ function BookmarksContent({ bookmarkedSongIds }: BookmarksContentProps) {
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             북마크한 곡
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {/*
+            (closes #431) 카운트 영역을 스크린 리더 라이브 영역으로 마킹한다.
+            BE 응답으로 bookmarkedSongIds 가 채워지거나 곡 메타데이터 N건 페치가 끝나며
+            메시지가 바뀌므로 polite live 로 알린다 (/likes 와 동일 패턴, PR #428 참고).
+          */}
+          <p
+            data-testid="bookmarks-count-live"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="text-sm text-zinc-600 dark:text-zinc-400"
+          >
             총 {bookmarkedSongIds.length}곡을 북마크했어요.
             {pendingCount > 0 ? ` (불러오는 중 ${pendingCount}곡)` : null}
           </p>

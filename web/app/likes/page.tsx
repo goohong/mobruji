@@ -125,7 +125,20 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             좋아한 곡
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {/*
+            (closes #431) 카운트 영역을 스크린 리더 라이브 영역으로 마킹한다.
+            BE 응답으로 likedSongIds 가 채워지거나 곡 메타데이터 N건 페치가 끝나며
+            메시지가 바뀌므로 polite live 로 알린다 (PR #428 /recommend 와 동일 패턴).
+            시각 표시는 그대로 유지하고 `aria-live` 만 부여 — 별도 sr-only 영역을
+            중복으로 두면 시각/SR 텍스트가 어긋날 위험이 있어 헤더 카피에 직접 부여.
+          */}
+          <p
+            data-testid="likes-count-live"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="text-sm text-zinc-600 dark:text-zinc-400"
+          >
             총 {likedSongIds.length}곡을 좋아했어요.
             {pendingCount > 0 ? ` (불러오는 중 ${pendingCount}곡)` : null}
           </p>

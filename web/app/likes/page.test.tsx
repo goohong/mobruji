@@ -143,4 +143,25 @@ describe("/likes 페이지", () => {
     // zustand store가 BE 응답과 동기화돼야 함.
     expect(useLikesStore.getState().likedSongIds).toEqual([42, 99]);
   });
+
+  // closes #431 — 카운트 영역이 polite 라이브 영역으로 마킹되고 BE 응답 도착 시
+  // 메시지가 업데이트되어야 한다. PR #428 /recommend 와 동일 패턴.
+  it("BE 응답이 도착하면 라이브 영역에 '총 N곡을 좋아했어요.' 메시지가 노출된다 (#431)", async () => {
+    readLikesMock.mockResolvedValue([buildLike(7), buildLike(8)]);
+    readSongByIdMock.mockImplementation(async (id) => buildSong(id));
+
+    renderWithQueryClient(<LikesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("좋아요-곡-7")).toBeInTheDocument();
+    });
+
+    const liveRegion = screen.getByTestId("likes-count-live");
+    expect(liveRegion).toHaveAttribute("role", "status");
+    expect(liveRegion).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+    await waitFor(() => {
+      expect(liveRegion).toHaveTextContent("총 2곡을 좋아했어요.");
+    });
+  });
 });
