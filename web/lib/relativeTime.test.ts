@@ -54,4 +54,30 @@ describe("formatRelativeKorean", () => {
   it("잘못된 입력은 '알 수 없음'을 반환한다", () => {
     expect(formatRelativeKorean("invalid", NOW)).toBe("알 수 없음");
   });
+
+  // ── 경계 회귀 가드 (#573) ──────────────────────────────────────────────
+  it("동일 시각(delta=0)은 '방금 전'", () => {
+    expect(formatRelativeKorean(NOW, NOW)).toBe("방금 전");
+  });
+
+  it("음수 delta(clock skew −10분)는 '방금 전'으로 fallback", () => {
+    const target = new Date(NOW.getTime() + 10 * 60 * 1000);
+    expect(formatRelativeKorean(target, NOW)).toBe("방금 전");
+  });
+
+  it("정확히 60초 전은 '1분 전' (1분 경계)", () => {
+    const target = new Date(NOW.getTime() - 60 * 1000);
+    expect(formatRelativeKorean(target, NOW)).toBe("1분 전");
+  });
+
+  it("정확히 60분 전은 '1시간 전' (1시간 경계)", () => {
+    const target = new Date(NOW.getTime() - 60 * 60 * 1000);
+    expect(formatRelativeKorean(target, NOW)).toBe("1시간 전");
+  });
+
+  it("정확히 24시간 전은 '어제 H시' (24시간 경계)", () => {
+    const target = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
+    const expectedHour = target.getHours();
+    expect(formatRelativeKorean(target, NOW)).toBe(`어제 ${expectedHour}시`);
+  });
 });
