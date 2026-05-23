@@ -269,6 +269,175 @@ class RecommendationScorerTest {
         assertThat(fastScore).isGreaterThan(slowScore);
     }
 
+    @Test
+    @DisplayName("score (경계): 모든 가중치가 0이면 total은 jitter 범위 [-jitterMagnitude, +jitterMagnitude] 안")
+    void score_allWeightsZero_totalWithinJitterRange() {
+        // given: 모든 가중치 0 + jitter 0.01
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final RecommendationProperties allZero = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(allZero)
+                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(42));
+        // then: total은 [-0.01, 0.01] 내 (가중 합산이 0이라 jitter만 남는다)
+        assertThat(scored.total()).isBetween(-0.01, 0.01);
+    }
+
+    @Test
+    @DisplayName("score (경계): 모든 가중치 0 + jitter 0 이면 total 정확히 0.0")
+    void score_allWeightsAndJitterZero_totalIsZero() {
+        // given
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final RecommendationProperties dead = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(dead)
+                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+        // then
+        assertThat(scored.total()).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("score (경계): voiceFit 만 1.0 가중치, 완전 매칭 곡 → total == 1.0 (jitter 0)")
+    void score_onlyVoiceFitWeight_perfectMatch() {
+        // given: voiceFit 1.0 단일 신호, 나머지 0
+        final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
+        final RecommendationProperties voiceOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when: 음역 완전 포함
+        final RecommendationScorer.Scored scored = scorer(voiceOnly)
+                .score(song, 50, 80, null, null, new Random(0));
+        // then: rangeFit=1.0 * 1.0 = 1.0
+        assertThat(scored.total()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("score (경계): mood 만 1.0 가중치, 분위기 일치 → total == 1.0")
+    void score_onlyMoodWeight_match() {
+        // given
+        final Song song = buildSong(MusicalKey.UNKNOWN, Mood.CALM, null);
+        final RecommendationProperties moodOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 1.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(moodOnly)
+                .score(song, 50, 80, Mood.CALM, null, new Random(0));
+        // then: moodMatch=1.0 * 1.0
+        assertThat(scored.total()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("score (경계): popularity 만 1.0 가중치 → v1 popularity=1.0 고정이라 total 항상 1.0")
+    void score_onlyPopularityWeight_alwaysOne() {
+        // given
+        final Song song = buildSong(MusicalKey.UNKNOWN, null, null);
+        final RecommendationProperties popOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 1.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(popOnly)
+                .score(song, 50, 80, null, null, new Random(0));
+        // then: popularity 신호=1.0 * 가중치 1.0
+        assertThat(scored.total()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("score (경계): genre 만 1.0 가중치 → v1 genre=0.0 고정이라 total 항상 0.0")
+    void score_onlyGenreWeight_alwaysZero() {
+        // given
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final RecommendationProperties genreOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 1.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(genreOnly)
+                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+        // then: genre 신호=0.0 → 가중치 무관 항상 0.0
+        assertThat(scored.total()).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("score (경계): 6신호 모두 최대값 + 모든 가중치 1.0 → total == 가중치 합 (popularity 신호=1, genre는 0이라 4.0)")
+    void score_allSignalsMax_totalEqualsWeightSum() {
+        // given: voiceFit=1, genre 신호=0(고정), mood=1, popularity=1, tempo=1 → 합 1+0+1+1+1 = 4
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
+        final RecommendationProperties allOnes = new RecommendationProperties(
+                new RecommendationProperties.Weights(1.0, 1.0, 1.0, 1.0, 1.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when: UPBEAT mood + preferredBpm 128 → tempoMatch=1.0
+        final RecommendationScorer.Scored scored = scorer(allOnes)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0));
+        // then: 1 + 0 + 1 + 1 + 1 = 4.0
+        assertThat(scored.total()).isEqualTo(4.0);
+    }
+
+    @Test
+    @DisplayName("score (invariant): breakdown raw 신호값은 가중치 변경에도 동일하게 보존된다")
+    void score_breakdownRawSignalsAreWeightInvariant() {
+        // given: 동일 입력, 가중치만 다른 두 properties
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
+        final RecommendationProperties propsA = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        final RecommendationProperties propsB = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.1, 0.0, 0.9, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final ScoreBreakdown breakdownA = scorer(propsA)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0)).breakdown();
+        final ScoreBreakdown breakdownB = scorer(propsB)
+                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0)).breakdown();
+        // then: raw 신호는 가중치와 독립 — 동일해야 한다
+        assertThat(breakdownA.keyMatch()).isEqualTo(breakdownB.keyMatch());
+        assertThat(breakdownA.rangeFit()).isEqualTo(breakdownB.rangeFit());
+        assertThat(breakdownA.genreMatch()).isEqualTo(breakdownB.genreMatch());
+        assertThat(breakdownA.moodMatch()).isEqualTo(breakdownB.moodMatch());
+        assertThat(breakdownA.popularity()).isEqualTo(breakdownB.popularity());
+        assertThat(breakdownA.tempoMatch()).isEqualTo(breakdownB.tempoMatch());
+    }
+
+    @Test
+    @DisplayName("score (경계): tempoMatch 만 가중치 1.0 + 곡 BPM null → 중립 0.5 → total 0.5")
+    void score_onlyTempoWeight_nullSongBpm_neutralHalf() {
+        // given
+        final Song song = buildSong(MusicalKey.UNKNOWN, null, null);
+        final RecommendationProperties tempoOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 1.0),
+                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when
+        final RecommendationScorer.Scored scored = scorer(tempoOnly)
+                .score(song, 50, 80, null, null, new Random(0));
+        // then: tempoMatch 중립 0.5 * 가중치 1.0 = 0.5
+        assertThat(scored.total()).isEqualTo(0.5);
+    }
+
+    @Test
+    @DisplayName("score (invariant): 동일 입력 + 동일 seed → 결정적 (total/breakdown 모두 일치)")
+    void score_sameInputSameSeed_deterministic() {
+        // given
+        final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final RecommendationProperties props = defaultProperties();
+        // when: 동일 seed 두 번
+        final RecommendationScorer.Scored a = scorer(props).score(song, 50, 80, Mood.UPBEAT, 120, new Random(7));
+        final RecommendationScorer.Scored b = scorer(props).score(song, 50, 80, Mood.UPBEAT, 120, new Random(7));
+        // then: 가중 합산과 raw 신호 모두 동일
+        assertThat(a.total()).isEqualTo(b.total());
+        assertThat(a.breakdown()).isEqualTo(b.breakdown());
+    }
+
     private static Song buildSong(final MusicalKey key, final Mood mood, final Integer bpm) {
         return Song.builder()
                 .title("t").artist("a")
