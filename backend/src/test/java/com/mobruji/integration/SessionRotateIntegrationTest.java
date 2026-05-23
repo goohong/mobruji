@@ -159,4 +159,21 @@ class SessionRotateIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.BAD_REQUEST.value());
     }
+
+    @Test
+    @DisplayName("E2E: rotate — body currentSessionId non-UUIDv4 형식 → 400 (F5 보안 보강)")
+    void e2e_rotate_nonUuidBody_returns400() {
+        final String invalidSessionId = "not-a-uuid-random-string-12345";
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", invalidSessionId)
+                .body("""
+                        {"currentSessionId":"%s"}
+                        """.formatted(invalidSessionId))
+                .when()
+                .post("/api/v1/sessions/rotate")
+                .then()
+                .statusCode(HttpStatus.BAD_REQUEST.value());
+    }
 }
