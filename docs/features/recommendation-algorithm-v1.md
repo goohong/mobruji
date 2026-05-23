@@ -6,7 +6,7 @@ owner: "@goohong"
 scope: recommendation
 related_issues: [5, 19]
 related_prs: [6, 20]
-last_reviewed: 2026-05-22
+last_reviewed: 2026-05-23
 ---
 
 # 추천 알고리즘 v1 (recommendation-algorithm-v1)
@@ -70,7 +70,9 @@ last_reviewed: 2026-05-22
 | Method | Path | 설명 | 인증 | Req | Res |
 |---|---|---|---|---|---|
 | POST | /api/v1/recommendations | 추천 요청 생성 + 결과 반환 | 익명 가능 (세션ID) | `RecommendationCreateRequest` | `RecommendationResponse` |
-| GET | /api/v1/recommendations/{id} | 이전 추천 결과 재조회 | 익명 가능 | - | `RecommendationResponse` |
+| GET | /api/v1/recommendations/{id} | 이전 추천 결과 재조회 | **익명 가능 (의도) — §9 2026-05-23 결정** | - | `RecommendationResponse` |
+
+> **`GET /recommendations/{id}` 권한 정책 (의도)** — 추천 결과 link 공유(예: SNS, 메신저)·재방문 UX를 위해 **익명 호출 가능**하게 유지한다. SessionAuthGuard 미적용. 응답에 sessionId·voiceRange 수치·PII 미포함 (`RecommendationResponse` 페이로드는 `recommendations[]` + `requestId`만). 식별자 enumeration 방지는 §9 2026-05-23 결정 로그(UUIDv7 전환)로 보강한다.
 
 ### 5-3) v1 알고리즘 (권장 안)
 **규칙 기반 베이스라인**. 다음 단계로 점수를 계산하고 상위 N곡을 반환한다.
@@ -226,3 +228,19 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **seedStrategy=RANDOM** 분기에서는 hash="-" 로 표기해 운영자가 비결정 분기를 즉시 식별. seed 는 새 `new Random()` 의 `nextLong()` 값을 로그·jitter 양쪽에 동일 노출.
   - **회귀 가드**: `RecommendationServiceDeterminismLogTest` 4건 (형식 · PII 미노출 · 결정성 hash/seed 동일 · RANDOM 분기) + `SeedDeriverTest.hashHex16` 2건 (결정성 · entropy).
   - **결정성 영향 없음**: 로그 추가만. `SeedDeriver.derive` / `canonicalize` / seed 산식 무변경. 응답 페이로드 무변경.
+- 2026-05-23: **`GET /recommendations/{id}` IDOR 정책 — 익명 유지 + requestId UUIDv7 전환 결정** (rev 사이클 🟡 #406 M3, 본 docs PR).
+  - **배경**: rev 사이클 recommendation/session audit (2026-05-23) 에서 `RecommendationController.read(Long id)` 권한 체크 부재 + `requestId` IDENTITY 순차 long → enumeration 위협 🟡 발견. spec §5-2 표 "익명 가능" 표기의 의도성 확인 필요로 plan 결정 보류 상태였음.
+  - **결정 (옵션 a)**: **익명 가능 유지** + `requestId` UUIDv7 전환으로 enumeration 방지. SessionAuthGuard 적용은 채택하지 않음.
+  - **근거**:
+    1. **UX 의도 보존** — 추천 결과를 SNS·메신저로 link 공유하거나 다른 기기/세션에서 재방문하는 흐름이 익명 추천 서비스의 핵심 가치. SessionAuthGuard 도입 시 같은 sessionId가 아니면 404 — 공유·재방문 흐름이 깨진다.
+    2. **민감도 낮음** — 응답 페이로드(`RecommendationResponse`)에 sessionId / voiceRange 수치 / 개인 식별자 미포함. 노출되는 정보는 곡 ID + score + matchReason + breakdown 으로, 곡 카탈로그는 공개 데이터. CLAUDE.md "음역대·기호 데이터 원문 노출 금지" 정신 위반 없음.
+    3. **enumeration 방지로 충분** — 순차 long → UUIDv7 전환 시 추측 불가. UUIDv7 은 시간 prefix + 무작위 suffix → 정렬·인덱싱 친화 + 보안 entropy 확보. 동시 N개 요청에서도 ID 충돌·예측 모두 불가.
+    4. **호환성·구현 비용 최소** — SessionAuthGuard 적용은 (a) `Recommendation` 엔티티에 sessionId FK 필요, (b) 기존 진행 중 추천 link 모두 무효화, (c) `RecommendationHistoryController` 와 권한 모델 분리 정의 필요 → 비용 대비 보안 이득 작음.
+  - **권한 정책 (영구 명문화)**: `GET /api/v1/recommendations/{id}` 는 **익명 호출 가능**. 응답에 sessionId 노출 금지(현재 미노출 — 회귀 가드). 향후 spec 확장으로 voiceRange/PII가 응답에 추가되는 경우 본 결정 재평가 필요 — 그 시점에 SessionAuthGuard (옵션 b)로 전환 가능.
+  - **구현 분할 (후속 이슈)**:
+    - **PR A (be)** (`feat:recommendation`): `requestId` 식별자 UUIDv7 전환. `RecommendationRequestEntity.id: UUID` (DB 컬럼 `BINARY(16)` 또는 `CHAR(36)`) + `RecommendationResponse.requestId` 타입 변경. JPA `@Id` strategy 제거(애플리케이션 레벨 UUIDv7 생성). 마이그레이션(`V5__recommendation_request_uuid.sql`) — 보호 영역 `needs-human-review`.
+    - **PR B (be)** (`test:recommendation`): enumeration 방지 회귀 가드 — `requestId` UUID 형식 단정 + 순차 호출 시 ID prefix 단조 증가(UUIDv7 시간 정렬성) + 충돌 없음 검증.
+    - **PR C (fe)** (`feat:web`): `requestId` 타입 string(UUID) 처리. localStorage 캐시 키 마이그레이션 (필요시).
+    - **별 이슈 등록**: be / fe 각각 후속 이슈(scope:recommendation / scope:web).
+  - **rev 🟡 M1/M4 (#406 묶음)**: 본 plan 결정은 M3 분기만 해소. M1(fe sessionId fallback entropy `crypto.getRandomValues`) / M4(history GET sessionId echo 제거) 은 spec 영향 없는 소규모 코드 수정 → be/fe 사이클 직접 처리 (별 spec 갱신 불필요).
+  - **결정성 영향 없음**: 본 docs PR. 코드 변경 0. 후속 PR A 의 UUIDv7 전환은 `SeedDeriver` 입력에 영향 없음(`sessionId` / `voiceRange` 등 입력 필드 무변경).
