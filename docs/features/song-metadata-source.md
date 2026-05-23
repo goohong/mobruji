@@ -72,8 +72,19 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
 |---|---|---|---|---|---|
 | GET | /api/v1/songs/{id} | 곡 상세 조회 | 익명 가능 | - | `SongResponse` |
 | GET | /api/v1/songs?keyword=... | 키워드(제목/아티스트) 검색 | 익명 가능 | query | `List<SongResponse>` |
+| GET | /api/v1/songs/stats | PoC 한정 admin 통계 (총 곡 수 / `metadataSource` 분포 / 평균 `metadataConfidence` / 마지막 backfill 시각) | Admin (`X-Admin-Token` 헤더 필수, `AdminTokenVerifier`) | header | `SongStatsResponse` |
 
 > 추천 결과에서 호출되는 read API만 1차로 둔다. POST/PUT은 admin 분리 후 결정.
+
+#### 5-2-1) Admin 통계 endpoint (`/api/v1/songs/stats`)
+- 도입: **PR #228** (v0.3 P0, rev 14 후속 #208/#212). 운영 가시성 — `SongAudioBackfill` 진행 상황 확인.
+- 인증: `X-Admin-Token` 헤더 + `com.mobruji.admin.AdminTokenVerifier`. Spring Security 정식 도입 시 인가 필터로 이전 예정.
+- 응답(`SongStatsResponse`):
+  - `total` — 전체 곡 수
+  - `byMetadataSource` — `MetadataSource` enum 전체에 대해 0 건 source 도 0 으로 채움
+  - `avgConfidence` — 평균 `metadataConfidence` (0.0~1.0). 곡 0 건이면 0.0
+  - `lastBackfillAt` — 마지막 backfill batch 완료 시각. 미실행/재기동 후 미실행 시 `null`
+- 본 endpoint 는 PoC 한정 운영 도구. fe 노출 계획 없음.
 
 **키워드 검색 정책 (BE↔FE 계약)** — `keyword` 가 비/공백/null 이면 200 OK + 빈 배열(`[]`) 반환. 400 Bad Request 가 아니다. 이유:
 1. Repository 는 `LIKE '%keyword%'` 라 빈 키워드면 전체 풀스캔. 200 OK + 빈 배열로 풀스캔을 차단한다.
@@ -154,3 +165,4 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
   - **`Difficulty` enum (EASY/NORMAL/HARD)** — fe(`web/lib/difficulty.ts`)와 1:1 동일 룰. 분류 임계값(HARD≥76 또는 span≥17, NORMAL 71~75, EASY <71)은 `Song`의 상수에 하드코딩. ADR 0007 후보(maestro 후속).
   - **응답 노출** — `SongResponse`에 `difficulty`, `lowestNoteName`, `highestNoteName` 추가. 노트명 변환은 `song.domain.NoteName` 유틸 (sharp 표기, fe와 일치).
   - **시드 30곡 모두 `lowMidi`/`highMidi` 채움** — 합리적 추정값. 후속 큐레이션에서 정확도 향상 가능.
+- 2026-05-23: §5-2 표 + §5-2-1 admin 통계 endpoint 섹션 신설 (rev drift #463). 실 코드 (`SongController#stats`, PR #228) 가 §5-2 표에 누락돼 있던 것을 동기화. 코드 변경 없음 — docs only.
