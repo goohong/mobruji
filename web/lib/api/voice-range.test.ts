@@ -68,6 +68,38 @@ describe("voice-range API", () => {
     expect((init as RequestInit).method ?? "GET").toBe("GET");
   });
 
+  it("readVoiceRange: 404 응답 시 ApiError(status=404) 전파", async () => {
+    fetchMock.mockResolvedValueOnce(json({ message: "not found" }, 404));
+    const p = readVoiceRange("sess-x");
+    await expect(p).rejects.toBeInstanceOf(ApiError);
+    await expect(p).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("readVoiceRange: 5xx 응답 시 ApiError 전파", async () => {
+    fetchMock.mockResolvedValueOnce(json({}, 503));
+    const p = readVoiceRange("sess-1");
+    await expect(p).rejects.toBeInstanceOf(ApiError);
+    await expect(p).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("readVoiceRange: AbortSignal을 fetch init으로 전달 + abort reject 전파", async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException("Aborted", "AbortError"));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      readVoiceRange("sess-1", { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(
+      controller.signal,
+    );
+  });
+
+  it("readVoiceRange: 최소 응답(필수 필드)을 그대로 매핑한다", async () => {
+    fetchMock.mockResolvedValueOnce(json(sample));
+    const result = await readVoiceRange("sess-1");
+    expect(result).toEqual(sample);
+  });
+
   const baseReq = {
     sessionId: "sess-1",
     lowestNoteMidi: 48,
