@@ -44,14 +44,14 @@ last_reviewed: 2026-05-23
 ### 기능 요구사항
 - [ ] NCP 에 tmux session `helper` 신설 (claude CLI 상주, Restart=always)
 - [ ] bot.py routing 변경: 사용자 Discord 메시지는 **helper tmux 로 우선 send-keys** (현재 nmae 직접 send 폐지 또는 후순위)
-- [ ] **즉시 답 4단계 패턴 강제** (helper 초기 프롬프트에 명시):
-  1. **1초 안 ack** — 사용자 메시지 수신 직후 짧은 정중체 ack 즉시 push ("확인하고 있습니다" 등)
-  2. **10초 안 자체 답** — 다음 정보 소스로 자체 reasoning 후 정중체 답 push:
-     - `tmux capture-pane -t mobruji:0.0 -p` (nmae pane raw 상태)
-     - `gh pr list --state open` / `gh pr view <num>`
-     - `git log --oneline -20` / `git status`
-  3. **nmae 위임 병행** — 실 작업 필요 시 helper 답과 **독립** 으로 `tmux send-keys -t mobruji:0.0` 로 nmae 위임. helper 는 nmae 응답을 절대 기다리지 않음.
-  4. **nmae 응답 도착 시 보강 push** — nmae pipe-pane 캡처 → helper 가 다시 작성 → 추가 push (1차 자체 답 위에 덧붙이는 형태)
+- [ ] **즉시 답 6단계 패턴 강제** (helper 초기 프롬프트에 명시. **canonical 정의는 `CLAUDE.md §11-pre-0` — 본 §3 는 high-level 요약**. 누락 재발 방지 회고 결과 4 → 6단계로 보강됨, 2026-05-23):
+  1. **ack push** — 사용자 메시지 수신 직후 첫 액션. `discord-reply.sh` 로 짧은 정중체 ack push (다른 어떤 tool call 보다 먼저)
+  2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}` append
+  3. **분류** — 요청을 (a) helper 자체 수정 / (b) sub-agent·nmae 위임 / (c) 단순 질문 3분기로 판정
+  4. **처리** — 분류에 따라 직접 처리 또는 위임. 위임 시 즉시 "X 작업 위임함" push. 정보 소스: `tmux capture-pane -t mobruji:0.0 -p` (nmae pane raw) / `gh pr list` / `git log` / `git status`
+  5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작해 ack 와 시각 분리
+  6. **queue done + pending 검증** — message_id 행 status `done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 미처리 0 확인. 1건이라도 남으면 turn 안 끝났다
+- [ ] **nmae 위임은 4단계 처리와 병행** — helper 는 nmae 응답을 기다리지 않고 5단계(응답 push) 즉시 진행. nmae stdout 도착 시 별 turn 으로 보강 push (위 6단계를 다시 1부터 반복).
 - [ ] **helper 절대 룰**: nmae 답 기다리며 사용자 응답 지연 금지. 자기 답 먼저 push.
 - [ ] helper LLM 출력은 **Discord raw push** (bot.py 가 정형 변환하지 않음, §5-3 참조)
 - [ ] helper crash 시 systemd Restart=always 로 자동 복구
