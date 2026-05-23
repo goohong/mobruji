@@ -39,13 +39,56 @@ type SessionState = {
   reset: () => void;
 };
 
+/**
+ * 익명 세션 ID 생성 (closes #424, #406 M1 결정).
+ *
+ * 우선순위:
+ *   1. `crypto.randomUUID()` — 모던 브라우저(Safari 15.4+, Chrome 92+, Firefox 95+).
+ *   2. `crypto.getRandomValues()` 기반 RFC 4122 v4 UUID — 구형 브라우저.
+ *
+ * AS-IS(폐기): `Math.random() + Date.now()` 조합은 약 41-bit entropy 로
+ * 충돌·예측 가능성이 있어 fallback 분기에서도 충분치 않았다. v4 UUID 는
+ * 122-bit entropy 를 보장한다 (RFC 4122 §4.4).
+ *
+ * 마지막 보루: `crypto` 자체가 없는 환경(Node SSR 등 일부 케이스)에서는
+ * 결정성 깨진 약한 ID라도 반환해야 호출부가 죽지 않으므로 기존 prefix 포맷을
+ * 유지한다. 실제 브라우저 런타임에서는 도달하지 않는 분기.
+ */
 function generateSessionId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
+  }
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.getRandomValues === "function"
+  ) {
+    return randomUuidV4FromBytes();
   }
   return `sess_${Date.now().toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 10)}`;
+}
+
+/**
+ * `crypto.getRandomValues()` 16 byte 로 RFC 4122 v4 UUID 문자열을 만든다.
+ *
+ * - byte 6: 상위 4비트를 `0100` (v4) 로 고정.
+ * - byte 8: 상위 2비트를 `10` (RFC 4122 variant) 로 고정.
+ * - 결과 포맷: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx` (y ∈ {8,9,a,b}).
+ */
+function randomUuidV4FromBytes(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+  return (
+    `${hex[0]}${hex[1]}${hex[2]}${hex[3]}-` +
+    `${hex[4]}${hex[5]}-` +
+    `${hex[6]}${hex[7]}-` +
+    `${hex[8]}${hex[9]}-` +
+    `${hex[10]}${hex[11]}${hex[12]}${hex[13]}${hex[14]}${hex[15]}`
+  );
 }
 
 /**
