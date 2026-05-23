@@ -115,4 +115,14 @@ describe("SongDetailContent 의 large AlbumCover", () => {
       screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
     ).toBeInTheDocument();
   });
+
+  it("img onError 시 placeholder 로 fallback (closes #499)", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/404-large.jpg" });
+    renderWithQueryClient(<SongDetailContent song={song} />);
+    const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
+    fireEvent.error(img);
+    expect(
+      screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+    ).toBeInTheDocument();
+  });
 });
