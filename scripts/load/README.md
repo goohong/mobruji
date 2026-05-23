@@ -1,6 +1,6 @@
 # 부하 테스트 (k6)
 
-추천 API p99/TPS 자동 회귀 가드. spec `docs/features/recommendation-algorithm-v1.md` §3 비기능 "p95 200ms" 임계를 통계적으로 감시한다.
+추천 API p95/p99/TPS 자동 회귀 가드. **임계 단일 진실**: [`docs/features/recommendation-p95-regression-guard.md` §5-3](../../docs/features/recommendation-p95-regression-guard.md) (PR #471, closes #273 — p95 200ms / p99 400ms 박제). v1/v2 spec §3 비기능은 본 단일 진실을 참조 (역참조 금지).
 
 ## 1) 왜 k6인가
 - QA 단발 측정(n=30~50)은 분산이 커서 회귀 감지에 실패한 이력이 있다 (rev 사이클 6, p95 80.9ms 회귀 미감지).
@@ -11,10 +11,17 @@
 
 | 지표 | 임계 | 출처 |
 |------|------|------|
-| `http_req_duration{endpoint:recommendation}` p95 | < 200 ms | spec §3 비기능 |
-| `http_req_duration{endpoint:recommendation}` p99 | < 400 ms | 본 PR 기본값 (p95 임계의 2배 휴리스틱) |
+| `http_req_duration{endpoint:recommendation}` p95 | < 200 ms | [recommendation-p95-regression-guard §5-3](../../docs/features/recommendation-p95-regression-guard.md) (단일 진실, PR #471) |
+| `http_req_duration{endpoint:recommendation}` p99 | < 400 ms | [recommendation-p95-regression-guard §5-3](../../docs/features/recommendation-p95-regression-guard.md) (단일 진실, PR #471 — p95 × 2 휴리스틱) |
 | `http_req_failed` rate | < 1 % | 일반 서비스 가용성 휴리스틱 |
 | `checks` rate | > 99 % | 응답 구조 보존 |
+
+> **부하 실측 footnote** (rev 사이클, BASE_URL=http://localhost:8080, ubuntu-22.04 runner):
+> - VUS=30 → p95 16 ms
+> - VUS=50 → p95 15 ms
+> - VUS=100 → p95 16 ms
+>
+> 단일 코어 runner 에서도 임계(200 ms) 대비 10배 여유. 회귀 감지 목적상 분산 허용. 절대 latency 는 호스트 환경에 좌우 — **회귀 감지가 목적이지 SLA 측정이 아니다** (§7 참조).
 
 워크로드:
 - VU 10, ramp-up 10s + steady 60s + ramp-down 5s (총 ~75s)
@@ -69,12 +76,16 @@ BPM_INJECTION_RATE=1.0 BPM_MIN=80 BPM_MAX=160 k6 run scripts/load/recommendation
 
 ## 5) 임계 변경 절차
 
-임계는 spec과 1:1로 묶여 있으므로 코드만 바꾸지 않는다.
+임계는 spec 단일 진실과 1:1로 묶여 있으므로 코드만 바꾸지 않는다. **단일 경로**: [`recommendation-p95-regression-guard.md` §6 baseline 갱신 절차](../../docs/features/recommendation-p95-regression-guard.md) (한 PR 에 6단계 모두 묶음).
 
-1. `docs/features/recommendation-algorithm-v1.md` §3 비기능 항목을 먼저 수정 (또는 ADR 추가).
-2. `scripts/load/recommendation.k6.js` 의 `options.thresholds` 갱신.
-3. 본 README §2 표 동기화.
-4. PR 본문에 변경 사유 + 측정 데이터(이전 p95/p99 vs 신규 목표) 첨부.
+요약 (상세는 §6 참조):
+
+1. `docs/features/recommendation-p95-regression-guard.md` §5-3 표 갱신 (단일 진실).
+2. `docs/features/recommendation-algorithm-v1.md` / `v2.md` §3 비기능은 단일 진실 cross-ref 만 유지 (직접 숫자 갱신 금지).
+3. `docs/features/observability-baseline.md` §5-4 매트릭스 + §5-6 알림 임계 (× 2) 동기화.
+4. `scripts/load/recommendation.k6.js` 의 `options.thresholds` 갱신.
+5. 본 README §2 표 동기화.
+6. PR 본문에 변경 사유 + 측정 데이터(이전 p95/p99 vs 신규 목표) 첨부.
 
 ## 6) 회귀 시 디버깅
 - `Actions` 탭 → `k6-load-results` artifact 다운로드 → `summary.json` 비교
