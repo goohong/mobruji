@@ -117,3 +117,29 @@ describe("apiFetch error mapping", () => {
     await expect(promise).rejects.not.toBeInstanceOf(ApiError);
   });
 });
+
+describe("apiFetch NEXT_PUBLIC_API_BASE_URL 분기", () => {
+  // API_BASE_URL은 module top-level에서 env 평가 → env 조작 후 dynamic import 필요.
+  const originalEnv = process.env.NEXT_PUBLIC_API_BASE_URL;
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    else process.env.NEXT_PUBLIC_API_BASE_URL = originalEnv;
+  });
+
+  it.each([
+    { label: "env 미설정 → default localhost:8080", env: undefined, expected: "http://localhost:8080/api/v1/songs", base: "http://localhost:8080" },
+    { label: "env 정상 URL → 그대로 base + path 정확 결합", env: "https://api.example.com", expected: "https://api.example.com/api/v1/songs", base: "https://api.example.com" },
+    { label: "env trailing slash → 결합 시 double slash (현재 동작 lock)", env: "https://api.example.com/", expected: "https://api.example.com//api/v1/songs", base: "https://api.example.com/" },
+  ])("$label", async ({ env, expected, base }) => {
+    vi.resetModules();
+    if (env === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    else process.env.NEXT_PUBLIC_API_BASE_URL = env;
+    const { apiFetch: scopedApiFetch, API_BASE_URL } = await import("./client");
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await scopedApiFetch("/api/v1/songs");
+
+    expect(API_BASE_URL).toBe(base);
+    expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
+  });
+});
