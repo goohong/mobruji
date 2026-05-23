@@ -20,6 +20,7 @@
 - VU 10, ramp-up 10s + steady 60s + ramp-down 5s (총 ~75s)
 - VU별 voice-range 사전 등록(setup) 후 추천 호출 loop
 - voiceRangeLow/High, mood, excludeSongIds 변주 — Audio Features 미도입 상태이므로 음역대 폭/오프셋 다양화로 일반화
+- `preferredBpm` 변주 (#274, v2 #218 tempoMatch 회귀 가드): 기본 50% 확률로 [60, 200] 임의 정수 주입, 나머지는 미주입 (mood default BPM 경로 유지). `BPM_INJECTION_RATE` / `BPM_MIN` / `BPM_MAX` 로 튜닝.
 
 ## 3) 로컬 실행
 
@@ -41,6 +42,9 @@ VUS=20 DURATION=120s k6 run scripts/load/recommendation.k6.js
 
 # 다른 호스트
 BASE_URL=http://192.168.0.10:8080 k6 run scripts/load/recommendation.k6.js
+
+# preferredBpm 변주 비율/범위 튜닝 (#274)
+BPM_INJECTION_RATE=1.0 BPM_MIN=80 BPM_MAX=160 k6 run scripts/load/recommendation.k6.js
 ```
 
 ### 결과 해석
@@ -79,6 +83,6 @@ BASE_URL=http://192.168.0.10:8080 k6 run scripts/load/recommendation.k6.js
 - 회귀 의심 시 `git bisect` + 본 스크립트 조합
 
 ## 7) 알려진 한계
-- Audio Features (BPM/key 매칭) 미도입 → 입력 다양성이 voiceRange/mood에 한정. v2에서 변주 확대.
+- Audio Features (BPM/key 매칭) 미도입 → 입력 다양성이 voiceRange/mood/preferredBpm 에 한정. key 매칭 도입 시 추가 변주 필요.
 - VU 10은 PoC 수준. 운영 트래픽 곡선 입수 후 stage profile 재조정 필요.
 - 단일 ubuntu-22.04 runner — 절대 latency는 호스트 환경에 좌우. **회귀 감지가 목적이지 SLA 측정이 아니다.**
