@@ -8,6 +8,12 @@
  *
  * 타입은 BE record DTO와 동일한 필드명을 유지한다 (camelCase, MIDI int).
  * 자세한 흐름은 docs/features/voice-range-input.md §5-2.
+ *
+ * 인증 (#883 / PR #881, ADR-0011 §28):
+ *   PR #881 이 `VoiceRangeController` 3 endpoint 에 `SessionAuthGuard` 적용 →
+ *   `X-Session-Id` 헤더가 body(POST)/path(GET·PUT) 의 sessionId 와 일치해야 200.
+ *   누락/blank/불일치 모두 401. 3 함수 모두 헤더 전달.
+ *   (feedback.ts / voiceRangeHistory.ts / recommendationHistory.ts 와 동일 패턴.)
  */
 
 import { apiFetch } from "./client";
@@ -48,6 +54,7 @@ export function createVoiceRange(
     method: "POST",
     body: request,
     signal: options.signal,
+    headers: { "X-Session-Id": request.sessionId },
   });
 }
 
@@ -57,7 +64,10 @@ export function readVoiceRange(
 ): Promise<VoiceRangeResponse> {
   return apiFetch<VoiceRangeResponse>(
     `/api/v1/voice-ranges/${encodeURIComponent(sessionId)}`,
-    { signal: options.signal },
+    {
+      signal: options.signal,
+      headers: { "X-Session-Id": sessionId },
+    },
   );
 }
 
@@ -72,6 +82,7 @@ export function updateVoiceRange(
       method: "PUT",
       body: request,
       signal: options.signal,
+      headers: { "X-Session-Id": sessionId },
     },
   );
 }
