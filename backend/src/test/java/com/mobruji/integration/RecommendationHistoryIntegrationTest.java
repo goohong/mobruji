@@ -70,7 +70,8 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E: 같은 sessionId 로 추천 2회 → history 응답에 2건이 최신순으로 노출")
     void e2e_history_returnsTwoRequestsInDescOrder() {
-        final String sessionId = "rec-history-asc";
+        // UUIDv4 (#948)
+        final String sessionId = "550e8400-e29b-41d4-a716-11eeeec01a01";
         // given: 추천 2회 (서로 다른 입력으로 별도 row 생성)
         final Integer firstRequestId = postRecommendation(sessionId, 55, 75, "UPBEAT");
         final Integer secondRequestId = postRecommendation(sessionId, 50, 72, "EMOTIONAL");
@@ -103,10 +104,12 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E: 추천 이력 없는 sessionId → 200 + 빈 배열 (인증 통과 시)")
     void e2e_history_unknownSession_returnsEmptyList() {
+        // UUIDv4 (#948) — POST 가드 없이 GET 만 호출. path 와 header 동일하면 인증 통과.
+        final String unknownSessionId = "550e8400-e29b-41d4-a716-11eeeec01a02";
         given()
-                .header("X-Session-Id", "no-such-session")
+                .header("X-Session-Id", unknownSessionId)
                 .when()
-                .get("/api/v1/sessions/{sessionId}/recommendation-history", "no-such-session")
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", unknownSessionId)
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("recommendationHistoryResponses", hasSize(0));
@@ -115,13 +118,16 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E: 다른 sessionId 의 추천은 응답에 포함되지 않는다")
     void e2e_history_isolatedBySessionId() {
-        postRecommendation("session-A", 55, 75, "UPBEAT");
-        postRecommendation("session-B", 50, 80, "EMOTIONAL");
+        // UUIDv4 (#948)
+        final String sessionA = "550e8400-e29b-41d4-a716-11eeeec01a03";
+        final String sessionB = "550e8400-e29b-41d4-a716-11eeeec01a04";
+        postRecommendation(sessionA, 55, 75, "UPBEAT");
+        postRecommendation(sessionB, 50, 80, "EMOTIONAL");
 
         given()
-                .header("X-Session-Id", "session-A")
+                .header("X-Session-Id", sessionA)
                 .when()
-                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", sessionA)
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("recommendationHistoryResponses", hasSize(1))
@@ -133,9 +139,11 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E (#238): X-Session-Id 헤더 누락 → 401")
     void e2e_history_missingHeader_returns401() {
+        // path sessionId UUIDv4 (#948)
+        final String pathSessionId = "550e8400-e29b-41d4-a716-11eeeec01a05";
         given()
                 .when()
-                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", pathSessionId)
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
@@ -143,12 +151,15 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E (#238): X-Session-Id 헤더가 path sessionId 와 다르면 → 401 (다른 세션 히스토리 노출 차단)")
     void e2e_history_mismatchedHeader_returns401() {
-        postRecommendation("session-A", 55, 75, "UPBEAT");
+        // UUIDv4 (#948)
+        final String sessionA = "550e8400-e29b-41d4-a716-11eeeec01a06";
+        final String sessionB = "550e8400-e29b-41d4-a716-11eeeec01a07";
+        postRecommendation(sessionA, 55, 75, "UPBEAT");
 
         given()
-                .header("X-Session-Id", "session-B")
+                .header("X-Session-Id", sessionB)
                 .when()
-                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", sessionA)
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
@@ -156,10 +167,12 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E (#238): X-Session-Id 헤더 blank → 401")
     void e2e_history_blankHeader_returns401() {
+        // path sessionId UUIDv4 (#948) — 헤더 blank 자체가 401 이라 path 검증까지 가지 않음
+        final String pathSessionId = "550e8400-e29b-41d4-a716-11eeeec01a08";
         given()
                 .header("X-Session-Id", "")
                 .when()
-                .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", pathSessionId)
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
@@ -167,7 +180,8 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E (#423): history 응답 JSON 에 sessionId 키가 존재하지 않는다 (echo 제거 회귀 가드)")
     void e2e_history_responseHasNoSessionIdField() {
-        final String sessionId = "rec-history-no-echo";
+        // UUIDv4 (#948)
+        final String sessionId = "550e8400-e29b-41d4-a716-11eeeec01a09";
         postRecommendation(sessionId, 55, 75, "UPBEAT");
 
         final String body = given()
@@ -186,7 +200,8 @@ class RecommendationHistoryIntegrationTest {
     @Test
     @DisplayName("E2E: POST 응답의 recommendations 와 history 의 동일 requestId 항목이 곡 ID·rank 까지 일치 (영속 라운드트립)")
     void e2e_history_persistsRoundtrip() {
-        final String sessionId = "rec-history-roundtrip";
+        // UUIDv4 (#948)
+        final String sessionId = "550e8400-e29b-41d4-a716-11eeeec01a0a";
         // POST → 응답 캡처
         final var post = given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)

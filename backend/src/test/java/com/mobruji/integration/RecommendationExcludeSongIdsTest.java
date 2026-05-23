@@ -96,7 +96,7 @@ class RecommendationExcludeSongIdsTest {
         // given: BTS Dynamite, IU Eight 두 곡을 제외
         final String payload = """
                 {
-                  "sessionId": "exclude-basic",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c01",
                   "voiceRangeLow": 50,
                   "voiceRangeHigh": 80,
                   "mood": "UPBEAT",
@@ -118,7 +118,7 @@ class RecommendationExcludeSongIdsTest {
         // 결과 내 BTS는 최대 2곡, 그리고 Spring Day는 등장하지 않아야 한다.
         final String payload = """
                 {
-                  "sessionId": "exclude-diversity",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c02",
                   "voiceRangeLow": 50,
                   "voiceRangeHigh": 80,
                   "mood": "UPBEAT",
@@ -144,7 +144,7 @@ class RecommendationExcludeSongIdsTest {
         // given
         final String payload = """
                 {
-                  "sessionId": "exclude-det",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c03",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -167,7 +167,7 @@ class RecommendationExcludeSongIdsTest {
         // 여기서는 buskerId만 제외해 결과 곡 집합이 거의 동일한 상황에서 순서 변동 여부를 확인.
         final String emptyExclude = """
                 {
-                  "sessionId": "alter-seed",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c04",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -176,7 +176,7 @@ class RecommendationExcludeSongIdsTest {
                 """;
         final String oneExclude = """
                 {
-                  "sessionId": "alter-seed",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c04",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -199,7 +199,7 @@ class RecommendationExcludeSongIdsTest {
         // given
         final String payload = """
                 {
-                  "sessionId": "persist-exclude",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c05",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -229,7 +229,7 @@ class RecommendationExcludeSongIdsTest {
         // given: excludeSongIds 필드 자체를 생략
         final String payloadOmitted = """
                 {
-                  "sessionId": "omit",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c06",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT"
@@ -237,7 +237,7 @@ class RecommendationExcludeSongIdsTest {
                 """;
         final String payloadEmpty = """
                 {
-                  "sessionId": "omit",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2c06",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",

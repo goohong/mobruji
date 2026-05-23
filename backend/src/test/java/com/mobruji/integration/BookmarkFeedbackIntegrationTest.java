@@ -61,7 +61,8 @@ class BookmarkFeedbackIntegrationTest {
     @Test
     @DisplayName("E2E: POST(toggle on) → GET 1건(Song join 포함) → POST(toggle off) → GET 빈 목록")
     void e2e_toggleBookmark_succeeds() {
-        final String sessionId = "e2e-bm-session";
+        // UUIDv4 (ADR-0011 / #948 SessionIdPatterns 강제)
+        final String sessionId = "550e8400-e29b-41d4-a716-11ee5e55b401";
         final String requestBody = """
                 {"sessionId":"%s","songId":%d}
                 """.formatted(sessionId, seededSongId);
@@ -121,7 +122,8 @@ class BookmarkFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id 헤더 누락 → 401")
         void missingHeader_returns401() {
-            final String sessionId = "e2e-bm-auth";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e55b402";
             bookmarkRepository.save(Bookmark.create(sessionId, seededSongId));
 
             given()
@@ -135,8 +137,9 @@ class BookmarkFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id 불일치 → 401")
         void mismatchedHeader_returns401() {
-            final String sessionA = "e2e-bm-A";
-            final String sessionB = "e2e-bm-B";
+            // UUIDv4 (#948)
+            final String sessionA = "550e8400-e29b-41d4-a716-11ee5e55b403";
+            final String sessionB = "550e8400-e29b-41d4-a716-11ee5e55b404";
             bookmarkRepository.save(Bookmark.create(sessionA, seededSongId));
 
             given()
@@ -150,7 +153,8 @@ class BookmarkFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id 일치하지만 북마크 0건 → 200 + 빈 배열")
         void matchedHeader_emptyResult_returns200() {
-            final String sessionId = "e2e-bm-empty";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e55b405";
 
             given()
                     .header("X-Session-Id", sessionId)
@@ -165,7 +169,8 @@ class BookmarkFeedbackIntegrationTest {
         @Test
         @DisplayName("POST /api/v1/bookmarks: 헤더 누락 → 401 (toggle 실행 차단)")
         void postBookmarks_missingHeader_returns401() {
-            final String sessionId = "e2e-bm-post-missing";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e55b406";
             final String requestBody = """
                     {"sessionId":"%s","songId":%d}
                     """.formatted(sessionId, seededSongId);
@@ -184,8 +189,9 @@ class BookmarkFeedbackIntegrationTest {
         @Test
         @DisplayName("POST /api/v1/bookmarks: body sessionId ≠ X-Session-Id 헤더 → 401")
         void postBookmarks_mismatchedHeader_returns401() {
-            final String bodySessionId = "e2e-bm-post-A";
-            final String headerSessionId = "e2e-bm-post-B";
+            // UUIDv4 (#948)
+            final String bodySessionId = "550e8400-e29b-41d4-a716-11ee5e55b407";
+            final String headerSessionId = "550e8400-e29b-41d4-a716-11ee5e55b408";
             final String requestBody = """
                     {"sessionId":"%s","songId":%d}
                     """.formatted(bodySessionId, seededSongId);

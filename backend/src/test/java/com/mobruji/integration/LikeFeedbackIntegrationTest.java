@@ -66,7 +66,8 @@ class LikeFeedbackIntegrationTest {
     @Test
     @DisplayName("E2E: POST(toggle on) → GET 1건(Song join 포함) → POST(toggle off) → GET 빈 목록")
     void e2e_toggleLike_succeeds() {
-        final String sessionId = "e2e-like-session";
+        // sessionId 는 UUIDv4 (ADR-0011 / #948 SessionIdPatterns 강제) — 마지막 12자 끝부분에 케이스 식별자 hex 부착
+        final String sessionId = "550e8400-e29b-41d4-a716-11ee5e55101a";
         final String requestBody = """
                 {"sessionId":"%s","songId":%d}
                 """.formatted(sessionId, seededSongId);
@@ -129,12 +130,14 @@ class LikeFeedbackIntegrationTest {
     @Test
     @DisplayName("E2E: 존재하지 않는 songId로 POST → 404")
     void e2e_unknownSongId_returns404() {
+        // UUIDv4 (#948)
+        final String sessionId404 = "550e8400-e29b-41d4-a716-11ee5e554040";
         given()
-                .header("X-Session-Id", "e2e-like-404")
+                .header("X-Session-Id", sessionId404)
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body("""
-                        {"sessionId":"e2e-like-404","songId":999999}
-                        """)
+                        {"sessionId":"%s","songId":999999}
+                        """.formatted(sessionId404))
                 .when()
                 .post("/api/v1/likes")
                 .then()
@@ -151,7 +154,8 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id 헤더 누락 → 401, sessionId 원문 미노출")
         void missingHeader_returns401_withoutLeakingSessionId() {
-            final String sessionId = "e2e-auth-session-A";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a01";
             likeRepository.save(Like.create(sessionId, seededSongId));
 
             given()
@@ -166,8 +170,9 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id 헤더와 path sessionId 불일치 → 401")
         void mismatchedHeader_returns401() {
-            final String sessionA = "e2e-auth-A";
-            final String sessionB = "e2e-auth-B";
+            // UUIDv4 (#948)
+            final String sessionA = "550e8400-e29b-41d4-a716-11ee5e554a02";
+            final String sessionB = "550e8400-e29b-41d4-a716-11ee5e554a03";
             likeRepository.save(Like.create(sessionA, seededSongId));
 
             given()
@@ -181,7 +186,8 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id 일치하지만 좋아요 0건 → 200 + 빈 배열 (404 아님)")
         void matchedHeader_emptyResult_returns200() {
-            final String sessionId = "e2e-auth-empty";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a04";
 
             given()
                     .header("X-Session-Id", sessionId)
@@ -198,7 +204,8 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("X-Session-Id blank → 401")
         void blankHeader_returns401() {
-            final String sessionId = "e2e-auth-blank";
+            // UUIDv4 (#948) — 헤더는 blank, path 는 valid UUIDv4
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a05";
 
             given()
                     .header("X-Session-Id", "   ")
@@ -211,7 +218,8 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("POST /api/v1/likes: 헤더 누락 → 401 (toggle 실행 차단)")
         void postLikes_missingHeader_returns401() {
-            final String sessionId = "e2e-post-auth-missing";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a06";
             final String requestBody = """
                     {"sessionId":"%s","songId":%d}
                     """.formatted(sessionId, seededSongId);
@@ -231,8 +239,9 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("POST /api/v1/likes: body sessionId ≠ X-Session-Id 헤더 → 401")
         void postLikes_mismatchedHeader_returns401() {
-            final String bodySessionId = "e2e-post-auth-A";
-            final String headerSessionId = "e2e-post-auth-B";
+            // UUIDv4 (#948)
+            final String bodySessionId = "550e8400-e29b-41d4-a716-11ee5e554a07";
+            final String headerSessionId = "550e8400-e29b-41d4-a716-11ee5e554a08";
             final String requestBody = """
                     {"sessionId":"%s","songId":%d}
                     """.formatted(bodySessionId, seededSongId);
@@ -262,7 +271,8 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("page=0&size=2 → 첫 페이지 2건, hasNext=true; page=1&size=2 → 1건, hasNext=false")
         void pageSlicing_succeeds() {
-            final String sessionId = "e2e-page";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a09";
 
             // 3건의 좋아요를 시간 차로 등록 (createdAt DESC 정렬 검증)
             final Long songA = songRepository.save(Song.builder()
@@ -311,11 +321,13 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("size > 100 → 400")
         void sizeOverMax_returns400() {
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a0a";
             given()
-                    .header("X-Session-Id", "e2e-page-cap")
+                    .header("X-Session-Id", sessionId)
                     .queryParam("size", 101)
                     .when()
-                    .get("/api/v1/sessions/e2e-page-cap/likes")
+                    .get("/api/v1/sessions/" + sessionId + "/likes")
                     .then()
                     .statusCode(HttpStatus.BAD_REQUEST.value());
         }
@@ -326,7 +338,8 @@ class LikeFeedbackIntegrationTest {
         @Test
         @DisplayName("좋아요 대상 곡이 삭제된 경우 → 응답 배열에서 제외(빈 응답 + totalCount=1)")
         void orphanSongId_isFilteredFromResponse() {
-            final String sessionId = "e2e-orphan";
+            // UUIDv4 (#948)
+            final String sessionId = "550e8400-e29b-41d4-a716-11ee5e554a0b";
             final Long orphanSongId = songRepository.save(Song.builder()
                     .title("삭제될 곡").artist("가수").keyOriginal(MusicalKey.C_MAJOR)
                     .metadataSource(MetadataSource.MANUAL_SEED).build()).getId();

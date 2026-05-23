@@ -59,9 +59,10 @@ class RecommendationIntegrationTest {
     @Test
     @DisplayName("E2E: 추천 요청 → 결과 N개 + GET 재조회 일치")
     void e2e_createThenRead() {
+        // sessionId 는 UUIDv4 (#948 SessionIdPatterns 강제)
         final String createBody = """
                 {
-                  "sessionId": "rec-e2e-1",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e01",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT"
@@ -105,7 +106,7 @@ class RecommendationIntegrationTest {
         // given: preferredBpm 입력. 시드 곡 BPM은 buildSong 에서 120 (UPBEAT default와 비슷한 영역).
         final String createBody = """
                 {
-                  "sessionId": "rec-e2e-tempo",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e02",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -143,7 +144,7 @@ class RecommendationIntegrationTest {
         // BTS 2곡, IU 2곡 시드. 모두 점수 높게 잡혀도 결과 내 BTS 곡은 최대 2 (cap 2)
         final String createBody = """
                 {
-                  "sessionId": "rec-e2e-2",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e03",
                   "voiceRangeLow": 50,
                   "voiceRangeHigh": 80,
                   "mood": "EMOTIONAL"
