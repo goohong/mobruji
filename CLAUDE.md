@@ -184,6 +184,26 @@ PR을 만든 직후 다음을 떠올려라. 떠올리지 않았다면 PR 생성�
 - 설계 결정이 필요하면 `docs/ai-harness/06-domain-model.md §7 오픈 이슈`에 추가.
 - 문서와 코드가 충돌하면 **문서를 먼저 갱신**하고 구현한다 (01-harness-spec §5).
 
+## 11-pre) helper 응답 절대 룰 (Discord 양방향)
+helper 또는 maestro(mmae/nmae)가 Discord에서 **사용자 메시지를 받은 매 turn 의 첫 액션** 은 무조건 다음 호출이다:
+```bash
+bash /home/mobruji/.mobruji/discord-reply.sh "답변 가능합니다. 잠시만 기다려주세요."
+```
+또는 상황별 ack 문구 (예: "nmae가 X 작업 중이라 ~분 걸립니다"). bot.py auto-ack 는 이슈 #807 단순화에서 제거됐기 때문에, 사용자 입장에서 "받았다" 신호 없이 깜깜이가 된다.
+
+**금지:** 분석/조사/tool call 을 먼저 하고 ack 를 뒤로 미루는 행위. 사용자가 "답변 안왔어" 라고 한 번이라도 적었다면 룰을 어긴 것이다.
+
+**문구 3종 (확정):**
+- 즉답 가능 → "답변 가능합니다. 잠시만 기다려주세요."
+- 대기 필요 → "nmae가 X 작업 중이라 ~분 걸립니다"
+- nmae busy + 재배치 → "nmae가 X 작업 중입니다. 중단시키고 작업 전달할까요?"
+
+**ack ↔ 본 답변 분리 룰:**
+- ack 메시지는 위 3종 중 하나 **한 줄만**. 부가 설명/조사 결과/사과/계획 일체 금지.
+- 본 답변 push 시 첫 줄에 `━━━━━━━━━━━━━━━` 구분선 + 빈 줄. Discord 가 같은 author 연속 메시지를 시각적으로 묶더라도 분리되게.
+
+채널은 **MOBRUJI_CHANNEL_ID** (#모부르지) 전용. NOTIFY_CHANNEL_ID 는 digest cron 만 사용.
+
 ## 11) context 사용량 자기 emit (maestro 자율 회복용)
 maestro 본진(tmux `mobruji:0.0`)은 매 turn 응답 **마지막 줄**에 자기 context 사용률을 marker 로 emit 한다. bot.py 의 `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 이 marker 를 polling 해서 95% 도달 시 자율 정리 사이클을 트리거한다.
 

@@ -9,9 +9,10 @@
 #   - 운영: ~/.mobruji/discord-reply.sh (helper PATH 진입점). 심볼릭 링크 또는 복사.
 #
 # 동작:
-#   - .env 에서 DISCORD_BOT_TOKEN 과 채널 id (NOTIFY_CHANNEL_ID 우선, 없으면
-#     MOBRUJI_CHANNEL_ID) 를 읽어 Discord REST `POST /channels/{id}/messages`
-#     호출. bot.py 데몬과 동일한 .env 파일을 공유합니다.
+#   - .env 에서 DISCORD_BOT_TOKEN 과 채널 id (MOBRUJI_CHANNEL_ID 우선 — 사용자
+#     응답은 #모부르지 채널, NOTIFY_CHANNEL_ID 는 digest cron 전용 fallback) 를
+#     읽어 Discord REST `POST /channels/{id}/messages` 호출. bot.py 데몬과
+#     동일한 .env 파일을 공유합니다.
 #   - 메시지 본문은 jq 로 JSON-escape. 멀티라인 / 따옴표 안전.
 #
 # 종속:
@@ -33,10 +34,10 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-# NOTIFY_CHANNEL_ID 우선, 없으면 MOBRUJI_CHANNEL_ID fallback.
-CHANNEL=$(grep -E '^NOTIFY_CHANNEL_ID=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)
+# MOBRUJI_CHANNEL_ID 우선 (helper raw 응답 = 메인 #모부르지), NOTIFY_CHANNEL_ID 는 digest 전용 fallback.
+CHANNEL=$(grep -E '^MOBRUJI_CHANNEL_ID=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)
 if [[ -z "$CHANNEL" ]]; then
-  CHANNEL=$(grep -E '^MOBRUJI_CHANNEL_ID=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)
+  CHANNEL=$(grep -E '^NOTIFY_CHANNEL_ID=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)
 fi
 if [[ -z "$CHANNEL" ]]; then
   echo "discord-reply.sh: NOTIFY_CHANNEL_ID / MOBRUJI_CHANNEL_ID 둘 다 비어 있음" >&2
