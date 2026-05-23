@@ -115,6 +115,34 @@ describe("SongDetailModal", () => {
     await expectNoA11yViolations(container);
   });
 
+  // Escape 회귀 가드 (closes #509): 닫힘(unmount) 상태에서 no-op + 본문 focusable 케이스 + 비-ESC 키 분기.
+  describe("Escape 키 회귀 가드 (closes #509)", () => {
+    it("open=false 면 ESC 를 눌러도 onClose 가 호출되지 않는다", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SongDetailModal open={false} onClose={onClose} titleLabel="테스트 곡">
+          <p>본문</p>
+        </SongDetailModal>,
+      );
+      await user.keyboard("{Escape}");
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("ESC 이외 키('a')는 onClose 를 호출하지 않는다", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SongDetailModal open onClose={onClose} titleLabel="테스트 곡">
+          <p>본문</p>
+        </SongDetailModal>,
+      );
+      screen.getByRole("button", { name: /상세 닫기/ }).focus();
+      await user.keyboard("a");
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
   /**
    * focus trap + 포커스 복원 회귀 가드 (closes #438).
    *
