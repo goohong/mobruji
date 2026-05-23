@@ -46,10 +46,14 @@ public class LikeController {
      * 좋아요 토글. 같은 (sessionId, songId)로 두 번째 호출하면 liked=false(취소)를 반환한다.
      * spec recommendation-history-and-feedback.md §5-2 — POST는 멱등적 toggle 동작.
      *
-     * <p>본 POST 엔드포인트는 본 PR(F) 범위 외 — body sessionId 기반 SessionAuthGuard 적용은 별도 후속.
+     * <p>인증: §5-2-1 / ADR-0011 — body 의 {@code sessionId} 와 {@code X-Session-Id} 헤더가 일치해야 한다
+     * (누락/blank/불일치 모두 401). #258 후속 적용.
      */
     @PostMapping("/api/v1/likes")
-    public LikeToggleResponse toggle(@Valid @RequestBody final LikeToggleRequest likeToggleRequest) {
+    public LikeToggleResponse toggle(
+            @Valid @RequestBody final LikeToggleRequest likeToggleRequest,
+            @RequestHeader(value = "X-Session-Id", required = false) final String presentedSessionId) {
+        sessionAuthGuard.verify(likeToggleRequest.sessionId(), presentedSessionId);
         final ToggleResult toggleResult = likeService.toggle(
                 likeToggleRequest.sessionId(), likeToggleRequest.songId());
         return LikeToggleResponse.from(toggleResult);

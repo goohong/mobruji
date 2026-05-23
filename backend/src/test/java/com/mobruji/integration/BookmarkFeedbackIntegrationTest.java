@@ -67,6 +67,7 @@ class BookmarkFeedbackIntegrationTest {
                 """.formatted(sessionId, seededSongId);
 
         given()
+                .header("X-Session-Id", sessionId)
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body(requestBody)
                 .when()
@@ -94,6 +95,7 @@ class BookmarkFeedbackIntegrationTest {
                 .body("hasNext", equalTo(false));
 
         given()
+                .header("X-Session-Id", sessionId)
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body(requestBody)
                 .when()
@@ -158,6 +160,48 @@ class BookmarkFeedbackIntegrationTest {
                     .statusCode(HttpStatus.OK.value())
                     .body("responses", hasSize(0))
                     .body("totalCount", equalTo(0));
+        }
+
+        @Test
+        @DisplayName("POST /api/v1/bookmarks: 헤더 누락 → 401 (toggle 실행 차단)")
+        void postBookmarks_missingHeader_returns401() {
+            final String sessionId = "e2e-bm-post-missing";
+            final String requestBody = """
+                    {"sessionId":"%s","songId":%d}
+                    """.formatted(sessionId, seededSongId);
+
+            given()
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .body(requestBody)
+                    .when()
+                    .post("/api/v1/bookmarks")
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    0, bookmarkRepository.countBySessionId(sessionId));
+        }
+
+        @Test
+        @DisplayName("POST /api/v1/bookmarks: body sessionId ≠ X-Session-Id 헤더 → 401")
+        void postBookmarks_mismatchedHeader_returns401() {
+            final String bodySessionId = "e2e-bm-post-A";
+            final String headerSessionId = "e2e-bm-post-B";
+            final String requestBody = """
+                    {"sessionId":"%s","songId":%d}
+                    """.formatted(bodySessionId, seededSongId);
+
+            given()
+                    .header("X-Session-Id", headerSessionId)
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .body(requestBody)
+                    .when()
+                    .post("/api/v1/bookmarks")
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    0, bookmarkRepository.countBySessionId(bodySessionId));
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    0, bookmarkRepository.countBySessionId(headerSessionId));
         }
     }
 }
