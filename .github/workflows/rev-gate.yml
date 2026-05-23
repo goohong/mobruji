@@ -1,0 +1,107 @@
+name: Rev Gate
+
+# rev sub-agent 3단계 e2e (docs/features/rev-e2e-3-stages.md) PR 머지 게이트.
+#
+# rev sub-agent 가 단계 1 (PR 머지 전) 절차로:
+#   - `reviewed:claude` 라벨 부착
+#   - PR 코멘트로 `✅ rev e2e PR pass` 또는 `📝 rev no-op pass` 남김
+# 두 가지를 모두 만족해야 본 check 가 통과한다. 이 check 를
+# `required_status_checks` 로 등록하면 라벨 누락 / 코멘트 누락 PR 은
+# Squash merge 가 막힌다 (admin override 또는 whitelist 라벨 필요).
+#
+# Whitelist 라벨 (rev 게이트 우회):
+#   - `needs-human-review` — 보호 영역 (`.github/workflows/**` 등) 사용자 승인 영역
+#   - `type:release` — release PR (develop → main)
+#
+# Escape hatch 의도:
+#   helper 자율 사이클이 rev 게이트 때문에 marble (deadlock) 나는 것 방지.
+#   사용자가 명시적으로 human review 라벨 박은 PR + release PR 은 통과.
+#
+# 본 워크플로우 자체는 `.github/workflows/**` 보호 영역이므로 신설 PR 은
+# `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+#
+# 관련:
+#   - docs/features/rev-e2e-3-stages.md §3-1
+#   - 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]
+#   - 이슈 #945
+
+on:
+  pull_request:
+    types: [opened, reopened, labeled, unlabeled, synchronize, ready_for_review]
+    branches: [develop, main]
+
+permissions:
+  pull-requests: read
+  issues: read
+  contents: read
+
+jobs:
+  rev-gate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.setFailed('No pull_request payload — workflow trigger misconfigured.');
+              return;
+            }
+
+            const labels = pr.labels.map(l => l.name);
+            core.info(`PR #${pr.number} labels: ${labels.join(', ') || '(none)'}`);
+
+            // 1) Whitelist — rev 게이트 우회 허용 라벨
+            const whitelist = ['needs-human-review', 'type:release'];
+            const matchedWhitelist = whitelist.filter(w => labels.includes(w));
+            if (matchedWhitelist.length > 0) {
+              core.info(`Whitelist label(s) present (${matchedWhitelist.join(', ')}) — rev gate skipped.`);
+              return;
+            }
+
+            // 2) reviewed:claude 라벨 필수
+            if (!labels.includes('reviewed:claude')) {
+              core.setFailed(
+                `PR #${pr.number} 는 'reviewed:claude' 라벨이 없습니다. ` +
+                `rev sub-agent 의 단계 1 (PR 머지 전) 검사 후 라벨 부여 필요. ` +
+                `Whitelist (needs-human-review / type:release) 라벨도 없음. ` +
+                `상세: docs/features/rev-e2e-3-stages.md §3-1`
+              );
+              return;
+            }
+
+            // 3) type:fix / type:feat + scope:web|backend 인 경우 rev 코멘트 검증
+            const isFixOrFeat = labels.includes('type:fix') || labels.includes('type:feat');
+            const isCodeScope = labels.includes('scope:web') || labels.includes('scope:backend');
+
+            if (isFixOrFeat && isCodeScope) {
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100,
+              });
+              const bodies = comments.data.map(c => c.body || '').join('\n');
+
+              // rev 단계 1 통과 코멘트 패턴:
+              //   "✅ rev e2e PR pass" — e2e 실제 수행
+              //   "📝 rev no-op pass"  — 변경 사소함, e2e 불요
+              const passPattern = /(✅\s*rev e2e PR pass|📝\s*rev no-op pass)/;
+              if (!passPattern.test(bodies)) {
+                core.setFailed(
+                  `PR #${pr.number} 는 type:fix/feat + scope:web/backend 인데 ` +
+                  `rev 단계 1 통과 코멘트 ('✅ rev e2e PR pass' 또는 '📝 rev no-op pass') 가 없습니다. ` +
+                  `rev sub-agent 가 PR diff 검사 + e2e 실행 후 코멘트 남기지 않으면 머지 차단. ` +
+                  `상세: docs/features/rev-e2e-3-stages.md §3-1`
+                );
+                return;
+              }
+              core.info('rev 단계 1 통과 코멘트 확인됨.');
+            } else {
+              core.info(
+                `type:fix/feat + scope:web/backend 조합 아님 ` +
+                `(type:fix|feat=${isFixOrFeat}, scope:web|backend=${isCodeScope}) — 코멘트 검증 skip.`
+              );
+            }
+
+            core.info('rev gate passed.');
