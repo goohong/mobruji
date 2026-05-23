@@ -1,7 +1,8 @@
 name: Feature Spec Status Check
 
 # docs/features/*.md 변경 시 frontmatter status 필드가 valid한지 검증.
-# 유효 값: draft, approved, implementing, shipped, deprecated.
+# 유효 값: draft, approved, implementing, shipped, deprecated, blocked.
+# (blocked = 외부 의존성/데이터 부재로 진행 불가, draft 와 의미적으로 구분 — #955)
 
 on:
   pull_request:
@@ -23,7 +24,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const validStatuses = ['draft','approved','implementing','shipped','deprecated'];
+            const validStatuses = ['draft','approved','implementing','shipped','deprecated','blocked'];
             const dir = 'docs/features';
 
             if (!fs.existsSync(dir)) {
