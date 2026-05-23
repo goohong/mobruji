@@ -1,11 +1,11 @@
 ---
 feature: scoreBreakdown zero-span (single-note) 정책
 slug: score-breakdown-zero-span
-status: draft
+status: blocked-by-data
 owner: @mobruji-maestro
 scope: recommendation
-related_issues: [756]
-related_prs: [748]
+related_issues: [756, 765]
+related_prs: [748, 762]
 last_reviewed: 2026-05-23
 ---
 
@@ -93,14 +93,41 @@ S1이 핵심 funnel. S2/S3은 현행과 같다.
   - `±1 semitone`은 musically arbitrary — `±2` 또는 `±3`도 후보지만 ±1이 가장 보수적.
   - 테스트 케이스 증가 (3종 추가).
 
-### 5-4) 권장: **옵션 C (±1 semitone fuzzy)**
+### 5-4) ~~권장: 옵션 C (±1 semitone fuzzy)~~ → **잠정 결정: 옵션 A 유지 (결정 보류)**
+
+**최초 권장 (PR #762)**: 옵션 C (±1 semitone fuzzy).
+
+**잠정 결정 (2026-05-23, rev #765 후속)**: **옵션 A 유지** + 데이터 수집 후 재평가.
+
+**보류 사유** (rev #765 권장 인용):
+1. **결정 트리거 데이터 부재**: §5-1 "단일음 곡 비율 < 5% 가정"은 DB seed 30곡 / 큐레이션 100곡 어디서도 실측되지 않음. 가정 기반 알고리즘 변경은 위험.
+2. **±1 semitone tolerance가 musically arbitrary**: ±2 (vibrato 가능 폭) 또는 ±3 (whole tone) 같은 근거 있는 대안과 비교 미수행. 권장값 선택 근거가 "가장 보수적"뿐.
+3. **옵션 C over-match 위험 미평가**: 데이터 오류성 zero-span (예: `lowMidi=highMidi=60` 잘못 입력) 곡이 사용자 음역 (C3-G4 등)에 들어가면 ±1 확장 후 over-recommend. 옵션 A는 이 경우 안전(0 dropout).
 
 **근거**:
-1. S1 funnel 회복(옵션 A 단점 해소)하면서 옵션 B의 over-recommend 위험(데이터 오류) 회피.
-2. fuzzy 범위(±1)는 가장 보수적 선택 — 차후 데이터 누적되면 ADR로 조정 가능.
-3. 코드 변경 분량 < 10 lines (FE/BE 합산).
+1. 옵션 A는 현 상태 유지 → 회귀 위험 zero, S2/S3 시나리오 안전.
+2. S1 funnel 손실은 단일음 곡 비율 < 5% 가정이 참이면 무시 가능. 가정 검증 우선.
+3. status `draft` → `blocked-by-data`로 변경. 데이터 trigger 충족 시 ADR로 재오픈.
 
-### 5-5) 영향 코드
+### 5-5) 재평가 plan
+
+**데이터 수집** (별도 ADR 신설 예정 — 본 PR scope 외):
+- DB 전 곡 대상 `range_low == range_high` (zero-span) 곡 비율 측정 metric 추가.
+- 큐레이션 100곡 시드 완료 후 1회 측정, 이후 분기별 측정.
+- 측정 위치 후보: `backend` admin endpoint 또는 startup log 1회 출력.
+
+**재평가 trigger**:
+| 조건 | 액션 |
+|---|---|
+| 단일음 곡이 전체 곡의 **5% 미만** | 옵션 A 영구 lock-in. 본 spec status `accepted-A`로 전환. |
+| 단일음 곡이 전체 곡의 **5% 이상 ~ 15% 미만** | 옵션 C (±1) vs 옵션 B 재검토. A/B test 또는 휴리스틱 합의 후 결정. |
+| 단일음 곡이 전체 곡의 **15% 이상** | 옵션 B 또는 옵션 C (±2 ~ ±3) 적극 검토. S1 funnel 손실이 무시 불가. |
+
+**재평가 trigger 보조 조건**:
+- 사용자 피드백에서 단일음 곡 추천 누락 불만 N건 이상 누적.
+- 큐레이션 단계에서 단일음 응원가/챈트 의도적 포함 결정.
+
+### 5-6) 영향 코드 (옵션 C 채택 시 — 참고용, 현재 미적용)
 
 | 영역 | 파일 | 변경 |
 |---|---|---|
@@ -112,12 +139,14 @@ S1이 핵심 funnel. S2/S3은 현행과 같다.
 
 ## 6) 작업 분할 (예상 PR 리스트)
 
-- [ ] PR 1 (본 PR): spec docs 작성 (이 파일).
-- [ ] PR 2 (be): `RecommendationScorer.voiceRangeFit` zero-span fuzzy 적용 + test. scope `recommendation`.
-- [ ] PR 3 (fe): `scoreBreakdown.ts` zero-span fuzzy 적용 + test 갱신 (#756 lock-in 풀기). scope `web`.
-- [ ] PR 4 (docs): `recommendation-algorithm-v1.md` §3 zero-span 정책 한 줄 추가 + 본 spec 링크.
+**상태**: 결정 보류 (`blocked-by-data`). 아래 PR 2/3은 데이터 trigger 충족 시까지 **착수 금지**.
 
-PR 2/3은 독립 머지 가능 (FE는 BE-provided breakdown 우선, 추정 fallback만 영향).
+- [x] PR 1 (#762): spec docs 작성 (이 파일).
+- [x] PR (이번): 결정 보류 + 재평가 plan 추가 (#765).
+- [ ] PR (선결, 신규 ADR): 단일음 곡 비율 측정 metric 추가. scope `recommendation` 또는 `infra`. 본 spec 결정 trigger 데이터 제공.
+- [ ] ~~PR 2 (be): `RecommendationScorer.voiceRangeFit` zero-span fuzzy 적용 + test.~~ **보류**.
+- [ ] ~~PR 3 (fe): `scoreBreakdown.ts` zero-span fuzzy 적용 + test 갱신 (#756 lock-in 풀기).~~ **보류**.
+- [ ] PR 4 (docs, 옵션 A lock-in 확정 시): `recommendation-algorithm-v1.md` §3 zero-span 정책 한 줄 추가 (옵션 A 명시) + 본 spec 링크.
 
 ## 7) 테스트 전략
 
@@ -136,4 +165,5 @@ PR 2/3은 독립 머지 가능 (FE는 BE-provided breakdown 우선, 추정 fallb
 
 ## 9) 결정 로그
 
-- 2026-05-23: 초안 작성 (status=draft). 권장 옵션 C(±1 semitone fuzzy). rev v6 audit(#756) 트리거.
+- 2026-05-23: 초안 작성 (status=draft). 권장 옵션 C(±1 semitone fuzzy). rev v6 audit(#756) 트리거. PR #762 머지.
+- 2026-05-23: rev #765 후속. status `draft` → `blocked-by-data`. **잠정 결정: 옵션 A 유지** (회귀 위험 zero, S3 안전). 옵션 C lock-in은 단일음 곡 비율 데이터 수집 후 재평가. 재평가 trigger §5-5 참조. Q1 (±1 vs ±2 vs ±3 musically arbitrary), §5-1 비율 < 5% 가정 미검증, 옵션 C over-match 위험 (데이터 오류성 zero-span)이 보류 사유.
