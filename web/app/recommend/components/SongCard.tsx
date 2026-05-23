@@ -719,8 +719,10 @@ function difficultyTone(difficulty: Difficulty): string {
 /**
  * 응답에 `difficulty`가 있으면 그것을, 없고 `lowMidi`/`highMidi`가 있으면
  * client-side 계산값을, 둘 다 없으면 null을 돌려준다.
+ *
+ * 회귀 가드(이슈 #512): 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
  */
-function resolveDifficulty(
+export function resolveDifficulty(
   song: RecommendedSongResponse["song"],
 ): Difficulty | null {
   if (song.difficulty) {
@@ -732,7 +734,14 @@ function resolveDifficulty(
   return null;
 }
 
-function formatMusicalKey(key: string): string {
+/**
+ * BE `MusicalKey` enum 값(`C_SHARP_MAJOR` 등)을 UI 표시용 문자열로 변환한다.
+ * `_SHARP` → `#`, 나머지 `_` → 공백, 단어 첫 글자만 대문자.
+ * 특수값 `UNKNOWN`은 한국식 표기 대신 `Unknown` 으로 고정.
+ *
+ * 회귀 가드(이슈 #512): 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
+ */
+export function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
     return "Unknown";
   }
