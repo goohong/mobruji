@@ -13,21 +13,30 @@ import userEvent from "@testing-library/user-event";
 import { ThemeToggle } from "./ThemeToggle";
 import { THEME_DARK_CLASS, THEME_STORAGE_KEY } from "@/lib/theme";
 
-function setOsPrefersDark(prefers: boolean): void {
+/** matchMedia mock — change listener 캡처해 OS prefers 변화를 수동 fire 가능. */
+function setOsPrefersDark(prefers: boolean): (next: boolean) => void {
+  const listeners = new Set<(ev: MediaQueryListEvent) => void>();
+  let current = prefers;
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: query.includes("dark") ? prefers : false,
+      get matches() {
+        return query.includes("dark") ? current : false;
+      },
       media: query,
       onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: (_: string, cb: (ev: MediaQueryListEvent) => void) => listeners.add(cb),
+      removeEventListener: (_: string, cb: (ev: MediaQueryListEvent) => void) => listeners.delete(cb),
       addListener: vi.fn(),
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     })),
   });
+  return (next: boolean): void => {
+    current = next;
+    listeners.forEach((cb) => cb({ matches: next } as MediaQueryListEvent));
+  };
 }
 
 beforeEach(() => {
@@ -139,5 +148,28 @@ describe("ThemeToggle", () => {
     button.focus();
     await user.keyboard(" ");
     expect(button.getAttribute("data-theme-mode")).toBe("light");
+  });
+
+  it("system 모드 + OS dark 면 <html.dark> 가 적용된다", () => {
+    setOsPrefersDark(true);
+    render(<ThemeToggle />);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
+  });
+
+  it("system 모드 중 OS dark→light 변경이 즉시 반영된다", () => {
+    const fireOsChange = setOsPrefersDark(true);
+    render(<ThemeToggle />);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
+    fireOsChange(false);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(false);
+  });
+
+  it("explicit dark 모드면 OS prefers 변경을 무시한다", () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    const fireOsChange = setOsPrefersDark(true);
+    render(<ThemeToggle />);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
+    fireOsChange(false);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
   });
 });
