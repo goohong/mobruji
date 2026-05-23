@@ -36,7 +36,11 @@ from dotenv import load_dotenv
 
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
+INBOX_FILE_MODE: Final[int] = 0o600
 MAX_TEXT_PREVIEW_LEN: Final[int] = 80
+# inbox.jsonl 에 저장되는 사용자 메시지 본문 최대 길이 (#909 F-1).
+# PII/민감 본문이 평문으로 디스크에 남는 위험을 완화 — 백업/디버깅 용도 한정.
+INBOX_TEXT_MAX_LEN: Final[int] = 500
 DEDUP_TTL_SECONDS: Final[int] = 24 * 60 * 60  # 24h
 DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 
@@ -215,18 +219,56 @@ def parse_allowed_user_ids(raw: str) -> set[int]:
     return ids
 
 
-def truncate_for_log(text: str) -> str:
-    """로그에 메시지를 남길 때 너무 길지 않도록 자릅니다."""
-    if len(text) <= MAX_TEXT_PREVIEW_LEN:
+def truncate_for_log(text: str, max_len: int = MAX_TEXT_PREVIEW_LEN) -> str:
+    """로그/inbox 에 메시지를 남길 때 너무 길지 않도록 자릅니다.
+
+    Args:
+        text: 원문.
+        max_len: 자르기 기준 길이. 기본값은 로그 미리보기용 :data:`MAX_TEXT_PREVIEW_LEN`.
+            inbox.jsonl append 시 (#909 F-1) :data:`INBOX_TEXT_MAX_LEN` 를 명시적으로
+            전달하여 더 긴 본문도 capped 형태로 저장합니다.
+    """
+    if len(text) <= max_len:
         return text
-    return text[:MAX_TEXT_PREVIEW_LEN] + "…"
+    return text[:max_len] + "…"
+
+
+def _ensure_inbox_secure() -> None:
+    """inbox.jsonl 디렉토리 보장 + 0o600 권한 강제 (#909 F-1).
+
+    - 부모 디렉토리가 없으면 생성.
+    - 파일이 없으면 0o600 mode 로 touch.
+    - 파일이 이미 있더라도 매 호출마다 chmod 600 으로 보정 (운영 중 권한 수정 방어).
+
+    chmod / touch 실패는 warning 만 남기고 raise 하지 않습니다 — 백업/디버깅용
+    파일이라 본 메시지 처리(send-keys) 흐름을 막아서는 안 됩니다.
+    """
+    try:
+        INBOX_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if not INBOX_PATH.exists():
+            INBOX_PATH.touch(mode=INBOX_FILE_MODE, exist_ok=True)
+        os.chmod(INBOX_PATH, INBOX_FILE_MODE)
+    except OSError as exc:
+        logger.warning("inbox.jsonl 보안 준비 실패: %s", exc)
 
 
 def append_inbox(payload: dict[str, str]) -> None:
-    """inbox.jsonl 에 한 줄 JSON 으로 append 합니다 (백업/디버깅용)."""
+    """inbox.jsonl 에 한 줄 JSON 으로 append 합니다 (백업/디버깅용).
+
+    #909 F-1: PII 평문 노출 완화.
+      - 매 호출마다 부모 디렉토리 + 0o600 권한 보장.
+      - ``text`` 필드를 :data:`INBOX_TEXT_MAX_LEN` (500자) 로 truncate 저장.
+        나머지 필드(author/ts/message_id 등) 는 ID 류라 그대로 보존.
+    """
+    _ensure_inbox_secure()
+    truncated_payload = dict(payload)
+    if isinstance(payload.get("text"), str):
+        truncated_payload["text"] = truncate_for_log(
+            payload["text"], max_len=INBOX_TEXT_MAX_LEN
+        )
     try:
         with INBOX_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(truncated_payload, ensure_ascii=False) + "\n")
     except OSError as exc:
         logger.warning("inbox.jsonl write 실패: %s", exc)
 
@@ -322,6 +364,25 @@ class DedupLedger:
                 (message_id, ts),
             )
             self._conn.commit()
+
+    def claim(self, message_id: str, now_epoch: int | None = None) -> bool:
+        """is_processed + mark_processed 를 단일 SQLite 트랜잭션으로 원자화 (#909 F-3).
+
+        Discord Gateway reconnect / on_message 콜백 동시성 race 방지:
+        ``INSERT OR IGNORE`` 후 ``rowcount`` 검사로 신규 claim 여부 판단.
+
+        Returns:
+            True  — 신규 claim 성공 (호출자가 처리 진행).
+            False — 이미 처리된 message_id (호출자가 즉시 return).
+        """
+        ts = int(time.time()) if now_epoch is None else now_epoch
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT OR IGNORE INTO processed_messages (message_id, processed_at) VALUES (?, ?)",
+                (message_id, ts),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def gc(self, ttl_seconds: int = DEDUP_TTL_SECONDS) -> int:
         cutoff = int(time.time()) - ttl_seconds
@@ -1123,7 +1184,13 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             return
 
         message_id = str(message.id)
-        if ledger is not None and ledger.is_processed(message_id):
+        # #909 F-3: dedup race fix.
+        # 기존 흐름은 `is_processed` → tmux send → `mark_processed` 순서라
+        # Discord Gateway reconnect (`on_message` 재호출) 시 mark 이전에 두 번째
+        # 진입이 가능했다. `claim` 으로 가드+마크를 단일 SQLite 트랜잭션으로
+        # 원자화하고, 이후 단계 (tmux send 등) 실패는 warning 만 남긴다.
+        # mark 는 유지 — 재처리 위험이 tmux 재전송 누락보다 비용이 큼.
+        if ledger is not None and not ledger.claim(message_id):
             logger.info("dedup hit: message_id=%s", message_id)
             return
 
@@ -1174,15 +1241,20 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
 
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
+        # #909 F-3: claim 으로 이미 마킹됐기 때문에 여기서 실패해도 unclaim 하지
+        # 않는다 (재처리 위험 회피). 실패는 warning + 운영자가 로그로 인지.
         if not ensure_tmux_session(session_name, claude_bin):
-            logger.error("tmux 세션 확보 실패 — 메시지 dropped: id=%s", message_id)
+            logger.warning(
+                "tmux 세션 확보 실패 — 메시지 dropped (claim 유지): id=%s",
+                message_id,
+            )
             return
         if not tmux_send_payload(target_pane, payload["text"]):
-            logger.error("tmux send-keys 실패 — 메시지 dropped: id=%s", message_id)
+            logger.warning(
+                "tmux send-keys 실패 — 메시지 dropped (claim 유지): id=%s",
+                message_id,
+            )
             return
-
-        if ledger is not None:
-            ledger.mark_processed(message_id)
 
     return client
 

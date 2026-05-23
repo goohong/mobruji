@@ -45,8 +45,14 @@ if [ ! -f .env ]; then
 fi
 
 # 4) 로그 파일 준비 (append 모드라 미리 touch 필요)
+# #909 F-2: 기존 `ubuntu:ubuntu` 하드코드 → 실 운영자(SUDO_USER → USER fallback)
+# 자동 감지. NCP 실 계정은 `mobruji`, GCP 옛 셋업은 `ubuntu` 라 비대칭 발생했었음.
+# systemd unit 의 `User=` 와 일치해야 로그 회전/append 권한 충돌이 없다.
+RUN_USER="${SUDO_USER:-$USER}"
+RUN_GROUP="$(id -gn "$RUN_USER")"
+echo "로그 owner: ${RUN_USER}:${RUN_GROUP} (systemd unit 의 User= 와 일치해야 함)"
 sudo touch /var/log/${SERVICE_NAME}.out.log /var/log/${SERVICE_NAME}.err.log
-sudo chown ubuntu:ubuntu /var/log/${SERVICE_NAME}.out.log /var/log/${SERVICE_NAME}.err.log
+sudo chown "${RUN_USER}:${RUN_GROUP}" /var/log/${SERVICE_NAME}.out.log /var/log/${SERVICE_NAME}.err.log
 
 # 5) systemd unit 등록 + 기동
 sudo cp "$SERVICE_FILE" /etc/systemd/system/
