@@ -1,12 +1,12 @@
 ---
 feature: 익명 sessionId 라이프사이클 (TTL 만료 + 사용자 회전 + 머지)
 slug: anonymous-session-lifecycle
-status: draft
+status: implementing
 owner: @goohong
 scope: infra
 related_issues: [209, 238, 242, 243]
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [913, 924, 925]
+last_reviewed: 2026-05-24
 ---
 
 # 익명 sessionId 라이프사이클 (TTL 만료 + 사용자 회전 + 머지)
@@ -369,14 +369,16 @@ discoverability 작업은 **2개 PR 로 쪼개진다**:
 
 ## 6) 작업 분할 (예상 PR 리스트)
 
-- [ ] **PR 1 (현 PR, plan 33)**: ADR-0013 + 본 spec(`anonymous-session-lifecycle.md`) + voice-range-progress / recommendation-history-and-feedback cross-reference 갱신. **본 PR**.
-- [ ] **PR 2 (be)**: `AnonymousSession` 엔티티 + repository + Flyway V<next> + V<next+1> (backfill) + `application.yml` 환경변수. 보호 영역 변경(`application.yml` + Flyway) → `needs-human-review` 라벨.
-- [ ] **PR 3 (be)**: `SessionAuthGuard` 만료/revoke 게이트 확장 + `SessionActivityTracker` (in-memory 캐시 + 5분 flush). 기존 ADR-0011 컴포넌트 확장.
-- [ ] **PR 4 (be)**: TTL 만료 batch (`@Scheduled` + cascade-delete 트랜잭션 + Discord 알림). 관측성 카운터 신설 + observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 같이.
-- [ ] **PR 5 (be)**: `POST /api/v1/sessions/rotate` endpoint + session bootstrap (§5-5-1 Q2 결정 따라 옵션 (a) 자동 또는 (b) endpoint).
-- [ ] **PR 6 (plan)**: v0.4 계정 시스템 spec (#243) 머지 시 본 spec 의 §5-5 placeholder 를 그 spec 으로 이관 + 본 spec `last_reviewed` 갱신.
-- [ ] **PR 7 (fe, v0.3 후반 또는 v0.4)**: "고급 설정 > 세션 초기화" UX 노출 + 만료 시 onboarding redirect 처리.
+- [x] **PR 1 (현 PR, plan 33)**: ADR-0013 + 본 spec(`anonymous-session-lifecycle.md`) + voice-range-progress / recommendation-history-and-feedback cross-reference 갱신. **본 PR**.
+- [x] **PR 2 (be)**: `AnonymousSession` 엔티티 + repository + Flyway V<next> + V<next+1> (backfill) + `application.yml` 환경변수. 보호 영역 변경(`application.yml` + Flyway) → `needs-human-review` 라벨. (#913)
+- [ ] **PR 3 (be)**: `SessionAuthGuard` 만료/revoke 게이트 확장 + `SessionActivityTracker` (in-memory 캐시 + 5분 flush). 기존 ADR-0011 컴포넌트 확장. (#924 진행 중)
+- [x] **PR 4 (be)**: TTL 만료 batch (`@Scheduled` + cascade-delete 트랜잭션 + Discord 알림). 관측성 카운터 신설 + observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 같이. (#913, `AnonymousSessionTtlCleanup` 골격)
+- [x] **PR 5 (be)**: `POST /api/v1/sessions/rotate` endpoint + session bootstrap (§5-5-1 Q2 결정 따라 옵션 (a) 자동 또는 (b) endpoint). (#913, `SessionRotationService` + Controller)
+- [ ] **PR 6 (be)**: Flyway V9 backfill 마이그레이션 — 기존 sessionId 들 (like/bookmark/voice_range/recommendation 에서 distinct) 을 `AnonymousSession` 으로 backfill (§5-7 V<next+1>).
+- [ ] **PR 7 (be, infra)**: 만료 batch Discord 알림 + observability-baseline.md §5-3/§5-6/§5-7 표 갱신 (관측성 카운터 3종 + 라벨 화이트리스트 + 알림 규칙). (#925 진행 중)
 - [ ] **PR 8 (be, docs)**: §5-9 sessionId discoverability — `/api/v1/sessions` 루트 405 hint 핸들러 + `README.md` `### sessionId` 섹션 + `docs/api/sessionid-discovery.md` 신설. 단독 PR 가능 (PR 3/5 의존 없음). rev 발견 (2026-05-23) 기반 fast-track.
+- [ ] **PR 9 (plan)**: v0.4 계정 시스템 spec (#243) 머지 시 본 spec 의 §5-5 placeholder 를 그 spec 으로 이관 + 본 spec `last_reviewed` 갱신.
+- [ ] **PR 10 (fe, v0.3 후반 또는 v0.4)**: "고급 설정 > 세션 초기화" UX 노출 + 만료 시 onboarding redirect 처리.
 
 ## 7) 테스트 전략
 
@@ -416,3 +418,4 @@ discoverability 작업은 **2개 PR 로 쪼개진다**:
 
 - **2026-05-22 (plan 33, 본 PR)**: 초안 작성 (status=draft). ADR-0013 의 §D-1~D-5 를 1:1 구현 항목으로 매핑. 7개 PR 로 분할 (엔티티/마이그레이션 → 가드 확장 → batch → 회전 endpoint → v0.4 spec 이관 → fe UX). 관측성 카운터 3종 신설 → observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 동반 필요. 첫 호출 시 AnonymousSession bootstrap 정책은 Q2 (PR 3 결정).
 - **2026-05-23 (plan, 본 PR)**: **§5-9 sessionId discoverability 추가** (rev 발견 — 외부 API 탐색자가 `POST /api/v1/sessions` 호출 시 default 404 라 client-side UUID 발급 규약을 알 수 없음). 해소 방안 3건: (1) `/api/v1/sessions` 루트 405 + hint body + `Link` 헤더, (2) `SessionAuthGuard` 401 응답 body 보강 (hint 추가), (3) `README.md` `### sessionId` 섹션 + `docs/api/sessionid-discovery.md` cookbook. PR 8 신설 (be + docs), PR 3 에 (2) 합류. §3 기능 요구사항 1개 추가, §5-9 신설, §6 PR 표 PR 8 추가, §8 Q6/Q7/Q8 신설. ADR-0011 §Decision (client 발급) 은 재검토하지 않음 — Q6 (a) 유지 default.
+- **2026-05-24 (be, F2)**: PR #913 머지 — PR 2 (`AnonymousSession` 엔티티 + V8 migration) + PR 4 (`AnonymousSessionTtlCleanup` 골격) + PR 5 (`SessionRotationService` + Controller) 동시 반영. spec frontmatter `status: draft` → `implementing` (docs/features/README.md §5 라이프사이클 룰), `related_prs: [913, 924, 925]` 보강, `last_reviewed: 2026-05-24`. §6 PR 표 재정렬 (V9 backfill 을 PR 6 으로 분리, Discord 알림 + 관측성 표 갱신을 PR 7 으로 분리, v0.4 spec 이관/fe UX 를 PR 9/10 으로 뒤로 이동). PR 3 (#924) / PR 7 (#925) 동시 진행 중. PR 6/8/9/10 미착수.

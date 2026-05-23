@@ -40,6 +40,10 @@
 | 음표명 | NoteName | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
 | 좋아요 | Like | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR) |
 | 북마크 | Bookmark | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정) |
+| 익명 세션 | AnonymousSession | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md |
+| 세션 회수 | SessionRevocation | sessionId 를 revoke 처리한 사실(시점 + 사유). reason enum: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` |
+| 세션 회전 | SessionRotation | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
+| 계정 머지 | AccountMerge | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -151,6 +155,25 @@
 - Repository: `findBySessionIdOrderByMeasuredAtDesc(sessionId)`, `findBySessionIdOrderByMeasuredAtAsc(sessionId)`.
 - update 메서드 없음 (불변).
 
+### 5-6) `AnonymousSession` (PR #913, anonymous-session-lifecycle.md PR 2)
+
+익명 sessionId 의 라이프사이클(최초/최근 활동, TTL 만료, revoke 사유)을 관리하는 엔티티. ADR-0013 단일 진실. 다른 sessionId-bound 엔티티(`VoiceRange`, `VoiceRangeSnapshot`, `Like`, `Bookmark`, `Recommendation` 등)는 FK 없이 application 레벨에서만 join — cascade-delete 는 `AnonymousSessionTtlCleanup` 가 명시적 DELETE 로 수행.
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `sessionId` | String(64) | PK | 외부 노출 식별자 (client 발급 UUIDv4) |
+| `firstSeenAt` | LocalDateTime | not null | 최초 등록 시각 |
+| `lastSeenAt` | LocalDateTime | not null, index | 최근 활동 시각. `SessionActivityTracker` 5분 윈도우 캐시 → batch flush |
+| `revokedAt` | LocalDateTime | nullable, index | revoke 시각 (NULL = 활성) |
+| `revokedReason` | enum `SessionRevocationReason` | nullable | `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` |
+
+- 불변식: `firstSeenAt ≤ lastSeenAt`, `revokedAt != null ↔ revokedReason != null`.
+- 도메인 메서드: `static create(sessionId)`, `markSeen(now)`, `revoke(now, reason)`.
+- TTL 정책: `lastSeenAt + ${mobruji.session.ttl-days:180} < now()` AND `revokedAt IS NULL` → `AnonymousSessionTtlCleanup` 가 일별 batch revoke + cascade-delete.
+- Repository: `findBySessionId(sessionId)`, `findIdsByLastSeenBeforeAndRevokedAtIsNull(cutoff, limit)`.
+- 회전: `SessionRotationService` 가 현재 sessionId 를 `USER_ROTATE` 로 revoke + cascade-delete + 새 sessionId 발급.
+- 머지 (v0.4): account merge 시 `ACCOUNT_MERGE` 로 revoke + 데이터를 user 로 owner 치환.
+
 ## 6) Mermaid ERD
 
 ```mermaid
@@ -232,6 +255,14 @@ erDiagram
         datetime measured_at
     }
 
+    ANONYMOUS_SESSION {
+        varchar session_id PK
+        datetime first_seen_at
+        datetime last_seen_at
+        datetime revoked_at
+        varchar revoked_reason
+    }
+
     SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION_REQUEST_EXCLUDE_SONG : "excludeSongIds (@ElementCollection)"
@@ -239,10 +270,15 @@ erDiagram
     SONG ||--o{ LIKE_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
     SONG ||--o{ BOOKMARK_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
     VOICE_RANGE ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId로 join (FK 없음, insert-only 시계열)"
+    ANONYMOUS_SESSION ||--o{ VOICE_RANGE : "sessionId 라이프사이클 owner (FK 없음, cascade-delete app 레벨)"
+    ANONYMOUS_SESSION ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId 라이프사이클 owner (FK 없음)"
+    ANONYMOUS_SESSION ||--o{ LIKE_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
+    ANONYMOUS_SESSION ||--o{ BOOKMARK_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
+    ANONYMOUS_SESSION ||--o{ RECOMMENDATION_REQUEST : "sessionId 라이프사이클 owner (FK 없음)"
 ```
 
-- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark` — 7개 엔티티.
-- 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join.
+- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession` — 8개 엔티티.
+- 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join. `AnonymousSession` 이 sessionId 라이프사이클(TTL 만료 / 회전 / 머지) 의 단일 owner — cascade-delete 는 `AnonymousSessionTtlCleanup` / `SessionRotationService` 가 application 레벨에서 명시적 DELETE.
 
 ## 7) 오픈 이슈
 
