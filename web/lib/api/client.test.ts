@@ -385,3 +385,36 @@ describe("apiFetch non-GET 메서드 body 처리 가드 (#699)", () => {
     expect("Content-Type" in headers).toBe(expectedHasContentType);
   });
 });
+
+describe("ApiError stack 보존 가드 (#713)", () => {
+  // extends Error → V8/Node 환경은 생성자 호출 시점에 stack 을 자동 캡처한다.
+  // 운영 Sentry payload 에서 stack trace 가 사라지지 않음을 명시 lock.
+  it("new ApiError 는 stack 문자열을 가진다 + 'ApiError' 식별자 포함", () => {
+    const error = new ApiError(503, "service unavailable", null);
+    expect(typeof error.stack).toBe("string");
+    expect(error.stack).toContain("ApiError");
+  });
+
+  it("apiFetch 가 던지는 ApiError 도 stack 보존", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "boom" }), { status: 500, headers: { "Content-Type": "application/json" } }),
+    );
+    await expect(apiFetch("/api/v1/probe")).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && typeof (e as ApiError).stack === "string" && ((e as ApiError).stack as string).length > 0,
+    );
+  });
+});
+
+describe("apiFetch URL path 한글/유니코드 가드 (#713)", () => {
+  // 현 동작 lock: client.ts 는 path 를 raw concat 하며 encodeURI/encodeURIComponent 를 수행하지 않는다.
+  // 미인코딩 한글 path 는 그대로 fetch URL 에 전달 → 인코딩은 호출자 책임 (encodeURIComponent 권장).
+  it.each([
+    { label: "한글 path 미인코딩 → raw concat", path: "/api/v1/songs/발라드", expected: "http://localhost:8080/api/v1/songs/발라드" },
+    { label: "한글 path encodeURIComponent → 인코딩된 형태 보존", path: `/api/v1/songs/${encodeURIComponent("발라드")}`, expected: "http://localhost:8080/api/v1/songs/%EB%B0%9C%EB%9D%BC%EB%93%9C" },
+    { label: "공백 포함 path 미인코딩 → 그대로 전달 (호출자 책임)", path: "/api/v1/songs/hello world", expected: "http://localhost:8080/api/v1/songs/hello world" },
+  ])("$label", async ({ path, expected }: { path: string; expected: string }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch(path);
+    expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
+  });
+});
