@@ -207,6 +207,18 @@ public class RecommendationService {
     ) {
     }
 
+    /**
+     * 단일 추천 결과를 영속 row 기반으로 다시 조회한다 (history 단건 / 공유 링크 재방문 등).
+     *
+     * <p>spec: {@code docs/features/recommendation-history-and-feedback.md} — 추천 결과 영속 재조회.
+     *
+     * <p>Song-누락 정책 (이슈 #599, 옵션 (a) 필터링):
+     * persisted row 의 {@code songId} 가 카탈로그에서 사라진 경우(시드 재구성/곡 비공개 전환 등)
+     * 해당 entry 를 응답에서 skip 하고 짧아진 리스트를 반환한다.
+     * {@link #readHistoryBySessionId(String)} 와 같은 정책으로 통일 — read-side 일관성.
+     * 누락이 발생하면 {@code event=recommendation.readById.song_missing} 경고 로그로 운영 가시성을 남긴다.
+     * (대안 (b) 명시적 예외는 UX 비용이 더 크다고 판단, (a) 채택. PII/sessionId 원문은 로그에 넣지 않는다.)
+     */
     @Transactional(readOnly = true)
     public RecommendationResult readById(final Long requestId) {
         final RecommendationRequestEntity savedRequest = recommendationRequestRepository.findById(requestId)
@@ -220,12 +232,20 @@ public class RecommendationService {
         final Map<Long, Song> songsById = new HashMap<>();
         songRepository.findAllById(songIds).forEach(song -> songsById.put(song.getId(), song));
         final List<ScoredRecommendation> recommendations = persisted.stream()
+                .filter(recommendation -> songsById.get(recommendation.getSongId()) != null)
                 .map(recommendation -> new ScoredRecommendation(
                         songsById.get(recommendation.getSongId()),
                         recommendation.getScore(),
                         recommendation.getMatchReason(),
                         recommendation.getRankPosition()))
                 .toList();
+        if (recommendations.size() < persisted.size()) {
+            log.warn(
+                    "event=recommendation.readById.song_missing requestId={} persisted={} returned={}",
+                    requestId,
+                    persisted.size(),
+                    recommendations.size());
+        }
         return new RecommendationResult(savedRequest.getId(), recommendations);
     }
 
