@@ -118,12 +118,15 @@ class SongControllerTest {
                 42L,
                 Map.of(MetadataSource.MANUAL_SEED, 42L),
                 0.95,
-                Instant.parse("2026-05-23T00:00:00Z")));
+                Instant.parse("2026-05-23T00:00:00Z"),
+                Instant.parse("2026-05-23T00:30:00Z")));
 
         mockMvc.perform(get("/api/v1/songs/stats").header("X-Admin-Token", "ok-token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total", is(42)))
-                .andExpect(jsonPath("$.avgConfidence", is(0.95)));
+                .andExpect(jsonPath("$.avgConfidence", is(0.95)))
+                .andExpect(jsonPath("$.lastBackfillAt", is("2026-05-23T00:00:00Z")))
+                .andExpect(jsonPath("$.lastAlbumCoverBackfillAt", is("2026-05-23T00:30:00Z")));
     }
 
     @Test

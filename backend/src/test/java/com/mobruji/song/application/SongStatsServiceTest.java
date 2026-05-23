@@ -61,7 +61,7 @@ class SongStatsServiceTest {
     }
 
     @Test
-    @DisplayName("getStats: 곡 0건이면 total=0, avg=0.0, 모든 source=0")
+    @DisplayName("getStats: 곡 0건이면 total=0, avg=0.0, 모든 source=0, lastAlbumCoverBackfillAt=null(미실행)")
     void getStats_emptyDb_returnsZeros() {
         // given
         final SongRepository repo = mock(SongRepository.class);
@@ -79,6 +79,8 @@ class SongStatsServiceTest {
         assertThat(stats.avgConfidence()).isEqualTo(0.0);
         assertThat(stats.byMetadataSource()).hasSize(MetadataSource.values().length);
         assertThat(stats.byMetadataSource().values()).allMatch(count -> count == 0L);
+        // 이슈 #863: AlbumCoverBackfillCommand 미실행 시각이 그대로 노출된다 (배치 실행 전에는 null).
+        assertThat(stats.lastAlbumCoverBackfillAt()).isNull();
     }
 
     @Test

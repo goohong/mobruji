@@ -20,6 +20,10 @@ import com.mobruji.song.infrastructure.SongRepository;
 /**
  * 시드 30곡(또는 DB 전체)의 lowMidi/highMidi 를 Python audio analysis tool 산출값으로 backfill 하는 일회성 batch.
  *
+ * <p>곡 단위 자체 트랜잭션 (한 곡 실패가 다음 곡 막지 않는 의도된 격리). 이슈 #863 — {@code @Transactional}
+ * 부재는 의도된 설계로, 곡별 save 호출이 Spring 의 기본 트랜잭션 경계 1곡 ↔ 1 commit 로 동작한다. SongAnalysis
+ * 도입 시 트랜잭션 경계 재설계 필수 — spec {@code docs/features/audio-tooling-bootstrap.md} §10-7 cross-ref.
+ *
  * <p>spec: {@code docs/features/audio-tooling-bootstrap.md} PR C — 수기 시드의 음역대 정확도를 audio 분석으로
  * 끌어올린다. 추천 알고리즘 코드는 그대로이고 입력 데이터만 정확해지므로 결정성 회귀는 없다.
  *
