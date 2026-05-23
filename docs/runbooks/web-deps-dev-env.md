@@ -90,8 +90,8 @@ PR #734 (`fix(web): NODE_OPTIONS=--preserve-symlinks 4 scripts 추가`) 가 머�
 
 ## 7) 후속 작업
 
-- [ ] NCP provisioning 스크립트에 `/data/node_modules/` 표준 경로 반영
-- [ ] `web/package.json` `NODE_OPTIONS=--preserve-symlinks` 제거 cleanup PR (보호 영역, `needs-human-review`)
+- [x] NCP provisioning 런북에 `/data/node_modules/` 표준 경로 반영 (#746 — `docs/runbooks/ncp-maestro-setup.md` §I-5 갱신, ESM realpath 회귀 가드 추가)
+- [x] `web/package.json` `NODE_OPTIONS=--preserve-symlinks` 제거 cleanup PR (#743 머지)
 - [ ] 신규 워크트리 (be/rev/plan) 의 `node_modules` symlink 도 동일 구조인지 확인 — 다른 워크트리는 vitest 실행 안 하므로 영향 없을 가능성 높음
 
 ## 8) 참고
