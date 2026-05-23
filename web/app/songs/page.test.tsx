@@ -22,6 +22,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import SongSearchPage from "./page";
+import { ApiError } from "@/lib/api/client";
 import { searchSongs } from "@/lib/api/song";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
@@ -386,6 +387,64 @@ describe("SongSearchPage", () => {
     const lastUrl = replaceMock.mock.calls.at(-1)?.[0] as string;
     expect(lastUrl).toContain("keyword=song");
     expect(lastUrl).toContain("difficulty=EASY");
+  });
+
+  // closes #470 — 검색 에러는 role="alert" + aria-live="assertive"로 SR이 즉시 announce.
+  // 검색 결과 카운트는 role="status" + aria-live="polite" live region에 노출되어
+  // 필터 토글에 따른 카운트 변경이 발화된다.
+  describe("live region (#470)", () => {
+    it("ApiError 발생 시 에러 영역이 role='alert'로 노출된다", async () => {
+      const user = userEvent.setup();
+      searchSongsMock.mockRejectedValueOnce(
+        new ApiError(500, "internal", null),
+      );
+
+      renderWithQueryClient(<SongSearchPage />);
+      await user.type(
+        screen.getByPlaceholderText("곡 제목이나 아티스트로 검색"),
+        "boom",
+      );
+
+      const alert = await screen.findByRole(
+        "alert",
+        {},
+        { timeout: 2000 },
+      );
+      expect(alert).toHaveAttribute("aria-live", "assertive");
+      expect(alert).toHaveTextContent(/검색에 실패했습니다/);
+      expect(alert).toHaveTextContent("500");
+    });
+
+    it("결과 카운트는 aria-live='polite' status 영역에서 필터 변경을 반영한다", async () => {
+      const user = userEvent.setup();
+      searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
+
+      renderWithQueryClient(<SongSearchPage />);
+      await user.type(
+        screen.getByPlaceholderText("곡 제목이나 아티스트로 검색"),
+        "song",
+      );
+
+      // 카운트 status 영역이 polite live region으로 노출되어야 한다.
+      // 초기엔 필터 없이 "2곡" 텍스트.
+      const countRegion = await screen.findByText(
+        /^2곡$/,
+        {},
+        { timeout: 2000 },
+      );
+      expect(countRegion).toHaveAttribute("aria-live", "polite");
+
+      // 필터 토글 → 같은 live region의 텍스트가 "필터 결과 N곡 / 전체 M곡"로 갱신.
+      await user.click(screen.getByRole("button", { name: "POP" }));
+      await waitFor(() => {
+        expect(
+          screen.getByText(/필터 결과 1곡 \/ 전체 2곡/),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.getByText(/필터 결과 1곡 \/ 전체 2곡/),
+      ).toHaveAttribute("aria-live", "polite");
+    });
   });
 
   // closes #107 — 검색 페이지는 search input, 난이도 필터 칩(aria-pressed),
