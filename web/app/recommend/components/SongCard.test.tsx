@@ -698,6 +698,25 @@ describe("SongCard", () => {
       const params = new URL(url).searchParams;
       expect(params.get("search_query")).toBe("C# Song/Artist");
     });
+
+    // closes #539 — SongDetailContent 의 PR #537 (closes #535) 짝. SongCard 의
+    // YouTubeSearchLink 도 새 탭으로 외부 사이트(youtube.com) 를 열기 때문에 reverse
+    // tabnabbing 방지를 위해 rel="noopener noreferrer" 가 target="_blank" 와 항상
+    // 함께 있어야 한다. 위 #302 케이스가 동등 검증을 포함하지만, 의도 코멘트가 있는
+    // 별도 가드 it 으로 검색/짝 추적성을 명시한다.
+    it("회귀 가드(#539): target=_blank 와 rel=noopener noreferrer 를 함께 가진다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const link = screen.getByRole("link", {
+        name: /테스트 곡 YouTube에서 듣기/,
+      });
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
   });
 
   // closes #107 — axe-core 자동 검사. serious/critical 위반이 없어야 한다.
