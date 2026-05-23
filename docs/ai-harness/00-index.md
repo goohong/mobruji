@@ -47,6 +47,7 @@
   - `0014-multi-agent-worktree-orchestration.md` — 다중 agent worktree 오케스트레이션
   - `0015-hosting-stack.md` — 호스팅 스택
   - `0016-maestro-context-percent-estimation.md` — maestro context 사용률 추정
+  - `0017-spring-boot-eol-strategy.md` — Spring Boot 3.5 EOL 대응 (3.6 라인 채택, proposed)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
 - `docs/runbooks/`: 운영 런북 (로컬 환경 가동 등)
   - `local-3tier-setup.md` — MySQL + Spring Boot + Next.js 로컬 3-tier 가동 가이드 (rev QA 기본 환경)
