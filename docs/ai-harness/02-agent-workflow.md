@@ -137,43 +137,61 @@ gh release create vX.Y.Z --generate-notes
 - spec과 코드가 충돌하면 **spec을 먼저 갱신**한 뒤 구현(01-harness-spec §5 결정 규칙).
 - 오픈 질문 중 구현에 영향을 주는 것이 남아있으면 구현 착수 금지, 사용자에게 확인.
 
-## 10) 다중 AI 에이전트 운영 (Claude + Codex)
+## 10) 다중 AI 에이전트 운영
 
-복수의 AI 에이전트(예: Claude Code + OpenAI Codex CLI)가 같은 레포에서 동시에 동작할 수 있다. 충돌과 추적성 손실을 막기 위한 룰.
+복수의 AI 에이전트가 같은 레포에서 동시에 동작할 수 있다. 충돌과 추적성 손실을 막기 위한 룰.
+
+> **현재 운영 형태 (2026-05-23 기준)**: maestro 1 + sub-agent 워크트리 4(be/fe/rev/plan), 총 **5 워크트리** 동시 가동. maestro가 단일 Claude 세션으로 오케스트레이션하고 `Agent` 도구로 각 워크트리에 sub-agent를 background 가동한다. 항시 가동 룰과 셋업은 [§11 multi-session-runbook §0-10](./11-multi-session-runbook.md#0-10-항시-4-워크트리-가동-룰)과 [ADR-0014](../decisions/0014-multi-agent-worktree-orchestration.md) 참조. (초기엔 Claude+Codex 2 에이전트 가정이었으나 Codex 미사용 + 워크트리 분리 패턴으로 진화)
 
 ### 10-1) 1 브랜치 = 1 에이전트
 - 한 브랜치/PR에는 **한 에이전트만** 커밋한다. 다른 에이전트가 같은 브랜치에 직접 push 금지.
 - 다른 에이전트의 변경을 보고 싶다면: **PR 코멘트**로 제안만 한다. 직접 push 하지 않는다.
-- 사람만이 두 에이전트 브랜치를 교차로 수정/머지/리베이스할 수 있다.
+- 사람만이 에이전트 브랜치를 교차로 수정/머지/리베이스할 수 있다.
+- 워크트리 lock: 같은 워크트리(`mobruji-be` 등)에 동시 2 sub-agent launch 금지 (§11 §0-10 워크트리 lock 참조).
 
 ### 10-2) 에이전트 식별
 - **커밋 trailer**(필수): 모든 AI 작성 커밋에 `Co-Authored-By: <에이전트명> <noreply@...>`를 포함한다.
   - Claude: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` (또는 사용 모델에 따라 표기)
-  - Codex: `Co-Authored-By: OpenAI Codex <noreply@openai.com>`
-- **PR 라벨**(필수): `ai-generated` 우산 라벨 + 구체 라벨 `ai:claude` 또는 `ai:codex` 중 하나.
+  - Codex: `Co-Authored-By: OpenAI Codex <noreply@openai.com>` (현재 미사용, 도입 시 적용)
+- **PR 라벨**(필수): `ai-generated` 우산 라벨 + 구체 라벨 `ai:claude` (Codex 도입 시 `ai:codex` 추가).
 - **PR 본문 "AI 작업 기록"**: 사용 에이전트와 프롬프트 요약을 명시.
 
-### 10-3) 작업 분담
-1차 권장 패턴 (변경 가능):
-- **영역 분담**: 백엔드(Spring) = Claude, 프론트엔드(Next.js) = Codex. 풀스택 기능은 두 PR로 분리.
-- **역할 분담**: spec/review = Claude, implementation = Codex (또는 반대).
-- 둘 다 같은 PR을 만들고 사람이 픽하는 **평행 + 교차 리뷰** 패턴은 비용 크므로 학습/비교 목적에만.
+### 10-3) 작업 분담 (현재 형태)
+maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 역할/만질 수 있는 경로는 §11 §2 세션별 역할 표.
+
+- **maestro** (`mobruji`): 기획·이슈 등록·백로그 우선순위·공유 영역(`CLAUDE.md`/`docs/ai-harness/**`) 보수·develop 점유. 코드/테스트 작성은 sub-agent 위임 default.
+- **be** (`mobruji-be`): `backend/**` 구현 전용.
+- **fe** (`mobruji-fe`): `web/**` 구현 전용.
+- **rev** (`mobruji-rev`): 사후 감사 + QA 실행 검증. 파일 수정 금지 (`pre-push` hook 차단).
+- **plan** (`mobruji-plan`): ADR/spec/`docs/ai-harness/**` 갱신 전담. v0.2 메타 전환 후 본진 부담 분산용 (`feedback-plan-session-option`, `project-plan-session-active`).
+
+> 풀스택 기능은 be/fe 두 PR로 분리. 같은 PR에서 두 에이전트가 평행 작업 후 사람이 픽하는 패턴은 비용 크므로 학습/비교 목적에만.
 
 ### 10-4) 컨텍스트 파일
 - `CLAUDE.md`: Claude 자동 로딩 룰. 비협상 룰의 single source of truth.
-- `AGENTS.md`(root): Codex 자동 로딩 룰. `CLAUDE.md`를 가리키되 Codex 한정 메모를 추가한다.
+- `AGENTS.md`(root): Codex 자동 로딩 룰. `CLAUDE.md`를 가리키되 Codex 한정 메모를 추가한다. (현재 Codex 미사용이지만 파일은 유지 — 도입 시 즉시 활성)
 - `web/AGENTS.md`: 프론트엔드 작업 시 Codex/Claude 모두 참조.
 - 새 룰 추가는 `CLAUDE.md`/`AGENTS.md` 한 번에 갱신한다 (drift 방지).
 
 ### 10-5) 충돌 발생 시
-- 두 에이전트가 같은 파일/심볼을 동시에 만지는 경우 → 후순위 PR이 사람 중재 요청(PR 코멘트 + `needs-human-review` 라벨).
+- 같은 파일/심볼을 동시에 만지는 경우 → 후순위 PR이 사람 중재 요청(PR 코멘트 + `needs-human-review` 라벨).
 - spec(`docs/features/*.md`)의 결정 로그 충돌 → 사람이 합의 결정 후 다시 spec 갱신 PR.
 - `.github/workflows/session-collision-check.yml`이 PR 열릴 때 자동으로 다른 open PR과의 파일 겹침을 검출해 코멘트로 경고.
 
-### 10-6) 다중 세션 실행 런북
-구체 셋업·운영 명령은 [`docs/ai-harness/11-multi-session-runbook.md`](./11-multi-session-runbook.md)에 있다. 워크트리 생성, 라벨, 새 브랜치 시작 스크립트, 리뷰 세션 트리거, Projects v2 보드 연동까지 포함.
+### 10-6) 항시 가동 + 자율 사이클 룰
+maestro 본진은 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상 유지**한다. 1개 완료 통지가 들어오면 같은 워크트리에 즉시 다음 백로그를 launch (idle 워크트리 default 금지).
 
-### 10-7) 동기화 채널
+- 본진 자체 작업 default는 메타 (spec/ADR/메모리/orchestration). 코드/테스트/문서 본문 작성은 sub-agent 위임.
+- 통지 우선 처리: sub-agent 완료 통지는 본진 자기 작업보다 우선 (§11 §0-8).
+- 자율 운영: 사용자 부재 시에도 maestro은 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
+
+구체 사이클 명명(§11 §0-4) / idle 룰(§0-5) / 사용자 결정 묶음(§0-6) / Discord 가시성(§0-6-1, §0-6-2) / 워크트리 정리(§0-7) / rev 코멘트 자동 등록(§0-9) / 항시 가동 점검 의무(§0-10)는 모두 §11에 정형화. 본 절은 §10 일관성 유지를 위한 한 줄 요약.
+
+### 10-7) 다중 세션 실행 런북
+구체 셋업·운영 명령은 [`docs/ai-harness/11-multi-session-runbook.md`](./11-multi-session-runbook.md). 워크트리 5개 생성(maestro + be/fe/rev/plan), 라벨, 새 브랜치 시작 스크립트, 리뷰 세션 트리거, Projects v2 보드 연동, 항시 가동 룰까지 포함.
+
+### 10-8) 동기화 채널
 - **세션 간 시그널**: PR 라벨(`session:*`, `reviewed:*`, `ai:*`) + draft state + `gh pr list` 조회. 새 메커니즘 없이 GitHub state가 자연스러운 싱크 채널.
 - **사람 대시보드**: GitHub Projects v2(`mobruji` 보드). PR/이슈 자동 등록은 `.github/workflows/auto-add-to-project.yml`. Status/Session 필드로 칸반 + 필터.
+- **모바일/외부 모니터링**: Discord webhook (`docs/ai-harness/14-discord-notify-setup.md` / `docs/features/discord-status-push.md`). maestro 자율 사이클 trail이 GitHub events 경유로 #모부르지 채널에 push.
 - `docs/backlog.md`는 폐기되었다(2026-05-21). 대체: Projects v2 보드 + 영속 결정은 `docs/decisions/` ADR로.
