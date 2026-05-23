@@ -6,7 +6,7 @@ owner: @goohong
 scope: infra
 related_issues: [201]
 related_prs: [202]
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-23
 ---
 
 # Discord 데몬 호스팅 (무료 24/7 옵션)
@@ -60,8 +60,9 @@ last_reviewed: 2026-05-21
 | D. GCP Free e2-micro | 0 (영구 무료) | 필요 | O | O | 중 |
 | E. GitHub Codespaces 60h/월 | 0 | GitHub 결제수단만 | O | X (60h 한계) | 낮음 |
 | F. Replit Hacker | $7/월 | 필요 | O | O | 낮음 |
+| G. NCP VM (사용자 보유 크레딧) | 0 (크레딧 소진까지) | 불필요 (사용자 기보유) | O | O | 중 (systemd) |
 
-> 결론: **카드 인증 없이 평문 Gateway까지 가능한 건 A, B, E (E는 60h 한계).** C는 카드 없이 24/7 가능하지만 슬래시 명령만 됨.
+> 결론: **카드 인증 없이 평문 Gateway까지 가능한 건 A, B, E (E는 60h 한계).** C는 카드 없이 24/7 가능하지만 슬래시 명령만 됨. **2026-05-22 추가**: 사용자가 NCP 크레딧 보유 → **G (NCP VM + systemd) 1차 채택** 으로 전환. A (macOS LaunchAgent) 는 사용자 데스크탑 켜진 시간대 fallback 으로 유지. 상세 운영은 `docs/features/maestro-auto-wake.md` + `docs/features/ncp-maestro-resilience.md`.
 
 ### 5-3) 각 옵션 셋업 절차 (개요)
 
@@ -94,6 +95,15 @@ last_reviewed: 2026-05-21
 #### D~F (대안, 본 spec 채택 안 함)
 - D는 카드 인증 동일 문제, E는 60h/월 제약, F는 유료. 향후 카드 확보 또는 정책 변경 시 재검토.
 
+#### G. NCP VM + systemd (1차 채택, 2026-05-22~)
+1. NCP 콘솔에서 micro VM 1대 (Ubuntu 22.04) 생성. 사용자 보유 크레딧 사용.
+2. 사용자 ssh 키 등록 후 `ssh ubuntu@<vm-ip>`.
+3. `apt install python3-venv git tmux` → `git clone https://github.com/goohong/mobruji.git`.
+4. `tools/discord-daemon/setup-gcp-systemd.sh` 실행 (이름이 GCP 잔재지만 NCP 동일 적용 — Linux + systemd 환경 공통).
+5. `/etc/systemd/system/mobruji-discord-daemon.service` + `mobruji-discord-bridge.service` 등록 → `systemctl enable --now`.
+6. `journalctl -u mobruji-discord-daemon -f` 로 로그 모니터.
+7. 운영 런북: `docs/features/ncp-maestro-resilience.md`. wake 자동화: `docs/features/maestro-auto-wake.md`.
+
 ### 5-4) 데이터 흐름 / 시퀀스
 - Gateway 옵션 (A/B):
   - 사용자 → Discord 채널 메시지 → 데몬 `on_message` → 화이트리스트 검증 → GitHub `repository_dispatch` 호출 → mobruji workflow 트리거 → Discord 채널에 결과 회신
@@ -115,12 +125,13 @@ last_reviewed: 2026-05-21
 - [ ] PR 3: 보강 — **C (Cloudflare Workers 슬래시 명령)** 로 데스크탑 OFF 시간대 status/health 응답 커버
   - `tools/discord-bot-worker/`
 - [ ] PR 4 (선택): Termux 절차 문서화 (사용자가 안드로이드 단말 결정 시)
+- [x] PR 5 (2026-05-22~): 옵션 G (NCP VM + systemd) 셋업 — `setup-gcp-systemd.sh`, `mobruji-discord-daemon.service`, `mobruji-discord-bridge.service`. NCP 크레딧으로 24/7 확보. 운영 런북: `docs/features/ncp-maestro-resilience.md`.
 
 ## 7) 권장 단계
-1. **즉시**: 옵션 A (macOS LaunchAgent) 셋업 — 사용자 Mac이 가장 자주 켜져 있는 환경. PR 2 진행.
-2. **보강**: 옵션 C (Cloudflare Workers) 로 슬래시 명령만이라도 24/7 가능하게 PR 3 진행. iPhone에서 데스크탑 OFF여도 `/mobruji status` 응답 가능.
+1. **2026-05-22 이후 (현행)**: 옵션 G (NCP VM + systemd) 1차. 사용자 NCP 크레딧으로 24/7 확보. PR 5 머지 완료. 옵션 A 는 사용자 데스크탑 켜진 시간대 보조.
+2. **보강**: 옵션 C (Cloudflare Workers) 로 슬래시 명령 추가 가능 — 현재 G 가 24/7 커버하므로 우선순위 낮음.
 3. **백업**: 사용자가 안드로이드 단말 도입 시 옵션 B 추가.
-4. **장기**: 신용카드 확보 후 GCP/Oracle 재검토 → `infra` ADR 갱신.
+4. **장기**: NCP 크레딧 소진 시 GCP/Oracle 재검토 → `infra` ADR 갱신.
 
 ## 8) 보안
 - 봇 토큰: A/B 는 `.env` (chmod 600) + .gitignore, C 는 `wrangler secret`
@@ -139,3 +150,5 @@ last_reviewed: 2026-05-21
 
 ## 10) 결정 로그
 - 2026-05-21: 초안 작성 (status=draft). Oracle Free Tier 가입 불가(카드 인증 실패) 확인 → 카드 없이 가능한 A/B/C/E 위주 비교. 1차 권장 = A (macOS LaunchAgent), 보강 = C (Cloudflare Workers Interactions).
+- 2026-05-22 (plan): 사용자 NCP 크레딧 확보 → **옵션 G (NCP VM + systemd)** 신설 + 1차 채택. `setup-gcp-systemd.sh` (이름 GCP 잔재지만 Linux + systemd 환경 공통, NCP 동일 적용) + `mobruji-discord-daemon.service` + `mobruji-discord-bridge.service` 추가. 운영 런북: `docs/features/ncp-maestro-resilience.md`. 옵션 A 는 데스크탑 켜진 시간대 보조로 유지.
+- 2026-05-23 (plan, spec drift cleanup pt2): §5-2 표에 옵션 G 행 추가, §5-3 에 옵션 G 셋업 절차 추가, §6 PR 5 (옵션 G shipped) 추가, §7 권장 단계 G 1차로 갱신. spec ↔ 실 코드 (`tools/discord-daemon/setup-gcp-systemd.sh`, `*.service`) 정합화.

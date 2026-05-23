@@ -6,7 +6,7 @@ owner: @goohong
 scope: infra
 related_issues: [180]
 related_prs: []
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-23
 ---
 
 # Discord 실시간 양방향 소통 인프라
@@ -96,13 +96,13 @@ sequenceDiagram
 ```
 
 **구성 요소:**
-- `infra/discord-daemon/` 신규 디렉터리 (별도 PR)
+- `tools/discord-daemon/` 디렉터리 (실제 채택 경로, 본 spec 초안의 `infra/discord-daemon/` 에서 변경 — `discord-daemon-hosting.md` PR 2 가 `tools/` 하위로 박음)
   - `bot.py` — discord.py 클라이언트, `on_message` 이벤트 처리
-  - `dispatcher.py` — GitHub `repo_dispatch` 호출 + dedup SQLite
-  - `Dockerfile` + `docker-compose.yml`
+  - `dispatcher.py` — GitHub `repo_dispatch` 호출 + dedup SQLite (Phase 2 — Phase 1 은 `bot.py` 단독)
+  - `requirements.txt` (Docker 미사용 — NCP VM 직접 systemd 운영, `mobruji-discord-daemon.service`)
   - `.env.example` — `DISCORD_BOT_TOKEN`, `GITHUB_PAT`, `ALLOWED_USER_IDS`, `REPO=mobruji/mobruji`
 - `.github/workflows/discord-dispatch.yml` — `on: repo_dispatch: types: [discord-cmd]` → Claude Code Action 호출 → 결과를 webhook으로 daemon에 회신
-- 헬스체크: daemon `/health` 엔드포인트 (FastAPI sidecar) + cron 모니터
+- 헬스체크: `journalctl -u mobruji-discord-daemon` + `ncp-maestro-resilience.md` 의 wake-stuck 모니터 재사용
 
 **보안:**
 - bot token은 daemon 호스트의 `.env` (chmod 600)
@@ -114,10 +114,10 @@ sequenceDiagram
 - 해당 없음.
 
 ## 6) 작업 분할 (예상 PR 리스트)
-- [ ] **PR A** `docs(infra): maestro 매 호흡 fetch_messages 컨벤션` (즉시, 옵션 5) — `docs/ai-harness/` runbook 패치
+- [x] **PR A** `docs(infra): maestro 매 호흡 fetch_messages 컨벤션` (즉시, 옵션 5) — `docs/ai-harness/` runbook 패치 + memory `feedback-discord-polling`
 - [ ] **PR B** `feat(infra): plugin_discord MCP subscribe PoC` (옵션 1) — fork 저장소에 작업, 본 리포에는 컨벤션 메모만
-- [ ] **PR C** `feat(infra): discord-daemon 스캐폴딩` (옵션 4 1단계) — `infra/discord-daemon/` 디렉터리, bot.py hello-world, docker-compose
-- [ ] **PR D** `feat(infra): GitHub repo_dispatch dispatcher` (옵션 4 2단계) — dispatcher.py + dedup SQLite
+- [x] **PR C** `feat(infra): discord-daemon 스캐폴딩` (옵션 4 1단계) — `tools/discord-daemon/` 디렉터리 (초안의 `infra/` 에서 변경), `bot.py` (#202), discord-daemon-hosting.md 옵션 A/G 셋업
+- [ ] **PR D** `feat(infra): GitHub repo_dispatch dispatcher` (옵션 4 2단계) — `tools/discord-daemon/dispatcher.py` + dedup SQLite (현재 Phase 1 은 bot.py 단독 운영, dispatcher 분리는 Phase 2 후속)
 - [ ] **PR E** `feat(infra): Claude Code Action workflow + Discord 회신` (옵션 4 3단계) — `.github/workflows/discord-dispatch.yml`
 
 ## 7) 테스트 전략
@@ -137,3 +137,4 @@ sequenceDiagram
 
 ## 9) 결정 로그
 - 2026-05-21: 초안 작성 (status=draft). 사용자 요청 "mcp 또는 다른 방법" 5개 옵션 비교 + 즉시/중기/장기 단계 권장 확정.
+- 2026-05-23 (plan, spec drift cleanup pt2): §5-5 컴포넌트 경로 `infra/discord-daemon/` → `tools/discord-daemon/` 정정 (실제 채택 경로 — `discord-daemon-hosting.md` PR 2 가 `tools/` 하위로 박음). Docker/docker-compose 가정 → NCP VM systemd 직접 운영 (`mobruji-discord-daemon.service`) 으로 정정. §6 PR A/C [x] 완료 표시. PR C 의 디렉터리 경로 정정. Phase 1 (bot.py 단독) vs Phase 2 (dispatcher 분리) 명시.
