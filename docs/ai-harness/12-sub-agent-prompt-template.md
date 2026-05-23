@@ -185,6 +185,93 @@ PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서
 - 이유: 리뷰어/머지권자가 첫 줄에 anchoring되어 본문 회귀 신호를 놓치는 confirmation bias를 회피한다.
 - 사례: 사이클 6 PR #74에서 `🟢 LGTM` 헤더 다음에 EAGER fetch p95=80.9ms(3.7배) 회귀 신호가 누락된 적이 있다.
 
+#### E-2) rev 3단계 e2e 절차 (2026-05-24 비협상)
+
+본 절은 PR #889 / #932 (spec) 머지 후 helper sub-agent 자율 머지가 rev 우회한 사고 (2026-05-24) 직후 박제. spec: `docs/features/rev-e2e-3-stages.md`. 메모리: [[feedback-rev-e2e-always]].
+
+`.github/workflows/rev-gate.yml` (이슈 #945) 가 단계 1 의 라벨 + 코멘트 부재 시 PR check 를 fail 시켜 머지를 차단한다. rev sub-agent 는 본 절차를 반드시 따라야 한다.
+
+##### E-2.1 단계 1 — PR 머지 전 (기존 룰 강화)
+
+매 PR 감사 종료 시 **둘 중 하나** 의 코멘트 + `reviewed:claude` 라벨 부여 의무:
+
+- e2e 가능 (web/backend 코드 변경) PR:
+  ```bash
+  gh pr comment <N> -b '✅ rev e2e PR pass — <e2e 시나리오 요약 1줄>'
+  gh pr edit <N> --add-label reviewed:claude
+  ```
+- e2e 불가능 (docs/spec/refactor/chore/style/test 류) PR:
+  ```bash
+  gh pr comment <N> -b '📝 rev no-op pass — 변경 사소함, e2e 불요'
+  gh pr edit <N> --add-label reviewed:claude
+  ```
+- 실패 (e2e fail 또는 audit 결함):
+  ```bash
+  gh pr comment <N> -b '❌ rev e2e PR fail: <원인>'
+  # reviewed:claude 라벨 부여 안 함 → 머지 차단
+  ```
+
+둘 중 어느 것도 안 하면 `rev-gate` check 가 fail → maestro 자율 머지 차단. 라벨만 있고 코멘트 없거나, 코멘트만 있고 라벨 없으면 동일하게 차단된다.
+
+##### E-2.2 단계 2 — develop 머지 후 사후 검사 (e2e 가능 PR 만)
+
+rev 사이클 시작 시 다음 명령으로 사후 검사 후보 발굴:
+```bash
+gh pr list --state merged --base develop \
+  --search 'merged:>1h ago -label:rev-post-merge-pass -label:type:release' \
+  --json number,title,labels
+```
+
+각 후보에 대해:
+1. NCP dev 환경 deploy 사이클 완료 ~5분 대기 (`cd-dev.yml` 완료 또는 ScheduleWakeup)
+2. 단계 1 시나리오 동일 재실행 — 실제 dev 환경 대상
+3. 결과 처리:
+   - 통과 →
+     ```bash
+     gh pr comment <N> -b '✅ rev e2e post-merge pass'
+     gh pr edit <N> --add-label rev-post-merge-pass
+     ```
+   - 실패 →
+     ```bash
+     gh pr comment <N> -b '❌ rev e2e post-merge fail: <원인>'
+     gh pr edit <N> --add-label regression:dev
+     # 즉시 revert 이슈 등록 권고 (maestro 보고)
+     bash /home/mobruji/.mobruji/discord-reply.sh "🚨 rev post-merge fail PR #<N>: <원인>. revert 권고."
+     ```
+
+`rev-post-merge-pass` 라벨은 같은 PR 의 단계 2 중복 실행을 막는 멱등성 표식.
+
+##### E-2.3 단계 3 — release 후 production 검증 (e2e 가능 PR 만)
+
+release tag (`v*`) 푸시 + production deploy 완료 후:
+
+1. release 에 포함된 모든 type:fix/feat PR 목록 추출 (release 노트 / `gh pr list --search 'merged:>=<prev-release-date> base:main'`)
+2. 각 PR 단계 1 시나리오 production 환경 재실행
+3. 결과 처리:
+   - 통과 →
+     ```bash
+     gh pr comment <N> -b '✅ rev e2e production verified — release <tag>'
+     gh pr edit <N> --add-label rev-prod-pass
+     # release 노트에도 본 사항 추가
+     ```
+   - 실패 →
+     ```bash
+     gh pr comment <N> -b '❌ rev e2e production fail: <원인>'
+     gh pr edit <N> --add-label regression:prod
+     # hotfix 이슈 즉시 등록 (사용자 부재여도 자율 hotfix 사이클 launch)
+     bash /home/mobruji/.mobruji/discord-reply.sh "🚨 rev production fail PR #<N> (release <tag>): <원인>. 자율 hotfix 사이클 시작."
+     ```
+
+##### E-2.4 라벨 reference
+
+| 라벨 | 부여 시점 | 의미 |
+|---|---|---|
+| `reviewed:claude` | 단계 1 통과 | 머지 게이트 통과 (rev-gate.yml 검증) |
+| `rev-post-merge-pass` | 단계 2 통과 | develop 머지 후 dev 환경 e2e 통과 (멱등성 표식) |
+| `rev-prod-pass` | 단계 3 통과 | release production 환경 e2e 통과 |
+| `regression:dev` | 단계 2 실패 | dev 환경 회귀 발견 — revert 후보 |
+| `regression:prod` | 단계 3 실패 | production 회귀 발견 — hotfix 트리거 |
+
 ### plan (mobruji-plan)
 - 워크트리: `/home/mobruji/mobruji-plan` (NCP Linux 호스트)
 - 작업 가능 경로: 큰 docs/spec/ADR — `docs/ai-harness/**`, `docs/features/**`, `docs/decisions/**`, `scripts/**`, `.github/**`(보호 영역 라벨 필수)
@@ -271,3 +358,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
 - 2026-05-23 — fe 역할에 의존성 설치 금지 룰 + `node_modules` symlink 보존 룰 추가. 사고: sub-agent `npm install --no-save` 실행으로 외부 디스크 symlink 풀림 (이슈 #187).
 - 2026-05-23 — NCP Linux 워크트리 절대경로 박제 (`/home/mobruji/...`) + §1 maestro 항시 가동 / 워크트리 lock / 5분 reasoning 룰 박스 / fe `npm install` 1회 룰 / §4 sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢) / §5 안티패턴 매트릭스 신설 (이슈 #405, PR TBD). 메모리 [[feedback-keep-4-cycles-active]] [[feedback-worktree-lock]] [[feedback-reasoning-chunk-limit]] [[feedback-sub-agent-launch-mandatory]] 영속화.
+- 2026-05-24 — rev §E-2 추가: 3단계 e2e 절차 명문화 (단계 1 코멘트 + 라벨 의무 / 단계 2 develop 사후 검사 / 단계 3 release production 검증) + 라벨 reference 표 (`rev-post-merge-pass`, `rev-prod-pass`, `regression:dev|prod`). 트리거: helper 자율 머지가 rev 우회한 사고 → `.github/workflows/rev-gate.yml` 신설로 머지 차단 강제 (이슈 #945).
