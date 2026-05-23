@@ -160,3 +160,38 @@ describe("THEME_INIT_SCRIPT", () => {
     expect(THEME_INIT_SCRIPT).toContain("} catch");
   });
 });
+
+describe("THEME_INIT_SCRIPT (eval)", () => {
+  // JSDOM 에서 스크립트 문자열을 실행해 stored/system/prefers 분기 결과로
+  // documentElement.classList 가 올바르게 토글되는지 검증 — 분기 로직 회귀 가드.
+  const runInit = (
+    stored: string | null,
+    prefersDark: boolean,
+  ): boolean => {
+    window.localStorage.clear();
+    if (stored !== null) {
+      window.localStorage.setItem(THEME_STORAGE_KEY, stored);
+    }
+    document.documentElement.classList.remove(THEME_DARK_CLASS);
+    setOsPrefersDark(prefersDark);
+    new Function(THEME_INIT_SCRIPT)();
+    return document.documentElement.classList.contains(THEME_DARK_CLASS);
+  };
+
+  it("stored='dark' → <html.dark> 적용", () => {
+    expect(runInit("dark", false)).toBe(true);
+  });
+
+  it("stored='light' → <html.dark> 제거", () => {
+    document.documentElement.classList.add(THEME_DARK_CLASS);
+    expect(runInit("light", true)).toBe(false);
+  });
+
+  it("stored=null + prefers=dark → <html.dark> 적용 (system 기본)", () => {
+    expect(runInit(null, true)).toBe(true);
+  });
+
+  it("stored='system' + prefers=light → <html.dark> 제거", () => {
+    expect(runInit("system", false)).toBe(false);
+  });
+});
