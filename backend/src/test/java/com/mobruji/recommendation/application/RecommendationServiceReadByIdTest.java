@@ -1,6 +1,7 @@
 package com.mobruji.recommendation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
@@ -42,11 +43,10 @@ import com.mobruji.song.infrastructure.SongRepository;
  * {@code findByRecommendationRequestIdOrderByRankPositionAsc} 계약을 호출 측이 신뢰)</li>
  * <li>persisted 가 비어 있으면 {@link RecommendationResult} 의 recommendations 도 비어 있다.</li>
  * <li>요청 ID 미존재 시 {@link RecommendationNotFoundException}.</li>
- * <li>persisted row 의 songId 가 {@code Song} 테이블에서 사라진 경우, 현 구현은
- * {@code ScoredRecommendation} 생성자 {@code Objects.requireNonNull(song)} 에 부딪혀 NPE.
- * create 경로는 명시 filter 로 막아두지만 read 경로는 없어서 발생 — 본 테스트는
- * <b>현 동작을 명세화</b>하여 후속 fix(필터링 vs 예외 변환) PR 시 의도 변경이 명시적으로
- * 눈에 띄게 한다.</li>
+ * <li>persisted row 의 songId 가 {@code Song} 테이블에서 사라진 경우(시드 재구성/곡 비공개)
+ * 이슈 #599 결정에 따라 옵션 (a) 필터링 적용 — 누락 entry skip 후 짧은 list 반환.
+ * {@link RecommendationService#readHistoryBySessionId(String)} 와 같은 정책. 부분 누락 / 전부 누락
+ * 두 경계를 모두 가드한다.</li>
  * </ol>
  */
 @ExtendWith(MockitoExtension.class)
@@ -141,15 +141,50 @@ class RecommendationServiceReadByIdTest {
     }
 
     /**
-     * 현 동작 명세화: persisted row 의 songId 가 {@code Song} 테이블에 없으면 {@link NullPointerException}.
-     * {@code ScoredRecommendation} 의 {@code Objects.requireNonNull(song)} 가드에 닿는다.
-     * 후속 fix(필터/예외 변환) 가 들어오면 본 테스트가 깨지면서 정책 변경이 명시적으로 드러난다.
+     * 이슈 #599 옵션 (a) 필터링: persisted row 의 songId 가 catalog 에 없으면 해당 entry skip,
+     * 살아있는 entry 만 짧은 list 로 반환. 순서는 영속 rank 정렬 그대로 보존.
      */
     @Test
-    @DisplayName("readById: Song catalog 누락 시 현 구현은 NPE (filter 미적용 — 후속 정책 결정 트리거)")
-    void readById_songMissing_throwsNullPointer() throws Exception {
+    @DisplayName("readById: Song catalog 부분 누락 시 누락 entry skip 후 short list (rank 보존)")
+    void readById_songMissingPartial_returnsShortListSkippingMissing() throws Exception {
         // given
         final Long requestId = 102L;
+        final RecommendationRequestEntity savedRequest = persistedRequest(requestId);
+        given(recommendationRequestRepository.findById(requestId)).willReturn(Optional.of(savedRequest));
+
+        final List<Recommendation> persisted = List.of(
+                persistedRecommendation(requestId, 11L, 0.9, "r1", 1),
+                persistedRecommendation(requestId, 22L, 0.8, "r2", 2),
+                persistedRecommendation(requestId, 33L, 0.7, "r3", 3));
+        given(recommendationRepository.findByRecommendationRequestIdOrderByRankPositionAsc(requestId))
+                .willReturn(persisted);
+
+        // 22L 곡이 사라진 catalog (11L, 33L 만 반환)
+        given(songRepository.findAllById(List.of(11L, 22L, 33L)))
+                .willReturn(List.of(buildSong(11L, "t1"), buildSong(33L, "t3")));
+
+        // when
+        final RecommendationResult result = recommendationService.readById(requestId);
+
+        // then — 살아있는 11/33 만 rank 순으로, 22 는 skip.
+        assertThat(result.requestId()).isEqualTo(requestId);
+        assertThat(result.recommendations()).hasSize(2);
+        assertThat(result.recommendations())
+                .extracting(r -> r.song().getId())
+                .containsExactly(11L, 33L);
+        assertThat(result.recommendations())
+                .extracting(r -> r.rankPosition())
+                .containsExactly(1, 3);
+    }
+
+    /**
+     * 이슈 #599 (a) 경계: 모든 persisted row 의 song 이 사라졌으면 빈 list 반환 (NPE 없이).
+     */
+    @Test
+    @DisplayName("readById: Song catalog 전부 누락 시 빈 list 반환 (NPE 없음)")
+    void readById_songMissingAll_returnsEmptyListWithoutNpe() throws Exception {
+        // given
+        final Long requestId = 103L;
         final RecommendationRequestEntity savedRequest = persistedRequest(requestId);
         given(recommendationRequestRepository.findById(requestId)).willReturn(Optional.of(savedRequest));
 
@@ -158,13 +193,14 @@ class RecommendationServiceReadByIdTest {
                 persistedRecommendation(requestId, 22L, 0.8, "r2", 2));
         given(recommendationRepository.findByRecommendationRequestIdOrderByRankPositionAsc(requestId))
                 .willReturn(persisted);
+        given(songRepository.findAllById(List.of(11L, 22L))).willReturn(List.of());
 
-        // 22L 곡이 사라진 catalog (11L 만 반환)
-        given(songRepository.findAllById(List.of(11L, 22L))).willReturn(List.of(buildSong(11L, "t1")));
-
-        // when / then
-        assertThatThrownBy(() -> recommendationService.readById(requestId))
-                .isInstanceOf(NullPointerException.class);
+        // when / then — NPE 없이 빈 list (#599 옵션 (a) 보장)
+        assertThatCode(() -> {
+            final RecommendationResult result = recommendationService.readById(requestId);
+            assertThat(result.requestId()).isEqualTo(requestId);
+            assertThat(result.recommendations()).isEmpty();
+        }).doesNotThrowAnyException();
     }
 
     private static RecommendationRequestEntity persistedRequest(final Long id) throws Exception {
