@@ -60,7 +60,9 @@ describe("Chip", () => {
     expect(chip.className).toContain("bg-white");
     expect(chip.className).toContain("ring-1");
     // pressed=true 전용 클래스는 적용되지 않아야 한다.
-    expect(chip.className).not.toContain("bg-zinc-900");
+    // dark variant (`dark:bg-zinc-900`) 는 inactive 토큰에 포함되어 있으므로
+    // 단순 substring 매칭이 아니라 라이트 모드 활성 클래스만 검증한다 (#745).
+    expect(chip.className).not.toMatch(/(^|\s)bg-zinc-900(\s|$)/);
   });
 
   it("Enter 키로 onClick이 호출된다 (button 변환 회귀 가드)", () => {

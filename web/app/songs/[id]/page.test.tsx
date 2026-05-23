@@ -128,13 +128,18 @@ describe("SongDetailPage", () => {
   // 스크린리더가 즉시 안내할 수 있어야 한다. 회귀 가드.
   it("일시 오류(5xx) 분기는 role='alert' aria-live='assertive' 컨테이너로 노출된다", async () => {
     useParamsMock.mockReturnValue({ id: "1" });
-    readSongByIdMock.mockRejectedValueOnce(
+    // useQuery retry=1 (404 외 1회 재시도) → 두 번 모두 5xx 일관 응답이어야
+    // alert 분기에 진입한다. mockResolvedValueOnce 단일 사용 시 두번째 호출이
+    // undefined 로 resolve → query success 처리되어 alert 미노출 (#745).
+    readSongByIdMock.mockRejectedValue(
       new ApiError(500, "internal error", { message: "internal error" }),
     );
 
     renderWithQueryClient(<SongDetailPage />);
 
-    const alert = await screen.findByRole("alert");
+    // useQuery retry=1 + 기본 retryDelay(1초) → 첫 시도 + 1초 대기 + 두번째 시도 후 isError.
+    // findByRole default timeout(1초) 부족 → 3초로 확장 (#745).
+    const alert = await screen.findByRole("alert", undefined, { timeout: 3000 });
     expect(alert).toHaveAttribute("aria-live", "assertive");
     expect(alert).toHaveTextContent(/곡 정보를 불러오지 못했습니다/);
     expect(alert).toHaveTextContent(/500/);
