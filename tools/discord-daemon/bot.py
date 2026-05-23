@@ -91,11 +91,15 @@ SENTINEL_KEYS: Final[dict[str, list[str]]] = {
 
 # context auto-clear (spec: docs/features/context-auto-clear.md §5).
 # PR #807 단순화에서 누락된 loop 를 #809 에서 복구. opt-in (default off — dry-run).
+# #855 multi-pane 확장: nmae(mobruji:0.0) + helper(helper:0.0) 둘 다 polling.
 CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED: Final[str] = "0"
 CONTEXT_AUTO_CLEAR_DEFAULT_TRIGGER_PCT: Final[int] = 95
 CONTEXT_AUTO_CLEAR_DEFAULT_HYSTERESIS_PCT: Final[int] = 80
 CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS: Final[int] = 5
-CONTEXT_AUTO_CLEAR_DEFAULT_PANE: Final[str] = "mobruji:0.0"
+# 복수 pane CSV. plural (`TMUX_PANE_TARGETS`) 우선, singular (`TMUX_PANE_TARGET`)
+# 후방호환. 둘 다 부재 시 아래 default.
+CONTEXT_AUTO_CLEAR_DEFAULT_PANES: Final[str] = "mobruji:0.0,helper:0.0"
+CONTEXT_AUTO_CLEAR_DEFAULT_PANE: Final[str] = "mobruji:0.0"  # legacy 단일 default (env 후방호환용)
 CONTEXT_AUTO_CLEAR_CAPTURE_LINES: Final[int] = 2000
 CLEAR_READY_MARKER: Final[str] = "===CLEAR_READY==="
 CONTEXT_PCT_PATTERN: Final[re.Pattern[str]] = re.compile(r"===CTX:(\d{1,3})%===")
@@ -106,19 +110,19 @@ CONTEXT_CLEAR_LOG_PATH: Final[Path] = Path(
 CONTEXT_CLEAR_LOG_HEADER: Final[str] = (
     "---\n"
     "name: project-context-clear-log\n"
-    "description: maestro context auto-clear 사이클 결과 누적 (trigger / marker / clear)\n"
+    "description: maestro/helper context auto-clear 사이클 결과 누적 (trigger / marker / clear)\n"
     "metadata:\n"
     "  type: project\n"
     "---\n"
     "\n"
     "# context auto-clear log (역시간순)\n"
     "\n"
-    "| timestamp | event | context% | handoff file | duration |\n"
-    "|---|---|---|---|---|\n"
+    "| timestamp | pane | event | context% | handoff file | duration |\n"
+    "|---|---|---|---|---|---|\n"
 )
 CONTEXT_CLEANUP_PROMPT: Final[str] = (
     "🧠 컨텍스트 95% 도달. 다음 절차로 자율 정리하라: "
-    "1) 진행 중 sub-agent 모두 완료 대기 (launch 추가 금지) "
+    "1) 진행 중 작업 모두 완료 대기 (sub-agent launch / 새 요청 추가 금지) "
     "2) 다음 핸드오프 메모리 project_session_handoff_<YYYY-MM-DD>_v<N+1>.md 작성 "
     "(사이클 카운트 / 진행 중 PR / 사용자 결정 대기 / 첫 액션) "
     "3) MEMORY.md 인덱스에 새 핸드오프 한 줄 추가 "
@@ -168,9 +172,18 @@ def load_env() -> dict[str, str]:
     env["CONTEXT_CLEAR_HYSTERESIS_PCT"] = os.environ.get(
         "CONTEXT_CLEAR_HYSTERESIS_PCT", str(CONTEXT_AUTO_CLEAR_DEFAULT_HYSTERESIS_PCT)
     )
-    env["TMUX_PANE_TARGET"] = os.environ.get(
-        "TMUX_PANE_TARGET", CONTEXT_AUTO_CLEAR_DEFAULT_PANE
-    )
+    # multi-pane: TMUX_PANE_TARGETS (plural, CSV) 우선. 부재 시 TMUX_PANE_TARGET
+    # (singular) 후방호환. 둘 다 없으면 CONTEXT_AUTO_CLEAR_DEFAULT_PANES.
+    plural_value = os.environ.get("TMUX_PANE_TARGETS")
+    singular_value = os.environ.get("TMUX_PANE_TARGET")
+    if plural_value is not None:
+        env["TMUX_PANE_TARGETS"] = plural_value
+    elif singular_value is not None:
+        env["TMUX_PANE_TARGETS"] = singular_value
+    else:
+        env["TMUX_PANE_TARGETS"] = CONTEXT_AUTO_CLEAR_DEFAULT_PANES
+    # singular 도 별도 키로 보존 — 디버깅/legacy import 용.
+    env["TMUX_PANE_TARGET"] = singular_value or CONTEXT_AUTO_CLEAR_DEFAULT_PANE
     env["CYCLE_STATUS_PATH"] = os.path.expanduser(
         os.environ.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
     )
@@ -738,14 +751,15 @@ def send_clear_command(pane_target: str) -> bool:
     return tmux_send_payload(pane_target, "/clear")
 
 
-def append_clear_log(pct: int, event: str) -> None:
+def append_clear_log(pct: int, event: str, pane: str = "-") -> None:
     """`project_context_clear_log.md` 에 한 줄 append. 파일 없으면 header 생성.
 
-    spec §5-3 포맷: `| timestamp | event | context% | handoff file | duration |`.
+    spec §5-3 포맷 (#855 갱신): `| timestamp | pane | event | context% | handoff file | duration |`.
     handoff file 과 duration 은 자동 채울 정보가 없으므로 `-` 로 비워둡니다.
+    pane 인자 부재 시 (legacy 호출) `-` 로 표기.
     """
     timestamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    row = f"| {timestamp} | {event} | {pct} | - | - |\n"
+    row = f"| {timestamp} | {pane} | {event} | {pct} | - | - |\n"
     try:
         CONTEXT_CLEAR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         if not CONTEXT_CLEAR_LOG_PATH.exists():
@@ -755,6 +769,25 @@ def append_clear_log(pct: int, event: str) -> None:
             handle.write(row)
     except OSError as exc:
         logger.warning("context clear log append 실패: %s", exc)
+
+
+def resolve_pane_targets(raw: str | None) -> list[str]:
+    """`TMUX_PANE_TARGETS` (또는 singular `TMUX_PANE_TARGET`) CSV 를 list 로 변환.
+
+    빈 문자열 토큰 / 공백 trim. raw 가 None 이거나 비어 있으면
+    `CONTEXT_AUTO_CLEAR_DEFAULT_PANES` 를 fallback. 중복 제거 (순서 보존).
+    """
+    if raw is None or not raw.strip():
+        raw = CONTEXT_AUTO_CLEAR_DEFAULT_PANES
+    seen: set[str] = set()
+    result: list[str] = []
+    for token in raw.split(","):
+        stripped = token.strip()
+        if not stripped or stripped in seen:
+            continue
+        seen.add(stripped)
+        result.append(stripped)
+    return result
 
 
 def resolve_context_pct_env(env_value: str | None, default: int) -> int:
@@ -784,73 +817,120 @@ async def context_auto_clear_loop(
     client: "discord.Client",
     channel_id: int,
     *,
-    pane_target: str = CONTEXT_AUTO_CLEAR_DEFAULT_PANE,
+    pane_targets: list[str] | tuple[str, ...] | None = None,
+    pane_target: str | None = None,  # legacy 단일 인자 (#810 호환).
     trigger_pct: int = CONTEXT_AUTO_CLEAR_DEFAULT_TRIGGER_PCT,
     hysteresis_pct: int = CONTEXT_AUTO_CLEAR_DEFAULT_HYSTERESIS_PCT,
     poll_interval: int = CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS,
 ) -> None:
-    """5초 간격 polling. trigger_pct 도달 → 정리 prompt inject, marker → /clear.
+    """pane 별 독립 state polling. trigger_pct 도달 → 정리 prompt inject, marker → /clear.
 
-    spec §5-2 본문 흐름:
-      1. AUTOCLEAR_PAUSED_FLAG 존재하면 polling skip (사용자 수동 중단).
-      2. tmux capture-pane → parse_context_pct 로 최신 marker 추출.
-      3. awaiting_marker == True 이고 CLEAR_READY_MARKER 가 보이면:
-         Discord push → send_clear_command → log append → awaiting_marker 해제.
-      4. debounced == True 이고 pct ≤ hysteresis_pct 면 debounce 해제.
-      5. debounced == False 이고 pct ≥ trigger_pct 면:
-         Discord push → inject_cleanup_prompt → log append → debounced/awaiting_marker SET.
-      6. marker 도착까지 timeout 없음 — sub-agent 보호 (spec §3 안전성).
+    #855: 다중 pane (nmae mobruji:0.0 + helper helper:0.0) polling. 각 pane 마다
+    debounced / awaiting_marker 를 독립 추적해 한 pane 의 트리거가 다른 pane 에
+    영향을 주지 않는다. pane 별 `tmux has-session` 확인 → missing pane 은 매 iter
+    silently skip (helper 세션 없는 환경에서 crash 금지).
+
+    spec §5-2 본문 흐름 (pane 별 반복):
+      1. AUTOCLEAR_PAUSED_FLAG 존재하면 전체 polling skip (사용자 수동 중단).
+      2. 각 pane 에 대해:
+         a. tmux has-session 실패 → 해당 pane 만 skip.
+         b. tmux capture-pane → parse_context_pct 로 최신 marker 추출.
+         c. awaiting_marker(pane) == True 이고 CLEAR_READY_MARKER 가 보이면:
+            Discord push → send_clear_command → log append → awaiting_marker 해제.
+         d. debounced(pane) == True 이고 pct ≤ hysteresis_pct 면 debounce 해제.
+         e. debounced(pane) == False 이고 pct ≥ trigger_pct 면:
+            Discord push → inject_cleanup_prompt → log append → debounced/awaiting_marker SET.
+      3. marker 도착까지 timeout 없음 — 진행 중 작업 보호 (spec §3 안전성).
+
+    pane_target (singular) 가 지정되면 [pane_target] 단일 리스트로 처리 — legacy
+    호출(#809/#810 테스트 호환) 보존. 둘 다 None 이면 default panes 사용.
 
     asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리되도록.
     """
-    debounced = False
-    awaiting_marker = False
+    if pane_targets is None:
+        if pane_target is not None:
+            pane_targets = [pane_target]
+        else:
+            pane_targets = resolve_pane_targets(None)
+    panes = list(pane_targets)
+    state: dict[str, dict[str, bool]] = {
+        p: {"debounced": False, "awaiting_marker": False} for p in panes
+    }
+    missing_warned: set[str] = set()
     while True:
         try:
             await asyncio.sleep(poll_interval)
             if AUTOCLEAR_PAUSED_FLAG.exists():
                 continue
-            pane_text = capture_pane_text(pane_target)
-            if pane_text is None:
-                continue
-            pct = parse_context_pct(pane_text)
-            # marker 우선 — pct 가 None 이어도 정리 완료 신호는 살린다.
-            if awaiting_marker and CLEAR_READY_MARKER in pane_text:
-                last_pct_text = "?" if pct is None else f"{pct}%"
-                channel = client.get_channel(channel_id)
-                if channel is not None:
-                    await channel.send(
-                        f"🧹 정리 완료 → /clear 전송 (마지막 context {last_pct_text})"
+            for pane in panes:
+                session = pane.split(":", 1)[0]
+                if not tmux_has_session(session):
+                    if pane not in missing_warned:
+                        logger.warning(
+                            "context auto-clear: pane=%s 세션 없음 — skip",
+                            pane,
+                        )
+                        missing_warned.add(pane)
+                    continue
+                # 세션이 재생성되면 다시 warn 가능하도록 살아있을 땐 set 에서 제거.
+                missing_warned.discard(pane)
+
+                pane_text = capture_pane_text(pane)
+                if pane_text is None:
+                    continue
+                pct = parse_context_pct(pane_text)
+                st = state[pane]
+                # marker 우선 — pct 가 None 이어도 정리 완료 신호는 살린다.
+                if st["awaiting_marker"] and CLEAR_READY_MARKER in pane_text:
+                    last_pct_text = "?" if pct is None else f"{pct}%"
+                    channel = client.get_channel(channel_id)
+                    if channel is not None:
+                        await channel.send(
+                            f"🧹 {pane} 정리 완료 → /clear 전송 (마지막 context {last_pct_text})"
+                        )
+                    else:
+                        logger.warning(
+                            "context auto-clear: channel_id=%s 없음 — pane=%s marker push skip",
+                            channel_id,
+                            pane,
+                        )
+                    send_clear_command(pane)
+                    append_clear_log(
+                        pct if pct is not None else -1, "cleared", pane=pane
                     )
-                else:
-                    logger.warning(
-                        "context auto-clear: channel_id=%s 없음 — marker push skip",
-                        channel_id,
+                    logger.info(
+                        "context auto-clear: pane=%s cleared=%s",
+                        pane,
+                        last_pct_text,
                     )
-                send_clear_command(pane_target)
-                append_clear_log(pct if pct is not None else -1, "cleared")
-                awaiting_marker = False
-                # debounce 는 80% 이하 자연 falloff 까지 유지.
-                continue
-            if pct is None:
-                continue
-            if debounced and pct <= hysteresis_pct:
-                debounced = False
-            if not debounced and pct >= trigger_pct:
-                channel = client.get_channel(channel_id)
-                if channel is not None:
-                    await channel.send(
-                        f"🧠 context {pct}% → 자율 정리 시작"
+                    st["awaiting_marker"] = False
+                    # debounce 는 80% 이하 자연 falloff 까지 유지.
+                    continue
+                if pct is None:
+                    continue
+                if st["debounced"] and pct <= hysteresis_pct:
+                    st["debounced"] = False
+                if not st["debounced"] and pct >= trigger_pct:
+                    channel = client.get_channel(channel_id)
+                    if channel is not None:
+                        await channel.send(
+                            f"🧠 {pane} context {pct}% → 자율 정리 시작"
+                        )
+                    else:
+                        logger.warning(
+                            "context auto-clear: channel_id=%s 없음 — pane=%s trigger push skip",
+                            channel_id,
+                            pane,
+                        )
+                    inject_cleanup_prompt(pane)
+                    append_clear_log(pct, "triggered", pane=pane)
+                    logger.info(
+                        "context auto-clear: pane=%s trigger=%d%%",
+                        pane,
+                        pct,
                     )
-                else:
-                    logger.warning(
-                        "context auto-clear: channel_id=%s 없음 — trigger push skip",
-                        channel_id,
-                    )
-                inject_cleanup_prompt(pane_target)
-                append_clear_log(pct, "triggered")
-                debounced = True
-                awaiting_marker = True
+                    st["debounced"] = True
+                    st["awaiting_marker"] = True
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -903,7 +983,8 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         env.get("CONTEXT_CLEAR_HYSTERESIS_PCT"),
         CONTEXT_AUTO_CLEAR_DEFAULT_HYSTERESIS_PCT,
     )
-    context_pane_target = env.get("TMUX_PANE_TARGET", CONTEXT_AUTO_CLEAR_DEFAULT_PANE)
+    # multi-pane (#855). plural CSV 우선, singular 후방호환.
+    context_pane_targets = resolve_pane_targets(env.get("TMUX_PANE_TARGETS"))
 
     @client.event
     async def on_ready() -> None:  # noqa: D401
@@ -934,16 +1015,29 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 cycle_status_path,
             )
 
-        # context auto-clear loop (spec §5-2, #809). opt-in 이고 pane 존재할 때만 launch.
+        # context auto-clear loop (spec §5-2, #809 → #855 multi-pane).
+        # opt-in 이고 적어도 1 pane 의 세션이 존재할 때만 launch.
+        # 일부 pane 만 존재하면 그 pane 만 polling (loop 안에서 graceful skip).
         if context_auto_clear_enabled and not hasattr(
             client, "_context_auto_clear_task_started"
         ):
-            pane_session = context_pane_target.split(":", 1)[0]
-            if not tmux_has_session(pane_session):
+            available_panes = [
+                p
+                for p in context_pane_targets
+                if tmux_has_session(p.split(":", 1)[0])
+            ]
+            missing_panes = [
+                p for p in context_pane_targets if p not in available_panes
+            ]
+            if missing_panes:
                 logger.warning(
-                    "context auto-clear skip: tmux 세션 없음 (session=%s pane=%s)",
-                    pane_session,
-                    context_pane_target,
+                    "context auto-clear: 부재 pane(들) graceful skip: %s",
+                    ", ".join(missing_panes),
+                )
+            if not available_panes:
+                logger.warning(
+                    "context auto-clear skip: polling 대상 모든 pane 의 tmux 세션 없음 (panes=%s)",
+                    ", ".join(context_pane_targets),
                 )
             else:
                 client._context_auto_clear_task_started = True  # type: ignore[attr-defined]
@@ -951,14 +1045,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     context_auto_clear_loop(
                         client,
                         notify_channel_id,
-                        pane_target=context_pane_target,
+                        pane_targets=context_pane_targets,
                         trigger_pct=context_trigger_pct,
                         hysteresis_pct=context_hysteresis_pct,
                     )
                 )
                 logger.info(
-                    "context_auto_clear_loop launched: pane=%s trigger=%d%% hysteresis=%d%%",
-                    context_pane_target,
+                    "context_auto_clear_loop launched: panes=%s trigger=%d%% hysteresis=%d%%",
+                    ", ".join(context_pane_targets),
                     context_trigger_pct,
                     context_hysteresis_pct,
                 )

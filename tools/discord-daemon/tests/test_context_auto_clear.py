@@ -1,18 +1,23 @@
-"""context_auto_clear_loop 단위 테스트 (#809).
+"""context_auto_clear_loop 단위 테스트 (#809, #855 multi-pane).
 
 PR #807 단순화에서 누락된 `context_auto_clear_loop` 를 복구하면서 함께 작성.
-spec: docs/features/context-auto-clear.md §5-2 / §5-4 / §5-6 / §7.
+#855 에서 multi-pane (nmae + helper) polling 으로 확장.
+spec: docs/features/context-auto-clear.md §5-2 / §5-4 / §5-5 / §5-6 / §7.
 
 검증 범위:
 1. `parse_context_pct` — marker 단일/다중/없음/잘못된 형식/범위 초과.
-2. `context_auto_clear_loop` (asyncio mock) —
-   - 트리거: pct 96 → inject 호출 + debounced True + log append.
+2. `resolve_pane_targets` — CSV / 공백 / 빈 토큰 / 중복 제거 / None fallback.
+3. `context_auto_clear_loop` (asyncio mock) —
+   - 트리거 (single pane / legacy 호출): pct 96 → inject 호출 + debounced True + log append.
+   - 트리거 (multi-pane): 2 pane 모두 96 → pane 별 inject 1번씩 + Discord push 에 pane 이름 포함.
+   - pane 별 독립 state: pane A 트리거 시 pane B debounce 영향 없음.
+   - 한 pane 의 세션 부재 → 해당 pane skip, 다른 pane 정상 polling.
    - hysteresis: pct 96 유지 시 재트리거 없음. pct 75 → debounced 해제.
-   - marker: stdout `===CLEAR_READY===` → send_clear_command 호출.
+   - marker: stdout `===CLEAR_READY===` → send_clear_command 호출 (pane 별).
    - paused flag: 파일 존재 시 polling skip (inject/send 호출 0).
    - disabled flag: build_client 단에서 task 생성 자체 차단 (별 검증).
-3. `append_clear_log` — 신규 파일 헤더 + row append.
-4. `resolve_context_pct_env` — 정수/이상값/범위 초과 → default.
+4. `append_clear_log` — 신규 파일 헤더 + row append (pane 컬럼 포함).
+5. `resolve_context_pct_env` — 정수/이상값/범위 초과 → default.
 """
 
 from __future__ import annotations
@@ -111,6 +116,46 @@ class ResolveContextPctEnvTest(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# resolve_pane_targets (#855 multi-pane)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ResolvePaneTargetsTest(unittest.TestCase):
+    """`TMUX_PANE_TARGETS` (plural CSV) 파싱."""
+
+    def test_none_returns_default(self) -> None:
+        self.assertEqual(
+            bot.resolve_pane_targets(None), ["mobruji:0.0", "helper:0.0"]
+        )
+
+    def test_empty_string_returns_default(self) -> None:
+        self.assertEqual(
+            bot.resolve_pane_targets(""), ["mobruji:0.0", "helper:0.0"]
+        )
+
+    def test_single_pane_returned_as_one_element_list(self) -> None:
+        self.assertEqual(bot.resolve_pane_targets("mobruji:0.0"), ["mobruji:0.0"])
+
+    def test_csv_split_with_whitespace_trimmed(self) -> None:
+        self.assertEqual(
+            bot.resolve_pane_targets("mobruji:0.0 , helper:0.0"),
+            ["mobruji:0.0", "helper:0.0"],
+        )
+
+    def test_empty_tokens_ignored(self) -> None:
+        self.assertEqual(
+            bot.resolve_pane_targets("mobruji:0.0,,helper:0.0,"),
+            ["mobruji:0.0", "helper:0.0"],
+        )
+
+    def test_duplicates_removed_preserving_order(self) -> None:
+        self.assertEqual(
+            bot.resolve_pane_targets("helper:0.0,mobruji:0.0,helper:0.0"),
+            ["helper:0.0", "mobruji:0.0"],
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # append_clear_log
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -121,23 +166,33 @@ class AppendClearLogTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_path = Path(tmp_dir) / "subdir" / "log.md"
             with mock.patch.object(bot, "CONTEXT_CLEAR_LOG_PATH", log_path):
-                bot.append_clear_log(96, "triggered")
+                bot.append_clear_log(96, "triggered", pane="mobruji:0.0")
             content = log_path.read_text(encoding="utf-8")
             self.assertIn("name: project-context-clear-log", content)
-            self.assertIn("| timestamp | event | context%", content)
+            # 신규 헤더 (#855) — pane 컬럼 추가.
+            self.assertIn("| timestamp | pane | event | context%", content)
             # 새 row 한 줄.
-            self.assertIn("| triggered | 96 |", content)
+            self.assertIn("| mobruji:0.0 | triggered | 96 |", content)
 
     def test_appends_to_existing_file_without_dup_header(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_path = Path(tmp_dir) / "log.md"
             with mock.patch.object(bot, "CONTEXT_CLEAR_LOG_PATH", log_path):
-                bot.append_clear_log(96, "triggered")
-                bot.append_clear_log(73, "cleared")
+                bot.append_clear_log(96, "triggered", pane="mobruji:0.0")
+                bot.append_clear_log(73, "cleared", pane="helper:0.0")
             content = log_path.read_text(encoding="utf-8")
             self.assertEqual(content.count("name: project-context-clear-log"), 1)
-            self.assertIn("| triggered | 96 |", content)
-            self.assertIn("| cleared | 73 |", content)
+            self.assertIn("| mobruji:0.0 | triggered | 96 |", content)
+            self.assertIn("| helper:0.0 | cleared | 73 |", content)
+
+    def test_pane_defaults_to_dash_when_omitted(self) -> None:
+        # legacy 호출 — pane 인자 미지정 시 `-` 로 표기.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "log.md"
+            with mock.patch.object(bot, "CONTEXT_CLEAR_LOG_PATH", log_path):
+                bot.append_clear_log(50, "triggered")
+            content = log_path.read_text(encoding="utf-8")
+            self.assertIn("| - | triggered | 50 |", content)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -198,10 +253,17 @@ class ContextAutoClearLoopTest(unittest.IsolatedAsyncioTestCase):
             bot, "CONTEXT_CLEAR_LOG_PATH", self._log_path
         )
         self._log_patcher.start()
+        # #855: loop 가 매 iter `tmux_has_session` 호출 — 테스트는 항상 True 로.
+        # 일부 테스트(missing pane) 만 별도 side_effect 로 덮어 씀.
+        self._has_session_patcher = mock.patch.object(
+            bot, "tmux_has_session", return_value=True
+        )
+        self._has_session_patcher.start()
 
     def tearDown(self) -> None:
         self._flag_patcher.stop()
         self._log_patcher.stop()
+        self._has_session_patcher.stop()
         self._tmp_dir.cleanup()
 
     async def test_trigger_at_high_pct_injects_and_logs(self) -> None:
@@ -219,7 +281,7 @@ class ContextAutoClearLoopTest(unittest.IsolatedAsyncioTestCase):
             coro = bot.context_auto_clear_loop(
                 client,
                 channel_id=111,
-                pane_target="mobruji:0.0",
+                pane_target="mobruji:0.0",  # legacy 단일 인자.
                 trigger_pct=95,
                 hysteresis_pct=80,
                 poll_interval=0,
@@ -231,8 +293,10 @@ class ContextAutoClearLoopTest(unittest.IsolatedAsyncioTestCase):
         inject.assert_called_with("mobruji:0.0")
         # marker 가 아직 안 보였으므로 clear 호출 0.
         send_clear.assert_not_called()
-        # Discord push 첫 줄 = trigger ack.
-        self.assertTrue(any("🧠 context 96%" in m for m in channel.sent))
+        # Discord push 첫 줄 = trigger ack (pane 이름 포함, #855).
+        self.assertTrue(
+            any("🧠 mobruji:0.0 context 96%" in m for m in channel.sent)
+        )
 
     async def test_hysteresis_blocks_retrigger_until_falloff(self) -> None:
         channel = FakeChannel()
@@ -315,8 +379,8 @@ class ContextAutoClearLoopTest(unittest.IsolatedAsyncioTestCase):
             await _run_loop_iters(coro, iterations=10)
 
         send_clear.assert_called_with("mobruji:0.0")
-        # Discord push 에 "정리 완료" 라인이 등장.
-        self.assertTrue(any("정리 완료" in m for m in channel.sent))
+        # Discord push 에 "정리 완료" 라인이 등장 (pane 이름 포함).
+        self.assertTrue(any("mobruji:0.0 정리 완료" in m for m in channel.sent))
 
     async def test_paused_flag_skips_polling(self) -> None:
         channel = FakeChannel()
@@ -361,6 +425,189 @@ class ContextAutoClearLoopTest(unittest.IsolatedAsyncioTestCase):
 
         inject.assert_not_called()
         send_clear.assert_not_called()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # #855 multi-pane 테스트
+    # ─────────────────────────────────────────────────────────────────────
+
+    async def test_multi_pane_both_trigger_independently(self) -> None:
+        """두 pane 모두 96% → 각각 inject 1번씩 + pane 이름이 Discord push 에 들어감."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        def fake_capture(pane: str) -> str:
+            return "===CTX:96%==="
+
+        with mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True) as inject, \
+             mock.patch.object(bot, "send_clear_command", return_value=True):
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_targets=["mobruji:0.0", "helper:0.0"],
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=10)
+
+        # 각 pane 마다 inject 1번씩 (debounce 후 추가 없음).
+        injected_panes = [c.args[0] for c in inject.call_args_list]
+        self.assertEqual(injected_panes.count("mobruji:0.0"), 1)
+        self.assertEqual(injected_panes.count("helper:0.0"), 1)
+        # Discord push 에 두 pane 이름 각각 등장.
+        self.assertTrue(any("mobruji:0.0 context 96%" in m for m in channel.sent))
+        self.assertTrue(any("helper:0.0 context 96%" in m for m in channel.sent))
+
+    async def test_multi_pane_state_isolation(self) -> None:
+        """pane A 만 96% / pane B 만 50% → A 만 트리거, B 미트리거."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        def fake_capture(pane: str) -> str:
+            if pane == "mobruji:0.0":
+                return "===CTX:96%==="
+            return "===CTX:50%==="
+
+        with mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True) as inject, \
+             mock.patch.object(bot, "send_clear_command", return_value=True):
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_targets=["mobruji:0.0", "helper:0.0"],
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=10)
+
+        injected_panes = [c.args[0] for c in inject.call_args_list]
+        self.assertEqual(injected_panes, ["mobruji:0.0"])
+
+    async def test_multi_pane_missing_session_graceful_skip(self) -> None:
+        """helper 세션 부재 → helper polling 시도조차 안 함, mobruji 만 polling."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        # setUp 의 mock 을 풀고 pane 별 분기로 다시 패치.
+        self._has_session_patcher.stop()
+        try:
+            def has_session_per_target(session: str) -> bool:
+                # session 부 (`mobruji` / `helper`) 비교.
+                return session == "mobruji"
+
+            captured_panes: list[str] = []
+
+            def fake_capture(pane: str) -> str:
+                captured_panes.append(pane)
+                return "===CTX:96%==="
+
+            with mock.patch.object(bot, "tmux_has_session", side_effect=has_session_per_target), \
+                 mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+                 mock.patch.object(bot, "inject_cleanup_prompt", return_value=True) as inject, \
+                 mock.patch.object(bot, "send_clear_command", return_value=True):
+                coro = bot.context_auto_clear_loop(
+                    client,
+                    channel_id=111,
+                    pane_targets=["mobruji:0.0", "helper:0.0"],
+                    trigger_pct=95,
+                    hysteresis_pct=80,
+                    poll_interval=0,
+                )
+                await _run_loop_iters(coro, iterations=10)
+
+            # helper pane 은 has-session 실패 → capture 호출 자체가 일어나지 않음.
+            self.assertNotIn("helper:0.0", captured_panes)
+            self.assertIn("mobruji:0.0", captured_panes)
+            # mobruji 만 inject (helper 는 그래스풀 skip).
+            injected_panes = [c.args[0] for c in inject.call_args_list]
+            self.assertEqual(injected_panes, ["mobruji:0.0"])
+        finally:
+            # tearDown 이 stop 을 호출하므로 다시 start.
+            self._has_session_patcher = mock.patch.object(
+                bot, "tmux_has_session", return_value=True
+            )
+            self._has_session_patcher.start()
+
+    async def test_multi_pane_per_pane_debounce_independent(self) -> None:
+        """pane A 트리거 후에도 pane B 는 처음 96% 시 별도 트리거."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        # iter 1: A=96 (trigger), B=50 (no)
+        # iter 2: A=96 (debounced), B=96 (trigger — A 의 debounce 영향 없음)
+        # iter 3+: 둘 다 96 — 추가 트리거 없음
+        state = {"call": 0}
+
+        def fake_capture(pane: str) -> str:
+            # 한 iter 안에서 두 pane 이 차례로 capture 됨.
+            # iteration 단위로 정확한 분리는 어려우므로 호출 시점 카운터 기반.
+            state["call"] += 1
+            if pane == "mobruji:0.0":
+                return "===CTX:96%==="
+            # helper:0.0
+            # 첫 호출 (iter 1) 은 50, 그 이후엔 96.
+            return "===CTX:50%===" if state["call"] <= 2 else "===CTX:96%==="
+
+        with mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True) as inject, \
+             mock.patch.object(bot, "send_clear_command", return_value=True):
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_targets=["mobruji:0.0", "helper:0.0"],
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=15)
+
+        injected_panes = [c.args[0] for c in inject.call_args_list]
+        # 두 pane 각각 정확히 1번 트리거 (pane 별 독립 debounce).
+        self.assertEqual(injected_panes.count("mobruji:0.0"), 1)
+        self.assertEqual(injected_panes.count("helper:0.0"), 1)
+
+    async def test_multi_pane_marker_pane_specific(self) -> None:
+        """pane A 가 marker 보이면 pane A 에만 /clear, pane B 는 영향 없음."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        seq_a = iter([
+            "===CTX:96%===",  # trigger
+            "===CTX:96%===\n===CLEAR_READY===",  # marker → clear
+            "===CTX:96%===",
+        ])
+        seq_b = iter([
+            "===CTX:96%===",  # trigger
+            "===CTX:96%===",  # no marker yet
+            "===CTX:96%===",
+        ])
+
+        def fake_capture(pane: str) -> str:
+            seq = seq_a if pane == "mobruji:0.0" else seq_b
+            try:
+                return next(seq)
+            except StopIteration:
+                return "===CTX:96%==="
+
+        with mock.patch.object(bot, "capture_pane_text", side_effect=fake_capture), \
+             mock.patch.object(bot, "inject_cleanup_prompt", return_value=True), \
+             mock.patch.object(bot, "send_clear_command", return_value=True) as send_clear:
+            coro = bot.context_auto_clear_loop(
+                client,
+                channel_id=111,
+                pane_targets=["mobruji:0.0", "helper:0.0"],
+                trigger_pct=95,
+                hysteresis_pct=80,
+                poll_interval=0,
+            )
+            await _run_loop_iters(coro, iterations=15)
+
+        cleared_panes = [c.args[0] for c in send_clear.call_args_list]
+        # mobruji 만 clear, helper 는 marker 없으니 clear 안 함.
+        self.assertIn("mobruji:0.0", cleared_panes)
+        self.assertNotIn("helper:0.0", cleared_panes)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
