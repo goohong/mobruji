@@ -62,9 +62,12 @@ MAESTRO_WATCHER_SEND_MAX_RETRIES: Final[int] = 3  # transient send 실패 시 �
 # (retry 1 → 2s, retry 2 → 4s). poll_interval 과는 독립. #764 (rev round 2).
 MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE: Final[float] = 2.0
 # pending 재시도 중 새 chunk 가 무한 누적되어 메모리 폭주하는 것을 방지.
-# Discord 장기 outage 시나리오. MAX_CHUNK_LEN * 10 = 18000 char.
-# 초과 시 oldest(앞쪽) 절반을 drop 하고 WARN. #764 (rev round 2).
-MAESTRO_WATCHER_MAX_BUFFER_LEN: Final[int] = MAESTRO_WATCHER_MAX_CHUNK_LEN * 10
+# Discord 장기 outage 시나리오. 기본 200000 char (helper 한 응답 1KB~10KB 다수 cover, #795 긴급).
+# 초과 시 oldest(앞쪽) 절반을 drop 하고 WARN. env `MAESTRO_WATCHER_MAX_BUFFER_LEN` 으로 외부화.
+# 이전 default `MAX_CHUNK_LEN * 10 = 18000` 은 helper 응답 단일 turn 도 넘쳐 drop 발생 (#795).
+MAESTRO_WATCHER_MAX_BUFFER_LEN: Final[int] = int(
+    os.environ.get("MAESTRO_WATCHER_MAX_BUFFER_LEN", "200000")
+)
 # context_auto_clear_loop 튜닝값. maestro 가 매 turn 끝에 emit 하는 `===CTX:NN%===` 마커를
 # pipe-pane capture 파일에서 tail 하여 95% 도달 시 정리 prompt inject, ===CLEAR_READY===
 # 마커 감지 시 /clear 전송. spec: docs/features/context-auto-clear.md §5-6 옵션 A.
