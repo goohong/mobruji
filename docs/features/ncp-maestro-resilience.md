@@ -5,7 +5,7 @@ status: approved
 owner: @mobruji-maestro
 scope: infra
 related_issues: [#384]
-related_prs: []
+related_prs: [#385, #391]
 last_reviewed: 2026-05-23
 ---
 
@@ -155,7 +155,7 @@ P 우선순위로:
 
 **P1 묶음 (즉시):**
 - [x] **PR A (본 PR)**: spec 신설
-- [ ] **PR B**: bot.py `resilience_monitor_loop` — 위험 1 (wake stuck), 4 (context size — 메모리 file size proxy), 8 (token 충돌 — API 5xx grep), 13 (bridge inactive — self-check 불가, watchdog 필요), 14 (OAuth fail — Claude TUI error grep tmux log)
+- [ ] **PR B**: bot.py `resilience_monitor_loop` — 위험 1 (wake stuck), 4 (context size — 메모리 file size proxy), 8 (token 충돌 — API 5xx grep), 13 (bridge inactive — self-check 불가, watchdog 필요), 14 (OAuth fail — Claude TUI error grep tmux log). **실 구현 spec → §11 (분할 1차 §11-1~§11-3, 분할 2차 §11-4~§11-6).**
 - [ ] **PR C**: `tools/deploy/mobruji-bridge-watchdog.sh` + systemd timer — 위험 13 last-resort
 - [ ] **PR D**: 위험 2 (workflow main 의존) — `daily-auto-release.yml` cron + spec 보강
 
@@ -181,6 +181,7 @@ P 우선순위로:
 ## 9) 결정 로그
 - 2026-05-23: 초안 작성 + 즉시 운영 적용 (status=approved). 사용자 위임 — NCP 멈춤 위험 15 정리. P1 묶음 즉시 진행 권장. secondary 는 bot.py 통합 + watchdog systemd timer 이중화.
 - 2026-05-23 (PR #385 후속): §5-2-a P1 5건 (감지/복구/자동화 후보) detail 보강 + §10 `resilience_monitor_loop` 의사코드 추가. 위험 #14 행에 `.claude.json` corruption + hourly cron backup (본진 적용 완료) 반영.
+- 2026-05-23 (PR #385/#391 후속, 분할 1차): §11-1~§11-3 신설 — 의사코드(§10) 한 단계 더 내려간 실 구현 spec (함수 signature + state 관리 / 5건 점검 명령·임계·비용 / 푸시 메시지 템플릿). §11-4~§11-6 (회복 자동화 / systemd 통합 / 회귀 가드) 는 stub. be 사이클 입력으로 전달.
 
 ## 10) `resilience_monitor_loop` 의사코드 (PR B 입력)
 PR B 구현 가이드. **본 절은 의사코드 — 실제 구현은 후속 PR.** bot.py 의 새 asyncio task 로 동작. 5분 cycle. 검사 5건 (위험 #1, #4, #8, #13(self-skip), #14).
@@ -264,3 +265,140 @@ def _maybe_alert(channel, last_alert_ts, key: str, message: str) -> None:
 - 자동 `/wake` trigger — 1단계 자동화 도입 여부 (사용자 결정).
 - `.claude.json` 자동 롤백 — dry-run 우선, 실제 cp 는 별도 flag.
 - last-resort alert (위험 #13) 채널 — Q1 답 후 PR C.
+
+## 11) `resilience_monitor_loop` 실 구현 spec (PR B 입력, 의사코드 §10 → 실 구현)
+§10 의사코드를 한 단계 더 내려간 구현 계약. be 사이클이 본 절(§11-1~§11-3 1차, §11-4~§11-6 2차)을 그대로 코드로 옮길 수 있도록 함수 시그니처/state 스키마/임계/명령/메시지 템플릿을 모두 확정.
+
+**분할**: 본 PR 은 §11-1~§11-3 (시그니처 + state + 점검 매트릭스 + 푸시 템플릿). §11-4~§11-6 (회복 자동화 / systemd 통합 / 회귀 가드) 는 stub — 다음 PR 에서 채움.
+
+### 11-1) 함수 signature + state 관리
+`tools/discord-daemon/bot.py` 에 신규 asyncio task. state 는 JSON 파일 1개로 외부화 — bot 재기동 시 dedup ledger 유지 + 같은 메시지 5분마다 재push 회피.
+
+```python
+# tools/discord-daemon/bot.py — 신규 함수 (§10 의 main loop 와 1:1 대응)
+async def resilience_monitor_loop(
+    client: discord.Client,
+    notify_channel_id: int,
+    state_path: Path,
+) -> None:
+    """5분 cycle. 위험 #1/#4/#8/#14 점검 + delta push. heartbeat 1h.
+
+    Args:
+        client: discord.Client (bot 본체).
+        notify_channel_id: alert 보낼 채널 id (NOTIFY_CHANNEL_ID 또는 MOBRUJI_CHANNEL_ID).
+        state_path: dedup ledger / heartbeat 저장 위치. 기본 ``/home/mobruji/.claude/state/resilience.json``.
+
+    self-protection: 각 검사 try/except 로 감싸 bot 죽이지 않음. 외부 IO (subprocess/file) 모두 timeout 명시.
+    """
+```
+
+**state 파일 스키마** (`/home/mobruji/.claude/state/resilience.json`, 0600 권한):
+```json
+{
+  "schema_version": 1,
+  "last_heartbeat_ts": 1716440000.0,
+  "risks": {
+    "wake_stuck":         {"last_triggered_ts": 1716438000.0, "last_recovered_ts": 1716439500.0, "active": false},
+    "context_heavy":      {"last_triggered_ts": 0,            "last_recovered_ts": 0,            "active": false},
+    "oauth_conflict":     {"last_triggered_ts": 0,            "last_recovered_ts": 0,            "active": false},
+    "claude_json_corrupt":{"last_triggered_ts": 0,            "last_recovered_ts": 0,            "active": false}
+  }
+}
+```
+
+**push 규칙**:
+- `active=False → True` 전이: 🚨/🟡 alert 1회 push, `last_triggered_ts` 갱신.
+- `active=True → False` 전이: 🟢 회복 push 1회.
+- 같은 상태 유지: push 없음 (delta-only).
+- 1h 동안 어떤 alert 도 없으면 heartbeat 1줄 push (`🫧 resilience OK — N분 idle`). `last_heartbeat_ts` 갱신.
+- bot 재기동: state 파일 읽어 `active` 복원 → 직전 상태와 동일하면 silent.
+
+**디렉토리/권한**:
+- `state_path.parent.mkdir(parents=True, exist_ok=True)` 첫 진입 시.
+- 파일 write 는 `tmp + os.replace` atomic — partial-write 방지.
+
+### 11-2) P1 5건 점검 매트릭스 (임계 / 명령 / graceful skip / 비용)
+
+| 위험 | 임계 | 점검 명령 (NCP 셸) | graceful skip | 실 호출 비용 (per check) |
+|---|---|---|---|---|
+| #1 wake_stuck | `time.time() - last_wake_ts > 5400` (90분) | `tmux capture-pane -p -t mobruji-maestro:0 -S -200` → grep `ScheduleWakeup|wake` 마지막 timestamp 추출 | tmux 세션 부재 (`tmux has-session -t mobruji-maestro` exit≠0) → skip + 로그 `WARN tmux session missing` | tmux pipe ~10ms, regex parse 무시 |
+| #4 context_heavy | transcript jsonl > 200MB **또는** memory dir > 100KB | `du -sb ~/.claude/projects/-home-mobruji-mobruji/<session>.jsonl` + `du -sb ~/.claude/projects/-home-mobruji-mobruji/memory` | 세션 파일 glob 결과 0건 → skip (콜드스타트 직후) | stat 2회 ~5ms |
+| #8 oauth_conflict | 최근 1h 내 `rate_limit\|429\|quota\|invalid_api_key` 매치 ≥ 5건 | `tmux capture-pane -p -t mobruji-maestro:0 -S -2000` → regex count | tmux 부재 → skip | tmux pipe ~15ms |
+| #13 bridge_inactive | (self-check 불가 — §11-2 에서는 placeholder 만, 실제 감지는 watchdog PR C) | (skip — `_check_bridge_inactive` 는 항상 graceful skip + 1회 로그 `INFO bridge self-check skipped (watchdog 영역)`) | 항상 skip | 0 |
+| #14 claude_json_corrupt | `jq -e . ~/.claude.json` exit≠0 **또는** size=0 **또는** size 가 직전 hourly backup 대비 90% 미만 | `jq -e . ~/.claude.json` + `stat -c '%s' ~/.claude.json` + `ls -1t ~/.claude.json.bak.* | head -1` 비교 | 백업 파일 0건 (`ls` 결과 비음) → 손상 감지만 push, 자동 롤백 보류 | jq ~50ms, stat ~5ms |
+
+**cycle 총 비용**: 약 90ms / 5분 = 무시 가능 (LLM X, shell only).
+
+**timeout 룰**:
+- `asyncio.wait_for(subprocess, timeout=10.0)` — 모든 subprocess 호출.
+- timeout 초과 → graceful skip + `WARN check <name> timeout` 로그. push 안 함 (false alarm 방지).
+
+### 11-3) 푸시 메시지 템플릿 (delta-only)
+
+각 위험별 alert 1회 + 회복 1회. 본문은 1-3줄, 한국어 + 이모지 등급.
+
+#### 위험 #1 wake_stuck — 🔴 시급
+```
+🚨 wake stuck — 마지막 활동 {minutes}분 전 (임계 90분 초과)
+원인 후보: ScheduleWakeup 미스케줄 / Claude TUI 무응답
+회복 시도: 자동 `/wake` trigger 발사 — N초 후 재검사
+```
+회복 시:
+```
+🟢 wake 회복 — 마지막 활동 {minutes}분 전 (정상 범위 복귀)
+```
+멘션: 채널 멘션 없음 (사용자 외출 가정, 메시지만 누적). 향후 P0 도입 시 `@here`.
+
+#### 위험 #4 context_heavy — 🟡 보강
+```
+🟡 context 약 {tokens_estimate}k tokens — /clear 권장
+transcript: {transcript_mb}MB, memory: {memory_kb}KB (임계 200MB / 100KB)
+대응: 핸드오프 메모리(`project_session_handoff_*.md`) 갱신 후 새 세션
+```
+회복 시: (push 없음 — `/clear` 직후 자연 회복, 다음 cycle 에서 active=False 로 silent 전환)
+
+#### 위험 #8 oauth_conflict — 🔴 시급
+```
+🚨 OAuth 충돌 의심 — 최근 1h API 오류 {count}회 (임계 5회)
+원인 후보: mac + NCP 동시 가동 (Claude Max multi-device 회색지대)
+회복 시도: 사용자 결정 필요 — mac maestro 종료 또는 시간대 분리
+```
+회복 시:
+```
+🟢 OAuth 회복 — 최근 1h API 오류 {count}회 (정상 범위)
+```
+
+#### 위험 #13 bridge_inactive — placeholder (watchdog 영역)
+```
+(self-check 불가 — alert 발사 안 함. watchdog PR C 가 systemd timer 로 외부 감시.)
+```
+
+#### 위험 #14 claude_json_corrupt — 🔴 시급
+```
+🚨 .claude.json 손상 의심 — jq 검증 실패 또는 size {actual}B (직전 backup {prev}B)
+회복 시도: hourly backup `~/.claude.json.bak.{hh}` 로 자동 롤백 후보 등록 (dry-run, §11-4 에서 실 적용)
+사용자 액션: SSH 후 백업 검증 + 수동 cp
+```
+회복 시:
+```
+🟢 .claude.json 회복 — jq 검증 성공, size {actual}B
+```
+
+**heartbeat (1h idle 시)**:
+```
+🫧 resilience OK — {idle_minutes}분 idle (위험 4건 모두 정상)
+```
+
+**delta 판정**:
+- 매 cycle 끝에 `risks[*].active` 와 직전 state 비교.
+- 변화 있으면 push + state write. 없으면 push 안 함.
+- heartbeat 는 별도 ledger (`last_heartbeat_ts`) — alert push 가 있으면 heartbeat reset (alert 가 곧 살아있음 신호).
+
+### 11-4) 회복 자동화 (stub — §11-4 본 PR 범위 아님, 다음 PR §11-4~§11-6 분할 2차)
+> 특정 위험 시 systemctl restart / docker compose restart / mysql reconnect / `/wake` trigger 실 발사. dry-run flag → 본 적용 flow.
+
+### 11-5) systemd 통합 (stub — 다음 PR)
+> `mobruji-resilience-monitor.service` 별도 분리 검토 vs bot.py 내장 유지. trade-off: 별 service → bot down 무관, 내장 → 코드 단순.
+
+### 11-6) 회귀 가드 (stub — 다음 PR)
+> Python unittest + `unittest.mock.patch` 로 subprocess / tmux / docker mock. 위험 5건 각각 (a) 정상, (b) 임계 초과 → push, (c) 회복 → 회복 push, (d) graceful skip 시나리오.
