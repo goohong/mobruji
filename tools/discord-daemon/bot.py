@@ -47,7 +47,7 @@ DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 # bot.py 1초 generic auto-ack (#880) — helper bash chain latency 시 사용자 깜깜이 해소.
 # #807 에서 제거됐던 것 부활. helper 측 구체 ack 와 직렬로 보이게 됨.
 BOT_AUTO_ACK_DEFAULT_ENABLED: Final[str] = "1"
-BOT_AUTO_ACK_TEXT: Final[str] = "📥 받음 — helper 작업 중 (구체 ack 곧 도착)"
+BOT_AUTO_ACK_TEXT: Final[str] = "🤖 helper bot 수신 — helper 가 nmae 상태 확인 중. 곧 답변드립니다."
 
 # reply.referenced_message forwarding (#880) — 사용자 Discord "답장" 으로 보낸 메시지가
 # 어떤 메시지에 대한 답장인지 helper 가 알 수 있도록 prefix.
