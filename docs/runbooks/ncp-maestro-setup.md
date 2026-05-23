@@ -584,9 +584,9 @@ docker compose 의 환경 변수는 컨테이너 생성 시 한 번 inline. 변�
 ## I) NCP 추가 블록 스토리지 attach + Docker root 이동
 
 ### 배경 / 언제 쓰나
-Phase 4 dev 환경을 한동안 굴리면 docker image / build cache / fe node_modules 가 누적되어 root 디스크(50GB)가 차오른다. 본진 실측: dev 가동 약 1주 만에 사용률 **88%** (≈ 44GB) 도달, image pull / `npm ci` 가 `ENOSPC` 직전. NCP 의 root 볼륨 자체는 사후 확장이 번거롭고 단순 정리만으로는 다음 사이클에 다시 찬다.
+Phase 4 dev 환경을 한동안 굴리면 docker image / build cache / fe node_modules 가 누적되어 root 디스크(50GB)가 차오른다. maestro 실측: dev 가동 약 1주 만에 사용률 **88%** (≈ 44GB) 도달, image pull / `npm ci` 가 `ENOSPC` 직전. NCP 의 root 볼륨 자체는 사후 확장이 번거롭고 단순 정리만으로는 다음 사이클에 다시 찬다.
 
-해법: **추가 블록 스토리지(예: 20GB)를 NCP 콘솔에서 attach 한 뒤, Docker 의 데이터 디렉토리(`/var/lib/docker`)와 fe `node_modules` 를 그 볼륨(`/data`)로 이동.** 본진 실측 결과 **88% → 63%** 로 즉시 해소, 다운타임 **약 30초**(docker 재시작 1회), 추가 비용은 NCP 가격표 기준 20GB 블록.
+해법: **추가 블록 스토리지(예: 20GB)를 NCP 콘솔에서 attach 한 뒤, Docker 의 데이터 디렉토리(`/var/lib/docker`)와 fe `node_modules` 를 그 볼륨(`/data`)로 이동.** maestro 실측 결과 **88% → 63%** 로 즉시 해소, 다운타임 **약 30초**(docker 재시작 1회), 추가 비용은 NCP 가격표 기준 20GB 블록.
 
 ### I-1) NCP 콘솔에서 블록 스토리지 attach (사용자 작업)
 NCP 콘솔 → Server → 해당 VM (`mobruji-maestro`) → "스토리지" 탭 → **"스토리지 생성"** (또는 "기존 스토리지 연결").
@@ -624,7 +624,7 @@ sudo mount -a
 df -h /data
 ```
 
-> **회귀 가드 — `nofail` 필수**: NCP 콘솔에서 사용자가 디스크를 떼는 등 어떤 이유로든 볼륨이 보이지 않을 때, `nofail` 이 없으면 systemd `local-fs.target` 이 실패해 부팅이 멈춘다. dev 환경이라도 maestro/discord-bridge 가 같은 VM 에 있으므로 boot 실패는 곧 본진 정지다.
+> **회귀 가드 — `nofail` 필수**: NCP 콘솔에서 사용자가 디스크를 떼는 등 어떤 이유로든 볼륨이 보이지 않을 때, `nofail` 이 없으면 systemd `local-fs.target` 이 실패해 부팅이 멈춘다. dev 환경이라도 maestro/discord-bridge 가 같은 VM 에 있으므로 boot 실패는 곧 maestro 정지다.
 
 ### I-3) Docker 정지 → data-root 이동 → 재기동 (root)
 실제 다운타임이 발생하는 구간. dev container 4개 + docker 데몬을 한 번에 멈춘다.
@@ -688,7 +688,7 @@ sudo rm -rf /var/lib/docker
 ### I-5) Frontend `node_modules` symlink (다운타임 0)
 fe 의 `node_modules` (수백 MB) 만 따로 옮기면 dev 디스크가 더 가벼워진다. fe dev 가 안 도는 시점(또는 무관)에 진행 가능.
 
-> **표준 target 경로 — `/data/node_modules/`**: 본진 실측(#439, #736)으로 외부 target 디렉토리 이름이 워크트리 내부 `node_modules` 와 다른 prefix(예: `/data/web-node_modules/` 또는 `/data/node_modules/fe-web/`) 를 가지면 Node.js ESM resolver 가 동일 패키지를 두 가지 realpath 로 중복 해석해 `vitest` 등 subpath exports lookup 이 깨진다(`ERR_MODULE_NOT_FOUND: '@vitest/utils'`). target 이름을 **`/data/node_modules/`** 로 단순화해 realpath 일관성을 확보한 것이 실제 해결이었다. 신규 setup 은 처음부터 본 경로로 통일한다. 진단 상세: [`docs/runbooks/web-deps-dev-env.md`](./web-deps-dev-env.md).
+> **표준 target 경로 — `/data/node_modules/`**: maestro 실측(#439, #736)으로 외부 target 디렉토리 이름이 워크트리 내부 `node_modules` 와 다른 prefix(예: `/data/web-node_modules/` 또는 `/data/node_modules/fe-web/`) 를 가지면 Node.js ESM resolver 가 동일 패키지를 두 가지 realpath 로 중복 해석해 `vitest` 등 subpath exports lookup 이 깨진다(`ERR_MODULE_NOT_FOUND: '@vitest/utils'`). target 이름을 **`/data/node_modules/`** 로 단순화해 realpath 일관성을 확보한 것이 실제 해결이었다. 신규 setup 은 처음부터 본 경로로 통일한다. 진단 상세: [`docs/runbooks/web-deps-dev-env.md`](./web-deps-dev-env.md).
 
 ```bash
 # 1) 옮길 대상 만들기 (표준 경로 — 다른 이름 쓰지 말 것, §I-5 가드 참조)

@@ -12,9 +12,9 @@ last_reviewed: 2026-05-23
 # 자율 사이클 오케스트레이션 — 4 워크트리 동시 가동 + cycle-status digest
 
 ## 1) 개요 (What / Why)
-지난 ~3시간 nmae (NCP maestro) 자율 사이클 운영에서 **반복 패턴 6종** 이 누적 발견되었으나 spec 화 부재로 매 turn 본진 ad-hoc 판단에 의존했다. 본 spec 은 이를 정형화하여 nmae 가 사용자 부재 시에도 결정적으로 4 워크트리를 동시 가동·관측·복구할 수 있게 한다.
+지난 ~3시간 nmae (NCP maestro) 자율 사이클 운영에서 **반복 패턴 6종** 이 누적 발견되었으나 spec 화 부재로 매 turn maestro ad-hoc 판단에 의존했다. 본 spec 은 이를 정형화하여 nmae 가 사용자 부재 시에도 결정적으로 4 워크트리를 동시 가동·관측·복구할 수 있게 한다.
 
-**대상 액터**: nmae 본진 (오케스트레이터), be/fe/rev/plan 4 워크트리 sub-agent, helper (사용자 양방향), bot.py (digest cron), 오너 (Discord 단방향 observer).
+**대상 액터**: nmae (오케스트레이터), be/fe/rev/plan 4 워크트리 sub-agent, helper (사용자 양방향), bot.py (digest cron), 오너 (Discord 단방향 observer).
 
 **해결 문제**:
 1. 4 워크트리 동시 사이클 시 같은 도메인 lock / branch checkout 충돌 (worktree 한 곳 = 동시 sub-agent 1) 룰 부재
@@ -26,7 +26,7 @@ last_reviewed: 2026-05-23
 ## 2) 용어 / 약어
 | 약어 | 의미 |
 |---|---|
-| **mmae** | mac maestro (오너 mac 본진, 옵션) |
+| **mmae** | mac maestro (오너 mac 호스트, 옵션) |
 | **nmae** | ncp maestro (NCP 상주 오케스트레이터 — 본 spec 주체) |
 | **helper** | NCP 상주 사용자 양방향 전담 (참고: `helper-agent.md`) |
 | **sub-agent** | nmae 가 Agent 도구로 launch 하는 워크트리 1회용 워커 |
@@ -42,7 +42,7 @@ last_reviewed: 2026-05-23
 - [x] **Sub-agent launch 시 stale verification 의무** — `gh pr list --search "..." --state all` + grep 으로 이미 처리된 이슈/PR 인지 확인. stale 발견 시 close + 다음 백로그 picking
 - [x] **worktree branch checkout 충돌 회피** — `git checkout -b <new-branch> origin/develop` 패턴 강제 (다른 워크트리가 develop 점유 시 conflict 회피). 기존 작업 브랜치 잔재는 `git reset --hard HEAD` 로 정리
 - [x] **helper boundary** — helper 는 (i) 사용자 응답 + (ii) helper 자체 룰/메모리/스크립트 수정만. 그 외 (PR / bot.py / sub-agent launch / 이슈 등록 / release) 는 nmae 위임. (CLAUDE.md §11-pre-pre + [[feedback-helper-role-boundary]] 메모리)
-- [x] **rev audit → follow-up 이슈 자동 등록 → 다음 사이클 위임** — rev sub-agent 가 audit 결과 코멘트 작성 후 nmae 본진이 🔴 시급 항목을 같은 사이클 내 이슈 등록 + 다음 사이클 fe/be/plan 위임 ([[feedback-auto-register-rev-findings]] + [[feedback-rev-release-gate]] 메모리)
+- [x] **rev audit → follow-up 이슈 자동 등록 → 다음 사이클 위임** — rev sub-agent 가 audit 결과 코멘트 작성 후 nmae가 🔴 시급 항목을 같은 사이클 내 이슈 등록 + 다음 사이클 fe/be/plan 위임 ([[feedback-auto-register-rev-findings]] + [[feedback-rev-release-gate]] 메모리)
 - [ ] **release cut 자동 트리거** — 현재 미구현. 사용자 결정 의존 (D12, §7 오픈 이슈)
 
 ### 비기능 요구사항
@@ -247,7 +247,7 @@ helper 는 다음만 직접 수정:
 | # | 질문 | 선택지 | 담당/기한 | 우선순위 |
 |---|---|---|---|---|
 | Q1 | release cut 자동 트리거 (D12) | (a) develop → main 자동 release PR 생성 + 사용자 ack 만 / (b) 현 수동 유지 | @user / v0.5.0 계획 시 | 중 |
-| Q2 | 1 turn 1 launch 룰 정형화 | (a) nmae 본진 prompt 에 hard rule / (b) 현 ad-hoc | @nmae / 다음 spec 갱신 | 중 |
+| Q2 | 1 turn 1 launch 룰 정형화 | (a) nmae prompt 에 hard rule / (b) 현 ad-hoc | @nmae / 다음 spec 갱신 | 중 |
 | Q3 | helper boundary 자동 enforce | (a) tmux pre-exec hook 로 helper 의 PR / gh issue create 차단 / (b) 현 룰 only | @user / boundary 위반 사고 발생 시 | 하 |
 | Q4 | cycle-status.json schema 버저닝 | (a) `schema_version` 필드 추가 / (b) breaking change 없으면 미도입 | @nmae / bot.py reader 변경 시 | 하 |
 

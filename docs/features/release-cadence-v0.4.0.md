@@ -14,11 +14,11 @@ last_reviewed: 2026-05-23
 
 ## 1) 개요 (What / Why)
 - v0.3.3 머지(2026-05-23) 이후 `develop` ahead `main` 이 27 commit 까지 누적됨. cutoff 판단 룰이 없어 매번 사용자에게 "지금 release 할까?"를 물어보고 있다.
-- v0.4.0 부터는 **cadence 룰**(언제 cut 할지)과 **scope 라벨**(어떤 PR을 포함할지)을 spec 으로 박제해, 본진이 자율적으로 release PR draft 를 만들 수 있게 한다.
-- 본진이 release 만 사용자 확인을 받는 [Rev release gate](feedback_rev_release_gate.md) 흐름을 유지하되, "언제 어떤 PR로" 결정의 인지 비용을 0 으로 만든다.
+- v0.4.0 부터는 **cadence 룰**(언제 cut 할지)과 **scope 라벨**(어떤 PR을 포함할지)을 spec 으로 박제해, maestro가 자율적으로 release PR draft 를 만들 수 있게 한다.
+- maestro가 release 만 사용자 확인을 받는 [Rev release gate](feedback_rev_release_gate.md) 흐름을 유지하되, "언제 어떤 PR로" 결정의 인지 비용을 0 으로 만든다.
 
 ## 2) 사용자 시나리오
-- 본진은 매 사이클 끝에 ahead 카운트를 체크. cutoff 룰 임계치 도달 시 자동으로 release PR draft 생성 + `#모부르지` push.
+- maestro는 매 사이클 끝에 ahead 카운트를 체크. cutoff 룰 임계치 도달 시 자동으로 release PR draft 생성 + `#모부르지` push.
 - 사용자는 Discord 에서 release draft 링크를 받고 changelog 만 훑은 뒤 `merge` 한 마디로 승인.
 - rev 워크트리는 release PR 의 모든 포함 PR 이 `reviewed:claude` 라벨인지 gate 검증 (이미 박제됨).
 
@@ -76,15 +76,15 @@ last_reviewed: 2026-05-23
 > 권장: 디폴트 "전부 포함", `release:skip` 만 명시. 라벨 부담 최소화.
 
 ### 5-3) release notes 자동화 스크립트 흐름
-1. 본진 사이클 끝에 `gh pr list --base develop --state merged --search "merged:>=<last_release_date>"` 호출.
+1. maestro 사이클 끝에 `gh pr list --base develop --state merged --search "merged:>=<last_release_date>"` 호출.
 2. 옵션 C 임계치 도달 여부 판단.
 3. 도달 시:
    - `git log <last_tag>..origin/develop --oneline` 으로 commit 추출
    - `type:*` 라벨 기준 그룹핑 (feat / fix / docs / chore / test / refactor)
    - `release/v0.4.0` branch 생성, draft PR (base: main) 생성
    - `#모부르지` push: "v0.4.0 release draft #XXX — ahead 22 / fix 3 + feat 2 / 검토 부탁"
-4. 사용자 `merge` 시 본진이 `gh pr merge --merge` (Squash 금지, develop 히스토리 보존).
-5. tag + `gh release create` 도 본진 자동.
+4. 사용자 `merge` 시 maestro가 `gh pr merge --merge` (Squash 금지, develop 히스토리 보존).
+5. tag + `gh release create` 도 maestro 자동.
 
 ### 5-4) v0.4.0 잠정 범위
 
@@ -102,14 +102,14 @@ last_reviewed: 2026-05-23
 ## 6) 후속 PR 분할
 1. **PR-1**: 본 spec 머지 (현재 PR)
 2. **PR-2**: `02-agent-workflow.md §8 릴리즈` 에 옵션 C 룰 + 라벨 정책 반영
-3. **PR-3**: 본진 prompt template (`12-sub-agent-prompt-template.md`) 에 cutoff 자동 판단 step 추가
+3. **PR-3**: maestro prompt template (`12-sub-agent-prompt-template.md`) 에 cutoff 자동 판단 step 추가
 4. **PR-4**: `release/v0.4.0` 실 PR 생성 (사용자 승인 후)
 
 ## 7) 오픈 이슈
 - 옵션 C 의 5건 / 20 commit 임계치는 첫 사이클에서 측정 후 조정 가능. v0.5.0 회고 때 재평가.
 - `release:skip` 라벨 강제 룰을 안 두면 docs/test PR 도 모두 changelog 에 나옴 → notes 길어짐 → 사용자 가독성 저하. 첫 release notes 길이 보고 결정.
 - hotfix 별도 branch 정책은 v0.4.1 첫 발생 시 spec 신설.
-- 2026-05-23: rev audit D12 발견 — fix 11 + feat 3 = 14건 (5건 임계치 3배 초과), v0.3.3..origin/develop 56 commit ahead. 자동화 (cron self-trigger) 미구현 → 사용자 결정 대기. v0.4.0 release cut 진행 여부 본진 Discord push 알림 완료.
+- 2026-05-23: rev audit D12 발견 — fix 11 + feat 3 = 14건 (5건 임계치 3배 초과), v0.3.3..origin/develop 56 commit ahead. 자동화 (cron self-trigger) 미구현 → 사용자 결정 대기. v0.4.0 release cut 진행 여부 maestro Discord push 알림 완료.
 
 ## 8) 영향 파일 (코드 변경 없음, 후속 PR 에서 갱신)
 - `docs/ai-harness/02-agent-workflow.md` §8 (PR-2)

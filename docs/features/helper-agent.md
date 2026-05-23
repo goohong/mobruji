@@ -12,12 +12,12 @@ last_reviewed: 2026-05-23
 # Helper Agent — nmae 영구 가동으로 mmae 대체 + 사용자 양방향 전담
 
 > **약어 (전 문서 일관)**
-> - **mmae** = mac maestro (오너 mac 본진, 기존 오케스트레이션 세션)
-> - **nmae** = ncp maestro (NCP 상주 본진, sub-agent be/fe/rev/plan 오케스트레이션)
+> - **mmae** = mac maestro (오너 mac 호스트, 기존 오케스트레이션 세션)
+> - **nmae** = ncp maestro (NCP 상주, sub-agent be/fe/rev/plan 오케스트레이션)
 > - **helper** = NCP 상주 신설 세션 (사용자 양방향 전담)
 
 ## 1) 개요 (What / Why)
-- 현재 운영 모델은 **mmae 본진**이 켜져 있어야만 사용자가 폰만으로 모부르지 운영을 지속할 수 있다. mac 종료/sleep/네트워크 단절 시 사용자 응답 채널이 끊긴다.
+- 현재 운영 모델은 **mmae** 가 켜져 있어야만 사용자가 폰만으로 모부르지 운영을 지속할 수 있다. mac 종료/sleep/네트워크 단절 시 사용자 응답 채널이 끊긴다.
 - 동시에 **nmae** 가 도입되어 sub-agent 오케스트레이션은 NCP 에서 영구 가동되지만, nmae 는 작업·digest 에 집중해야 하므로 사용자 query 즉시 응답 책임을 분리할 필요가 있다.
 - 사용자 요청 원문 (2026-05-23): *"폰만으로 운영하려면 mac maestro 역할을 NCP helper agent 가 영구 대체."* + 후속 *"helper 진짜 가치 = nmae 바빠도 사용자 query 즉시 답."*
 - 본 spec 은 NCP 상주 `helper` Claude CLI 세션을 신설하여 다음 책임을 전담시킨다:
@@ -123,7 +123,7 @@ helper tmux session  (NCP, 신설, claude CLI)
 
 ### 5-3) 외부 연동
 - **Anthropic API** (helper LLM): 두 옵션
-  - 옵션 A — Max OAuth multi-device: 본진 mmae 와 동일 계정, `claude --login` 으로 NCP 에 별도 device 로 로그인. **가성비 1차 시도**. 한계: Max quota 공유, multi-device 정책 변경 위험.
+  - 옵션 A — Max OAuth multi-device: maestro mmae 와 동일 계정, `claude --login` 으로 NCP 에 별도 device 로 로그인. **가성비 1차 시도**. 한계: Max quota 공유, multi-device 정책 변경 위험.
   - 옵션 B — Anthropic API key (Haiku): `ANTHROPIC_API_KEY` env 로 별도 결제. **안정 fallback**. 한계: 월 비용 발생.
   - 권장: A 시도 → quota / 정책 fail 시 B 즉시 전환. (§8 Q1 우선순위 최상)
 - **Discord Gateway**: bot.py 가 기존 그대로 사용. helper 는 Discord 직접 접근하지 않음 (bot.py 가 유일 채널).
