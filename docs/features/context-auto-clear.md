@@ -217,10 +217,12 @@ metadata:
 
 **regex 최종 후보** (옵션 A): `r'===CTX:(\d{1,3})%==='`. PR C 단위 테스트로 고정.
 
+**maestro 측 룰 (확정)**: `CLAUDE.md §11 context 사용량 자기 emit (maestro 자율 회복용)` 에서 marker 형식·추정 방법·적용 대상(maestro 본진만) 명시. PR C 는 이 룰을 전제로 구현한다.
+
 ## 6) 작업 분할 (예상 PR 리스트)
 - [x] **PR A (본 PR)**: spec 신설.
 - [ ] **PR B**: `project_context_clear_log.md` 메모리 초기화 (빈 표). 본 spec 머지 후 plan 또는 maestro가 작성.
-- [ ] **PR C**: `bot.py` 에 `context_auto_clear_loop` + 파싱 + send_keys + `.env.example` 토글 + `tests/test_context_auto_clear.py`. be 사이클 후속.
+- [ ] **PR C**: `bot.py` 에 `context_auto_clear_loop` + 파싱 + send_keys + `.env.example` 토글 + `tests/test_context_auto_clear.py`. be 사이클 후속. **전제**: `CLAUDE.md §11` (maestro self-emit `===CTX:NN%===` 룰) 머지됨.
 - [ ] **PR D**: `bot.py` on_message 에 `/stop autoclear` / `/start autoclear` / `/force clear` 핸들러 + 테스트. PR C 후 또는 동시.
 - [ ] **PR E (운영 시험)**: PR C 머지 후 1주 dry-run (CONTEXT_AUTO_CLEAR_ENABLED=0 로 polling만 + log 만 append). hysteresis/패턴 검증 후 default ENABLED=1 전환.
 
