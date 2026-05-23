@@ -3,6 +3,7 @@ package com.mobruji.voice.api;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -13,12 +14,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.mobruji.auth.SessionAuthGuard;
+import com.mobruji.user.application.SessionAuthGuard;
 import com.mobruji.voice.application.VoiceRangeService;
 import com.mobruji.voice.domain.VoiceRangeSnapshot;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
@@ -30,10 +32,11 @@ import com.mobruji.voice.domain.VoiceRangeSourceMethod;
  * full context 부팅이 필요해 회귀 감지 비용이 크다. 본 슬라이스 테스트는 컨트롤러 + {@link SessionAuthGuard}
  * 와이어링과 직렬화 회귀를 빠르게 잡는 용도.
  *
- * <p>실제 {@code SessionAuthGuard} 를 {@link Import} 해 401 가드 동작도 함께 검증한다.
+ * <p>{@code SessionAuthGuard} 는 PR 3 (#924) 부터 AnonymousSessionRepository 등 의존성이 늘었기 때문에
+ * 슬라이스에서 실 빈으로 띄우기 까다롭다. {@link MockitoBean} 으로 mock 화하고 401 케이스는 명시적으로
+ * {@code willThrow} 한다. 가드 본체 동작 검증은 {@link com.mobruji.user.application.SessionAuthGuardTest} 가 담당.
  */
 @WebMvcTest(VoiceRangeHistoryController.class)
-@Import(SessionAuthGuard.class)
 @ActiveProfiles("test")
 class VoiceRangeHistoryControllerTest {
 
@@ -42,6 +45,9 @@ class VoiceRangeHistoryControllerTest {
 
     @MockitoBean
     private VoiceRangeService voiceRangeService;
+
+    @MockitoBean
+    private SessionAuthGuard sessionAuthGuard;
 
     @Test
     @DisplayName("GET history: snapshot 없으면 200 + 빈 배열")
@@ -81,15 +87,21 @@ class VoiceRangeHistoryControllerTest {
     }
 
     @Test
-    @DisplayName("GET history: X-Session-Id 헤더 누락 → 401")
+    @DisplayName("GET history: X-Session-Id 헤더 누락 → 401 (가드가 throw 하도록 stub)")
     void readHistory_missingHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id"))
+                .given(sessionAuthGuard).verify("s-guard", null);
+
         mockMvc.perform(get("/api/v1/sessions/{sessionId}/voice-range-history", "s-guard"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
-    @DisplayName("GET history: path/header sessionId 불일치 → 401")
+    @DisplayName("GET history: path/header sessionId 불일치 → 401 (가드가 throw 하도록 stub)")
     void readHistory_mismatchedHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
+                .given(sessionAuthGuard).verify("s-path", "s-other");
+
         mockMvc.perform(get("/api/v1/sessions/{sessionId}/voice-range-history", "s-path")
                 .header("X-Session-Id", "s-other"))
                 .andExpect(status().isUnauthorized());

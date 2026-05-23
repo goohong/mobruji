@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.mobruji.auth.SessionAuthGuard;
+import com.mobruji.user.application.SessionAuthGuard;
 import com.mobruji.voice.api.dto.VoiceRangeHistoryResponse;
 import com.mobruji.voice.api.dto.VoiceRangeSnapshotResponse;
 import com.mobruji.voice.application.VoiceRangeService;

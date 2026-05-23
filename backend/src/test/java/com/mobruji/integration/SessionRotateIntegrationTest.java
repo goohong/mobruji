@@ -176,4 +176,39 @@ class SessionRotateIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.BAD_REQUEST.value());
     }
+
+    /**
+     * 회귀 가드 — PR 3 (#924) 핵심: 회전 후 옛 sessionId 로 다른 session-bound endpoint 호출 시 401.
+     * 발견 3 (rev QA, PR #913 follow-up): SessionAuthGuard 가 헤더-path 일치만 검증하면 회전한 sessionId 도 통과.
+     *
+     * <p>SessionAuthGuard §5-2 만료/revoke 게이트가 AnonymousSession.revokedAt != null 인 행을
+     * 401 로 차단해야 한다. 본 테스트는 rotate 직후 옛 sessionId 로 GET /likes 호출 → 401 검증.
+     */
+    @Test
+    @DisplayName("E2E: rotate 후 옛 sessionId 로 다른 endpoint 호출 → 401 (revoke 게이트, #924)")
+    void e2e_rotatedSessionId_subsequentCall_returns401() {
+        final String oldSessionId = "550e8400-e29b-41d4-a716-446655440099";
+
+        // given: rotate 수행 → oldSessionId 가 revoked(USER_ROTATE) 상태로 영속
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", oldSessionId)
+                .body("""
+                        {"currentSessionId":"%s"}
+                        """.formatted(oldSessionId))
+                .when()
+                .post("/api/v1/sessions/rotate")
+                .then()
+                .statusCode(HttpStatus.OK.value());
+
+        assertThat(anonymousSessionRepository.findById(oldSessionId).orElseThrow().isRevoked()).isTrue();
+
+        // when / then: 옛 sessionId 로 GET /likes 호출 → 401 (PR #913 이전엔 200 통과했던 회귀)
+        given()
+                .header("X-Session-Id", oldSessionId)
+                .when()
+                .get("/api/v1/sessions/" + oldSessionId + "/likes")
+                .then()
+                .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
 }

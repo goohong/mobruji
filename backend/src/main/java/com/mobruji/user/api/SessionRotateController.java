@@ -7,10 +7,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.user.api.dto.SessionDataMode;
 import com.mobruji.user.api.dto.SessionRotateRequest;
 import com.mobruji.user.api.dto.SessionRotateResponse;
+import com.mobruji.user.application.SessionAuthGuard;
 import com.mobruji.user.application.SessionRotationService;
 
 import jakarta.validation.Valid;

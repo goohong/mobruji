@@ -14,14 +14,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mobruji.auth.SessionAuthGuard;
+import com.mobruji.user.application.SessionAuthGuard;
 import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
 import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
 import com.mobruji.voice.application.CreateVoiceRangeCommand;
@@ -34,12 +33,11 @@ import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 /**
  * {@link VoiceRangeController} MockMvc 슬라이스 가드.
  *
- * <p>실제 {@link SessionAuthGuard} 를 {@link Import} 해 ADR-0011 §28 / 이슈 #868 후속 적용된
- * 인증 게이트 동작도 함께 검증한다 ({@code LikeControllerTest} 동일 패턴). POST 는 body sessionId,
- * GET/PUT 은 path sessionId 가 {@code X-Session-Id} 헤더와 일치해야 한다.
+ * <p>PR 3 (#924) 부터 {@link SessionAuthGuard} 는 AnonymousSessionRepository 등 의존성이 늘었기 때문에
+ * 슬라이스 컨텍스트에서 실 빈으로 띄우기 까다롭다. {@link MockitoBean} 으로 mock 화 — verify() 는 default
+ * no-op 라 success 시나리오에 영향 없음. 401 케이스는 별 슬라이스/통합 테스트와 가드 단위 테스트에서 담당.
  */
 @WebMvcTest(VoiceRangeController.class)
-@Import(SessionAuthGuard.class)
 @ActiveProfiles("test")
 class VoiceRangeControllerTest {
 
@@ -51,6 +49,9 @@ class VoiceRangeControllerTest {
 
     @MockitoBean
     private VoiceRangeService voiceRangeService;
+
+    @MockitoBean
+    private SessionAuthGuard sessionAuthGuard;
 
     @Test
     @DisplayName("POST /api/v1/voice-ranges: 201 + 응답 바디")

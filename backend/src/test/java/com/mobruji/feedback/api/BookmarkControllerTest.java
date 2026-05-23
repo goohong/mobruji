@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,13 +21,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.feedback.application.BookmarkService;
 import com.mobruji.feedback.application.BookmarkService.BookmarkPageSlice;
 import com.mobruji.feedback.application.ToggleResult;
@@ -35,15 +36,17 @@ import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
+import com.mobruji.user.application.SessionAuthGuard;
 
 /**
  * {@link BookmarkController} MockMvc 슬라이스 가드. {@code LikeControllerTest} 와 동일 패턴.
  *
  * <p>spec: docs/features/recommendation-history-and-feedback.md §5-2 + §5-2-1(ADR-0011).
  * PR #258 후속 {@link SessionAuthGuard} 와이어링 + 응답 직렬화(bookmarked, songId, responses[].song) 회귀 가드.
+ *
+ * <p>PR 3 (#924) 부터 {@link SessionAuthGuard} 는 의존성이 늘어 슬라이스에서 mock 화. 401 케이스는 명시 stub.
  */
 @WebMvcTest(BookmarkController.class)
-@Import(SessionAuthGuard.class)
 @ActiveProfiles("test")
 class BookmarkControllerTest {
 
@@ -52,6 +55,9 @@ class BookmarkControllerTest {
 
     @MockitoBean
     private BookmarkService bookmarkService;
+
+    @MockitoBean
+    private SessionAuthGuard sessionAuthGuard;
 
     @Test
     @DisplayName("POST /api/v1/bookmarks: body sessionId == header → 200 + bookmarked/songId 직렬화")
@@ -70,6 +76,9 @@ class BookmarkControllerTest {
     @Test
     @DisplayName("POST /api/v1/bookmarks: X-Session-Id 헤더 누락 → 401 (service 미호출)")
     void toggle_missingHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id"))
+                .given(sessionAuthGuard).verify("s-1", null);
+
         mockMvc.perform(post("/api/v1/bookmarks")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
@@ -81,6 +90,9 @@ class BookmarkControllerTest {
     @Test
     @DisplayName("POST /api/v1/bookmarks: body/header sessionId 불일치 → 401")
     void toggle_mismatchedHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
+                .given(sessionAuthGuard).verify("s-1", "s-other");
+
         mockMvc.perform(post("/api/v1/bookmarks")
                 .header("X-Session-Id", "s-other")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -117,6 +129,9 @@ class BookmarkControllerTest {
     @Test
     @DisplayName("GET /api/v1/sessions/{id}/bookmarks: path/header sessionId 불일치 → 401")
     void readBySessionId_mismatchedHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
+                .given(sessionAuthGuard).verify("s-path", "s-other");
+
         mockMvc.perform(get("/api/v1/sessions/{sessionId}/bookmarks", "s-path")
                 .header("X-Session-Id", "s-other"))
                 .andExpect(status().isUnauthorized());

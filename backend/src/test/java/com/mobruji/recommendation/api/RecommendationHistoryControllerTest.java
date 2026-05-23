@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -14,12 +15,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.recommendation.application.RecommendationService;
 import com.mobruji.recommendation.application.RecommendationService.RecommendationHistorySnapshot;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
@@ -29,6 +30,7 @@ import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
+import com.mobruji.user.application.SessionAuthGuard;
 
 /**
  * MockMvc 슬라이스 가드: {@link RecommendationHistoryController}.
@@ -37,11 +39,10 @@ import com.mobruji.song.domain.Song;
  * {@link SessionAuthGuard} 헤더 검증이 그대로 통과되는지 확인. 서비스/DTO 매핑은 별 단위 테스트로 이미 커버되어
  * 본 슬라이스에서는 (a) 200 빈/비어있지 않은 응답 형태 (b) 401 가드 분기 두 가지만 본다.
  *
- * <p>가드는 {@code @Import} 로 진짜 빈을 끌어다 쓰는 편이 401 매핑까지 한 번에 검증되어 가치가 더 크다 —
- * 가드 자체는 외부 의존이 없는 순수 컴포넌트라 슬라이스 비용도 무시 가능 수준.
+ * <p>PR 3 (#924) 부터 {@link SessionAuthGuard} 는 AnonymousSessionRepository 등 의존성이 늘었기 때문에
+ * 슬라이스에서 실 빈으로 띄우기 까다롭다. {@link MockitoBean} 으로 mock 화 — 401 케이스는 명시 stub.
  */
 @WebMvcTest(RecommendationHistoryController.class)
-@Import(SessionAuthGuard.class)
 @ActiveProfiles("test")
 class RecommendationHistoryControllerTest {
 
@@ -53,6 +54,9 @@ class RecommendationHistoryControllerTest {
 
     @MockitoBean
     private RecommendationService recommendationService;
+
+    @MockitoBean
+    private SessionAuthGuard sessionAuthGuard;
 
     @Test
     @DisplayName("GET history: 빈 히스토리 → 200 + recommendationHistoryResponses=[]")
@@ -106,6 +110,9 @@ class RecommendationHistoryControllerTest {
     @Test
     @DisplayName("GET history: X-Session-Id 헤더 누락 → 401 (SessionAuthGuard 차단)")
     void readHistory_missingHeader_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id"))
+                .given(sessionAuthGuard).verify(SESSION_ID, null);
+
         mockMvc.perform(get("/api/v1/sessions/{sessionId}/recommendation-history", SESSION_ID))
                 .andExpect(status().isUnauthorized());
     }
@@ -113,6 +120,9 @@ class RecommendationHistoryControllerTest {
     @Test
     @DisplayName("GET history: path sessionId ↔ X-Session-Id 헤더 불일치 → 401")
     void readHistory_headerMismatch_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
+                .given(sessionAuthGuard).verify(SESSION_ID, OTHER_SESSION_ID);
+
         mockMvc.perform(get("/api/v1/sessions/{sessionId}/recommendation-history", SESSION_ID)
                 .header("X-Session-Id", OTHER_SESSION_ID))
                 .andExpect(status().isUnauthorized());
