@@ -1,7 +1,7 @@
 ---
 feature: scoreBreakdown zero-span (single-note) 정책
 slug: score-breakdown-zero-span
-status: blocked-by-data
+status: draft
 owner: @mobruji-maestro
 scope: recommendation
 related_issues: [756, 765]
