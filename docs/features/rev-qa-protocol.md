@@ -370,7 +370,7 @@ rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름**
 
 #### 5-7-12) 인증 헤더 한 줄 정리
 - `X-Session-Id: <SID>` — `/api/v1/sessions/{sessionId}/**` 패턴은 모두 필수 (SessionAuthGuard).
-- `Authorization: Bearer <MOBRUJI_ADMIN_TOKEN>` — `/api/v1/songs/stats` 등 admin endpoint. 토큰은 env로 주입 (`docs/runbooks/local-3tier-setup.md` §2-2).
+- `X-Admin-Token: <MOBRUJI_ADMIN_TOKEN>` — `/api/v1/songs/stats` 등 admin endpoint. 검증은 `com.mobruji.admin.AdminTokenVerifier` (상수시간 비교). 토큰은 env로 주입 (`docs/runbooks/local-3tier-setup.md` §2-2). 헤더 명세 권위: `docs/features/song-metadata-source.md` §5-2-1.
 
 > **새 endpoint 추가 시**: backend PR에서 본 §5-7 을 같은 PR로 갱신한다. 갱신 없는 endpoint는 rev sub-agent가 grep을 다시 하게 되어 wall-clock 손실 + 미QA 위험.
 
