@@ -62,6 +62,16 @@ export function VoiceRangeProgressCard({ summary }: Props) {
     highMidiDeltaSemitones,
   } = summary;
 
+  // 방어 가드 (#567): 부모(page.tsx)가 빈 데이터를 별도 분기하지만, 회귀 시 silent
+  // crash 방지 + 스크린리더 status 안내.
+  if (points.length === 0) {
+    return (
+      <p role="status" className="text-xs text-zinc-500 dark:text-zinc-400">
+        아직 표시할 측정 기록이 없어요.
+      </p>
+    );
+  }
+
   const yMin = minLowMidi - Y_AXIS_VERTICAL_PAD;
   const yMax = maxHighMidi + Y_AXIS_VERTICAL_PAD;
   const yRange = Math.max(1, yMax - yMin);
