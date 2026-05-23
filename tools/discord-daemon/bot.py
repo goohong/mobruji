@@ -40,6 +40,16 @@ MAX_TEXT_PREVIEW_LEN: Final[int] = 80
 DEDUP_TTL_SECONDS: Final[int] = 24 * 60 * 60  # 24h
 DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 
+# bot.py 1초 generic auto-ack (#880) — helper bash chain latency 시 사용자 깜깜이 해소.
+# #807 에서 제거됐던 것 부활. helper 측 구체 ack 와 직렬로 보이게 됨.
+BOT_AUTO_ACK_DEFAULT_ENABLED: Final[str] = "1"
+BOT_AUTO_ACK_TEXT: Final[str] = "📥 받음 — helper 작업 중 (구체 ack 곧 도착)"
+
+# reply.referenced_message forwarding (#880) — 사용자 Discord "답장" 으로 보낸 메시지가
+# 어떤 메시지에 대한 답장인지 helper 가 알 수 있도록 prefix.
+REPLY_CONTEXT_PREVIEW_LEN: Final[int] = 30
+REPLY_CONTEXT_PREFIX_TEMPLATE: Final[str] = "[답장→ {preview}] {body}"
+
 # digest cron 튜닝값 — cycle-status.json (사용자 룰 2026-05-23).
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
@@ -187,6 +197,7 @@ def load_env() -> dict[str, str]:
     env["CYCLE_STATUS_PATH"] = os.path.expanduser(
         os.environ.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
     )
+    env["BOT_AUTO_ACK"] = os.environ.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED)
     return env
 
 
@@ -218,6 +229,43 @@ def append_inbox(payload: dict[str, str]) -> None:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except OSError as exc:
         logger.warning("inbox.jsonl write 실패: %s", exc)
+
+
+def build_reply_context_prefix(
+    referenced_content: str | None,
+    user_body: str,
+    *,
+    preview_len: int = REPLY_CONTEXT_PREVIEW_LEN,
+) -> str:
+    """사용자 Discord "답장" 메시지에 reference 본문 요약 prefix 를 붙입니다 (#880).
+
+    Discord 의 reply 기능은 `Message.reference.message_id` + 서버에서 hydrate 한
+    `Message.referenced_message` 객체로 제공됩니다. 이 함수는 referenced_message
+    가 있을 때만 `[답장→ <preview>] <user 본문>` 형태로 helper 에게 전달할
+    문자열을 만듭니다.
+
+    Args:
+        referenced_content: ``Message.referenced_message.content`` 원문, 또는
+            None / 빈 문자열 (답장이 아닐 때).
+        user_body: 사용자가 새로 작성한 메시지 본문.
+        preview_len: 원문 미리보기 글자 수. 줄바꿈은 공백으로 치환.
+
+    Returns:
+        - referenced_content 가 None / 빈 문자열 → ``user_body`` 그대로
+          (기존 호환).
+        - 그 외 → ``[답장→ <preview>] <user 본문>``.
+    """
+    if not referenced_content:
+        return user_body
+    # 멀티라인 reference 는 한 줄로 만들고 N자 컷.
+    flattened = " ".join(referenced_content.split())
+    if not flattened:
+        return user_body
+    if len(flattened) > preview_len:
+        preview = flattened[: preview_len - 1] + "…"
+    else:
+        preview = flattened
+    return REPLY_CONTEXT_PREFIX_TEMPLATE.format(preview=preview, body=user_body)
 
 
 def sanitize_mentions(text: str) -> str:
@@ -974,6 +1022,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     digest_interval = resolve_digest_interval(env.get("DIGEST_INTERVAL_SECONDS"))
     cycle_status_path = env.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
 
+    bot_auto_ack_enabled = (
+        env.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED) == "1"
+    )
+
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
         env.get("CONTEXT_CLEAR_TRIGGER_PCT"),
@@ -989,12 +1041,13 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s notify=%s allowed=%d digest=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s notify=%s allowed=%d digest=%s auto_ack=%s",
             client.user,
             target_channel_id,
             notify_channel_id,
             len(allowed_user_ids),
             digest_enabled,
+            bot_auto_ack_enabled,
         )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
             # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
@@ -1074,9 +1127,25 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info("dedup hit: message_id=%s", message_id)
             return
 
+        # reply.referenced_message — 사용자가 Discord "답장" 으로 보낸 경우,
+        # 어떤 메시지에 대한 답장인지 prefix 로 helper 에게 전달 (#880).
+        # discord.py 가 message.reference 와 message.referenced_message (hydrated)
+        # 를 제공. referenced_message 가 None / 부분 정보 (delete 등) 면 ignore.
+        referenced_content: str | None = None
+        referenced_message = getattr(message, "referenced_message", None)
+        if referenced_message is not None:
+            ref_raw = getattr(referenced_message, "content", None)
+            if isinstance(ref_raw, str) and ref_raw.strip():
+                referenced_content = ref_raw
+
+        original_body = message.content or ""
+        forwarded_text = build_reply_context_prefix(
+            referenced_content, original_body
+        )
+
         ts_iso = message.created_at.astimezone(timezone.utc).isoformat()
         payload = {
-            "text": message.content or "",
+            "text": forwarded_text,
             "author": str(message.author.id),
             "author_name": message.author.name,
             "ts": ts_iso,
@@ -1085,12 +1154,23 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         }
 
         logger.info(
-            "메시지 수신: author=%s ts=%s preview=%r",
+            "메시지 수신: author=%s ts=%s preview=%r reply=%s",
             payload["author"],
             payload["ts"],
             truncate_for_log(payload["text"]),
+            referenced_content is not None,
         )
         append_inbox(payload)
+
+        # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
+        # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
+        # ack] → [thread stream...] → [helper 본답] 순.
+        # #807 에서 제거됐던 것 부활. BOT_AUTO_ACK=false 면 legacy 동작.
+        if bot_auto_ack_enabled:
+            try:
+                await message.channel.send(BOT_AUTO_ACK_TEXT)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("bot auto-ack push 실패: %s", exc)
 
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
