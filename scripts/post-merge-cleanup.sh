@@ -23,18 +23,31 @@
 #   3. maestro에서 `origin/develop`에 머지된 로컬 branch 삭제
 #
 # 가정:
-#   - maestro 워크트리 경로: $HOME/workspace/github/mobruji
-#   - 서브 워크트리 경로: $HOME/workspace/github/mobruji-{be,fe,rev,plan}
+#   - maestro 워크트리 경로: 자동 감지 (스크립트 위치 기준 `git rev-parse --show-toplevel`)
+#     실패 시 fallback: $HOME/mobruji
+#   - 서브 워크트리 경로: <maestro 부모>/mobruji-{be,fe,rev,plan}
+#   - 환경변수 `MOBRUJI_ROOT` 로 maestro 경로 override 가능
 #   - 이 스크립트는 maestro에서 실행 (다른 워크트리에서 실행해도 git worktree 정보는 동일)
+#
+# 호환성 매트릭스:
+#   - mac 본진 ($HOME/workspace/github/mobruji)        → 자동 감지 OK
+#   - NCP nmae (/home/mobruji/mobruji)                 → 자동 감지 OK
+#   - MOBRUJI_ROOT=/custom/path 으로 override          → env 우선
 
 set -euo pipefail
 
-ROOT_DIR="${HOME}/workspace/github/mobruji"
+# maestro(`mobruji`) 워크트리 경로 자동 감지.
+# 스크립트가 워크트리 안에 있는 경우 `git rev-parse --show-toplevel`로 root 추출.
+# 실패 시 $HOME/mobruji 로 fallback. MOBRUJI_ROOT env로 override 가능.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_ROOT="$(git -C "${SCRIPT_DIR}/.." rev-parse --show-toplevel 2>/dev/null || echo "${HOME}/mobruji")"
+ROOT_DIR="${MOBRUJI_ROOT:-${DEFAULT_ROOT}}"
+PARENT_DIR="$(dirname "${ROOT_DIR}")"
 SUB_WORKTREES=(
-  "${HOME}/workspace/github/mobruji-be"
-  "${HOME}/workspace/github/mobruji-fe"
-  "${HOME}/workspace/github/mobruji-rev"
-  "${HOME}/workspace/github/mobruji-plan"
+  "${PARENT_DIR}/mobruji-be"
+  "${PARENT_DIR}/mobruji-fe"
+  "${PARENT_DIR}/mobruji-rev"
+  "${PARENT_DIR}/mobruji-plan"
 )
 
 FORCE=0
