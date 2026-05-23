@@ -111,7 +111,11 @@ export function setup() {
                 sourceMethod: 'OCTAVE_PICK',
             }),
             {
-                headers: { 'Content-Type': 'application/json' },
+                // SessionAuthGuard(#924, F4) — POST /api/v1/voice-ranges 는 body sessionId
+                // vs X-Session-Id 헤더 상수시간 일치 검증. 헤더 누락 시 401.
+                // bootstrap 옵션 (a): anonymous_session 행 미존재여도 통과 → 별도 세션 생성
+                // endpoint 불필요. SessionActivityTracker 가 lazy 등록 (spec §5-2, §5-5-1).
+                headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
                 tags: { endpoint: 'voice_range_setup' },
             },
         );
@@ -145,7 +149,9 @@ export function recommendationFlow(data) {
     }
 
     const res = http.post(`${BASE_URL}/api/v1/recommendations`, JSON.stringify(payload), {
-        headers: { 'Content-Type': 'application/json' },
+        // POST /api/v1/recommendations 자체는 현재(2026-05-24) SessionAuthGuard 미적용이지만,
+        // session-bound endpoint 동등 처리를 위해 헤더를 함께 전송 (가드 확장 시 회귀 방지).
+        headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
         tags: { endpoint: 'recommendation' },
     });
 
