@@ -21,6 +21,89 @@
 | `mobruji-discord-daemon.service` | Linux systemd unit 템플릿 |
 | `setup-gcp-systemd.sh` | Linux/GCP: venv·.env·systemd unit 한 번에 처리 |
 
+## 환경 변수
+
+`.env.example` 을 `.env` 로 복사한 뒤 채운다. 새 변수가 늘어날 때마다 이 표와 `.env.example` 을 같이 갱신한다.
+
+### 필수
+
+| env | 기본값 | 설명 |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | (없음) | Developer Portal → Bot → Reset Token. MESSAGE CONTENT INTENT 활성 필수. |
+| `ALLOWED_USER_IDS` | (없음) | 명령을 받아들일 Discord user id CSV. 정수 비교. 본인만 두는 것을 권장. |
+| `MOBRUJI_CHANNEL_ID` | (없음) | 메인 채널 id. reply/decision/alert(P1+) 송신 대상. 그 외 채널 메시지는 무시. |
+| `GITHUB_PAT` | (없음) | `repository_dispatch` 호출용 classic PAT. 최소 권한 `repo`. |
+| `GITHUB_REPO` | (없음) | dispatch 대상 repo (`owner/name`). |
+
+### 채널 분리
+
+| env | 기본값 | 설명 |
+|---|---|---|
+| `NOTIFY_CHANNEL_ID` | (미설정 → `MOBRUJI_CHANNEL_ID` fallback) | cycle-start/cycle-end/digest/alert/recovery 카테고리 송신 대상. 알림 채널을 분리하려면 설정. spec: `docs/features/discord-message-style.md §5-2`. |
+
+운영 패턴: 메인 채널은 사용자 reply/결정만, 알림 채널은 5분 digest + cycle 이벤트 + 자동 recovery 통지. 두 값을 같게 두면 모든 카테고리가 한 채널에 모인다 (기존 동작 호환).
+
+### Phase 3 tmux bridge (옵션)
+
+| env | 기본값 | 설명 |
+|---|---|---|
+| `TMUX_BRIDGE_ENABLED` | `0` | `1` 이면 Discord → tmux `send-keys` 분기 활성, `0` 이면 GitHub `repository_dispatch` 만 수행. |
+| `TMUX_SESSION_NAME` | `mobruji` | maestro tmux 세션 이름. 없으면 bot 이 `CLAUDE_BIN` 으로 재생성. |
+| `TMUX_TARGET_PANE` | `mobruji:0.0` | `send-keys` 타깃 pane. |
+| `CLAUDE_BIN` | `claude` | tmux 세션 부재 시 띄울 실행 파일. 절대경로 권장. |
+| `DEDUP_LEDGER_PATH` | `~/.mobruji/discord-bridge.sqlite` | dedup ledger SQLite 경로. 24h TTL GC. |
+
+### tmux pane 캡처 (디버깅 / context auto-clear / maestro watcher 의존)
+
+| env | 기본값 | 설명 |
+|---|---|---|
+| `TMUX_PIPE_PANE_ENABLED` | `0` | `1` 이면 부팅 시 tmux `pipe-pane` 자동 설정 → pane stdout 을 파일로 캡처. context auto-clear loop / maestro response watcher loop 의 전제. |
+| `TMUX_PIPE_PANE_PATH` | `~/.mobruji/tmux-pane.log` | 캡처 파일 경로. |
+| `TMUX_PIPE_PANE_MAX_BYTES` | `104857600` (100MB) | 회전 임계치. 초과 시 별도 thread 가 truncate. |
+
+### 5분 cron digest (옵션, ABC 가시성 패턴 C)
+
+| env | 기본값 | 설명 |
+|---|---|---|
+| `DIGEST_ENABLED` | `1` | `1` 이면 on_ready 직후 asyncio task 가 일정 주기로 multi-line digest 1건 push. 노이즈가 크면 `0` 으로 두고 `/status` 슬래시로만 운영. |
+
+### context auto-clear loop (옵션, 이슈 #773)
+
+| env | 기본값 | 설명 |
+|---|---|---|
+| `CONTEXT_AUTO_CLEAR_ENABLED` | `0` | `1` 이면 5초 간격 pipe-pane log tail → maestro 가 emit 한 `===CTX:NN%===` 마커 추적. trigger pct 도달 시 정리 prompt inject → `===CLEAR_READY===` 감지 시 `/clear` 송신. **전제: `TMUX_BRIDGE_ENABLED=1` + `TMUX_PIPE_PANE_ENABLED=1` + CLAUDE.md §11 룰 적용 maestro.** 1주 dry-run 후 활성 권장. |
+| `CONTEXT_CLEAR_TRIGGER_PCT` | `95` | inject 발동 임계치. |
+| `CONTEXT_CLEAR_HYSTERESIS_PCT` | `80` | trigger 후 이 값 아래로 떨어졌다 다시 올라와야 재발동 (chattering 방지). |
+
+## 백그라운드 loop / watcher (bot.py)
+
+`on_ready` 시점에 아래 asyncio task 가 조건부로 띄워진다. 운영자가 비활성화하려면 위 env 토글로 끈다.
+
+- **`digest_loop`** (PR #755 디지털 분리) — `DIGEST_ENABLED=1` 일 때 가동. 일정 주기로 PR open / 머지 24h / 신규 bug 등 multi-line 상태 1건을 `NOTIFY_CHANNEL_ID` (없으면 `MOBRUJI_CHANNEL_ID`) 로 push. heartbeat 간격은 cron digest 옆에 별도 1시간 ping.
+- **`maestro_response_watcher_loop`** (PR #735 + #761 chunk 재시도) — `MAESTRO_RESPONSE_WATCHER_ENABLED=1` + pipe-pane 캡처 활성일 때 가동. tmux pane log 를 1초 간격 tail → idle 30초 도달 시 누적 buffer 를 한 응답 chunk 로 push. sha256 dedup ledger 로 중복 방지, transient send 실패 시 최대 `MAX_RETRIES=3` 재시도 (`pending_candidate` 보존).
+- **`context_auto_clear_loop`** (PR #776) — `CONTEXT_AUTO_CLEAR_ENABLED=1` 일 때 가동. 위 env 표 참조.
+
+## 보안
+
+### 시크릿 마스킹 (PR #742 + #751 + #771)
+
+Discord 로 송신되는 모든 chunk (maestro response watcher 경유) 는 송신 직전 `SECRET_MASK_PATTERNS` 순서로 치환된다. 패턴 추가 시 `bot.py` 의 `SECRET_MASK_PATTERNS` 튜플을 갱신하고 `tests/` 에 회귀 케이스 추가.
+
+기본 커버:
+
+- GitHub fine-grained PAT (`github_pat_…`)
+- GitHub classic PAT (`ghp_…`)
+- Discord bot token (`[MN]…\.…\.…` 3-segment 패턴)
+- env-style 시크릿 (`KEY=value` 형태, 범위 좁힘 — PR #771)
+
+### Mention sanitize (PR #767)
+
+PR 제목 / maestro pane chunk 에 `@everyone` / `@here` / `<@USER_ID>` / `<@&ROLE_ID>` 가 echo 되면 Discord 가 실제 알림으로 해석해 폭주가 발생한다. `sanitize_mentions()` 가 송신 직전 zero-width space 를 삽입해 trigger 를 무력화한다.
+
+### chunk 재시도 (PR #761)
+
+maestro response watcher 가 Discord API 일시 오류 (`HTTPException` / 네트워크) 만났을 때 `MAX_RETRIES=3` 까지 backoff 없이 재시도. 마지막까지 실패하면 `pending_candidate` 에 보존해 다음 idle flush 시점에 재시도 — chunk 유실 방지.
+
 ## 사전 준비 (공통)
 
 1. Discord Developer Portal → New Application → Bot 생성 → **Privileged Gateway Intents → MESSAGE CONTENT INTENT 활성화**
