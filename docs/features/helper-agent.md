@@ -186,6 +186,11 @@ helper tmux session  (NCP, 신설, claude CLI)
   - nmae 작업/digest + helper 양방향 역할 분리 §4 신설
   - 약어 통일 (mac maestro → mmae, ncp maestro → nmae) 전 문서 적용
   - Q1 (Max OAuth multi-device) 우선순위 최상 blocker 로 상향
+- 2026-05-23 (patch #880): ack/thread/reply UX 묶음 PR. 상세 spec: `docs/features/helper-thread-stream.md`.
+  - **bot.py 1초 generic auto-ack 부활** — `BOT_AUTO_ACK=1` (default). #807 제거됐던 것 복구. helper 자체 ack 까지 bash chain latency 5+초 깜깜이 해소.
+  - **Discord thread stream** — `discord-reply.sh --ack`/`--thread` 모드 추가. helper 가 매 도구 milestone 1줄씩 thread 에 stream → 메인 채널 잡음 없이 실시간 가시화.
+  - **reply.referenced_message forward** — bot.py 가 사용자 답장의 reference 본문을 30자 요약해 prefix `[답장→ ...] <body>` 형태로 helper 에 전달.
+  - CLAUDE.md §11 helper 룰 갱신은 후속 PR.
 
 ## 부록 A — 위험 / 한계
 - helper LLM 비용 (Max OAuth quota 또는 API key 결제)
