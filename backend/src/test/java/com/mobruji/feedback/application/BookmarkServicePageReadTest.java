@@ -10,10 +10,10 @@ import static org.mockito.Mockito.verify;
 
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
@@ -22,6 +22,8 @@ import com.mobruji.feedback.domain.Bookmark;
 import com.mobruji.feedback.infrastructure.BookmarkRepository;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
  * {@link BookmarkService#readPageBySessionId(String, int, int)} 분기 회귀 가드. {@link LikeServicePageReadTest} 와 동일 패턴의
@@ -38,8 +40,14 @@ class BookmarkServicePageReadTest {
     @Mock
     private SongRepository songRepository;
 
-    @InjectMocks
+    private SimpleMeterRegistry meterRegistry;
     private BookmarkService bookmarkService;
+
+    @BeforeEach
+    void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        bookmarkService = new BookmarkService(bookmarkRepository, songRepository, meterRegistry);
+    }
 
     @Test
     @DisplayName("readPageBySessionId: totalCount=0 → empty slice + Pageable 조회/songRepository 미호출")

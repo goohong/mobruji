@@ -11,10 +11,10 @@ import static org.mockito.Mockito.verify;
 
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
@@ -23,6 +23,8 @@ import com.mobruji.feedback.domain.Like;
 import com.mobruji.feedback.infrastructure.LikeRepository;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
  * {@link LikeService#readPageBySessionId(String, int, int)} + {@code readBySessionId} 분기 회귀 가드.
@@ -46,8 +48,14 @@ class LikeServicePageReadTest {
     @Mock
     private SongRepository songRepository;
 
-    @InjectMocks
+    private SimpleMeterRegistry meterRegistry;
     private LikeService likeService;
+
+    @BeforeEach
+    void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        likeService = new LikeService(likeRepository, songRepository, meterRegistry);
+    }
 
     @Test
     @DisplayName("readPageBySessionId: totalCount=0 → empty slice + Pageable 조회/songRepository 미호출")
