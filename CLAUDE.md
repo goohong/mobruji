@@ -183,3 +183,25 @@ PR을 만든 직후 다음을 떠올려라. 떠올리지 않았다면 PR 생성�
 - 구현 전에 **가정값을 명시하고** 사용자에게 확인 요청.
 - 설계 결정이 필요하면 `docs/ai-harness/06-domain-model.md §7 오픈 이슈`에 추가.
 - 문서와 코드가 충돌하면 **문서를 먼저 갱신**하고 구현한다 (01-harness-spec §5).
+
+## 11) context 사용량 자기 emit (maestro 자율 회복용)
+maestro 본진(tmux `mobruji:0.0`)은 매 turn 응답 **마지막 줄**에 자기 context 사용률을 marker 로 emit 한다. bot.py 의 `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 이 marker 를 polling 해서 95% 도달 시 자율 정리 사이클을 트리거한다.
+
+**형식**
+- 정상: `===CTX:NN%===` (NN = 0–100 정수). 예: `===CTX:73%===`
+- 모를 때: `===CTX:?===` (bot.py 는 unknown 처리 — 트리거 안 함)
+- 정리 완료 시: `===CLEAR_READY===` 도 함께 출력 (별도 줄 가능). bot.py 가 감지하면 `/clear` 전송.
+
+**추정 방법** (가능한 것 우선)
+1. `/context` slash 결과를 직전에 본 경우 → 그 수치 사용
+2. 본인이 알고 있는 input/output token 누적 ÷ 모델 window 총량 (1M context 모델 기준) × 100
+3. 둘 다 모르면 `===CTX:?===`
+
+**적용 대상**
+- maestro 본진만. sub-agent (be/fe/rev/plan 워크트리 sub-agent) 는 marker emit 하지 않는다 — 본진 pane 만 polling 대상.
+
+**예시 (turn 마지막)**
+```
+result: PR #777 머지 완료.
+===CTX:42%===
+```
