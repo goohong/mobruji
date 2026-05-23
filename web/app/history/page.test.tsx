@@ -605,6 +605,79 @@ describe("HistoryPage", () => {
     });
   });
 
+  // closes #435 — 카운트 영역이 polite 라이브 영역으로 마킹되고 BE source 분기/
+  // localStorage entry 모두에서 메시지가 라이브 영역에 노출되어야 한다.
+  // PR #428 /recommend, PR #433 /likes /bookmarks 와 동일 패턴.
+  describe("카운트 라이브 영역 (#435)", () => {
+    it("localStorage entry 일 때 라이브 영역에 '최근 N건' 메시지가 노출된다", () => {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      historyMock.set({
+        recommendations: [
+          buildEntry("e-1", tenMinutesAgo, [1]),
+          buildEntry("e-2", tenMinutesAgo, [2]),
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      const liveRegion = screen.getByTestId("history-count-live");
+      expect(liveRegion).toHaveAttribute("role", "status");
+      expect(liveRegion).toHaveAttribute("aria-live", "polite");
+      expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+      expect(liveRegion).toHaveTextContent(/최근 2건의 추천을 기록해두었어요/);
+    });
+
+    it("BE entry 도착 시 라이브 영역에 '세션 ID 기준 N건' 메시지로 분기된다", async () => {
+      sessionMock.set({ sessionId: "sess-live" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: 1,
+            sessionId: "sess-live",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: null,
+            preferredBpm: null,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 999,
+                  title: "BE곡-999",
+                  artist: "가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: null,
+                  mood: null,
+                  language: "ko",
+                  genre: "POP",
+                  tjNumber: null,
+                  kyNumber: null,
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.9,
+                matchReason: "음역 일치",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE entries 로딩 완료 후 라이브 영역 메시지가 BE source 문구로 바뀐다.
+      await screen.findByText("BE곡-999");
+      const liveRegion = screen.getByTestId("history-count-live");
+      expect(liveRegion).toHaveAttribute("role", "status");
+      expect(liveRegion).toHaveAttribute("aria-live", "polite");
+      expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+      expect(liveRegion).toHaveTextContent(
+        /세션 ID 기준 1건의 추천을 서버에서 불러왔어요/,
+      );
+    });
+  });
+
   describe("a11y", () => {
     it("빈 상태에 a11y 위반이 없다", async () => {
       const { container } = renderWithQueryClient(<HistoryPage />);
