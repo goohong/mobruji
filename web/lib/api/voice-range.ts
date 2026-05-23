@@ -62,12 +62,14 @@ export function readVoiceRange(
 export function updateVoiceRange(
   sessionId: string,
   request: VoiceRangeUpdateRequest,
+  options: { signal?: AbortSignal } = {},
 ): Promise<VoiceRangeResponse> {
   return apiFetch<VoiceRangeResponse>(
     `/api/v1/voice-ranges/${encodeURIComponent(sessionId)}`,
     {
       method: "PUT",
       body: request,
+      signal: options.signal,
     },
   );
 }
