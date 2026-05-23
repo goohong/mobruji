@@ -494,4 +494,30 @@ describe("AutoVoiceRangePage a11y", () => {
     );
     await expectNoA11yViolations(container);
   });
+
+  // #454: 단계 전환 announce 를 단일 status region 으로 일원화. 외곽 wrapper
+  // aria-live 와 nested MeasureStep aria-live 중첩 회귀를 막는다.
+  it("PERMISSION 단계에서 status region 이 권한 안내 텍스트를 노출한다", () => {
+    renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
+    expect(screen.getByTestId("auto-step-status")).toHaveTextContent(
+      "마이크 권한 안내 화면입니다.",
+    );
+  });
+
+  it("측정 흐름이 RESULT 까지 진행되면 status region 이 완료 안내로 갱신된다", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("auto-step-status")).toHaveTextContent(
+      "측정이 완료되었습니다. 결과를 확인하세요.",
+    );
+  });
 });
