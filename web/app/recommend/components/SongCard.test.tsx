@@ -633,6 +633,20 @@ describe("SongCard", () => {
       const url = buildYouTubeSearchUrl("Me & You", "Artist?");
       expect(url).toContain("search_query=Me+%26+You+Artist%3F");
     });
+
+    // closes #505 — 회귀 가드: 빈 입력은 search_query 자체를 비워야 한다.
+    it("buildYouTubeSearchUrl: 빈 입력은 빈 search_query를 반환한다", () => {
+      const url = buildYouTubeSearchUrl("", "");
+      const params = new URL(url).searchParams;
+      expect(params.get("search_query")).toBe("");
+    });
+
+    // closes #505 — 회귀 가드: 파라미터 round-trip이 정확해야 한다 (# 같은 fragment 문자 포함).
+    it("buildYouTubeSearchUrl: search_query는 원본 문자열로 round-trip 디코딩된다", () => {
+      const url = buildYouTubeSearchUrl("C#", "Song/Artist");
+      const params = new URL(url).searchParams;
+      expect(params.get("search_query")).toBe("C# Song/Artist");
+    });
   });
 
   // closes #107 — axe-core 자동 검사. serious/critical 위반이 없어야 한다.
