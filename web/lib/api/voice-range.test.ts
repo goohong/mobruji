@@ -118,4 +118,44 @@ describe("voice-range API", () => {
     expect((init as RequestInit).method).toBe("PUT");
     expect((init as RequestInit).body).toBe(JSON.stringify(body));
   });
+
+  const updateBody = {
+    lowestNoteMidi: 50,
+    highestNoteMidi: 74,
+    sourceMethod: "MIC_MEASURE" as const,
+  };
+
+  it("updateVoiceRange: 404 응답 시 ApiError(status=404) 전파", async () => {
+    fetchMock.mockResolvedValueOnce(json({ message: "not found" }, 404));
+    await expect(updateVoiceRange("sess-x", updateBody)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+    });
+  });
+
+  it("updateVoiceRange: 409 응답 시 ApiError(status=409) 전파", async () => {
+    fetchMock.mockResolvedValueOnce(json({ message: "conflict" }, 409));
+    const p = updateVoiceRange("sess-1", updateBody);
+    await expect(p).rejects.toBeInstanceOf(ApiError);
+    await expect(p).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("updateVoiceRange: 5xx 응답 시 ApiError 전파", async () => {
+    fetchMock.mockResolvedValueOnce(json({}, 503));
+    const p = updateVoiceRange("sess-1", updateBody);
+    await expect(p).rejects.toBeInstanceOf(ApiError);
+    await expect(p).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("updateVoiceRange: AbortSignal을 fetch init으로 전달 + abort reject 전파", async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException("Aborted", "AbortError"));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      updateVoiceRange("sess-1", updateBody, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(
+      controller.signal,
+    );
+  });
 });
