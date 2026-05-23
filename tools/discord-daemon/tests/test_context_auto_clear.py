@@ -251,7 +251,7 @@ class ContextAutoClearLoopTests(unittest.TestCase):
         )
         self.assertEqual(clear.call_count, 1)
         self.assertTrue(
-            any("정리 완료" in msg for msg in channel.send_calls),
+            any("정리를 완료했습니다" in msg for msg in channel.send_calls),
             f"clear 완료 push 누락: {channel.send_calls}",
         )
 
