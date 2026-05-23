@@ -18,6 +18,10 @@ import { MAX_EXCLUDED_SONG_IDS, useSessionStore } from "./session";
 
 beforeEach(() => {
   // persist middleware에 묶여 있어도 setState로 초기 상태 강제 복원 가능.
+  // localStorage도 비워야 ensureSessionId persist 테스트가 격리된다.
+  if (typeof localStorage !== "undefined") {
+    localStorage.clear();
+  }
   useSessionStore.setState({
     sessionId: null,
     voiceRangeId: null,
@@ -96,6 +100,34 @@ describe("useSessionStore.setVoiceRangeId", () => {
     appendExcluded([1, 2, 3]);
     setVoiceRangeId(7);
     expect(useSessionStore.getState().excludedSongIds).toEqual([1, 2, 3]);
+  });
+});
+
+describe("useSessionStore.ensureSessionId", () => {
+  it("최초 호출 시 sessionId를 새로 생성하고 이후 호출은 같은 값을 반환한다 (멱등)", () => {
+    const first = useSessionStore.getState().ensureSessionId();
+    expect(first).toBeTruthy();
+    expect(first.length).toBeGreaterThan(0);
+    expect(useSessionStore.getState().sessionId).toBe(first);
+
+    const second = useSessionStore.getState().ensureSessionId();
+    expect(second).toBe(first);
+  });
+
+  it("reset 호출 후 ensureSessionId는 새 값을 만든다 — 이전 ID를 끌고 가지 않는다", () => {
+    const before = useSessionStore.getState().ensureSessionId();
+    useSessionStore.getState().reset();
+    expect(useSessionStore.getState().sessionId).toBeNull();
+    const after = useSessionStore.getState().ensureSessionId();
+    expect(after).not.toBe(before);
+  });
+
+  it("persist storage key 는 'mobruji-session' 으로 sessionId를 직렬화한다", () => {
+    const id = useSessionStore.getState().ensureSessionId();
+    const raw = localStorage.getItem("mobruji-session");
+    expect(raw).not.toBeNull();
+    // zustand persist payload: { state: { sessionId, ... }, version }
+    expect(raw).toContain(id);
   });
 });
 
