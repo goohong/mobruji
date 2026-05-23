@@ -126,16 +126,29 @@ export default function HistoryPage() {
     return <EmptyHistory />;
   }
 
+  // BE source 여부에 따라 "전체 삭제" 버튼의 라벨/확인 문구를 분기하기 위해
+  // handleClear 보다 먼저 계산한다(아래 progressSummary 블록과 동일 변수도 별도 산출).
+  // BE entry 는 mutation API 미구현(PR F 대기)이라 localStorage 만 비우면 다음
+  // 페이지 진입 시 다시 보임 — 사용자 혼란 방지를 위해 라벨을 "이 기기 캐시 비우기"
+  // 로 분기하고 confirm 문구에 그 사실을 명시한다 (#295 항목 3 후속).
+  const hasBackendEntries =
+    (recommendationHistoryQuery.data?.recommendationHistoryResponses?.length ??
+      0) > 0;
+  const clearButtonLabel = hasBackendEntries
+    ? "이 기기 캐시 비우기"
+    : "전체 삭제";
+  const clearConfirmMessage = hasBackendEntries
+    ? "이 기기에 저장된 히스토리만 지웁니다. 서버에 저장된 추천은 다음 방문 시 다시 보입니다. 계속할까요?"
+    : "히스토리 전체를 삭제할까요? 되돌릴 수 없습니다.";
+
   const handleClear = () => {
     // confirm 은 사용자 마찰을 한 단계 추가 — 잘못된 클릭으로 전체가 날아가는 사고 방지.
     // 본 PR 범위에서는 BE entry 삭제 API 가 없으므로 localStorage 만 정리한다.
-    // BE 데이터는 다음 페이지 진입 시 다시 fetch 되어 그대로 보인다 — 사용자 기대치와 갭이 있을 수 있으나
+    // BE 데이터는 다음 페이지 진입 시 다시 fetch 되어 그대로 보인다 — 사용자 기대치와 갭이 있을 수 있어
+    // (#295 항목 3 후속) BE source 일 때는 confirm 문구에 명시한다.
     // spec §4 (out of scope) 에 좋아요/북마크/추천 결과 삭제는 빠져있고, "history 페이지에서 BE 데이터 영구 삭제"
     // 도 spec 에 없으므로 향후 별도 spec/API 가 들어오기 전까지는 "내 브라우저 캐시 비우기" 의미로 둔다.
-    if (
-      typeof window !== "undefined" &&
-      window.confirm("히스토리 전체를 삭제할까요? 되돌릴 수 없습니다.")
-    ) {
+    if (typeof window !== "undefined" && window.confirm(clearConfirmMessage)) {
       clearHistory();
     }
   };
@@ -153,9 +166,8 @@ export default function HistoryPage() {
     localRecommendations,
   );
 
-  const isBackendSource =
-    (recommendationHistoryQuery.data?.recommendationHistoryResponses?.length ??
-      0) > 0;
+  // 헤더 카피와 일치시키기 위한 alias — 이미 위에서 hasBackendEntries 로 계산했다.
+  const isBackendSource = hasBackendEntries;
 
   return (
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
@@ -200,7 +212,7 @@ export default function HistoryPage() {
             onClick={handleClear}
             className="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
           >
-            전체 삭제
+            {clearButtonLabel}
           </button>
         </div>
       </div>
