@@ -89,6 +89,42 @@ class MaskSecretsTests(unittest.TestCase):
         masked = bot.mask_secrets(sample)
         self.assertEqual(masked, sample)
 
+    # #759 false positive 회귀 방지 — 공개 의도 / non-secret 메타 변수.
+    def test_next_public_api_key_unchanged(self) -> None:
+        """Next.js NEXT_PUBLIC_* 접두사는 클라이언트 노출 의도 — 마스킹 금지."""
+        sample = "NEXT_PUBLIC_API_KEY=https://api.dev.example.com/v1"
+        masked = bot.mask_secrets(sample)
+        self.assertEqual(masked, sample)
+
+    def test_rsa_public_key_unchanged(self) -> None:
+        """`PUBLIC_KEY=` RSA 공개키 — 마스킹 금지."""
+        sample = "PUBLIC_KEY=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAabcdef"
+        masked = bot.mask_secrets(sample)
+        self.assertEqual(masked, sample)
+
+    def test_api_version_key_unchanged(self) -> None:
+        """`API_VERSION_KEY=v1.2` 버전 식별자 — 비밀 아님."""
+        sample = "API_VERSION_KEY=v1.2.3-canary"
+        masked = bot.mask_secrets(sample)
+        self.assertEqual(masked, sample)
+
+    def test_index_count_limit_unchanged(self) -> None:
+        """SHARD_COUNT/PAGE_LIMIT/CURSOR_INDEX 등 메타 — 마스킹 금지."""
+        for sample in (
+            "SHARD_COUNT_KEY=128_value_long",
+            "PAGE_LIMIT_KEY=200_pagination_v1",
+            "CURSOR_INDEX_KEY=abc_offset_marker",
+        ):
+            with self.subTest(sample=sample):
+                masked = bot.mask_secrets(sample)
+                self.assertEqual(masked, sample)
+
+    def test_short_value_not_masked(self) -> None:
+        """12자 미만 값은 secret 일 가능성 낮음 — 가독성 우선, 마스킹 skip."""
+        sample = "MY_API_KEY=short"
+        masked = bot.mask_secrets(sample)
+        self.assertEqual(masked, sample)
+
     def test_multiple_secrets_in_one_chunk(self) -> None:
         sample = (
             "환경변수 점검:\n"

@@ -65,7 +65,7 @@ ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
 )
 # Secret masking — maestro tmux pane 에 PAT/토큰/패스워드가 echo 될 수 있으므로
 # Discord push 직전에 패턴 매칭으로 마스킹 (#742). 새 시크릿 형태 발견 시 패턴 추가.
-# 순서 중요: 더 구체적인 패턴(github_pat, discord token)이 일반 패턴(*_TOKEN=) 보다 먼저 매칭되도록 배치.
+# 순서 중요: 더 구체적인 패턴(github_pat, discord token)이 일반 env-style 보다 먼저 매칭되도록 배치.
 SECRET_MASK_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     # GitHub fine-grained PAT — `github_pat_` + 82자 (실측 prefix 11 + body)
     (re.compile(r"github_pat_[A-Za-z0-9_]{50,}"), "github_pat_***"),
@@ -78,15 +78,44 @@ SECRET_MASK_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
         ),
         "discord_token_***",
     ),
-    # 일반 env-style `*_TOKEN=value` / `*_SECRET=value` / `*_KEY=value` — value 의 공백 전까지 마스킹.
-    # group 1 (key 이름)은 보존.
-    (
-        re.compile(r"([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD))=\S+"),
-        r"\1=***",
-    ),
-    # MySQL/DB password 패턴 — `password=value` (case-insensitive). 위 env-style 보다 뒤.
+    # MySQL/DB password 패턴 — `password=value` (case-insensitive).
+    # 일반 env-style (KEY/TOKEN/SECRET/PASSWORD) 은 _ENV_STYLE_SECRET_RE 로 별도 처리.
     (re.compile(r"(?i)\bpassword=\S+"), "password=***"),
 )
+
+# 일반 env-style `*_TOKEN=` / `*_SECRET=` / `*_KEY=` / `*_PASSWORD=` 매칭 (#759 narrow).
+# 단순 광역 패턴은 `NEXT_PUBLIC_API_KEY=`, `PUBLIC_KEY=` (RSA pub), `API_VERSION_KEY=` 등
+# 공개 의도 변수까지 마스킹해 가독성 회귀를 일으켰다. 콜백에서 화이트리스트/블랙리스트 + 길이
+# 임계로 false positive 를 줄인다.
+_ENV_STYLE_SECRET_RE: Final[re.Pattern[str]] = re.compile(
+    r"([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD))=(\S+)"
+)
+# 키 이름에 이 단어들이 포함되어 있으면 secret 이 아니므로 마스킹 제외.
+# - PUBLIC: `NEXT_PUBLIC_*` (Next.js 클라이언트 노출), `PUBLIC_KEY` (RSA pub) 등 공개 의도.
+# - VERSION/COUNT/LIMIT/INDEX/SIZE/LENGTH: 비밀이 아닌 메타 식별자.
+_ENV_STYLE_SECRET_KEYNAME_BLOCKLIST: Final[tuple[str, ...]] = (
+    "PUBLIC",
+    "VERSION",
+    "COUNT",
+    "LIMIT",
+    "INDEX",
+    "SIZE",
+    "LENGTH",
+)
+# 값 최소 길이 임계. 너무 짧은 값은 secret 일 가능성이 낮고 가독성 손해가 더 큼.
+# 일반 PAT/토큰/api key 는 32+ 가 일반적이지만, 짧은 dev secret 도 보호 가능하도록 12 로 설정.
+_ENV_STYLE_SECRET_MIN_VALUE_LEN: Final[int] = 12
+
+
+def _mask_env_style_secret(match: re.Match[str]) -> str:
+    """env-style `KEY=value` 매칭 1건에 대해 화이트리스트/블랙리스트/길이 임계 적용."""
+    key_name = match.group(1)
+    value = match.group(2)
+    if any(blocked in key_name for blocked in _ENV_STYLE_SECRET_KEYNAME_BLOCKLIST):
+        return match.group(0)  # 공개 의도 / 비-secret 메타 — 원문 유지
+    if len(value) < _ENV_STYLE_SECRET_MIN_VALUE_LEN:
+        return match.group(0)  # 너무 짧음 — secret 아닐 가능성 높음, 원문 유지
+    return f"{key_name}=***"
 SENTINEL_PREFIX: Final[str] = "/system:"
 STATUS_COMMAND_PREFIX: Final[str] = "/status"
 STATUS_GH_TIMEOUT_SECONDS: Final[int] = 8
@@ -843,10 +872,14 @@ def mask_secrets(text: str) -> str:
 
     maestro Claude TUI 가 gh/curl/env 명령 echo 시 PAT 가 raw 노출될 수 있으므로
     Discord push 전 SECRET_MASK_PATTERNS 순서대로 치환한다. 패턴 미매칭이면 원문 반환.
+
+    env-style `KEY=value` 는 _ENV_STYLE_SECRET_RE + _mask_env_style_secret 콜백으로
+    별도 처리 — PUBLIC/VERSION 등 화이트리스트 / 짧은 값 false positive 제외 (#759).
     """
     masked = text
     for pattern, replacement in SECRET_MASK_PATTERNS:
         masked = pattern.sub(replacement, masked)
+    masked = _ENV_STYLE_SECRET_RE.sub(_mask_env_style_secret, masked)
     return masked
 
 
