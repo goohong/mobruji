@@ -152,10 +152,11 @@ DIGEST_CHANNEL_ID=<별 채널 ID, 옵션>
 
 ### 5-1) 사용자 query → helper 즉시 답
 1. 사용자가 Discord에 "지금 뭐 하고 있어?" 보냄
-2. bot.py 1초 안 auto-ack: "📥 받음, helper 처리 중"
-3. helper가 tmux capture-pane으로 nmae 상태 + `gh pr list` 수집
-4. helper가 정중체 응답: "현재 PR #XXX 머지 중이고, sub-agent 4개 가동 중입니다..."
-5. bot.py가 helper stdout pipe-pane 캡처 → Discord raw push (10~30초 안)
+2. bot.py 는 단순 라우팅 — helper tmux session 으로 send-keys 만 수행 (PR #807 단순화 이후 bot.py 자체 auto-ack 제거됨)
+3. helper 가 매 turn 시작 시 `CLAUDE.md §11-pre / §11-pre-0` 절대 룰에 따라 **첫 액션으로** `discord-reply.sh "답변 가능합니다. 잠시만 기다려주세요."` 호출 → 채널에 ack push (1~3초 안)
+4. helper가 tmux capture-pane으로 nmae 상태 + `gh pr list` 수집
+5. helper가 정중체 응답: "현재 PR #XXX 머지 중이고, sub-agent 4개 가동 중입니다..." (응답 앞 `━━━━━━━━━━━━━━━` 구분선으로 ack 와 시각적 분리)
+6. bot.py가 helper stdout pipe-pane 캡처 → Discord raw push (10~30초 안)
 
 ### 5-2) helper가 nmae에 위임
 1. 사용자가 Discord에 "release v0.4.0 진행해" 보냄
