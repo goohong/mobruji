@@ -74,6 +74,30 @@ class VoiceRangeControllerTest {
     }
 
     @Test
+    @DisplayName("POST 검증 실패(sessionId blank): 400")
+    void create_blankSessionId_returns400() throws Exception {
+        final String bad = """
+                {"sessionId":"","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
+                """;
+        mockMvc.perform(post("/api/v1/voice-ranges")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bad))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST 검증 실패(sourceMethod null): 400")
+    void create_nullSourceMethod_returns400() throws Exception {
+        final String bad = """
+                {"sessionId":"s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":null}
+                """;
+        mockMvc.perform(post("/api/v1/voice-ranges")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bad))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("GET /api/v1/voice-ranges/{sessionId}: 200 + 응답 바디")
     void read_returns200() throws Exception {
         // given
@@ -113,5 +137,31 @@ class VoiceRangeControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.lowestNoteMidi", is(50)))
                 .andExpect(jsonPath("$.sourceMethod", is("MIC_MEASURE")));
+    }
+
+    @Test
+    @DisplayName("PUT 검증 실패(lowestNoteMidi null): 400")
+    void update_invalidInput_returns400() throws Exception {
+        final String bad = """
+                {"lowestNoteMidi":null,"highestNoteMidi":72,"sourceMethod":"MIC_MEASURE"}
+                """;
+        mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "s")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bad))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PUT 없는 sessionId: 404")
+    void update_notFound_returns404() throws Exception {
+        final VoiceRangeUpdateRequest request = new VoiceRangeUpdateRequest(
+                50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
+        given(voiceRangeService.updateBySessionId(eq("missing"), any(UpdateVoiceRangeCommand.class)))
+                .willThrow(new VoiceRangeNotFoundException("missing"));
+
+        mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "missing")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound());
     }
 }
