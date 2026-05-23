@@ -30,10 +30,10 @@ public class SongService {
      *
      * <ul>
      * <li>이유 1 — DoS/풀스캔 방지: Repository {@code searchByKeyword}는 {@code LIKE '%keyword%'}.
-     *     키워드가 비면 {@code LIKE '%%'}로 전체 테이블 풀스캔이 된다.</li>
+     * 키워드가 비면 {@code LIKE '%%'}로 전체 테이블 풀스캔이 된다.</li>
      * <li>이유 2 — FE 호출 비용 절약: fe({@code web/app/songs/page.tsx})는 입력 전에 빈 응답을 받아
-     *     "검색 결과 없음" 상태로 안전하게 fallback 한다. {@code 400 Bad Request} 대신 {@code []}로
-     *     예외 처리 분기를 단순화한다.</li>
+     * "검색 결과 없음" 상태로 안전하게 fallback 한다. {@code 400 Bad Request} 대신 {@code []}로
+     * 예외 처리 분기를 단순화한다.</li>
      * </ul>
      *
      * <p>같은 정책의 회귀 가드는 {@code SongServiceTest#searchByKeyword_emptyKeyword_returnsEmpty}.
