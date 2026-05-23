@@ -149,3 +149,27 @@ mmae(tmux `mobruji:0.0`) + nmae(NCP 호스트 tmux `mobruji:0.0`) + helper(tmux 
 - **mmae / nmae / helper 만 emit**. sub-agent (be/fe/rev/plan) 는 marker 안 함.
 
 추정 우선순위: ① `/context` slash 결과 → ② input/output 누적 ÷ 모델 window → ③ 모르면 `?`.
+
+## 13) 세션 종료 전 문서화 일치 체크 (helper / nmae /clear 직전 의무)
+
+helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또는 세션 종료 시점 직전 turn 마지막 단계에서 **4-way 문서화 일치 체크**.
+
+### 4-way
+1. **메모리** (`/home/mobruji/.claude/projects/-home-mobruji-mobruji/memory/feedback_*.md`)
+2. **CLAUDE.md** 본문 §1-§N
+3. **docs/ai-harness/** (런북/spec/컨벤션)
+4. **docs/features/** (feature spec)
+
+### 체크 절차
+- 직전 세션에서 신규/수정된 메모리 — CLAUDE.md 본문 또는 docs 에 반영됐는지
+- CLAUDE.md ↔ docs/ai-harness 모순 없는지
+- 신규 feature 룰 — `docs/features/<slug>.md` 작성됐는지
+
+### drift 발견 시
+- **즉시 자율 보강 PR launch** (사용자 부재여도 — §11 helper-role + 자율 default 룰)
+- push: `[doc-check] 메모리 N건 / CLAUDE.md N건 / docs N건 → drift N건 → 보강 PR #M launch`
+
+### 위반 정의
+다음 세션 helper 가 룰 학습 못 한 채 시작 = 직전 세션 doc-check 실패. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가.
+
+관련: 메모리 `feedback-session-close-doc-check` / `feedback-session-persist-rules` / `feedback-autonomous-default`
