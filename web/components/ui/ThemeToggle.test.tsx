@@ -83,4 +83,30 @@ describe("ThemeToggle", () => {
     fireEvent.click(button); // dark
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
   });
+
+  it("초기 로드 시 localStorage 저장값을 복원한다", () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("data-theme-mode")).toBe("dark");
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(
+      true,
+    );
+  });
+
+  it("system 모드 순환도 localStorage 에 저장된다", () => {
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    fireEvent.click(button); // light
+    fireEvent.click(button); // dark
+    fireEvent.click(button); // system
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
+  });
+
+  it("localStorage 비정상 값은 system 으로 fallback 된다", () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, "invalid-mode");
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("data-theme-mode")).toBe("system");
+  });
 });
