@@ -1,10 +1,10 @@
 ---
-feature: nmae 사이클 watchdog (3중 안전망)
+feature: nmae 사이클 watchdog (3중 안전망 + STRICT mode)
 slug: nmae-cycle-watchdog
 status: draft
 owner: @mobruji-maestro
 scope: infra
-related_issues: [941]
+related_issues: [941, 956]
 related_prs: []
 last_reviewed: 2026-05-24
 ---
@@ -22,12 +22,15 @@ last_reviewed: 2026-05-24
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] `cycle_idle_watch_loop` — 5분 polling (env override 가능) cycle-status.json read.
-- [ ] idle 정의: `in_progress` null/누락 AND `last_completed.completed_at` > `now - threshold_minutes` (default 10).
-- [ ] idle ≥ 1 워크트리 발견 시 nmae tmux pane (`mobruji:0.0`) 에 알림 inject (`tmux send-keys -l`).
-- [ ] Discord `CYCLE_NOTIFY_CHANNEL_ID` (default = `NOTIFY_CHANNEL_ID`) 에 경고 push.
-- [ ] 같은 워크트리 재알림 debounce 15분.
-- [ ] env toggle: `CYCLE_IDLE_WATCH=1` default. `0` 으로 비활성화.
+- [x] `cycle_idle_watch_loop` — 5분 polling (env override 가능) cycle-status.json read.
+- [x] idle 정의: `in_progress` null/누락 AND `last_completed.completed_at` > `now - threshold_minutes` (default 10).
+- [x] idle ≥ 1 워크트리 발견 시 nmae tmux pane (`mobruji:0.0`) 에 알림 inject (`tmux send-keys -l`).
+- [x] Discord `CYCLE_NOTIFY_CHANNEL_ID` (default = `NOTIFY_CHANNEL_ID`) 에 경고 push.
+- [x] 같은 워크트리 재알림 debounce 15분.
+- [x] env toggle: `CYCLE_IDLE_WATCH=1` default. `0` 으로 비활성화.
+- [x] (#956) **idle 시 `note` 필드 의무** — 미명시 시 STRICT relaunch prompt.
+- [x] (#956) env toggle: `CYCLE_REASON_REQUIRED=1` default. `0` 으로 strict mode off.
+- [x] (#956) Discord push 에 reason / idle_since 노출 — STRICT 라벨 분리.
 
 ### 비기능 요구사항
 - 알림 spam 방지: 워크트리 별 last_alert_at 캐시 + 15분 debounce.
@@ -86,8 +89,73 @@ N/A (Discord webhook + tmux 만 사용).
 
 세 layer 각각이 단독으로도 동작. 1번이 안전망의 핵심 — nmae 룰에 의존하지 않음.
 
+### 5-8) STRICT mode + reason 의무 (#956)
+
+사용자 2026-05-24 정정: "왜 사이클 멈췄나 / idle 시 digest 에 사유 명시 / 타당한 사유 없으면 relaunch 강제".
+
+#### cycle-status.json 스키마 확장
+
+```json
+{
+  "be": {
+    "in_progress": null,                                // dict 또는 null
+    "last_completed": { "pr": "#937", "title": "...", "completed_at": "..." },
+    "note": "idle 사유 또는 다음 launch 후보",          // idle 시 의무 (#956)
+    "idle_since": "2026-05-24T02:14:00Z"                // idle 진입 시각 (옵션)
+  }
+}
+```
+
+| 필드 | 타입 | 의무 | 설명 |
+|---|---|---|---|
+| `note` | str | **idle 시 의무** | 사유 명시 또는 다음 launch 후보. 미명시 시 watchdog STRICT relaunch |
+| `idle_since` | ISO8601 | optional | idle 진입 시각 |
+
+#### 갱신 헬퍼
+
+`tools/cycle-status/update.sh` — nmae 가 sub-agent launch/완료/idle 시 호출.
+
+```bash
+update.sh be set-active   --title "PR #N follow-up" --task "..."
+update.sh fe set-idle     --note "다음 launch 후보: PR #857 audit"
+update.sh rev set-completed --pr "#940" --title "audit PASS"
+```
+
+`set-idle 는 --note 필수`. note 빈 string → 에러 (STRICT 강제).
+
+#### watchdog 분기
+
+| 상태 | inject 동작 | Discord push |
+|---|---|---|
+| active (`in_progress` dict) | skip | skip |
+| idle + `note` 명시 | 일반 template inject ("watchdog ... keep-4-cycles 위반") | reason 표시 (한 줄에 워크트리별) |
+| idle + `note` 미명시 (`CYCLE_REASON_REQUIRED=1`) | **STRICT** template inject ("note 필드 기록 의무 + 즉시 launch") | "STRICT relaunch (N): ws1, ws2" 라벨 + 워크트리별 "reason 없음" 표시 |
+
+같은 iter 에 strict + soft idle 공존하면 두 inject 각각 발사.
+
+#### Discord push 형식 예시
+
+```
+⚠️ nmae watchdog — 3 워크트리 idle
+STRICT relaunch (1): fe
+- be: IDLE 2026-05-24T02:17:00Z~ (reason: be cache eviction 완료 후 audit)
+- fe: IDLE (reason 없음 — STRICT relaunch)
+- plan: IDLE 2026-05-24T01:30:00Z~ (reason: ADR-0017 옵션 결정 대기)
+→ nmae 에 알림 inject 완료
+```
+
+#### 검증 스크립트
+
+`tools/cycle-status/validate.sh` — idle 워크트리 note 누락 detect. exit 1 + 누락 목록 stderr. nmae self-check 용.
+
+#### 트레이드오프
+
+- nmae 가 set-idle 자주 호출해야 함 → wrapper 명령 정착 부담. 보상: idle 디버깅 용이성 (사이클 멈춤 원인 즉시 파악).
+- false STRICT 위험: nmae 가 transition 중 (active → completed → 다음 launch 직전) note 갱신 안 한 5분 polling 에 걸림. 보상: 5분 + 15분 debounce 로 실제로는 안전.
+
 ## 6) 작업 분할 (예상 PR 리스트)
-- [x] PR 1 (#941, 본): bot.py `cycle_idle_watch_loop` + pytest 17건 + 메모리 + CLAUDE.md §14.
+- [x] PR 1 (#941, #950): bot.py `cycle_idle_watch_loop` + pytest 17건 + 메모리 + CLAUDE.md §14.
+- [x] PR 2 (#956): STRICT mode + reason 의무 + `tools/cycle-status/` (update.sh / validate.sh / README) + pytest +7 (총 24) + CLAUDE.md §14 보강.
 
 ## 7) 테스트 전략
 - 단위 테스트 (pytest, asyncio mock):
@@ -107,3 +175,5 @@ N/A (Discord webhook + tmux 만 사용).
 - 2026-05-24: 초안 작성 (status=draft). #941 머지 후 status=shipped 로 갱신.
 - 2026-05-24: 외부 데몬 watchdog 채택 — nmae cron/timer 도입 대안 기각 (기존 bot.py daemon 활용이 운영 복잡도 낮음).
 - 2026-05-24: debounce 15분 — Discord rate limit 안전 마진 + idle 정정에 충분 (사용자 응답 turn 1회면 해소).
+- 2026-05-24 (#956): STRICT mode 도입 — note 미명시 idle 은 즉시 relaunch + 의무 강제 prompt. 사용자 정정: "idle 시 digest 에 사유 명시 / 타당한 사유 없으면 relaunch 강제". rev/plan 은 note 명시 패턴 정착, fe 는 누락 → 강제화 필요.
+- 2026-05-24 (#956): `CYCLE_REASON_REQUIRED=1` default — 후방호환 off 가능. `tools/cycle-status/update.sh` 도입 — nmae 수동 JSON 편집 부담 해소.
