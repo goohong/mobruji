@@ -5,17 +5,17 @@
 
 ## 0) 운영 모드
 
-3개 세션(be/fe/rev)을 가동하는 방식은 두 가지. **기본은 maestro 오케스트레이션.**
+4개 sub-agent 워크트리(be/fe/rev/plan)를 maestro 본진이 동시 가동하는 방식은 두 가지. **기본은 maestro 오케스트레이션** (§0-10 항시 4 워크트리 가동 룰 참고).
 
 ### 0-1) maestro 오케스트레이션 (기본 / 권장)
 
-**maestro(`mobruji` 워크트리)의 Claude 세션 하나**가 오케스트레이터 역할을 한다. be/fe/rev 작업은 maestro이 `Agent` 도구로 `claude` subagent를 `run_in_background: true`로 띄워 각 워크트리에서 실행하게 한다. 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
+**maestro(`mobruji` 워크트리)의 Claude 세션 하나**가 오케스트레이터 역할을 한다. be/fe/rev/plan 작업은 maestro이 `Agent` 도구로 `claude` subagent를 `run_in_background: true`로 띄워 각 워크트리에서 실행하게 한다. 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
 
 사이클:
 1. 백로그 정해지면 maestro이 각 워크트리에 `cd`해 `new-session-branch.sh`를 실행 → 이슈/브랜치/Draft PR 사전 스캐폴드.
-2. maestro이 `Agent` 도구로 be/fe/rev 서브에이전트를 동시 background 가동 (3개 병렬).
-3. 각 서브에이전트는 자기 워크트리에서 코드 작성 → 품질 게이트 → push → `gh pr ready`.
-4. maestro은 완료 통지를 받고 사용자에게 머지 결정 요청.
+2. maestro이 `Agent` 도구로 be/fe/rev/plan 서브에이전트를 동시 background 가동 (최대 4개 병렬, §0-10 참고).
+3. 각 서브에이전트는 자기 워크트리에서 코드/문서 작성 → 품질 게이트 → push → `gh pr ready`.
+4. maestro은 완료 통지를 받고 사용자에게 머지 결정 요청 (release는 사용자 확인, develop 머지는 자율).
 
 서브에이전트 프롬프트에 반드시 포함:
 - `cd <워크트리 절대경로>`로 시작 강제
@@ -191,27 +191,81 @@ rev sub-agent 완료 통지를 받으면 maestro은 발견 항목을 **GitHub �
 
 누적 패턴/메타 인사이트(예: "최근 5사이클 연속 같은 final 누락 패턴")는 **별 docs PR 후보**로 따로 모은다. 이슈 등록과 docs promote는 분리.
 
+### 0-10) 항시 4 워크트리 가동 룰
+
+maestro 본진은 **be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 항상 유지**한다. 1개 sub-agent 완료 통지가 들어오면 같은 워크트리에 **즉시** 다음 백로그를 launch한다. idle 워크트리를 두지 않는 게 default — 자체 reasoning 만 돌리면 컨텍스트 폭증 + 병렬 처리 부재 + 사용자 의도(4 워크트리 분리) 위반 (사용자 명시 2026-05-23: "4개 사이클 가동하고 유지해", "아예 launch를 까먹은거잖아 그러면 안 돼. 절대로").
+
+#### maestro 본진 점검 의무
+
+| 시점 | 점검 항목 |
+|---|---|
+| **매 turn 시작** | 사용자 메시지 받자마자 — 백로그에 be/fe/rev/plan 가능 작업 있나? 있으면 본진 자체 작업 전에 sub-agent launch (`run_in_background=true`). |
+| **매 turn 끝** | 응답 직전 마지막 점검 — 이 turn에 발견된 작업 중 sub-agent 가능한 것 즉시 launch. |
+| **wake fire 시** | autonomous wake (`feedback-autonomous-wake-pattern`) 발화 시 4 워크트리 모두 가동 중인지 확인. idle 있으면 즉시 launch. |
+| **완료 통지 수신** | sub-agent return 받자마자 — PR 검토/보고 정리 (본진 메타) → 같은 워크트리 다음 백로그 즉시 launch (§0-8 통지 우선 처리와 동일 순서). |
+
+#### 본진 자체 작업 default
+
+본진(maestro)이 직접 코드/테스트를 작성하는 패턴은 **금지에 가깝게 제한**. 본진 default는 메타:
+- spec / ADR / 메모리 작성·갱신
+- 핸드오프 / 사용자 보고 / orchestration
+- Discord 답변, 이슈 트리아지
+- 보호 영역(`docs/ai-harness/**`, CLAUDE.md, root 설정)의 일회성 보수 (sub-agent에 위임할 수 없는 영역)
+
+코드/테스트/문서 본문 작성은 **모두 sub-agent default**. 본진이 직접 하면 4 워크트리 중 하나가 idle.
+
+#### 백로그 고갈 시 발굴
+
+idle 워크트리가 발생하면 본진은 다음 순서로 발굴:
+
+1. `gh issue list --state open --label "scope:<domain>"` — 미할당 이슈
+2. `docs/features/` — 미구현/얇은 spec
+3. `docs/ai-harness/` — stale/누락 룰
+4. rev QA 리포트 / 메모리 (`feedback-*`) — 코드 promote 후보
+5. TODO / FIXME 코멘트 회수
+6. 작은 리팩터 / 테스트 보강 / 회귀 가드 신설 / 보안 audit
+
+**가치 점검 필수** — 발굴된 작업이 release 가치(회귀 가드 / 보안 / 디스크 / 가시성 / 정합성 중 1개 이상)를 만족하지 못하면 launch하지 않고 메타(문서/메모리/백로그 청소)로 위임. 사이클 수 채우려고 가치 없는 작업 양산 금지.
+
+#### 워크트리 lock
+
+같은 워크트리에 동시 2 sub-agent launch 금지 (`feedback-worktree-lock`). 이전 sub-agent 머지/종료 통지를 받은 뒤 다음 launch. 따라서 동시 가동 최대치는 **4** (4 워크트리 × 1).
+
+#### 5분 룰 병행
+
+본진 turn 자체가 5분 초과(`feedback-reasoning-chunk-limit`)하면 turn을 분할. 분할된 다음 turn에서 idle 워크트리 launch를 다시 점검.
+
+#### 위반 시 자기 점검
+
+본진이 sub-agent launch를 1회라도 까먹은 채 본진 자체 작업을 진행했다면 즉시 사용자에게 인정 + 사과 + 룰 재확인. 메모리(`feedback-sub-agent-launch-mandatory`)와 본 §0-10이 source of truth — 충돌 시 본 문서 우선.
+
 ## 1) 셋업 (최초 1회)
 
-### 1-1) 워크트리 3개 생성
+### 1-1) 워크트리 4개 생성
 
 ```bash
-# maestro은 ~/workspace/github/mobruji 그대로
+# maestro은 ~/workspace/github/mobruji (또는 NCP 환경의 ~/mobruji) 그대로
 git worktree add --detach ../mobruji-be
 git worktree add --detach ../mobruji-fe
 git worktree add --detach ../mobruji-rev
+git worktree add --detach ../mobruji-plan
 ```
+
+총 5개 디렉토리(maestro 1 + sub-agent 워크트리 4)가 셋업된다. **plan 워크트리**는 ADR/spec/`docs/ai-harness/` 갱신 전담(§2 참조). v0.2 메타 전환 이후 본진 부담을 덜기 위해 도입됐다 (`feedback-plan-session-option`, `project-plan-session-active`).
 
 `--detach`인 이유: git은 같은 브랜치(develop)를 여러 워크트리에서 동시에 체크아웃 못 함. detached로 만들면 각 세션에서 `new-session-branch.sh`가 `origin/develop`을 기준으로 새 브랜치를 만들어 작업한다.
 
 확인:
 ```bash
 git worktree list
-# /Users/goohong/workspace/github/mobruji      <sha> [develop]
-# /Users/goohong/workspace/github/mobruji-be   <sha> (detached HEAD)
-# /Users/goohong/workspace/github/mobruji-fe   <sha> (detached HEAD)
-# /Users/goohong/workspace/github/mobruji-rev  <sha> (detached HEAD)
+# /home/mobruji/mobruji         <sha> [develop]
+# /home/mobruji/mobruji-be      <sha> (detached HEAD)
+# /home/mobruji/mobruji-fe      <sha> (detached HEAD)
+# /home/mobruji/mobruji-rev     <sha> (detached HEAD)
+# /home/mobruji/mobruji-plan    <sha> (detached HEAD)
 ```
+
+> NCP maestro VM 기준 경로 예시. 사용자 macOS 셋업은 `/Users/<id>/workspace/github/mobruji*`. 경로만 다르고 셋업 절차는 동일.
 
 ### 1-2) 메모리 디렉토리 공유 (선택)
 
@@ -219,12 +273,14 @@ Claude는 워크트리 경로별로 별 메모리를 갖는다. maestro 메모�
 
 ```bash
 BASE=~/.claude/projects/-Users-goohong-workspace-github-mobruji/memory
-for w in be fe rev; do
+for w in be fe rev plan; do
     target=~/.claude/projects/-Users-goohong-workspace-github-mobruji-$w/memory
     mkdir -p "$(dirname "$target")"
     ln -snf "$BASE" "$target"
 done
 ```
+
+NCP maestro VM 기준 경로 prefix는 `-home-mobruji-mobruji`로 다르다. 셋업 환경별로 prefix만 맞춰 동일 루프 사용.
 
 > ⚠️ **메모리 race 주의**
 >
