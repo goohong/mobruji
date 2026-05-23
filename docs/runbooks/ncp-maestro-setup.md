@@ -581,15 +581,186 @@ docker volume rm mobruji-mysql-dev  # 신중히
 #### `.env.dev` 변경했는데 반영 안 됨
 docker compose 의 환경 변수는 컨테이너 생성 시 한 번 inline. 변경 후 `up -d --force-recreate` 또는 service 별 `up -d --no-deps backend`.
 
-## I) 다음 단계
+## I) NCP 추가 블록 스토리지 attach + Docker root 이동
 
-본 런북 §B(Phase 1) ~ §H(Phase 4) 완료 후:
+### 배경 / 언제 쓰나
+Phase 4 dev 환경을 한동안 굴리면 docker image / build cache / fe node_modules 가 누적되어 root 디스크(50GB)가 차오른다. 본진 실측: dev 가동 약 1주 만에 사용률 **88%** (≈ 44GB) 도달, image pull / `npm ci` 가 `ENOSPC` 직전. NCP 의 root 볼륨 자체는 사후 확장이 번거롭고 단순 정리만으로는 다음 사이클에 다시 찬다.
+
+해법: **추가 블록 스토리지(예: 20GB)를 NCP 콘솔에서 attach 한 뒤, Docker 의 데이터 디렉토리(`/var/lib/docker`)와 fe `node_modules` 를 그 볼륨(`/data`)로 이동.** 본진 실측 결과 **88% → 63%** 로 즉시 해소, 다운타임 **약 30초**(docker 재시작 1회), 추가 비용은 NCP 가격표 기준 20GB 블록.
+
+### I-1) NCP 콘솔에서 블록 스토리지 attach (사용자 작업)
+NCP 콘솔 → Server → 해당 VM (`mobruji-maestro`) → "스토리지" 탭 → **"스토리지 생성"** (또는 "기존 스토리지 연결").
+
+- 용량: 20GB 권장 (절차 검증된 값; 사용량에 따라 ↑)
+- 디스크 종류: SSD (기본)
+- 생성 후 자동으로 VM 에 attach 됨 (서버를 끄지 않아도 hot-attach 지원)
+- 본체(VM) 와 분리된 볼륨이므로 VM 을 재생성해도 데이터 유지 가능
+
+콘솔이 attach 완료 알림을 띄우면 SSH 로 VM 에 들어가 다음 단계를 진행한다.
+
+### I-2) 디스크 인식 / 포맷 / mount (root)
+새 볼륨은 보통 `/dev/xvdb` 또는 `/dev/vdb` 로 들어온다. 이름은 환경마다 달라 `lsblk` 로 먼저 확인.
+
+```bash
+# 1) 새 디스크 식별 (MOUNTPOINT 가 비어 있고, 크기가 attach 한 용량과 같은 device 를 찾는다)
+lsblk
+
+# 2) XFS 포맷 (-f 는 새 디스크 한정으로 사용; 기존 데이터가 있는 디스크에 절대 쓰지 말 것)
+sudo mkfs.xfs /dev/xvdb
+
+# 3) 마운트 포인트 생성 + 임시 mount
+sudo mkdir -p /data
+sudo mount /dev/xvdb /data
+
+# 4) UUID 추출 (device 이름은 재부팅 시 바뀔 수 있으므로 fstab 은 반드시 UUID 사용)
+sudo blkid /dev/xvdb
+# → 예: /dev/xvdb: UUID="abcd-...." TYPE="xfs"
+
+# 5) /etc/fstab 영구 등록 (UUID + nofail 옵션)
+echo "UUID=<위 UUID>  /data  xfs  defaults,nofail  0  2" | sudo tee -a /etc/fstab
+
+# 6) fstab 검증 — mount 옵션 오타가 있으면 다음 재부팅에 boot 실패할 수 있다
+sudo mount -a
+df -h /data
+```
+
+> **회귀 가드 — `nofail` 필수**: NCP 콘솔에서 사용자가 디스크를 떼는 등 어떤 이유로든 볼륨이 보이지 않을 때, `nofail` 이 없으면 systemd `local-fs.target` 이 실패해 부팅이 멈춘다. dev 환경이라도 maestro/discord-bridge 가 같은 VM 에 있으므로 boot 실패는 곧 본진 정지다.
+
+### I-3) Docker 정지 → data-root 이동 → 재기동 (root)
+실제 다운타임이 발생하는 구간. dev container 4개 + docker 데몬을 한 번에 멈춘다.
+
+```bash
+# 1) dev container graceful stop (compose 로 띄운 것)
+sudo -u mobruji bash -c "cd ~/mobruji && docker compose -f docker-compose.dev.yml --env-file .env.dev down"
+
+# 2) docker 데몬 + 소켓 동시 정지
+#    socket 을 같이 멈추지 않으면 다음 docker 명령이 socket activation 으로 데몬을 다시 깨운다
+sudo systemctl stop docker
+sudo systemctl stop docker.socket
+
+# 3) /etc/docker/daemon.json 작성 (data-root 지정)
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "data-root": "/data/docker"
+}
+EOF
+
+# 4) 기존 /var/lib/docker → /data/docker 로 복사 (소유권/ACL/xattr 보존)
+sudo mkdir -p /data/docker
+sudo rsync -aHAX --info=progress2 /var/lib/docker/ /data/docker/
+
+# 5) docker / socket 재기동
+sudo systemctl start docker.socket
+sudo systemctl start docker
+sudo systemctl status docker --no-pager | head -20
+```
+
+### I-4) Healthcheck — 4 container 모두 healthy 확인 후 old 삭제
+**중요**: rsync 직후 `/var/lib/docker` 를 바로 지우지 말 것. 새 data-root 로 첫 컨테이너가 정상 부팅되는지 먼저 확인한다.
+
+```bash
+# 1) dev container 재기동
+sudo -u mobruji bash -c "cd ~/mobruji && docker compose -f docker-compose.dev.yml --env-file .env.dev up -d"
+
+# 2) 모든 service 가 healthy 인지 polling (최대 5분)
+for i in {1..60}; do
+  sudo -u mobruji docker compose -f /home/mobruji/mobruji/docker-compose.dev.yml --env-file /home/mobruji/mobruji/.env.dev ps
+  unhealthy=$(sudo -u mobruji docker compose -f /home/mobruji/mobruji/docker-compose.dev.yml --env-file /home/mobruji/mobruji/.env.dev ps --format json | grep -c -v '"Health":"healthy"' || true)
+  [ "$unhealthy" = "0" ] && break
+  sleep 5
+done
+
+# 3) endpoint 검증
+curl -fsS http://localhost/_nginx_health
+curl -fsS http://localhost/actuator/health/liveness
+
+# 4) 새 data-root 가 실제로 쓰이는지 확인
+docker info | grep "Docker Root Dir"
+# → "Docker Root Dir: /data/docker" 가 나와야 한다
+
+# 5) 4개 모두 healthy + endpoint 200 인 것을 눈으로 확인한 다음에만 old 삭제
+sudo rm -rf /var/lib/docker
+```
+
+> **회귀 가드 — old 삭제는 healthy 확인 후**: 새 data-root 가 깨졌을 때 `/var/lib/docker` 가 남아 있으면 `daemon.json` 만 되돌리고 즉시 회복 가능. 미리 지우면 그 fallback 이 사라진다.
+
+### I-5) Frontend `node_modules` symlink (다운타임 0)
+fe 의 `node_modules` (수백 MB) 만 따로 옮기면 dev 디스크가 더 가벼워진다. fe dev 가 안 도는 시점(또는 무관)에 진행 가능.
+
+```bash
+# 1) 옮길 대상 만들기
+sudo mkdir -p /data/web-node_modules
+sudo chown mobruji:mobruji /data/web-node_modules
+
+# 2) 기존 node_modules 가 있으면 옮기고, 없으면 (대상이 빈 상태로) 다음 install 이 채움
+sudo -u mobruji bash <<'EOF'
+cd ~/mobruji/web
+if [ -d node_modules ] && [ ! -L node_modules ]; then
+  mv node_modules/* /data/web-node_modules/ 2>/dev/null || true
+  mv node_modules/.[!.]* /data/web-node_modules/ 2>/dev/null || true
+  rmdir node_modules
+fi
+ln -s /data/web-node_modules node_modules
+ls -la node_modules
+EOF
+```
+
+이후 `npm ci` / `npm install` 은 자동으로 `/data` 디스크에 쌓이고 root 디스크는 영향 없다. CD 가 컨테이너 안 빌드만 쓴다면(현재 dev 흐름) 본 단계는 호스트 fe 디버깅용으로만 의미가 있고 생략 가능.
+
+### I-6) 정량 결과 / 검증 체크리스트
+- [ ] `df -h /` → 사용률 **88% → 63%** 수준으로 떨어졌다 (Docker overlay 가 옮겨졌으므로)
+- [ ] `df -h /data` → 새 볼륨이 실제로 쓰이고 있다 (사용량 > 0)
+- [ ] `docker info | grep "Docker Root Dir"` → `/data/docker`
+- [ ] `docker compose ps` → 4 container 모두 `(healthy)`
+- [ ] `curl http://localhost/_nginx_health` → `ok`
+- [ ] `curl http://localhost/actuator/health/liveness` → `{"status":"UP"}`
+- [ ] 다운타임 측정: docker stop → up healthy 까지 **약 30초** (rsync 시간 + 컨테이너 부팅) 수준
+- [ ] (재부팅 회귀 테스트) `sudo reboot` 후 `df -h /data` 가 그대로 mount 되어 있다 — fstab UUID + nofail 검증
+
+### I-7) 트러블슈팅 — Phase 4 보강
+
+#### `docker info` 가 여전히 `/var/lib/docker` 로 보임
+원인: `daemon.json` 작성 후 `systemctl restart docker` 만 하고 `docker.socket` 은 재시작 안 함. socket activation 으로 데몬이 이전 설정으로 깨어났다.
+대응: `sudo systemctl stop docker docker.socket` 후 socket → docker 순으로 다시 start.
+
+#### 재부팅 후 `/data` 가 비어 보임
+원인: fstab UUID 오타 또는 device 이름(`/dev/xvdb`) 으로 직접 등록 후 디스크 순서가 바뀜.
+대응:
+1. `sudo blkid` 로 현재 UUID 재확인.
+2. `/etc/fstab` 의 UUID 라인 수정.
+3. `sudo mount -a` → 에러 없으면 정상.
+4. `nofail` 옵션이 있어서 부팅 자체는 정상 진행됐을 것.
+
+#### rsync 중 `/var/lib/docker` 가 너무 크다
+원인: 그동안 쌓인 image / build cache.
+대응 (rsync 전 1회):
+```bash
+sudo -u mobruji docker system prune -af --volumes
+```
+주의: `--volumes` 는 unnamed volume 까지 지운다. dev MySQL 은 named volume(`mobruji-mysql-dev`) 이므로 영향 없으나, 다른 named 가 있으면 먼저 확인.
+
+#### 옮긴 직후 컨테이너 부팅 실패
+원인: 권한/SELinux/ACL 손상.
+대응:
+1. `sudo journalctl -u docker -n 100 --no-pager` 로 데몬 로그 확인.
+2. rsync 가 `-aHAX` 였는지 (소유권/링크/ACL/xattr 모두 보존) 확인.
+3. 회복: `daemon.json` 의 `data-root` 라인을 지우거나 원래 경로로 되돌린 뒤 `systemctl restart docker docker.socket`. `/var/lib/docker` 가 살아 있으면 즉시 회복.
+
+### I-8) 운영 메모
+- **언제 또 attach 하나**: `/data` 사용률이 80% 를 넘으면 또 한 번 NCP 콘솔에서 볼륨을 키우거나(online resize 가능) 새 볼륨 추가.
+- **백업**: dev 환경은 휘발성 허용. `/data/docker` 자체는 image cache 이므로 백업 가치 낮음. 단 `mobruji-mysql-dev` volume 은 dev DB 본체 → 별도 dump 정책은 상위 spec(`docs/features/ncp-maestro-resilience.md`) 참고.
+- **prod 환경 확장 시**: 같은 절차를 그대로 쓰되 다운타임을 사전 공지하고, healthcheck polling 임계값을 길게(예: 10분) 잡는다.
+
+## J) 다음 단계
+
+본 런북 §B(Phase 1) ~ §H(Phase 4) 완료 후 (필요 시 §I 디스크 확장 포함):
 - Phase 4 dev 환경 사용성 1주 운영 데이터 보고 — `docs/features/deployment-infrastructure.md` (Hetzner CX22 prod) 진행 결정.
 - rev sub-agent 가 dev URL 을 통합 시나리오 QA 에 사용 — `docs/features/rev-qa-protocol.md` §5-4 갱신 (별 PR).
 - (선택) maestro transcript 무게 모니터 → 자동 `/compact` 트리거.
 - (선택) Grafana Cloud remote_write — CPU/RAM/swap/container memory.
 
-## J) 관련 문서
+## K) 관련 문서
 
 - [`docs/decisions/0015-hosting-stack.md`](../decisions/0015-hosting-stack.md) — 본 런북의 결정 ADR
 - [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) — Discord-driven maestro spec (#338)
