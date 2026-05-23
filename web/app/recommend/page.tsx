@@ -344,6 +344,7 @@ function RecommendationFeed({
     if (pageCount === 0) {
       // 쿼리 reset 등으로 페이지가 사라진 경우 메시지도 초기화.
       previousPageCountRef.current = 0;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 페이지 카운트 변화에 따라 a11y 라이브 메시지를 갱신해야 함. 근본 리팩터는 follow-up 이슈 추적.
       setLiveMessage("");
       return;
     }
@@ -351,8 +352,10 @@ function RecommendationFeed({
     const addedCount = latestPage?.recommendations.length ?? 0;
     const totalCount = allRecommendations.length;
     if (previousPageCount === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 첫 페이지 도착 시 1회성 a11y 안내 갱신. follow-up 이슈에서 derive 패턴으로 정리.
       setLiveMessage(`추천 ${totalCount}건을 불러왔습니다.`);
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 추가 페이지 도착 시 a11y 안내 갱신. follow-up 이슈에서 derive 패턴으로 정리.
       setLiveMessage(
         `추천 ${addedCount}건이 더 추가되었습니다. (총 ${totalCount}건)`,
       );
