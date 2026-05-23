@@ -221,6 +221,126 @@ class RecommendationPropertiesValidationTest {
                 });
     }
 
+    // --- Tempo 경계값 회귀 가드 (issue #548) ---
+    // 의도: PR #465 에서 잡지 못한 정확한 경계값(상·하한 통과 / 직전·직후 위반)을 명시한다.
+    // distanceTolerance @DecimalMin("1.0"), moodDefaultBpm value @Min(30)/@Max(300),
+    // fallbackBpm 은 record canonical constructor 의 [30,300] 가드.
+
+    @Test
+    @DisplayName("tempo.fallbackBpm=29 → record IAE → startup fail (하한 직전)")
+    void fallbackBpm_belowMin_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.fallback-bpm=29"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isNotNull();
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.fallbackBpm=30 → 정확한 하한, 정상 기동")
+    void fallbackBpm_atMin_succeeds() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.fallback-bpm=30"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    final RecommendationProperties properties = context.getBean(RecommendationProperties.class);
+                    assertThat(properties.tempo().fallbackBpm()).isEqualTo(30);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.fallbackBpm=300 → 정확한 상한, 정상 기동")
+    void fallbackBpm_atMax_succeeds() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.fallback-bpm=300"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    final RecommendationProperties properties = context.getBean(RecommendationProperties.class);
+                    assertThat(properties.tempo().fallbackBpm()).isEqualTo(300);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.fallbackBpm=301 → record IAE → startup fail (상한 직후)")
+    void fallbackBpm_aboveMax_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.fallback-bpm=301"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isNotNull();
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.distanceTolerance=1.0 → 정확한 하한, 정상 기동")
+    void distanceTolerance_atMin_succeeds() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.distance-tolerance=1.0"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    final RecommendationProperties properties = context.getBean(RecommendationProperties.class);
+                    assertThat(properties.tempo().distanceTolerance()).isEqualTo(1.0);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.distanceTolerance=0.0 → @DecimalMin(1.0) 위반으로 startup fail")
+    void distanceTolerance_zero_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.distance-tolerance=0.0"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.distanceTolerance=0.999 → @DecimalMin(1.0) 위반으로 startup fail (1.0 직전)")
+    void distanceTolerance_justBelowMin_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.distance-tolerance=0.999"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.moodDefaultBpm.UPBEAT=30 → 정확한 @Min 하한, 정상 기동")
+    void moodDefaultBpm_atMin_succeeds() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.mood-default-bpm.UPBEAT=30"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    final RecommendationProperties properties = context.getBean(RecommendationProperties.class);
+                    assertThat(properties.tempo().moodDefaultBpm())
+                            .containsEntry(com.mobruji.song.domain.Mood.UPBEAT, 30);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.moodDefaultBpm.UPBEAT=29 → @Min(30) 위반으로 startup fail (하한 직전)")
+    void moodDefaultBpm_justBelowMin_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.mood-default-bpm.UPBEAT=29"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("tempo.moodDefaultBpm.UPBEAT=301 → @Max(300) 위반으로 startup fail (상한 직후)")
+    void moodDefaultBpm_justAboveMax_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("recommendation.tempo.mood-default-bpm.UPBEAT=301"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
     private static String[] validProps() {
         return new String[]{
                 "recommendation.weights.voice-fit=0.5",
