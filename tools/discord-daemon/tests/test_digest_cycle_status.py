@@ -16,8 +16,10 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 PARENT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PARENT_DIR))
@@ -122,30 +124,33 @@ class FormatCycleDigestTest(unittest.TestCase):
         }
         rendered, signature = bot.format_cycle_digest(status)
 
-        # 헤더 + 4 워크트리 한 줄씩 = 5줄.
+        # 헤더 + timestamp + 4 워크트리 한 줄씩 = 6줄.
         lines = rendered.split("\n")
-        self.assertEqual(len(lines), 5)
+        self.assertEqual(len(lines), 6)
         self.assertIn("cycle digest", lines[0])
+        # timestamp 라인 — 🕒 + KST.
+        self.assertTrue(lines[1].startswith("🕒"))
+        self.assertIn("KST", lines[1])
 
         # be: in_progress + 최근 (pr + title).
-        self.assertIn("[be]", lines[1])
-        self.assertIn("진행: PR #804 digest cron 작성 중", lines[1])
-        self.assertIn("최근: #803 (bot.py auto-ack 동적화)", lines[1])
+        self.assertIn("[be]", lines[2])
+        self.assertIn("진행: PR #804 digest cron 작성 중", lines[2])
+        self.assertIn("최근: #803 (bot.py auto-ack 동적화)", lines[2])
 
         # fe: in_progress null → "idle".
-        self.assertIn("[fe]", lines[2])
-        self.assertIn("진행: idle", lines[2])
-        self.assertIn("최근: #796 (voice-range auto handleRetry)", lines[2])
+        self.assertIn("[fe]", lines[3])
+        self.assertIn("진행: idle", lines[3])
+        self.assertIn("최근: #796 (voice-range auto handleRetry)", lines[3])
 
         # rev: pr null 이어도 title 만으로 표시.
-        self.assertIn("[rev]", lines[3])
-        self.assertIn("진행: idle", lines[3])
-        self.assertIn("최근: P0 404 진단", lines[3])
+        self.assertIn("[rev]", lines[4])
+        self.assertIn("진행: idle", lines[4])
+        self.assertIn("최근: P0 404 진단", lines[4])
 
         # plan: in_progress + pr+title.
-        self.assertIn("[plan]", lines[4])
-        self.assertIn("진행: spec 보강", lines[4])
-        self.assertIn("최근: #801 (helper agent spec)", lines[4])
+        self.assertIn("[plan]", lines[5])
+        self.assertIn("진행: spec 보강", lines[5])
+        self.assertIn("최근: #801 (helper agent spec)", lines[5])
 
         # signature 는 시간 무관 — be/fe/rev/plan 4 파트 포함.
         self.assertIn("be=", signature)
@@ -156,6 +161,8 @@ class FormatCycleDigestTest(unittest.TestCase):
     def test_none_status_returns_fallback_message(self) -> None:
         rendered, signature = bot.format_cycle_digest(None)
         self.assertIn("cycle-status.json 읽기 실패", rendered)
+        # timestamp 는 fallback path 에서도 항상 포함.
+        self.assertIn("KST", rendered)
         self.assertEqual(signature, "unavailable")
 
     def test_missing_workspace_renders_as_idle(self) -> None:
@@ -168,18 +175,19 @@ class FormatCycleDigestTest(unittest.TestCase):
         }
         rendered, _signature = bot.format_cycle_digest(status)
         lines = rendered.split("\n")
-        # 헤더 1 + 4 워크트리 = 5
-        self.assertEqual(len(lines), 5)
-        # fe/rev/plan 누락 — idle / 없음
-        for ws_line in lines[2:]:
+        # 헤더 1 + timestamp 1 + 4 워크트리 = 6
+        self.assertEqual(len(lines), 6)
+        # fe/rev/plan 누락 — idle / 없음 (lines[3:6])
+        for ws_line in lines[3:]:
             self.assertIn("진행: idle", ws_line)
             self.assertIn("최근: 없음", ws_line)
 
     def test_empty_dict_renders_all_idle(self) -> None:
         rendered, signature = bot.format_cycle_digest({})
         lines = rendered.split("\n")
-        self.assertEqual(len(lines), 5)
-        for ws_line in lines[1:]:
+        # 헤더 1 + timestamp 1 + 4 워크트리 = 6
+        self.assertEqual(len(lines), 6)
+        for ws_line in lines[2:]:
             self.assertIn("진행: idle", ws_line)
             self.assertIn("최근: 없음", ws_line)
         # signature: 모든 워크트리 missing.
@@ -194,7 +202,8 @@ class FormatCycleDigestTest(unittest.TestCase):
             "plan": {"in_progress": "  ", "last_completed": None},  # 공백 trim
         }
         rendered, _signature = bot.format_cycle_digest(status)
-        for ws_line in rendered.split("\n")[1:]:
+        # 헤더(0) + timestamp(1) 를 건너뛰고 워크트리 4줄(2..5) 검증.
+        for ws_line in rendered.split("\n")[2:]:
             self.assertIn("진행: idle", ws_line)
 
     def test_last_completed_missing_title_uses_fallback(self) -> None:
@@ -209,7 +218,8 @@ class FormatCycleDigestTest(unittest.TestCase):
             "plan": {"in_progress": None, "last_completed": None},
         }
         rendered, _signature = bot.format_cycle_digest(status)
-        be_line = rendered.split("\n")[1]
+        # 헤더(0) + timestamp(1) 다음 be 라인은 index 2.
+        be_line = rendered.split("\n")[2]
         self.assertIn("#999 (제목 없음)", be_line)
 
     def test_signature_changes_with_in_progress(self) -> None:
@@ -249,9 +259,56 @@ class FormatCycleDigestTest(unittest.TestCase):
             "plan": {"in_progress": None, "last_completed": None},
         }
         rendered, _signature = bot.format_cycle_digest(status)
-        be_line = rendered.split("\n")[1]
+        # 헤더(0) + timestamp(1) 다음 be 라인은 index 2.
+        be_line = rendered.split("\n")[2]
         self.assertLessEqual(len(be_line), bot.CYCLE_DIGEST_MAX_LINE_LEN)
         self.assertTrue(be_line.endswith("…"))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # timestamp (#811)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def test_timestamp_line_present_with_injected_now(self) -> None:
+        # `now` 주입 시 정확히 그 시각이 KST 포맷으로 두 번째 라인에 노출.
+        fixed_now = datetime(2026, 5, 23, 14, 7, tzinfo=ZoneInfo("Asia/Seoul"))
+        status = {
+            "be": {"in_progress": None, "last_completed": None},
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status, now=fixed_now)
+        lines = rendered.split("\n")
+        # 정확한 timestamp 라인 매칭 — 사용자 요청 형식.
+        self.assertEqual(lines[1], "🕒 2026-05-23 14:07 KST")
+
+    def test_timestamp_converts_utc_to_kst(self) -> None:
+        # UTC 시각 주입 시 KST(+9h)로 변환되어 표시.
+        fixed_utc = datetime(2026, 5, 23, 5, 7, tzinfo=ZoneInfo("UTC"))
+        rendered, _signature = bot.format_cycle_digest({}, now=fixed_utc)
+        # UTC 05:07 → KST 14:07
+        self.assertIn("🕒 2026-05-23 14:07 KST", rendered)
+
+    def test_timestamp_not_in_signature(self) -> None:
+        # signature 는 시간 무관 — 같은 status 면 시각 달라도 동일 signature.
+        status = {
+            "be": {"in_progress": "동일", "last_completed": None},
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        now_a = datetime(2026, 5, 23, 14, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        now_b = datetime(2026, 5, 23, 23, 59, tzinfo=ZoneInfo("Asia/Seoul"))
+        _r1, sig1 = bot.format_cycle_digest(status, now=now_a)
+        _r2, sig2 = bot.format_cycle_digest(status, now=now_b)
+        self.assertEqual(sig1, sig2)
+
+    def test_timestamp_present_in_fallback_path(self) -> None:
+        # status=None (cycle-status.json 읽기 실패) 분기에도 timestamp 노출.
+        fixed_now = datetime(2026, 5, 23, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+        rendered, signature = bot.format_cycle_digest(None, now=fixed_now)
+        self.assertEqual(signature, "unavailable")
+        self.assertIn("🕒 2026-05-23 09:00 KST", rendered)
 
 
 if __name__ == "__main__":

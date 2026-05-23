@@ -29,6 +29,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
+from zoneinfo import ZoneInfo
 
 import discord
 from dotenv import load_dotenv
@@ -46,6 +47,10 @@ DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 pus
 DEFAULT_CYCLE_STATUS_PATH: Final[str] = "/home/mobruji/.mobruji/cycle-status.json"
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
 CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
+# digest 본문 timestamp — 사용자 요청 #811. Discord 가 보여주는 시각이 클라이언트
+# timezone 에 의존하므로 본문에 KST 명시로 한눈에 emit 시각 확인.
+CYCLE_DIGEST_TZ: Final[ZoneInfo] = ZoneInfo("Asia/Seoul")
+CYCLE_DIGEST_TIME_FORMAT: Final[str] = "%Y-%m-%d %H:%M KST"
 
 # 7 카테고리 emoji prefix — spec: docs/features/discord-message-style.md §3.
 # bot.py 단순화본은 digest 만 사용하지만 헬퍼 import 호환을 위해 전체 보존.
@@ -394,11 +399,16 @@ def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
         return None
 
 
-def format_cycle_digest(status: dict | None) -> tuple[str, str]:
+def format_cycle_digest(
+    status: dict | None,
+    now: datetime | None = None,
+) -> tuple[str, str]:
     """4 워크트리(be/fe/rev/plan) 의 진행/최근 한 줄씩 digest 본문을 만듭니다.
 
     Args:
         status: `read_cycle_status()` 반환 dict, 또는 None (파일 없음/깨짐).
+        now: 헤더 timestamp 산출 기준 시각. 기본값 None → 호출 시점 KST.
+            테스트 deterministic 용으로만 외부 주입.
 
     Returns:
         (rendered, signature) 튜플.
@@ -410,9 +420,18 @@ def format_cycle_digest(status: dict | None) -> tuple[str, str]:
         [be] 진행: idle / 최근: 없음   ← last_completed 가 null 인 경우
 
     스키마 누락/타입 이상 시 해당 필드만 "idle" / "없음" 으로 대체합니다.
+
+    헤더 바로 아래에 `🕒 YYYY-MM-DD HH:MM KST` timestamp 라인을 항상 삽입합니다
+    (사용자 요청 #811). timestamp 는 signature 에 포함하지 않으므로 delta push
+    판정에는 영향을 주지 않습니다.
     """
     prefix = MESSAGE_PREFIX["digest"]
-    lines: list[str] = [f"{prefix} **cycle digest**"]
+    if now is None:
+        now = datetime.now(CYCLE_DIGEST_TZ)
+    elif now.tzinfo is not None:
+        now = now.astimezone(CYCLE_DIGEST_TZ)
+    timestamp_line = f"🕒 {now.strftime(CYCLE_DIGEST_TIME_FORMAT)}"
+    lines: list[str] = [f"{prefix} **cycle digest**", timestamp_line]
     sig_parts: list[str] = []
 
     if status is None or not isinstance(status, dict):
