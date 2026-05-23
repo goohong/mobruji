@@ -89,6 +89,84 @@ describe("extractVoiceRangeProgress", () => {
     expect(result!.points[0].sourceMethod).toBe("SELF_REPORT");
     expect(result!.points[1].sourceMethod).toBe("MIC_MEASURE");
   });
+
+  // ---- regression guards (#416) ----
+
+  it("[regression #416] valid datapoint 가 1개뿐(나머지 legacy)이면 null — boundary 가드", () => {
+    // valid 1 + legacy 2 → 총 datapoint 1개 → null (datapoint >= 2 boundary).
+    const result = extractVoiceRangeProgress([
+      buildEntry("legacy-2", "2026-05-21T12:00:00Z"),
+      buildEntry("valid", "2026-05-21T11:00:00Z", {
+        voiceRangeLowMidi: 50,
+        voiceRangeHighMidi: 72,
+      }),
+      buildEntry("legacy-1", "2026-05-21T10:00:00Z"),
+    ]);
+
+    expect(result).toBeNull();
+  });
+
+  it("[regression #416] 한 phase 만 valid (low number / high undefined) entry 는 제외된다", () => {
+    // low 만 있고 high 가 undefined / high 만 있고 low 가 undefined → 둘 다 제외.
+    // 결과적으로 valid 는 2개 entry 뿐 → summary 반환되며 partial entry 가
+    // points 에 섞이지 않아야 한다.
+    const result = extractVoiceRangeProgress([
+      buildEntry("only-low", "2026-05-21T14:00:00Z", {
+        voiceRangeLowMidi: 48,
+        // voiceRangeHighMidi 미지정.
+      }),
+      buildEntry("valid-recent", "2026-05-21T13:00:00Z", {
+        voiceRangeLowMidi: 50,
+        voiceRangeHighMidi: 72,
+      }),
+      buildEntry("only-high", "2026-05-21T12:00:00Z", {
+        voiceRangeHighMidi: 80,
+        // voiceRangeLowMidi 미지정.
+      }),
+      buildEntry("valid-old", "2026-05-21T10:00:00Z", {
+        voiceRangeLowMidi: 52,
+        voiceRangeHighMidi: 70,
+      }),
+    ]);
+
+    expect(result).not.toBeNull();
+    expect(result!.points.map((p) => p.id)).toEqual([
+      "valid-old",
+      "valid-recent",
+    ]);
+    // partial entry 의 MIDI 값이 min/max 에 영향을 주지 않아야 한다.
+    expect(result!.minLowMidi).toBe(50); // not 48 (only-low entry 제외)
+    expect(result!.maxHighMidi).toBe(72); // not 80 (only-high entry 제외)
+  });
+
+  it("[regression #416] 모든 측정이 동일 MIDI 면 spanDelta=0 + low/highDelta=0 (평평한 progress)", () => {
+    // 3회 모두 동일 측정(60~72). 사용자가 음역 변화 없이 같은 결과만 반복 측정 케이스.
+    // UI 차트는 flat line, summary 의 모든 delta 는 0 이어야 한다.
+    const result = extractVoiceRangeProgress([
+      buildEntry("t3", "2026-05-21T12:00:00Z", {
+        voiceRangeLowMidi: 60,
+        voiceRangeHighMidi: 72,
+      }),
+      buildEntry("t2", "2026-05-21T11:00:00Z", {
+        voiceRangeLowMidi: 60,
+        voiceRangeHighMidi: 72,
+      }),
+      buildEntry("t1", "2026-05-21T10:00:00Z", {
+        voiceRangeLowMidi: 60,
+        voiceRangeHighMidi: 72,
+      }),
+    ]);
+
+    expect(result).not.toBeNull();
+    expect(result!.points).toHaveLength(3);
+    expect(result!.minLowMidi).toBe(60);
+    expect(result!.maxHighMidi).toBe(72);
+    expect(result!.earliestSpanSemitones).toBe(12);
+    expect(result!.latestSpanSemitones).toBe(12);
+    expect(result!.spanDeltaSemitones).toBe(0);
+    expect(result!.lowMidiDeltaSemitones).toBe(0);
+    expect(result!.highMidiDeltaSemitones).toBe(0);
+  });
 });
 
 function buildSnapshot(
@@ -143,5 +221,41 @@ describe("extractVoiceRangeProgressFromSnapshots", () => {
     expect(result!.spanDeltaSemitones).toBe(6);
     expect(result!.lowMidiDeltaSemitones).toBe(-2);
     expect(result!.highMidiDeltaSemitones).toBe(4);
+  });
+
+  it("[regression #416] 입력 순서를 그대로 보존한다 — BE 가 정렬 책임을 진다 (별도 sort 없음)", () => {
+    // BE 가 약속을 어겨 역순(최신 → 오래된)으로 보낸 worst case.
+    // 본 함수는 별도 정렬하지 않으므로 첫 입력이 earliest 로, 마지막이 latest 로 취급된다.
+    // 이 보존 동작은 spec §5-2 (정렬 책임은 BE) 와 일치하며, 향후 정렬 로직을 함부로
+    // 추가하지 않도록 가드한다.
+    const result = extractVoiceRangeProgressFromSnapshots([
+      // 의도적으로 측정 시각 역순(latest 가 첫 번째)으로 넣는다.
+      buildSnapshot({
+        id: 22,
+        lowMidi: 50,
+        highMidi: 74,
+        measuredAt: "2026-05-21T12:00:00",
+        sourceMethod: "MIC_MEASURE",
+      }),
+      buildSnapshot({
+        id: 11,
+        lowMidi: 52,
+        highMidi: 70,
+        measuredAt: "2026-05-21T08:00:00",
+        sourceMethod: "SELF_REPORT",
+      }),
+    ]);
+
+    expect(result).not.toBeNull();
+    // 입력 순서 그대로 — 첫 입력(id=22) 이 earliest 자리, 마지막(id=11) 이 latest 자리.
+    expect(result!.points[0].id).toBe("snapshot-22");
+    expect(result!.points[1].id).toBe("snapshot-11");
+    // earliest = 첫 입력(50~74, span 24), latest = 마지막(52~70, span 18).
+    expect(result!.earliestSpanSemitones).toBe(24);
+    expect(result!.latestSpanSemitones).toBe(18);
+    expect(result!.spanDeltaSemitones).toBe(-6); // 24 → 18.
+    // min/max 는 정렬과 무관하게 전체 datapoint 기준.
+    expect(result!.minLowMidi).toBe(50);
+    expect(result!.maxHighMidi).toBe(74);
   });
 });
