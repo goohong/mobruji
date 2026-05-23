@@ -134,12 +134,12 @@ cd web && npm run dev                                                   # FE 실
 
 **금지**: 분석/조사/tool call 을 먼저 하고 ack 를 뒤로. bot.py auto-ack 는 #807 에서 제거됐기 때문에 helper ack 없으면 사용자 입장에선 깜깜이.
 
-## 12) maestro context% 자기 emit
-maestro 본진(tmux `mobruji:0.0`)은 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 95% 도달 시 자율 정리 트리거.
+## 12) maestro/helper context% 자기 emit
+maestro(mmae / nmae — tmux `mobruji:0.0`) + helper(tmux `helper:0.0`) 는 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-2 / §5-6`) 가 두 pane 을 독립 polling 해 95% 도달 시 자율 정리 트리거.
 
 - 정상: `===CTX:NN%===` (NN = 0–100 정수)
 - 모를 때: `===CTX:?===` (트리거 안 함)
 - 정리 완료 시: `===CLEAR_READY===` 동반 출력 → bot.py 가 `/clear` 전송
-- **본진만 emit**. sub-agent (be/fe/rev/plan) 는 marker 안 함.
+- **mmae/nmae + helper emit**. sub-agent (be/fe/rev/plan) 는 marker 안 함 — 사이클 후 종료라 누적 없음.
 
 추정 우선순위: ① `/context` slash 결과 → ② input/output 누적 ÷ 모델 window → ③ 모르면 `?`.

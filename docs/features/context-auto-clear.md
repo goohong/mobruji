@@ -1,18 +1,18 @@
 ---
-feature: maestro context auto-clear 자동화 (95% 임계 → 자율 핸드오프 + /clear)
+feature: maestro/helper context auto-clear 자동화 (95% 임계 → 자율 핸드오프 + /clear)
 slug: context-auto-clear
 status: draft
 owner: @mobruji-maestro
 scope: infra
 related_issues: []
 related_prs: []
-last_reviewed: 2026-05-23
+last_reviewed: 2026-05-24
 ---
 
-# maestro context auto-clear 자동화 (95% 임계 → 자율 핸드오프 + /clear)
+# maestro/helper context auto-clear 자동화 (95% 임계 → 자율 핸드오프 + /clear)
 
 ## 1) 개요 (What / Why)
-NCP maestro tmux pane이 컨텍스트 사용량 95%에 도달하면 **bot.py가 maestro에게 핸드오프 정리 prompt를 inject**하고, maestro가 정리를 마치고 `===CLEAR_READY===` marker를 stdout으로 출력하면 **bot.py가 `tmux send-keys "/clear" Enter`로 컨텍스트를 비운다**. 다음 wake 시 첫 turn에서 MEMORY.md 자동 로드 → 자율 회복.
+polling 대상 tmux pane (nmae `mobruji:0.0`, helper `helper:0.0`) 이 컨텍스트 사용량 95%에 도달하면 **bot.py가 해당 pane에 핸드오프 정리 prompt를 inject**하고, 그 안의 Claude 세션이 정리를 마치고 `===CLEAR_READY===` marker를 stdout으로 출력하면 **bot.py가 `tmux send-keys "/clear" Enter`로 컨텍스트를 비운다**. 다음 wake 시 첫 turn에서 MEMORY.md 자동 로드 → 자율 회복.
 
 문제: v6 사이클에서 컨텍스트 97% 도달 후 본진이 사실상 멈춤. 사용자가 부재이면 회복 불가. 기존 `maestro-auto-wake` (60분 wake) 와는 다른 axis — wake는 idle 회복, 본 spec은 **context 포화 회복**.
 
@@ -25,25 +25,25 @@ NCP maestro tmux pane이 컨텍스트 사용량 95%에 도달하면 **bot.py가 
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] **컨텍스트 사용량 polling**: bot.py가 tmux pane stdout (`tmux capture-pane -t mobruji:0.0 -p`) 5~10초 간격 tail. footer/marker 패턴 `[NN% context used]` 또는 `Context: NN%` 파싱.
-- [ ] **95% 트리거 + hysteresis**: 사용량 ≥ 95% 도달 시 1회 trigger. 트리거 후 사용량 ≤ 80% 떨어질 때까지 재트리거 차단 (debounce flag).
-- [ ] **maestro inject prompt 표준**:
+- [ ] **컨텍스트 사용량 polling (multi-pane)**: bot.py가 설정된 모든 polling pane (default: nmae `mobruji:0.0` + helper `helper:0.0`) 의 stdout (`tmux capture-pane -t <pane> -p`) 을 5~10초 간격 tail. pane 별 독립 state 추적. marker 패턴 `===CTX:NN%===` (§5-6 옵션 A) 파싱.
+- [ ] **95% 트리거 + hysteresis (pane 별 독립)**: 한 pane 의 사용량 ≥ 95% 도달 시 1회 trigger. 트리거 후 사용량 ≤ 80% 떨어질 때까지 재트리거 차단 (pane 별 debounce flag).
+- [ ] **inject prompt 표준 (pane 무관 공통)**:
   ```
   🧠 컨텍스트 95% 도달. 다음 절차로 자율 정리하라:
-  1. 진행 중 sub-agent 모두 완료 대기 (launch 추가 금지)
+  1. 진행 중 작업 모두 완료 대기 (sub-agent launch / 새 요청 추가 금지)
   2. 다음 핸드오프 메모리 `project_session_handoff_<YYYY-MM-DD>_v<N+1>.md` 작성:
      - 사이클 카운트 / 진행 중 PR / 사용자 결정 대기 / 첫 액션
   3. MEMORY.md 인덱스에 새 핸드오프 한 줄 추가
   4. 정리 완료 후 stdout 에 marker 출력: `===CLEAR_READY===`
   5. 그 후 정지 (ScheduleWakeup 재호출 안 함 — /clear 후 다음 wake가 처리)
   ```
-  bot.py가 `tmux send-keys -t mobruji:0.0 "<위 prompt>" Enter` 로 inject.
-- [ ] **marker 감지 → /clear 전송**: bot.py가 `tmux capture-pane` tail에서 `===CLEAR_READY===` 발견 시:
-  - Discord 채널에 push "🧹 컨텍스트 정리 완료 (핸드오프: `<file>`). /clear 전송."
-  - `tmux send-keys -t mobruji:0.0 "/clear" Enter`
-  - debounce flag reset 대기 (사용량 80% 이하 확인 후)
-- [ ] **자율 wake 재개**: /clear 후 maestro는 빈 컨텍스트. 본진 첫 turn 시 CLAUDE.md + MEMORY.md auto-load (Claude Code 기본 동작) → 최신 핸드오프 메모리 Read → 진행 재개.
-- [ ] **사용자 중단 hook**: 채널 `/stop autoclear` → `.mobruji/autoclear-paused` 파일 → bot.py polling 시 flag 확인하면 inject 안 함. `/start autoclear` 로 재개.
+  bot.py가 `tmux send-keys -t <pane> "<위 prompt>" Enter` 로 inject. "진행 중 작업" 은 nmae(sub-agent)·helper(현재 turn) 양쪽 케이스를 포괄.
+- [ ] **marker 감지 → /clear 전송 (pane 별)**: bot.py 가 각 polling pane 의 `tmux capture-pane` tail 에서 `===CLEAR_READY===` 발견 시:
+  - Discord 채널에 push "🧹 `<pane>` 컨텍스트 정리 완료. /clear 전송."
+  - `tmux send-keys -t <pane> "/clear" Enter`
+  - 해당 pane 의 debounce flag 는 사용량 80% 이하 자연 falloff 까지 유지
+- [ ] **자율 wake 재개**: /clear 후 해당 pane Claude 는 빈 컨텍스트. 첫 turn 시 CLAUDE.md + MEMORY.md auto-load (Claude Code 기본 동작) → 최신 핸드오프 메모리 Read → 진행 재개.
+- [ ] **사용자 중단 hook**: 채널 `/stop autoclear` → `.mobruji/autoclear-paused` 파일 → bot.py polling 시 flag 확인하면 모든 pane 에 대해 inject 안 함. `/start autoclear` 로 재개.
 
 ### 비기능 요구사항
 - **결정성**: 95% 정확 트리거 (off-by-one 금지, ≥ 95 임계). hysteresis 80% 이하 재방문 필수. 같은 96% 유지 상태에서 한 사이클당 1회만 trigger.
@@ -55,16 +55,18 @@ NCP maestro tmux pane이 컨텍스트 사용량 95%에 도달하면 **bot.py가 
 
 ## 4) 범위 / 비범위
 ### 포함
-- bot.py에 polling loop + inject + marker 감지 + /clear send-keys
+- bot.py 에 multi-pane polling loop + pane 별 독립 state + inject + marker 감지 + /clear send-keys
+- polling 대상 pane: nmae `mobruji:0.0` + helper `helper:0.0` (default). `TMUX_PANE_TARGETS` env 로 외부화 (콤마 구분).
+- pane 별 debounce / awaiting_marker state 독립 관리. 한 pane 트리거가 다른 pane 에 영향 없음.
+- 세션 부재 pane 은 graceful skip (`tmux has-session` 검사 — 한쪽만 켜진 환경도 정상 동작).
 - 새 메모리 `project_context_clear_log.md` 구조
 - `.env` 토글 + 임계값
 - 사용자 중단 hook (`/stop autoclear` / `/start autoclear`)
-- maestro inject prompt 표준화
+- inject prompt 표준화 (pane 무관 공통 문구)
 
 ### 제외 (Out of Scope)
 - **사전 압축 (auto compact)** — Claude Code 자체 /compact 호출은 OOS. 본 spec은 /clear (전부 비움) 만. /compact 보존 부분 자동화는 후속.
-- **plan/be/fe/rev 워크트리 sub-agent 자체 context auto-clear** — sub-agent는 한 사이클 후 종료라 누적 안 됨. 본 spec은 maestro (본진) tmux pane 한정.
-- **다중 pane 지원** — mobruji:0.0 단일 pane. plan/be/fe/rev sub-agent는 본진이 launch 하므로 별 pane 없음.
+- **plan/be/fe/rev 워크트리 sub-agent 자체 context auto-clear** — sub-agent는 한 사이클 후 종료라 누적 안 됨. 본 spec은 maestro (nmae) + helper 인터랙티브 pane 한정.
 - **마커 패턴 자동 감지 (footer / status bar 변형)** — Claude Code의 context% 표시 포맷 변경 시 spec 갱신 필수. 자동 적응 OOS.
 
 ## 5) 설계
@@ -103,77 +105,95 @@ context >= 95% AND not debounced ?
 CONTEXT_TRIGGER_PCT: Final[int] = int(os.getenv("CONTEXT_CLEAR_TRIGGER_PCT", "95"))
 CONTEXT_HYSTERESIS_PCT: Final[int] = int(os.getenv("CONTEXT_CLEAR_HYSTERESIS_PCT", "80"))
 CONTEXT_AUTO_CLEAR_ENABLED: Final[bool] = os.getenv("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
-TMUX_PANE_TARGET: Final[str] = "mobruji:0.0"
+# 복수 pane 지원 — 콤마 구분. 단일 TMUX_PANE_TARGET 도 후방호환 (plural 미지정 시 사용).
+TMUX_PANE_TARGETS_DEFAULT: Final[str] = "mobruji:0.0,helper:0.0"
 CLEAR_READY_MARKER: Final[str] = "===CLEAR_READY==="
 AUTOCLEAR_PAUSED_FLAG: Final[Path] = Path("~/.mobruji/autoclear-paused").expanduser()
 CONTEXT_CLEAR_LOG_PATH: Final[Path] = Path("~/.claude/projects/-home-mobruji-mobruji/memory/project_context_clear_log.md").expanduser()
 
-def capture_pane_text() -> str:
-    """tmux capture-pane -t <pane> -p 전체 출력."""
+def resolve_pane_targets(env: dict[str, str]) -> list[str]:
+    """`TMUX_PANE_TARGETS` (plural, CSV) 우선. 부재 시 `TMUX_PANE_TARGET` (singular) 후방호환.
+    둘 다 없으면 default ("mobruji:0.0,helper:0.0"). 빈 문자열 토큰 제거."""
+    ...
+
+def capture_pane_text(pane_target: str) -> str | None:
+    """tmux capture-pane -t <pane> -p -S -<N> 전체 출력. 실패 시 None."""
     ...
 
 def parse_context_pct(pane_text: str) -> int | None:
-    """`[NN% context used]` 또는 `Context: NN%` 패턴 파싱. 최신 occurrence."""
+    """`===CTX:NN%===` 마지막 occurrence 파싱."""
     ...
 
-def inject_cleanup_prompt() -> None:
+def inject_cleanup_prompt(pane_target: str) -> bool:
     """tmux send-keys 로 정리 prompt 한 줄 inject + Enter."""
     ...
 
-def send_clear_command() -> None:
+def send_clear_command(pane_target: str) -> bool:
     """tmux send-keys '/clear' Enter."""
     ...
 
-async def context_auto_clear_loop(channel):
-    """5초 간격 polling. 95% 트리거 + marker 감지 + /clear + hysteresis."""
-    debounced = False
-    awaiting_marker = False
+async def context_auto_clear_loop(client, channel_id, *, pane_targets, ...):
+    """pane 별 독립 state. 5초 간격 polling. 95% 트리거 + marker 감지 + /clear + hysteresis.
+
+    각 pane 마다 (debounced, awaiting_marker) 튜플을 dict 로 관리. 한 pane 트리거가
+    다른 pane 에 영향 없음. pane 별 tmux has-session 확인 후 missing pane 은 매 iter 마다
+    silently skip (운영 환경에서 helper 세션 없을 때 crash 금지)."""
+    state: dict[str, dict] = {p: {"debounced": False, "awaiting_marker": False} for p in pane_targets}
     while True:
-        await asyncio.sleep(5)
+        await asyncio.sleep(poll_interval)
         if AUTOCLEAR_PAUSED_FLAG.exists():
             continue
-        pane = capture_pane_text()
-        pct = parse_context_pct(pane)
-        if pct is None:
-            continue
-        # marker 우선 체크 (정리 완료 신호)
-        if awaiting_marker and CLEAR_READY_MARKER in pane:
-            await channel.send(f"🧹 정리 완료 → /clear 전송 (마지막 context {pct}%)")
-            send_clear_command()
-            append_clear_log(pct, "cleared")
-            awaiting_marker = False
-            # debounce 는 80% 이하 자연 falloff 까지 유지
-            continue
-        # hysteresis 해제
-        if debounced and pct <= CONTEXT_HYSTERESIS_PCT:
-            debounced = False
-        # 트리거 조건
-        if not debounced and pct >= CONTEXT_TRIGGER_PCT:
-            await channel.send(f"🧠 context {pct}% → 자율 정리 시작")
-            inject_cleanup_prompt()
-            append_clear_log(pct, "triggered")
-            debounced = True
-            awaiting_marker = True
+        for pane in pane_targets:
+            # tmux has-session per pane (graceful skip)
+            session = pane.split(":", 1)[0]
+            if not tmux_has_session(session):
+                continue
+            pane_text = capture_pane_text(pane)
+            if pane_text is None:
+                continue
+            pct = parse_context_pct(pane_text)
+            st = state[pane]
+            # marker 우선
+            if st["awaiting_marker"] and CLEAR_READY_MARKER in pane_text:
+                await channel.send(f"🧹 {pane} 정리 완료 → /clear 전송 ...")
+                send_clear_command(pane)
+                append_clear_log(pct or -1, "cleared", pane=pane)
+                st["awaiting_marker"] = False
+                continue
+            if pct is None:
+                continue
+            if st["debounced"] and pct <= CONTEXT_HYSTERESIS_PCT:
+                st["debounced"] = False
+            if not st["debounced"] and pct >= CONTEXT_TRIGGER_PCT:
+                await channel.send(f"🧠 {pane} context {pct}% → 자율 정리 시작")
+                inject_cleanup_prompt(pane)
+                append_clear_log(pct, "triggered", pane=pane)
+                st["debounced"] = True
+                st["awaiting_marker"] = True
 ```
+
+Audit log line 은 pane 이름 포함: `pane=helper:0.0 trigger=...` / `pane=mobruji:0.0 cleared=...`.
 
 ### 5-3) 메모리 구조 (`project_context_clear_log.md`)
 ```markdown
 ---
 name: project-context-clear-log
-description: maestro context auto-clear 사이클 결과 누적 (trigger / marker / clear)
+description: maestro/helper context auto-clear 사이클 결과 누적 (trigger / marker / clear)
 metadata:
   type: project
 ---
 
 # context auto-clear log (역시간순)
 
-| timestamp | event | context% | handoff file | duration |
-|---|---|---|---|---|
-| 2026-05-24T03:10+09 | cleared | 96 | project_session_handoff_2026-05-24-v1.md | 12m |
-| 2026-05-24T02:58+09 | triggered | 95 | - | - |
+| timestamp | pane | event | context% | handoff file | duration |
+|---|---|---|---|---|---|
+| 2026-05-24T03:10+09 | mobruji:0.0 | cleared | 96 | project_session_handoff_2026-05-24-v1.md | 12m |
+| 2026-05-24T02:58+09 | mobruji:0.0 | triggered | 95 | - | - |
+| 2026-05-24T02:50+09 | helper:0.0 | cleared | 96 | - | 3m |
+| 2026-05-24T02:47+09 | helper:0.0 | triggered | 95 | - | - |
 ```
 
-마지막 50줄 유지. 동일 사이클 (triggered ↔ cleared) 쌍 누적 분석으로 정리 소요 시간 측정.
+마지막 50줄 유지. 동일 사이클 (triggered ↔ cleared) 쌍 누적 분석으로 정리 소요 시간 측정. pane 컬럼은 어느 pane 의 사이클인지 식별 — multi-pane 환경에서 nmae/helper 추세 분리.
 
 ### 5-4) 사용자 중단 hook
 - `/stop autoclear` → `touch ~/.mobruji/autoclear-paused` + 채널 ack "⏸️ context auto-clear paused"
@@ -181,8 +201,11 @@ metadata:
 - `/force clear` → debounce 무시 강제 /clear (sub-agent 잃기 수용. 사용자 명시)
 
 ### 5-5) tmux pane 검증
-- `mobruji:0.0` 세션 존재 확인: bot.py 시작 시 `tmux has-session -t mobruji` 호출. 실패 시 `CONTEXT_AUTO_CLEAR_ENABLED` 무시하고 시작.
-- pane 이름 변경 시 `TMUX_PANE_TARGET` env 갱신 필요 (운영 문서에 명시).
+- polling pane 별 세션 존재 확인: bot.py 시작 시 각 pane 의 session 부 (`<session>:<window>.<pane>` 의 `<session>`) 에 대해 `tmux has-session -t <session>` 호출.
+  - 한 pane 도 없으면 `context_auto_clear_loop` 자체를 띄우지 않음 (warn log + opt-in 무시).
+  - 일부만 부재 시 (예: nmae 만 존재, helper 부재) loop 는 띄우되 존재하는 pane 만 polling. log 에 `skip pane=helper:0.0 (session not found)` 한 줄.
+- 매 iter 마다 pane 별 `tmux has-session` 재확인 → 운영 도중 한쪽 pane 이 종료/재생성 되어도 다음 iter 부터 자동 반영. 부재 pane 은 silently skip.
+- pane 이름 변경 시 `TMUX_PANE_TARGETS` env 갱신 필요 (운영 문서에 명시). 단일 pane 환경은 `TMUX_PANE_TARGET` (singular) 후방호환으로 1개만 지정 가능.
 
 ### 5-6) context% 파싱 패턴 (실측 결과 — 2026-05-23, #760)
 **실측 결론**: Claude Code TUI footer/status-bar 에 context% **상시 표시 없음**. spec 초안의 두 가정 패턴 (`[NN% context used]`, `Context: NN%`) 모두 화면 캡처에 안 보임.
@@ -217,14 +240,15 @@ metadata:
 
 **regex 최종 후보** (옵션 A): `r'===CTX:(\d{1,3})%==='`. PR C 단위 테스트로 고정.
 
-**maestro 측 룰 (확정)**: `CLAUDE.md §11 context 사용량 자기 emit (maestro 자율 회복용)` 에서 marker 형식·추정 방법·적용 대상(maestro 본진만) 명시. PR C 는 이 룰을 전제로 구현한다.
+**maestro/helper 측 룰 (확정)**: `CLAUDE.md §12 maestro context% 자기 emit` 에서 marker 형식·추정 방법·적용 대상(maestro mmae/nmae + helper) 명시. PR C 는 이 룰을 전제로 구현한다. helper pane 도 polling 대상이므로 helper agent 역시 turn 마지막에 `===CTX:NN%===` emit 필요.
 
 ## 6) 작업 분할 (예상 PR 리스트)
 - [x] **PR A (본 PR)**: spec 신설.
 - [ ] **PR B**: `project_context_clear_log.md` 메모리 초기화 (빈 표). 본 spec 머지 후 plan 또는 maestro가 작성.
-- [x] **PR C**: `bot.py` 에 `context_auto_clear_loop` + 파싱 + send_keys + `.env.example` 토글 + `tests/test_context_auto_clear.py`. be 사이클 후속. **전제**: `CLAUDE.md §11` (maestro self-emit `===CTX:NN%===` 룰) 머지됨.
+- [x] **PR C**: `bot.py` 에 `context_auto_clear_loop` + 파싱 + send_keys + `.env.example` 토글 + `tests/test_context_auto_clear.py`. be 사이클 후속. **전제**: `CLAUDE.md §12` (maestro/helper self-emit `===CTX:NN%===` 룰) 머지됨.
 - [ ] **PR D**: `bot.py` on_message 에 `/stop autoclear` / `/start autoclear` / `/force clear` 핸들러 + 테스트. PR C 후 또는 동시.
 - [ ] **PR E (운영 시험)**: PR C 머지 후 1주 dry-run (CONTEXT_AUTO_CLEAR_ENABLED=0 로 polling만 + log 만 append). hysteresis/패턴 검증 후 default ENABLED=1 전환.
+- [x] **PR F (#855)**: `context_auto_clear_loop` multi-pane 확장 — nmae `mobruji:0.0` 단일 → nmae + helper `helper:0.0`. pane 별 독립 state (debounced/awaiting_marker). `TMUX_PANE_TARGETS` (plural CSV) env 신설, `TMUX_PANE_TARGET` (singular) 후방호환. graceful skip per pane (`tmux has-session`). audit log + Discord push 에 pane 이름 포함. helper pane 도 turn 끝 `===CTX:NN%===` emit 의무 (CLAUDE.md §12 갱신).
 
 ## 7) 테스트 전략
 - **PR A**: 문서 spec only.

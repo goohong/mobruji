@@ -52,10 +52,11 @@ helper 응답은 helper 측에서 신규 script `discord-reply.sh "<메시지>"`
 | `DIGEST_ENABLED` | `1` | `1` 이면 on_ready 직후 asyncio task 가 일정 주기로 cycle-status digest 1건 push. |
 | `DIGEST_INTERVAL_SECONDS` | `900` (15분) | digest 주기. 양수 정수만 유효. |
 | `CYCLE_STATUS_PATH` | `~/.mobruji/cycle-status.json` | digest 가 읽는 cycle-status JSON 경로. 호스트별 home 디렉토리에 맞춰 `~` 가 자동 확장됩니다. mac/linux 호환 위해 환경별 경로 분리 시 override. |
-| `CONTEXT_AUTO_CLEAR_ENABLED` | `0` (opt-in) | `1` 이면 on_ready 직후 `context_auto_clear_loop` 가동. maestro pane 의 `===CTX:NN%===` marker 를 5초 polling 해서 trigger 초과 시 정리 사이클 + `===CLEAR_READY===` 감지 시 `/clear` 전송. 출처: PR #810 (#809 후속, spec `docs/features/context-auto-clear.md §5-2`). |
+| `CONTEXT_AUTO_CLEAR_ENABLED` | `0` (opt-in) | `1` 이면 on_ready 직후 `context_auto_clear_loop` 가동. polling 대상 pane (nmae/helper) 의 `===CTX:NN%===` marker 를 5초 polling 해서 trigger 초과 시 정리 사이클 + `===CLEAR_READY===` 감지 시 `/clear` 전송. 출처: PR #810 (#809 후속), PR #855 (multi-pane). spec `docs/features/context-auto-clear.md §5-2`. |
 | `CONTEXT_CLEAR_TRIGGER_PCT` | `95` | auto-clear 트리거 임계치(%). 정수. `CONTEXT_AUTO_CLEAR_ENABLED=1` 일 때만 의미. |
 | `CONTEXT_CLEAR_HYSTERESIS_PCT` | `80` | trigger 후 다음 사이클 재무장(rearm) 하한 임계치(%). 정수. trigger 보다 낮아야 함. |
-| `TMUX_PANE_TARGET` | `mobruji:0.0` | auto-clear 가 polling/제어할 maestro pane. 세션 부재 시 loop launch 자체를 skip. |
+| `TMUX_PANE_TARGETS` | `mobruji:0.0,helper:0.0` | auto-clear 가 polling/제어할 pane 의 CSV. pane 별 독립 state. 일부 pane 의 tmux 세션 부재 시 해당 pane 만 graceful skip — loop 자체는 가동. 단일 pane 환경은 `TMUX_PANE_TARGET` (singular) 도 후방호환. |
+| `TMUX_PANE_TARGET` | (없음 — `TMUX_PANE_TARGETS` 우선) | 후방호환 singular env. `TMUX_PANE_TARGETS` 가 비어 있을 때만 단일 pane 으로 인식. |
 
 ### 폐기된 env (이슈 #807 단순화)
 
