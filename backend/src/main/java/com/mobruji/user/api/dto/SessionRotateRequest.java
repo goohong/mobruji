@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import com.mobruji.user.domain.AnonymousSession;
+import com.mobruji.user.domain.SessionIdPatterns;
 
 /**
  * {@code POST /api/v1/sessions/rotate} 요청 body.
@@ -20,7 +21,7 @@ import com.mobruji.user.domain.AnonymousSession;
  */
 public record SessionRotateRequest(
         @NotBlank @Size(max = AnonymousSession.SESSION_ID_MAX_LENGTH) @Pattern(
-                regexp = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", message = "UUIDv4 format required"
+                regexp = SessionIdPatterns.UUID_V4, message = SessionIdPatterns.UUID_V4_MESSAGE
         ) String currentSessionId,
         SessionDataMode dataMode
 ) {

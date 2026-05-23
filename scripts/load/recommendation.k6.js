@@ -32,6 +32,22 @@ const VUS = parseInt(__ENV.VUS || '10', 10);
 const DURATION = __ENV.DURATION || '60s';
 const WARMUP = __ENV.WARMUP || '10s';
 
+// UUIDv4 생성 헬퍼 (#948).
+// VoiceRangeCreateRequest.sessionId @Pattern(SessionIdPatterns.UUID_V4) 강제 — 비-UUIDv4 입력은 400.
+// k6 setup() 의 POST /api/v1/voice-ranges 가 본 헬퍼로 sessionId 를 발급해야 시나리오가 통과한다.
+// SessionRotateRequest 와 동일 형식. crypto.randomUUID 미지원 환경(k6) 대응을 위해 Math.random 기반 생성.
+function uuidV4() {
+    const bytes = new Array(16);
+    for (let i = 0; i < 16; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+    }
+    // RFC 4122 §4.4 — version(0100) + variant(10xx) nibble 셋팅
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 const MOODS = ['UPBEAT', 'CALM', 'EMOTIONAL', 'POWERFUL', 'GROOVY', 'NOSTALGIC', null];
 
 // preferredBpm 변주 — v2(#218) tempoMatch 회귀 가드(#274).
@@ -100,7 +116,9 @@ export const options = {
 export function setup() {
     const sessions = [];
     for (let i = 0; i < VUS; i++) {
-        const sessionId = `k6-load-${Date.now()}-${i}`;
+        // #948: VoiceRangeCreateRequest.sessionId @Pattern(UUIDv4) — UUIDv4 생성 필수.
+        // 이전 `k6-load-${Date.now()}-${i}` 패턴은 400 (UUIDv4 format required) 회귀.
+        const sessionId = uuidV4();
         const variant = VOICE_RANGE_VARIANTS[i % VOICE_RANGE_VARIANTS.length];
         const res = http.post(
             `${BASE_URL}/api/v1/voice-ranges`,
