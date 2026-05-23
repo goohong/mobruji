@@ -83,7 +83,11 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
     }
     return (
       <Shell>
-        <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+        >
           <p className="text-sm text-red-700 dark:text-red-200">
             곡 정보를 불러오지 못했습니다.{" "}
             {query.error instanceof ApiError
