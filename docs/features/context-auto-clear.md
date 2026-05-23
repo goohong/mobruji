@@ -184,13 +184,38 @@ metadata:
 - `mobruji:0.0` 세션 존재 확인: bot.py 시작 시 `tmux has-session -t mobruji` 호출. 실패 시 `CONTEXT_AUTO_CLEAR_ENABLED` 무시하고 시작.
 - pane 이름 변경 시 `TMUX_PANE_TARGET` env 갱신 필요 (운영 문서에 명시).
 
-### 5-6) context% 파싱 패턴
-Claude Code 의 context 사용량 표시는 footer/status bar에 다음 형식으로 나타남 (현재 가정):
-- `[95% context used]`
-- `Context: 95%`
-- (변형 발견 시 spec 갱신)
+### 5-6) context% 파싱 패턴 (실측 결과 — 2026-05-23, #760)
+**실측 결론**: Claude Code TUI footer/status-bar 에 context% **상시 표시 없음**. spec 초안의 두 가정 패턴 (`[NN% context used]`, `Context: NN%`) 모두 화면 캡처에 안 보임.
 
-regex 후보: `r'\[(\d{1,3})%\s+context'` 또는 `r'Context:\s*(\d{1,3})%'`. PR C 시작 시 실제 출력 sample로 확정.
+**실측 sample** (mobruji:0.0, `tmux capture-pane -p -S -2000`, 2026-05-23 17:43 KST):
+```
+✻ auto-clear 구현 위임 중… (1m 57s · ↓ 4.7k tokens · almost done thinking)
+  ⎿  ◼ context auto-clear 자동화 spec/구현
+  ◯ claude  BE digest mention sanitize (#754)               49s · ↓ 33.2k tokens
+  ◯ claude  FE 다음 백로그 a11y/refactor                    35s · ↓ 33.6k tokens
+  ◯ claude  PLAN footer context% 실측 + spec 갱신 (#760)    21s · ↓ 24.6k tokens
+
+⏵⏵ bypass permissions on · 3 local agents · esc to interrupt · ctrl+t to hid…
+```
+- footer line: `⏵⏵ bypass permissions on · N local agents · esc to interrupt · ctrl+t to hid…` — context% 없음.
+- 사이드바 (`◯ claude ... ↓ Nk tokens`) 는 sub-agent download 누적 — context% 직접 매핑 불가 (input/output/cache 구분 없음).
+- context% 정보는 `/context` slash 명령 호출 시에만 별도 화면에 출력 — 상시 polling 대상 아님.
+- pipe-pane 로그 (`~/.mobruji/tmux-pane.log`) 는 ANSI escape sequence 덤프 (cursor 위치 + 컬러 코드 폭주) — 평문 grep 불가능 확인.
+
+**결정**: 초안 footer-scrape 전략 **현 Claude Code 버전(2026-05-23) 에서 작동 불가**. 다음 두 옵션 중 택일:
+
+| 옵션 | 방식 | 장점 | 단점 |
+|---|---|---|---|
+| **A (권장)** | maestro self-emit marker — 매 turn 종료 직전 `===CTX:NN%===` 한 줄 stdout 출력. bot.py 는 marker 만 추적. | 결정적. inject 부작용 없음. 단일 regex. | maestro CLAUDE.md 룰 추가 + 매 turn 1줄 오버헤드. context% 자체는 maestro 가 자가 측정 (Claude API usage 또는 추정치) 필요. |
+| **B (fallback)** | bot.py 가 30분 간격 `/context` slash 자동 inject + 응답 화면 scrape. | maestro 측 변경 없음. | inject 가 작업 중 maestro turn 끼어들 위험. slash 응답 화면 형식 자체도 별도 검증 필요. |
+
+**spec 결정 (이번 PR)**: **옵션 A 채택**. PR C 구현 시:
+- maestro 자기 룰 (CLAUDE.md 또는 user-memory) 추가 — 매 turn 끝에 `===CTX:NN%===` emit. context% 측정은 (i) Claude API response usage 추적이 가능한 경우 정확값, (ii) 불가 시 maestro 자기 추정치 (예: 진행한 작업량 + turn 카운트 휴리스틱). PR C kickoff 전 별도 spec/ADR 로 측정 방식 확정.
+- bot.py regex: `r'===CTX:(\d{1,3})%==='` — 단순/유일 패턴. capture-pane scrape 후 마지막 occurrence 사용.
+- footer scrape 코드 작성 금지 (실측상 footer 에 context% 없음).
+- 옵션 B 는 옵션 A 가 비현실적으로 판명 시 fallback. 그 경우 본 spec 재갱신.
+
+**regex 최종 후보** (옵션 A): `r'===CTX:(\d{1,3})%==='`. PR C 단위 테스트로 고정.
 
 ## 6) 작업 분할 (예상 PR 리스트)
 - [x] **PR A (본 PR)**: spec 신설.
@@ -215,7 +240,7 @@ regex 후보: `r'\[(\d{1,3})%\s+context'` 또는 `r'Context:\s*(\d{1,3})%'`. PR 
 ## 8) 오픈 질문
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | context% 표시 정확한 footer 패턴? | sample capture-pane 출력으로 PR C 시작 시 확정 | @user / PR C kickoff |
+| Q1 | ~~context% 표시 정확한 footer 패턴?~~ → **해소 (2026-05-23, #760)**: Claude TUI footer 에 context% 상시 표시 없음 확인. §5-6 옵션 A (maestro self-emit marker `===CTX:NN%===`) 채택. PR C kickoff 전 측정 방식 (Claude API usage vs 자기 추정) 만 ADR/spec 1건 더 필요. | (해소) | @plan #760 ✅ |
 | Q2 | 95% 트리거 적정한가, 90% 더 보수적? | (a) 95% (현재) — 정리 여유 짧음 / (b) 90% — 여유 ↑ 노이즈 ↑ | @user / 운영 1주 데이터 |
 | Q3 | marker `===CLEAR_READY===` 외 다른 형식 필요? (다중 마커?) | 단일 marker 권장 (단순성). 변경 시 spec 갱신. | @maestro / PR C kickoff |
 | Q4 | PR C 후 즉시 ENABLED=1 vs 1주 dry-run? | (a) 즉시 — 빠른 검증 / (b) 1주 dry-run — 안전 (권장) | @user / PR C merge 시 |
@@ -223,3 +248,4 @@ regex 후보: `r'\[(\d{1,3})%\s+context'` 또는 `r'Context:\s*(\d{1,3})%'`. PR 
 
 ## 9) 결정 로그
 - 2026-05-23: 초안 작성 (status=draft). v6 핸드오프 메모리에서 사용자 위임. tmux send-keys + capture-pane polling 채택 (별 IPC 없이 단순). hysteresis 80% 채택 (95→80 gap 15%p — debounce 충분). 사용자 중단 hook `/stop autoclear` Discord prefix ([[maestro-auto-wake]] `/stop wake` 와 동일 패턴). 컨텍스트% 파싱 패턴은 PR C kickoff 시 실제 sample 로 확정.
+- 2026-05-23 (#760): footer-scrape 가정 폐기. 실측상 Claude Code TUI footer 에 context% 상시 표시 없음 확인 (capture-pane sample). 옵션 A — maestro self-emit marker `===CTX:NN%===` 채택. regex `r'===CTX:(\d{1,3})%==='` 단순화. PR C 차단 해소. 측정 방식 (Claude API usage vs 자기 추정) 은 후속 ADR/spec 1건으로 분리.
