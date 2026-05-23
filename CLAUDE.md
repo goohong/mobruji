@@ -197,3 +197,14 @@ helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또�
 - 메모리 룰 학습됐어도 행동 안 함
 
 따라서 1번 (외부 watchdog) 가 핵심. nmae 룰 위반 시 자동 정정.
+
+### idle 시 `note` 필드 의무 (#956 STRICT mode)
+**사용자 2026-05-24 추가 정정: "타당한 사유 없으면 relaunch 강제".**
+
+- `in_progress: null` 진입 시 cycle-status.json `note` 필드 의무 (사유 또는 다음 launch 후보).
+- 미명시 시 watchdog `cycle_idle_watch_loop` 가 **STRICT relaunch prompt** 즉시 inject.
+- 갱신: `tools/cycle-status/update.sh <ws> set-idle --note "..."` (수동 JSON 편집 금지).
+- 검증: `tools/cycle-status/validate.sh` — idle note 누락 detect.
+- env: `CYCLE_REASON_REQUIRED=1` default. 후방호환 off (=0) 가능.
+
+Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리별 `idle_since` / reason 한 줄.
