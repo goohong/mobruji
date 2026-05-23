@@ -202,9 +202,9 @@ import com.mobruji.song.application.SongService; // BAD — application은 domai
 - `api`/`domain`이 다른 BC의 `infrastructure`를 참조하는 것은 **금지**.
 - 미래에 BC가 5개 이상이거나 외부 ML 시스템 연동이 생기면 Port-Adapter/anti-corruption layer 도입을 별도 ADR로 결정.
 
-#### 자동 검증 (미래)
+#### 자동 검증
 
-ArchUnit 또는 Spring Modulith로 위 규칙을 테스트 코드로 강제하는 안을 별도 이슈로 추진(ADR 0005 마이그레이션 머지 후).
+도입 완료 — ADR-0008 (`docs/decisions/0008-archunit-layer-verification.md`) + `backend/src/test/java/com/mobruji/architecture/LayerDependencyTest.java` (4계층 + applicationMustNotDependOnApiDto 룰).
 
 ### A-8) 결정성 패턴 (비결정 호출 금지)
 
@@ -225,9 +225,8 @@ ArchUnit 또는 Spring Modulith로 위 규칙을 테스트 코드로 강제하�
 - 예외(허용): 테스트 코드(`src/test/**`), 시드 로더(`*SeedLoader` — 시드 데이터 생성용), 마이그레이션·운영 스크립트.
 - 보호 영역(`application.yml` 등) 바인딩값은 부트 fail-fast 목적이라 본 룰과 무관.
 
-#### 자동 강제 (계획)
-- ArchUnit으로 `application` 패키지에서 `java.util.Random`(no-arg constructor) / `java.time.Instant#now` / `java.util.UUID#randomUUID` 직접 호출 금지 룰을 테스트 코드로 강제 (#61).
-- 도입 전까지는 PR 리뷰에서 grep + 수동 확인. rev 세션이 회귀 가드.
+#### 자동 강제
+- 계층 침범 가드는 LayerDependencyTest로 자동화 완료. 결정성 룰(random/시계/UUID) ArchUnit 강제는 별도 이슈(#61) 유지, 현재까지는 grep + 수동 확인. rev 세션이 회귀 가드.
 
 ---
 
