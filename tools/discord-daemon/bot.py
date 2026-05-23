@@ -54,6 +54,18 @@ BOT_AUTO_ACK_TEXT: Final[str] = "🤖 helper bot 수신 — helper 가 nmae 상�
 REPLY_CONTEXT_PREVIEW_LEN: Final[int] = 30
 REPLY_CONTEXT_PREFIX_TEMPLATE: Final[str] = "[답장→ {preview}] {body}"
 
+# helper 본답 → 사용자 메시지 reply (#946, 2026-05-24).
+# bot.py 가 사용자 메시지를 helper 로 forward 할 때 그 message_id 를 file 에
+# atomic 으로 기록. discord-reply.sh bare body 모드가 그 파일을 읽어
+# Discord REST API payload 에 `message_reference` 를 포함시켜 자동 reply.
+#
+# Why: 사용자 입장에서 채널 누적 메시지 중 어떤 본문에 대한 helper 답인지
+# 시각적으로 추적하기 위함. standalone 메시지는 짝짓기가 어려움.
+LAST_USER_MSG_ID_PATH: Final[Path] = Path(
+    "~/.mobruji/last-user-msg-id.txt"
+).expanduser()
+LAST_USER_MSG_ID_FILE_MODE: Final[int] = 0o600
+
 # digest cron 튜닝값 — cycle-status.json (사용자 룰 2026-05-23).
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
@@ -316,6 +328,49 @@ def append_inbox(payload: dict[str, str]) -> None:
             handle.write(json.dumps(truncated_payload, ensure_ascii=False) + "\n")
     except OSError as exc:
         logger.warning("inbox.jsonl write 실패: %s", exc)
+
+
+def write_last_user_msg_id(message_id: str) -> None:
+    """`~/.mobruji/last-user-msg-id.txt` 에 최신 사용자 message_id 를 atomic write (#946).
+
+    discord-reply.sh bare body (본답) 모드가 이 파일을 읽어 Discord REST API
+    payload 에 `message_reference: {message_id, channel_id, fail_if_not_exists: false}`
+    를 포함시켜 자동으로 사용자 메시지에 reply 형태로 push.
+
+    동작:
+      - 부모 디렉토리 부재 시 생성.
+      - mktemp + os.replace 로 same-fs atomic rename — 동시 on_message 가
+        부분 파일을 읽지 않도록 보장 (POSIX rename(2) atomicity).
+      - 파일 권한 0o600 강제 — message_id 자체는 민감 정보 아니지만 PII
+        디렉토리 일관성 유지 (helper-queue.jsonl 등과 동일).
+      - 실패는 warning 만 — reply 표시 누락은 quality-of-life 저하일 뿐
+        본 forwarding 흐름을 막아서는 안 됨.
+
+    Args:
+        message_id: Discord message snowflake (정수 또는 문자열). 항상 str
+            로 받아 그대로 저장.
+    """
+    import tempfile as _tempfile  # local — module top scope 변경 회피.
+    try:
+        LAST_USER_MSG_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_path = _tempfile.mkstemp(
+            prefix=".last-user-msg-id-",
+            dir=str(LAST_USER_MSG_ID_PATH.parent),
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+                handle.write(message_id)
+            os.chmod(tmp_path, LAST_USER_MSG_ID_FILE_MODE)
+            os.replace(tmp_path, LAST_USER_MSG_ID_PATH)
+        except OSError:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            raise
+    except OSError as exc:
+        logger.warning("last-user-msg-id 기록 실패: %s", exc)
 
 
 def build_reply_context_prefix(
@@ -1770,6 +1825,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             referenced_content is not None,
         )
         append_inbox(payload)
+        # #946: helper 본답 자동 reply 용 message_id 캐시.
+        # discord-reply.sh bare body 모드가 이 파일을 읽어
+        # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
+        write_last_user_msg_id(message_id)
 
         # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
         # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
