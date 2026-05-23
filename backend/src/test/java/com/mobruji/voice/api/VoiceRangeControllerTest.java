@@ -14,15 +14,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
 import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
-
 import com.mobruji.voice.application.CreateVoiceRangeCommand;
 import com.mobruji.voice.application.UpdateVoiceRangeCommand;
 import com.mobruji.voice.application.VoiceRangeService;
@@ -30,7 +31,15 @@ import com.mobruji.voice.domain.VoiceRange;
 import com.mobruji.voice.domain.VoiceRangeNotFoundException;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 
+/**
+ * {@link VoiceRangeController} MockMvc 슬라이스 가드.
+ *
+ * <p>실제 {@link SessionAuthGuard} 를 {@link Import} 해 ADR-0011 §28 / 이슈 #868 후속 적용된
+ * 인증 게이트 동작도 함께 검증한다 ({@code LikeControllerTest} 동일 패턴). POST 는 body sessionId,
+ * GET/PUT 은 path sessionId 가 {@code X-Session-Id} 헤더와 일치해야 한다.
+ */
 @WebMvcTest(VoiceRangeController.class)
+@Import(SessionAuthGuard.class)
 @ActiveProfiles("test")
 class VoiceRangeControllerTest {
 
@@ -54,6 +63,7 @@ class VoiceRangeControllerTest {
 
         // when / then
         mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -68,6 +78,7 @@ class VoiceRangeControllerTest {
                 {"sessionId":"s","lowestNoteMidi":5,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                 """;
         mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(bad))
                 .andExpect(status().isBadRequest());
@@ -80,6 +91,7 @@ class VoiceRangeControllerTest {
                 {"sessionId":"","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                 """;
         mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(bad))
                 .andExpect(status().isBadRequest());
@@ -92,6 +104,7 @@ class VoiceRangeControllerTest {
                 {"sessionId":"s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":null}
                 """;
         mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(bad))
                 .andExpect(status().isBadRequest());
@@ -105,7 +118,8 @@ class VoiceRangeControllerTest {
         given(voiceRangeService.readBySessionId("s")).willReturn(voiceRange);
 
         // when / then
-        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "s"))
+        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "s")
+                .header("X-Session-Id", "s"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId", is("s")));
     }
@@ -116,7 +130,8 @@ class VoiceRangeControllerTest {
         given(voiceRangeService.readBySessionId("missing"))
                 .willThrow(new VoiceRangeNotFoundException("missing"));
 
-        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "missing"))
+        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "missing")
+                .header("X-Session-Id", "missing"))
                 .andExpect(status().isNotFound());
     }
 
@@ -132,6 +147,7 @@ class VoiceRangeControllerTest {
 
         // when / then
         mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "s")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -146,6 +162,7 @@ class VoiceRangeControllerTest {
                 {"lowestNoteMidi":null,"highestNoteMidi":72,"sourceMethod":"MIC_MEASURE"}
                 """;
         mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "s")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(bad))
                 .andExpect(status().isBadRequest());
@@ -160,6 +177,7 @@ class VoiceRangeControllerTest {
                 .willThrow(new VoiceRangeNotFoundException("missing"));
 
         mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "missing")
+                .header("X-Session-Id", "missing")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound());
