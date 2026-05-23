@@ -8,6 +8,7 @@
  *  - axe-core a11y 자동 검사.
  */
 
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -205,6 +206,44 @@ describe("SongDetailModal", () => {
 
       await user.tab({ shift: true });
       expect(document.activeElement).toBe(buttonB);
+    });
+
+    // close → trigger focus 복귀 e2e 가드 (closes #519): onClose 콜백을 받은 부모가
+    // open=false 로 토글하는 실제 시나리오를 ESC/X 두 경로에서 모두 가드.
+    function FocusRestoreHarness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" data-testid="trigger" onClick={() => setOpen(true)}>
+            트리거
+          </button>
+          <SongDetailModal open={open} onClose={() => setOpen(false)} titleLabel="테스트 곡">
+            <p>본문</p>
+          </SongDetailModal>
+        </>
+      );
+    }
+
+    it("ESC 로 닫으면 onClose → open=false → trigger 로 포커스가 복귀한다", async () => {
+      const user = userEvent.setup();
+      render(<FocusRestoreHarness />);
+      const trigger = screen.getByTestId("trigger");
+      await user.click(trigger);
+      const closeButton = await screen.findByRole("button", { name: /상세 닫기/ });
+      await waitFor(() => expect(document.activeElement).toBe(closeButton));
+      await user.keyboard("{Escape}");
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it("X 버튼 클릭으로 닫으면 trigger 로 포커스가 복귀한다", async () => {
+      const user = userEvent.setup();
+      render(<FocusRestoreHarness />);
+      const trigger = screen.getByTestId("trigger");
+      await user.click(trigger);
+      const closeButton = await screen.findByRole("button", { name: /상세 닫기/ });
+      await waitFor(() => expect(document.activeElement).toBe(closeButton));
+      await user.click(closeButton);
+      expect(document.activeElement).toBe(trigger);
     });
 
     it("모달 unmount 시 직전 포커스 요소(open trigger)로 포커스가 복원된다", async () => {
