@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
@@ -25,10 +26,6 @@ import com.mobruji.song.infrastructure.SongRepository;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
-/**
- * {@link BookmarkService#readPageBySessionId(String, int, int)} 분기 회귀 가드. {@link LikeServicePageReadTest} 와 동일 패턴의
- * empty/정상 2분기만 확인 (Like 측에서 누락 곡 / 단순 위임은 이미 cover).
- */
 @ExtendWith(MockitoExtension.class)
 class BookmarkServicePageReadTest {
 
@@ -88,6 +85,45 @@ class BookmarkServicePageReadTest {
         assertThat(slice.songsById().get(11L)).isSameAs(firstSong);
         assertThat(slice.songsById().get(22L)).isSameAs(secondSong);
         assertThat(slice.totalCount()).isEqualTo(2L);
+        verify(bookmarkRepository, times(1)).findBySessionIdOrderByCreatedAtDesc(eq(SESSION_ID), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("readPageBySessionId: 일부 song 삭제 → bookmarks 유지, songsById 에는 누락")
+    void readPageBySessionId_someSongsDeleted_keepsBookmarksDropsMissingSongs() {
+        // given: 3 bookmarks, song 22L 만 살아남음
+        final Bookmark firstBookmark = Bookmark.create(SESSION_ID, 11L);
+        final Bookmark secondBookmark = Bookmark.create(SESSION_ID, 22L);
+        final Bookmark thirdBookmark = Bookmark.create(SESSION_ID, 33L);
+        final Song survivingSong = mockSong(22L);
+        given(bookmarkRepository.countBySessionId(SESSION_ID)).willReturn(3L);
+        given(bookmarkRepository.findBySessionIdOrderByCreatedAtDesc(eq(SESSION_ID), any(Pageable.class)))
+                .willReturn(List.of(firstBookmark, secondBookmark, thirdBookmark));
+        given(songRepository.findAllById(List.of(11L, 22L, 33L))).willReturn(List.of(survivingSong));
+
+        // when
+        final BookmarkService.BookmarkPageSlice slice = bookmarkService.readPageBySessionId(SESSION_ID, 0, 10);
+
+        // then
+        assertThat(slice.bookmarks()).hasSize(3);
+        assertThat(slice.songsById()).containsOnlyKeys(22L);
+        assertThat(slice.totalCount()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("readBySessionId: Pageable 없는 단순 위임 — bookmarkRepository 반환값 그대로")
+    void readBySessionId_delegatesToRepository() {
+        // given
+        final Bookmark onlyBookmark = Bookmark.create(SESSION_ID, 42L);
+        given(bookmarkRepository.findBySessionIdOrderByCreatedAtDesc(SESSION_ID))
+                .willReturn(List.of(onlyBookmark));
+
+        // when
+        final List<Bookmark> bookmarks = bookmarkService.readBySessionId(SESSION_ID);
+
+        // then
+        assertThat(bookmarks).containsExactly(onlyBookmark);
+        verify(songRepository, never()).findAllById(any());
     }
 
     private static Song mockSong(final Long id) {
