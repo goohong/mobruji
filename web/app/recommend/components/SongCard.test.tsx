@@ -236,6 +236,88 @@ describe("SongCard", () => {
         screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
       ).toBeInTheDocument();
     });
+
+    // 회귀 가드 (closes #449) — 키보드 사용자가 trigger button에 포커스 후
+    // Enter / Space 로 모달을 활성화할 수 있어야 한다. 향후 trigger 구조가
+    // 비표준 wrapper (`<div onClick>` 등) 로 바뀌면 키보드 활성화가 끊겨도
+    // click test 만으로는 회귀가 잡히지 않는다.
+    it("회귀 가드: trigger button에 Tab 포커스 후 Enter 로 onShowDetail 호출", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const trigger = screen.getByRole("button", { name: /테스트 곡 상세 보기/ });
+      trigger.focus();
+      expect(trigger).toHaveFocus();
+      await user.keyboard("{Enter}");
+      expect(onShowDetail).toHaveBeenCalledTimes(1);
+    });
+
+    it("회귀 가드: trigger button에 포커스 후 Space 로 onShowDetail 호출", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const trigger = screen.getByRole("button", { name: /테스트 곡 상세 보기/ });
+      trigger.focus();
+      // userEvent Space는 keydown(Space) + keyup(Space) 로 분해되며 button 의
+      // 표준 동작에 따라 click 이 발생한다.
+      await user.keyboard(" ");
+      expect(onShowDetail).toHaveBeenCalledTimes(1);
+    });
+
+    // 회귀 가드 (closes #449) — LikeButton onClick 의 stopPropagation 이 사라지거나
+    // 향후 trigger 안에 좋아요/북마크 button 을 중첩(HTML 위반)으로 옮기면 좋아요
+    // 클릭이 모달을 동시에 띄우는 회귀가 생긴다. 구조적 약속을 명문화.
+    it("회귀 가드: 좋아요 버튼 클릭이 onShowDetail 을 트리거하지 않는다 (이벤트 격리)", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const likeButton = screen.getByRole("button", {
+        name: /테스트 곡 좋아요$/,
+      });
+      await user.click(likeButton);
+      // 좋아요 mutation 은 진행되지만 모달 trigger 콜백은 호출되지 않아야 한다.
+      expect(onShowDetail).not.toHaveBeenCalled();
+    });
+  });
+
+  // 회귀 가드 (closes #449) — href mode 에서 키보드로 detail Link 활성화.
+  // next/link 의 <a> 는 Enter 표준 동작으로 navigate 한다 (Space 는 link 표준 아님).
+  // jsdom 환경에서는 실제 navigate 가 일어나지 않으므로 click 이벤트 발생을 검증한다.
+  describe("href mode 키보드 nav 회귀 가드 (closes #449)", () => {
+    it("Link 에 포커스 후 Enter 로 click 이벤트가 발생한다", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} href="/songs/1" />
+        </ul>,
+      );
+      const link = screen.getByRole("link", { name: /테스트 곡 상세 보기/ });
+      const clickHandler = vi.fn((event: Event) => {
+        // jsdom 에서 navigate 시도 막기 — 회귀 가드 목적은 click 발화 여부 확인.
+        event.preventDefault();
+      });
+      link.addEventListener("click", clickHandler);
+      link.focus();
+      expect(link).toHaveFocus();
+      await user.keyboard("{Enter}");
+      expect(clickHandler).toHaveBeenCalled();
+    });
   });
 
   // closes #141 — matchReason 다중 줄 + 펼침 토글 (Spotify "Why this song?" 영감).
