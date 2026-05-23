@@ -5,15 +5,18 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -32,6 +35,16 @@ import org.springframework.web.client.RestClient;
  * <li>IO 실패 (network) → empty.</li>
  * <li>title/artist 가 null/blank → 호출 없이 empty.</li>
  * <li>upscale: 100x100 토큰 없으면 원본 그대로.</li>
+ * </ul>
+ *
+ * <p>이슈 #508 회귀 가드 보강:
+ * <ul>
+ * <li>타임아웃 ({@link org.springframework.web.client.ResourceAccessException}) → empty.</li>
+ * <li>HTTP 4xx → empty (5xx 와 별도 분기).</li>
+ * <li>body == null → empty.</li>
+ * <li>"results" 키 부재 → empty (빈 results 와 구분되는 분기).</li>
+ * <li>artworkUrl100 가 명시적 null → empty ({@code hasNonNull} false).</li>
+ * <li>term 쿼리 파라미터에 title + " " + artist 가 정확히 결합.</li>
  * </ul>
  */
 class ItunesAlbumCoverClientTest {
@@ -170,5 +183,117 @@ class ItunesAlbumCoverClientTest {
     @DisplayName("upscale: null 입력은 null 반환")
     void upscale_null_returnsNull() {
         assertThat(ItunesAlbumCoverClient.upscale(null, "600x600")).isNull();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: 타임아웃 (SocketTimeoutException → ResourceAccessException) 도 empty")
+    void lookup_timeout_returnsEmpty() {
+        // given
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andRespond(withException(new SocketTimeoutException("read timed out")));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl("t", "a");
+
+        // then
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: HTTP 4xx 응답이어도 예외 전파 없이 empty (5xx 분기와 별도)")
+    void lookup_clientError_returnsEmpty() {
+        // given
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl("t", "a");
+
+        // then
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: 응답 body 가 null 이면 empty (graceful)")
+    void lookup_nullBody_returnsEmpty() {
+        // given — 204 No Content 응답이면 RestClient.body(JsonNode.class) 가 null 반환.
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl("t", "a");
+
+        // then
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: 'results' 키 자체가 부재한 응답이면 empty (빈 results 와 구분되는 분기)")
+    void lookup_resultsKeyMissing_returnsEmpty() {
+        // given
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andRespond(withSuccess("{\"resultCount\":0}", MediaType.APPLICATION_JSON));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl("t", "a");
+
+        // then
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: artworkUrl100 이 명시적 null 이면 empty (hasNonNull false 분기)")
+    void lookup_artworkExplicitNull_returnsEmpty() {
+        // given
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andRespond(withSuccess(
+                        "{\"resultCount\":1,\"results\":[{\"artworkUrl100\":null}]}",
+                        MediaType.APPLICATION_JSON));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl("t", "a");
+
+        // then
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: term 쿼리에 title + ' ' + artist 가 정확히 결합 (공백은 %20 으로 인코딩)")
+    void lookup_termQueryParam_combinesTitleAndArtist() {
+        // given — UriComponentsBuilder.encode() 가 적용된 후의 raw query 값을 검증.
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(MockRestRequestMatchers.queryParam("term", "cherry%20blossom%20busker"))
+                .andRespond(withSuccess("{\"resultCount\":0,\"results\":[]}", MediaType.APPLICATION_JSON));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl("cherry blossom", "busker");
+
+        // then — term 결합 검증이 핵심, 응답은 비어 있어 empty.
+        assertThat(result).isEmpty();
+        server.verify();
     }
 }
