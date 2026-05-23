@@ -57,9 +57,10 @@ STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
 STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
 AUTO_ACK_QUEUE_WINDOW_SECONDS: Final[int] = 300  # 5분 안 dedup mark 수 = queue 표시
 AUTO_ACK_TEMPLATE: Final[str] = "📥 받음, maestro 처리 중 (queue: {queue})"
-DIGEST_INTERVAL_SECONDS: Final[int] = 300  # 5분 cron digest 주기
+DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분 cron digest 주기 (env override 가능)
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
 DIGEST_MERGED_WINDOW_HOURS: Final[int] = 24  # "최근 머지" 24h 윈도우
+DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 push (생존 신호)
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -552,10 +553,25 @@ def build_digest_line(
     *,
     now: datetime | None = None,
 ) -> str:
-    """5분 cron digest 1줄. /status 보다 압축.
+    """cron digest 1줄. /status 보다 압축.
 
     형식: 📊 PR open:N / 머지 24h:N / type:bug:N — HH:MM KST
     조회 실패는 '?' 로 표시. LLM 호출 없음.
+    """
+    line, _signature = build_digest_payload(github_repo, github_pat, now=now)
+    return line
+
+
+def build_digest_payload(
+    github_repo: str,
+    github_pat: str,
+    *,
+    now: datetime | None = None,
+) -> tuple[str, str]:
+    """digest 1줄(rendered) 과 delta 비교용 signature(시간 제외) 를 함께 반환한다.
+
+    signature 는 'open=N|merged24=N|bug=N' 형태. 호출 실패한 항목은 '?' 그대로 들어가므로
+    조회 실패가 연속되어도 '동일 signature' 로 잡혀 delta skip 된다.
     """
     now = now or datetime.now(timezone.utc)
     repo_args = ["--repo", github_repo]
@@ -579,11 +595,40 @@ def build_digest_line(
     def fmt(value: list | None) -> str:
         return "?" if value is None else str(len(value))
 
+    open_count = fmt(open_prs)
+    merged_count = fmt(merged_recent)
+    bug_count = fmt(bug_issues)
+
     kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
-    return (
-        f"📊 PR open:{fmt(open_prs)} / 머지 {DIGEST_MERGED_WINDOW_HOURS}h:{fmt(merged_recent)} / "
-        f"type:bug:{fmt(bug_issues)} — {kst.strftime('%H:%M')} KST"
+    line = (
+        f"📊 PR open:{open_count} / 머지 {DIGEST_MERGED_WINDOW_HOURS}h:{merged_count} / "
+        f"type:bug:{bug_count} — {kst.strftime('%H:%M')} KST"
     )
+    signature = f"open={open_count}|merged{DIGEST_MERGED_WINDOW_HOURS}={merged_count}|bug={bug_count}"
+    return line, signature
+
+
+def resolve_digest_interval(env_value: str | None) -> int:
+    """DIGEST_INTERVAL_SECONDS env 값을 정수로 해석. 부재/이상값이면 default."""
+    if env_value is None:
+        return DEFAULT_DIGEST_INTERVAL_SECONDS
+    try:
+        parsed = int(env_value)
+    except ValueError:
+        logger.warning(
+            "DIGEST_INTERVAL_SECONDS 가 정수 아님(%r) — 기본값 사용: %d",
+            env_value,
+            DEFAULT_DIGEST_INTERVAL_SECONDS,
+        )
+        return DEFAULT_DIGEST_INTERVAL_SECONDS
+    if parsed <= 0:
+        logger.warning(
+            "DIGEST_INTERVAL_SECONDS 가 양수 아님(%d) — 기본값 사용: %d",
+            parsed,
+            DEFAULT_DIGEST_INTERVAL_SECONDS,
+        )
+        return DEFAULT_DIGEST_INTERVAL_SECONDS
+    return parsed
 
 
 async def digest_loop(
@@ -592,22 +637,57 @@ async def digest_loop(
     github_repo: str,
     github_pat: str,
     *,
-    interval: int = DIGEST_INTERVAL_SECONDS,
+    interval: int = DEFAULT_DIGEST_INTERVAL_SECONDS,
     initial_delay: int = DIGEST_INITIAL_DELAY_SECONDS,
+    heartbeat_seconds: int = DIGEST_HEARTBEAT_SECONDS,
+    time_source=time.monotonic,
 ) -> None:
-    """on_ready 직후 launch. interval 초 마다 채널에 digest 1줄 push.
+    """on_ready 직후 launch. interval 초 마다 digest 1줄 push (delta + heartbeat).
+
+    - 직전 push 와 signature(시간 제외 counts) 가 동일하면 noise 라고 보고 skip.
+    - signature 가 바뀌면 즉시 push (= delta push).
+    - 동일해도 마지막 push 로부터 heartbeat_seconds 경과 시 한 번 push (생존 신호).
+    - 첫 iter 는 last signature 가 없으므로 무조건 push (초기 baseline).
 
     bot 종료 시 cancel 됨. asyncio.CancelledError 는 외부로 전파.
     """
     await asyncio.sleep(initial_delay)
+    last_signature: str | None = None
+    last_pushed_at: float | None = None
     while True:
         try:
             channel = client.get_channel(channel_id)
             if channel is None:
                 logger.warning("digest: channel_id=%s 찾을 수 없음 — skip 후 재시도", channel_id)
             else:
-                line = build_digest_line(github_repo, github_pat)
-                await channel.send(line)
+                line, signature = build_digest_payload(github_repo, github_pat)
+                now_ts = time_source()
+                should_push = False
+                reason = ""
+                if last_signature is None:
+                    should_push = True
+                    reason = "initial"
+                elif signature != last_signature:
+                    should_push = True
+                    reason = "delta"
+                elif (
+                    last_pushed_at is not None
+                    and (now_ts - last_pushed_at) >= heartbeat_seconds
+                ):
+                    should_push = True
+                    reason = "heartbeat"
+
+                if should_push:
+                    await channel.send(line)
+                    last_signature = signature
+                    last_pushed_at = now_ts
+                    logger.info("digest push: reason=%s signature=%s", reason, signature)
+                else:
+                    logger.debug(
+                        "digest skip: signature unchanged (%s), since_last=%.0fs",
+                        signature,
+                        0.0 if last_pushed_at is None else now_ts - last_pushed_at,
+                    )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -636,6 +716,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     claude_bin = env["CLAUDE_BIN"]
 
     digest_enabled = env.get("DIGEST_ENABLED", "0") == "1"
+    digest_interval = resolve_digest_interval(env.get("DIGEST_INTERVAL_SECONDS"))
 
     @client.event
     async def on_ready() -> None:  # noqa: D401
@@ -656,9 +737,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     target_channel_id,
                     env["GITHUB_REPO"],
                     env.get("GITHUB_PAT", ""),
+                    interval=digest_interval,
                 )
             )
-            logger.info("digest_loop launched: interval=%ds", DIGEST_INTERVAL_SECONDS)
+            logger.info(
+                "digest_loop launched: interval=%ds heartbeat=%ds",
+                digest_interval,
+                DIGEST_HEARTBEAT_SECONDS,
+            )
 
     @client.event
     async def on_message(message: discord.Message) -> None:
