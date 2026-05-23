@@ -161,6 +161,7 @@ gh release create vX.Y.Z --generate-notes
 
 - frontmatter의 `status` 필드로 추적
 - 상태 전이는 해당 PR에서 같이 수정
+- `blocked` (보조 상태) — 외부 의존성/데이터 부재 등으로 진행 불가. `draft` 와 구분 (의도 자체는 확정, 진행만 막힘). 차단 해제 시 원래 상태로 복귀.
 
 ### 9-4) 프로세스
 1. **Spec 초안 PR** — `docs/features/<slug>.md` 신설. `type:docs` 라벨.
