@@ -863,5 +863,57 @@ class MaestroWatcherEnvTests(unittest.TestCase):
         self.assertEqual(env["MAESTRO_RESPONSE_WATCHER_ENABLED"], "1")
 
 
+class AutoAckEtaTests(unittest.TestCase):
+    """auto-ack 메시지에 ETA 정보 노출 검증.
+
+    "처리 중" 만으로는 사용자가 무한정 기다리게 되어 무의미 — 일반/sub-agent 가동
+    범위를 같이 노출해야 한다. 사용자 피드백 반영.
+    """
+
+    def test_template_exposes_eta_range(self) -> None:
+        rendered = bot.AUTO_ACK_TEMPLATE.format(queue=1)
+        # 일반 응답 + sub-agent 가동 시 ETA 둘 다 표기되어야 함.
+        self.assertIn("1-5분", rendered)
+        self.assertIn("5-15분", rendered)
+        self.assertIn("sub-agent", rendered)
+
+    def test_template_keeps_queue_field(self) -> None:
+        rendered = bot.AUTO_ACK_TEMPLATE.format(queue=7)
+        self.assertIn("queue: 7", rendered)
+
+
+class StatusProgressParseTests(unittest.TestCase):
+    """`/system:status <msg>` sentinel 파싱 검증.
+
+    maestro 가 ad-hoc 진척 push 할 때 사용. dispatch 건너뛰고 채널에 reply 만 send.
+    """
+
+    def test_valid_message_returns_body(self) -> None:
+        self.assertEqual(
+            bot.parse_status_progress("/system:status sub-agent 가동 완료"),
+            "sub-agent 가동 완료",
+        )
+
+    def test_trims_whitespace(self) -> None:
+        self.assertEqual(
+            bot.parse_status_progress("/system:status   PR #123 생성 중   "),
+            "PR #123 생성 중",
+        )
+
+    def test_empty_body_returns_none(self) -> None:
+        # 빈 본문은 무의미 push 방지 — None 반환.
+        self.assertIsNone(bot.parse_status_progress("/system:status"))
+        self.assertIsNone(bot.parse_status_progress("/system:status   "))
+
+    def test_non_status_returns_none(self) -> None:
+        self.assertIsNone(bot.parse_status_progress("hello"))
+        self.assertIsNone(bot.parse_status_progress("/status"))
+        self.assertIsNone(bot.parse_status_progress("/system:ctrl-c"))
+
+    def test_no_partial_prefix_match(self) -> None:
+        # `/system:statusxyz` 같은 prefix 오염은 거부 (공백 또는 EOL 필수).
+        self.assertIsNone(bot.parse_status_progress("/system:statusxyz hello"))
+
+
 if __name__ == "__main__":
     unittest.main()
