@@ -494,6 +494,101 @@ class RecommendationScorerTest {
         assertThat(signal).isGreaterThan(0.0);
     }
 
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): 부분 overlap — 사용자 음역이 곡 음역의 절반만 덮으면 0.5")
+    void voiceRangeFit_halfOverlap_returnsHalf() {
+        // given: C major 곡 음역 53~67 (songSpan=14). 사용자 60~67 → overlap=7
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 60, 67);
+        // then: 7 / 14 = 0.5
+        assertThat(fit).isEqualTo(0.5);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): 정확 경계 — 사용자 high == 곡 low → overlap 0 → 0.0")
+    void voiceRangeFit_touchingBoundary_returnsZero() {
+        // given: C major 곡 53~67. 사용자 40~53 (high == 곡 low) → max-min = 53-53 = 0
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 53);
+        // then: overlap 0 → 0.0
+        assertThat(fit).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): 1 semitone overlap — 경계 직후 미세 매칭")
+    void voiceRangeFit_singleSemitoneOverlap_returnsSmallRatio() {
+        // given: C major 곡 53~67 (span 14). 사용자 40~54 → overlap=1
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 54);
+        // then: 1 / 14
+        assertThat(fit).isEqualTo(1.0 / 14.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역 폭 0 (low == high) → overlap 0 → 0.0")
+    void voiceRangeFit_zeroUserSpan_returnsZero() {
+        // given: 사용자 60~60 (점). 곡 53~67 → overlap = min(67,60) - max(53,60) = 60-60 = 0
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 60, 60);
+        // then
+        assertThat(fit).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): voiceLow > voiceHigh 역전 입력 → max(0, 음수) clamp → 0.0")
+    void voiceRangeFit_invertedUserRange_clampsToZero() {
+        // given: 잘못된 입력 사용자 low=80, high=50 (역전). 곡 53~67
+        // overlap = min(67,50) - max(53,80) = 50 - 80 = -30 → Math.max(0, ...) clamp
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 80, 50);
+        // then: NaN/음수 없이 0.0 결정적 반환
+        assertThat(fit).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 음역에 완전 포함 — overlap == songSpan → 1.0 (clamp)")
+    void voiceRangeFit_userInsideSong_returnsOne() {
+        // given: C major 53~67 (span 14). 사용자 56~64 → overlap = min(67,64) - max(53,56) = 64-56 = 8
+        // ratio = 8/14 ≈ 0.571 (사용자가 곡보다 좁으면 overlap == 사용자 span)
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 56, 64);
+        // then: clamp 1.0 이하, 양수
+        assertThat(fit).isEqualTo(8.0 / 14.0);
+        assertThat(fit).isLessThanOrEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): LOW/HIGH_OFFSET 매핑 회귀 — A_MAJOR(root=69) 곡 음역 62~76")
+    void voiceRangeFit_offsetRegressionGuard_aMajorRange() {
+        // given: A_MAJOR root=69. LOW_OFFSET=-7, HIGH_OFFSET=+7 → 곡 62~76 (span 14)
+        // 사용자 62~76 정확 일치 → overlap 14
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.A_MAJOR, 62, 76);
+        // then: 14/14 = 1.0. OFFSET이 변경되면 이 단언이 깨지면서 회귀 감지.
+        assertThat(fit).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): LOW/HIGH_OFFSET 회귀 — G_MAJOR(root=67) 음역 60~74 검증")
+    void voiceRangeFit_offsetRegressionGuard_gMajorRange() {
+        // given: G_MAJOR root=67 → 곡 60~74. 사용자 60~74 완전 매칭
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.G_MAJOR, 60, 74);
+        // then: OFFSET ±7 가정 회귀 가드
+        assertThat(fit).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (회귀 가드): clamp invariant — overlap > songSpan 가능성 없음 → 항상 [0,1]")
+    void voiceRangeFit_alwaysInUnitInterval() {
+        // given: 여러 키/사용자 범위 조합. 어떤 입력에서도 결과는 [0,1] 안.
+        // when / then
+        assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 0, 127)).isBetween(0.0, 1.0);
+        assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.B_MAJOR, 0, 127)).isBetween(0.0, 1.0);
+        assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.UNKNOWN, -100, 200)).isEqualTo(0.5);
+        assertThat(RecommendationScorer.voiceRangeFit(MusicalKey.E_MINOR, 50, 80)).isBetween(0.0, 1.0);
+    }
+
     private static Song buildSong(final MusicalKey key, final Mood mood, final Integer bpm) {
         return Song.builder()
                 .title("t").artist("a")
