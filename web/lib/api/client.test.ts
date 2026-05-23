@@ -213,6 +213,32 @@ describe("ApiError JSON.stringify 보존 가드 (#689)", () => {
   });
 });
 
+describe("apiFetch signal pass-through 가드 (#692)", () => {
+  // RequestOptions.signal이 fetch init.signal로 그대로 전달되는지 lock.
+  // 기존 abort 테스트(L108-118)는 fetch reject만 검증 → init 인스턴스 전달은 미검증이었음.
+  it("정상(non-aborted) signal → fetch init.signal에 동일 인스턴스 전달", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const controller = new AbortController();
+    await apiFetch("/api/v1/songs", { signal: controller.signal });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it("abort된 signal → init.signal에 동일 인스턴스 전달 + AbortError 전파", async () => {
+    const abortError = new DOMException("aborted", "AbortError");
+    fetchMock.mockRejectedValueOnce(abortError);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(apiFetch("/api/v1/songs", { signal: controller.signal })).rejects.toBe(abortError);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it("signal 미지정 → init.signal === undefined", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/songs");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeUndefined();
+  });
+});
+
 describe("apiFetch path query string 가드 (#683)", () => {
   // 현 동작 lock: client.ts는 URL/URLSearchParams 변환 없이 path를 raw concat한다.
   // → query string은 호출자가 미리 조립·인코딩한 형태 그대로 fetch URL에 전달된다.
