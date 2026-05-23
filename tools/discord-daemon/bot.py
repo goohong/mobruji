@@ -1088,6 +1088,171 @@ def formal_ack(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# auto-ack 동적화 (#802) — nmae 상태 capture 기반 4분기 매핑
+# ─────────────────────────────────────────────────────────────────────────────
+# 사용자 룰 (2026-05-23 #모부르지):
+#   사용자 메시지 수신 즉시 tmux capture-pane 으로 nmae(mobruji session) 상태 파악 후
+#   정중체 ack 1줄 발송. 정적 AUTO_ACK_TEMPLATE 폐기.
+#
+# 4분기 매핑:
+#   1) idle / 짧은 작업   → "📥 받았어요. 곧 답변 드릴게요."
+#   2) reasoning N분      → "📥 받았어요. nmae가 reasoning N분째라 답이 늦을 수 있어요."
+#   3) sub-agent 가동     → "📥 받았어요. nmae가 [작업명] 처리 중입니다. 곧 helper가 우선 답변 드립니다."
+#   4) stall / 무응답     → "📥 받았어요. nmae가 응답이 없어 helper가 직접 답합니다."
+
+NMAE_STATE_IDLE: Final[str] = "idle"
+NMAE_STATE_REASONING: Final[str] = "reasoning"
+NMAE_STATE_SUBAGENT: Final[str] = "subagent"
+NMAE_STATE_STALL: Final[str] = "stall"
+
+# stall 판정: 마지막 capture hash 가 이 시간 이상 동일하면 stall 로 본다.
+NMAE_STALL_THRESHOLD_SECONDS: Final[int] = 300  # 5분
+
+# reasoning indicator regex: Kneading / thought for / Pondering 등 + 초/분 표시.
+# 예: "Kneading… (42s)", "thought for 3m 12s", "Pondering… (1m 5s)"
+_REASONING_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?:Kneading|thought for|Pondering|Thinking|Reasoning|Considering|Reticulating|Mulling|Reflecting|Cogitating)"
+    r"[…\s.]*\(?\s*"
+    r"(?:(?P<min>\d+)\s*m[\s,]*)?"
+    r"(?:(?P<sec>\d+)\s*s)?",
+    re.IGNORECASE,
+)
+
+# sub-agent 가동 indicator. Task tool in_progress 또는 Async agent launched.
+# 예: "[in_progress] running task: …", "Async agent launched (id=…)"
+_SUBAGENT_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\[in_progress\]|Async agent launched|sub-agent (?:가동|launch|running)|Running\s+\w+\s*\(",
+    re.IGNORECASE,
+)
+
+# 작업명 추출. "[in_progress] foo bar" / "Async agent launched: foo" / "Running Task(...)" 등.
+_SUBAGENT_TASK_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?:\[in_progress\]\s*|Async agent launched[:\s]+|Running\s+)"
+    r"(?P<name>[A-Za-z][\w\-./]{1,40})",
+)
+
+# idle prompt: "❯" 만 보이는 마지막 라인. (capture 의 trailing 라인 검사)
+_IDLE_PROMPT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\s*[❯>]\s*$", re.MULTILINE)
+
+# stall 추적용 모듈 전역. (마지막 capture hash + 시각)
+_LAST_CAPTURE_HASH: dict[str, tuple[str, float]] = {}
+
+
+def _capture_pane(target_pane: str) -> str | None:
+    """tmux capture-pane -t <pane> -p 결과 반환. 실패 시 None."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", target_pane, "-p"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("tmux capture-pane 실패: %s", exc)
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout or ""
+
+
+def inspect_nmae_state(
+    target_pane: str = "mobruji:0.0",
+    *,
+    now_ts: float | None = None,
+    capture_override: str | None = None,
+) -> dict[str, object]:
+    """nmae(mobruji main session) 상태를 tmux capture 기반으로 분류.
+
+    Args:
+        target_pane: tmux pane 식별자.
+        now_ts: stall 판정용 timestamp. 미지정 시 time.time().
+        capture_override: 테스트용 — 실제 tmux 호출 대신 사용할 capture 문자열.
+
+    Returns:
+        {
+            "state": "idle" | "reasoning" | "subagent" | "stall",
+            "reasoning_minutes": Optional[int],  # state=reasoning 일 때
+            "task_name": Optional[str],          # state=subagent 일 때
+        }
+        capture 실패 시 idle 로 fallback.
+    """
+    capture = capture_override if capture_override is not None else _capture_pane(target_pane)
+    if capture is None:
+        # tmux 사용 불가 — idle 로 fallback (안전 ack).
+        return {"state": NMAE_STATE_IDLE, "reasoning_minutes": None, "task_name": None}
+
+    timestamp = now_ts if now_ts is not None else time.time()
+    capture_hash = hashlib.sha256(capture.encode("utf-8", errors="replace")).hexdigest()
+
+    # stall 판정: 동일 hash 가 임계치 이상 지속.
+    last = _LAST_CAPTURE_HASH.get(target_pane)
+    if last is not None and last[0] == capture_hash:
+        if timestamp - last[1] >= NMAE_STALL_THRESHOLD_SECONDS:
+            return {"state": NMAE_STATE_STALL, "reasoning_minutes": None, "task_name": None}
+    else:
+        _LAST_CAPTURE_HASH[target_pane] = (capture_hash, timestamp)
+
+    # reasoning indicator 우선 검출 (가장 즉시성 높음).
+    reasoning_match = _REASONING_PATTERN.search(capture)
+    if reasoning_match is not None:
+        minutes_raw = reasoning_match.group("min")
+        seconds_raw = reasoning_match.group("sec")
+        total_seconds = 0
+        if minutes_raw:
+            total_seconds += int(minutes_raw) * 60
+        if seconds_raw:
+            total_seconds += int(seconds_raw)
+        # 분 단위 올림 (최소 1분 표기). 0 이면 "곧" 수준이라 idle 로 강등.
+        if total_seconds > 0:
+            minutes = max(1, (total_seconds + 59) // 60)
+            return {
+                "state": NMAE_STATE_REASONING,
+                "reasoning_minutes": minutes,
+                "task_name": None,
+            }
+
+    # sub-agent 가동 indicator.
+    subagent_match = _SUBAGENT_PATTERN.search(capture)
+    if subagent_match is not None:
+        name_match = _SUBAGENT_TASK_NAME_PATTERN.search(capture)
+        task_name = name_match.group("name") if name_match is not None else "sub-agent"
+        return {
+            "state": NMAE_STATE_SUBAGENT,
+            "reasoning_minutes": None,
+            "task_name": task_name,
+        }
+
+    # 그 외 idle (prompt 만 보이는 경우 포함).
+    return {"state": NMAE_STATE_IDLE, "reasoning_minutes": None, "task_name": None}
+
+
+def formal_dynamic_ack(state: dict[str, object]) -> str:
+    """nmae 상태 기반 정중체 dynamic ack 1줄.
+
+    Args:
+        state: inspect_nmae_state() 반환 dict.
+
+    Returns:
+        4분기 매핑 ack 메시지. 이모지 📥 허용 (사용자 룰 #모부르지 2026-05-23).
+    """
+    kind = state.get("state", NMAE_STATE_IDLE)
+    if kind == NMAE_STATE_REASONING:
+        minutes = state.get("reasoning_minutes") or 1
+        return f"📥 받았어요. nmae가 reasoning {minutes}분째라 답이 늦을 수 있어요."
+    if kind == NMAE_STATE_SUBAGENT:
+        task_name = state.get("task_name") or "sub-agent"
+        return (
+            f"📥 받았어요. nmae가 {task_name} 처리 중입니다. "
+            f"곧 helper가 우선 답변 드립니다."
+        )
+    if kind == NMAE_STATE_STALL:
+        return "📥 받았어요. nmae가 응답이 없어 helper가 직접 답합니다."
+    # idle / fallback
+    return "📥 받았어요. 곧 답변 드릴게요."
+
+
 def formal_status(
     work_in_progress: list[str],
     work_completed: list[str],
@@ -1886,9 +2051,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         append_inbox(payload)
 
         # auto-ack — 1초 안 채널 응답. maestro 거치지 않음. /status 분기는 이미 위에서 처리됨.
-        # queue: 마지막 AUTO_ACK_QUEUE_WINDOW_SECONDS 안에 처리된 메시지 수 + 현재(=1).
-        queue_count = (ledger.count_since(AUTO_ACK_QUEUE_WINDOW_SECONDS) + 1) if ledger else 1
-        ack_text = AUTO_ACK_TEMPLATE.format(queue=queue_count)
+        # 동적화 (#802): tmux capture-pane 으로 nmae 상태 4분기 매핑 후 ack 발송.
+        # 기존 AUTO_ACK_TEMPLATE / formal_ack(queue=…) 폐기.
+        try:
+            nmae_state = inspect_nmae_state(target_pane)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("inspect_nmae_state 실패 — idle fallback: %s", exc)
+            nmae_state = {"state": NMAE_STATE_IDLE, "reasoning_minutes": None, "task_name": None}
+        ack_text = formal_dynamic_ack(nmae_state)
         try:
             await message.channel.send(ack_text)
         except Exception as exc:  # noqa: BLE001
