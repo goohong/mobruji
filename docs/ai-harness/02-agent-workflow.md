@@ -72,10 +72,49 @@ git log origin/main..origin/develop --oneline
 ```
 릴리즈에 포함될 커밋 목록을 확인한다.
 
+### 8-1-1) Release trigger 임계치 (옵션 C)
+> 출처: `docs/features/release-cadence-v0.4.0.md` §5-1 (PR #774). v0.5.0 회고 때 재평가.
+
+본진은 매 사이클 끝에 다음 조건을 확인하고, 도달 시 release 후보 진입을 자동 트리거한다.
+
+- **트리거 조건 (OR)**:
+  - `type:fix` + `type:feat` PR 합산 **5 건 이상** 머지 (마지막 release tag 이후)
+  - `develop` ahead `main` **20 commits 이상**
+- **트리거 안 함**: `type:docs` / `type:chore` / `type:test` / `type:refactor` 만 누적된 경우 (사용자 체감 변경 없음).
+- **즉시 트리거**: `release:hotfix` 라벨이 부여된 PR이 머지된 경우 임계치 무시하고 즉시 release.
+
+카운트 방법:
+```bash
+# fix + feat 누적 카운트 (마지막 release tag 이후)
+LAST_TAG=$(git describe --tags --abbrev=0 origin/main)
+gh pr list --base develop --state merged \
+  --search "merged:>=$(git log -1 --format=%cI $LAST_TAG) label:type:fix,type:feat" \
+  --json number | jq length
+
+# ahead commit 카운트
+git rev-list --count origin/main..origin/develop
+```
+
+트리거 도달 시 본진 흐름:
+1. release PR draft 생성 (다음 §8-2 절차).
+2. rev 워크트리에 release-readiness 점검 위임 → 모든 포함 PR에 `reviewed:claude` 라벨 부여 확인.
+3. `#모부르지` 채널에 draft 링크 + 카운트 요약 push.
+4. 사용자 결정 대기 (`merge` / `wait`). 사용자 승인 전에는 머지 금지.
+
 ### 8-2) 릴리즈 PR 생성 (base: `main`, head: `develop`)
 - 제목 형식: `release: vX.Y.Z` 또는 `release: YYYY-MM-DD`
 - 본문에 changelog를 type별(`feat` / `fix` / `chore` / `docs` 등)로 그룹핑해 기록
 - 라벨: `type:chore`, `scope:infra`, (AI 작성 시) `ai-generated`
+- 라벨 정책: `release:skip` 라벨이 부여된 PR은 changelog에서 제외. 기본은 "전부 포함".
+
+### 8-2-1) 버전 결정 룰 (patch / minor / major)
+현 0.x.y 체계 유지. 트리거 시 본진이 자동 판정.
+
+- **patch (vX.Y.Z+1)**: 포함된 PR 중 **사용자 facing `feat` 0 건** (fix / chore / docs / test / refactor 만).
+- **minor (vX.Y+1.0)**: 포함된 PR 중 **사용자 facing `feat` 1 건 이상**.
+- **major (vX+1.0.0)**: **breaking change** 존재 시 (API 시그니처 변경 / DB 스키마 비호환 / 환경변수 필수화 등). PR 본문/커밋 메시지에 `BREAKING CHANGE:` 트레일러 또는 `type!:` 표기로 감지.
+
+판정이 모호하면 사용자에게 확인.
 
 ### 8-3) CI 재검증
 - `.github/workflows/*-ci.yml`이 `main` 대상 PR도 트리거하도록 둔다.
