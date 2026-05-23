@@ -51,6 +51,10 @@ helper 응답은 helper 측에서 신규 script `discord-reply.sh "<메시지>"`
 | `DEDUP_LEDGER_PATH` | `~/.mobruji/discord-bridge.sqlite` | dedup ledger SQLite 경로. 24h TTL GC. |
 | `DIGEST_ENABLED` | `1` | `1` 이면 on_ready 직후 asyncio task 가 일정 주기로 cycle-status digest 1건 push. |
 | `DIGEST_INTERVAL_SECONDS` | `900` (15분) | digest 주기. 양수 정수만 유효. |
+| `CONTEXT_AUTO_CLEAR_ENABLED` | `0` (opt-in) | `1` 이면 on_ready 직후 `context_auto_clear_loop` 가동. maestro pane 의 `===CTX:NN%===` marker 를 5초 polling 해서 trigger 초과 시 정리 사이클 + `===CLEAR_READY===` 감지 시 `/clear` 전송. 출처: PR #810 (#809 후속, spec `docs/features/context-auto-clear.md §5-2`). |
+| `CONTEXT_CLEAR_TRIGGER_PCT` | `95` | auto-clear 트리거 임계치(%). 정수. `CONTEXT_AUTO_CLEAR_ENABLED=1` 일 때만 의미. |
+| `CONTEXT_CLEAR_HYSTERESIS_PCT` | `80` | trigger 후 다음 사이클 재무장(rearm) 하한 임계치(%). 정수. trigger 보다 낮아야 함. |
+| `TMUX_PANE_TARGET` | `mobruji:0.0` | auto-clear 가 polling/제어할 maestro pane. 세션 부재 시 loop launch 자체를 skip. |
 
 ### 폐기된 env (이슈 #807 단순화)
 
@@ -61,8 +65,10 @@ helper 응답은 helper 측에서 신규 script `discord-reply.sh "<메시지>"`
 - `TMUX_BRIDGE_ENABLED` (tmux routing 단일화 — 항상 ON)
 - `MAESTRO_RESPONSE_WATCHER_ENABLED`, `MAESTRO_WATCHER_*`
 - `TMUX_PIPE_PANE_ENABLED`, `TMUX_PIPE_PANE_PATH`, `TMUX_PIPE_PANE_MAX_BYTES`
-- `CONTEXT_AUTO_CLEAR_ENABLED`, `CONTEXT_CLEAR_TRIGGER_PCT`, `CONTEXT_CLEAR_HYSTERESIS_PCT`
 - `CONTEXT_REFRESH_ENABLED`, `CONTEXT_REFRESH_INTERVAL_SEC`
+
+> `CONTEXT_AUTO_CLEAR_*` 3건은 PR #810 (#809 후속) 에서 `context_auto_clear_loop`
+> 와 함께 복구되어 다시 인식됩니다. 위 "옵션" 표 참조.
 
 ## helper 응답 push — `discord-reply.sh`
 
@@ -153,8 +159,10 @@ cd ~/mobruji && git pull
 
 # .env 에서 폐기 env 제거 (또는 그대로 두어도 무시됩니다):
 #   MAESTRO_RESPONSE_WATCHER_ENABLED, TMUX_PIPE_PANE_*,
-#   CONTEXT_AUTO_CLEAR_*, CONTEXT_REFRESH_*, GITHUB_PAT, GITHUB_REPO,
+#   CONTEXT_REFRESH_*, GITHUB_PAT, GITHUB_REPO,
 #   TMUX_BRIDGE_ENABLED
+# CONTEXT_AUTO_CLEAR_* 3건은 PR #810 (#809 후속) 에서 복구 — 삭제하지 말 것.
+# 끄려면 CONTEXT_AUTO_CLEAR_ENABLED=0 (default) 유지.
 
 # helper 응답 진입점 심볼릭 링크
 mkdir -p ~/.mobruji
