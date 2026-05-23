@@ -4,9 +4,9 @@ slug: observability-baseline
 status: draft
 owner: @goohong
 scope: infra
-related_issues: [242, 62, 68, 69, 71, 209]
+related_issues: [242, 62, 68, 69, 71, 209, 273]
 related_prs: []
-last_reviewed: 2026-05-22
+last_reviewed: 2026-05-23
 ---
 
 # 운영 관측성 베이스라인 (핵심 카운터 + p95 + 수집 스택)
@@ -120,11 +120,11 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 
 ### 5-4) p95 측정 endpoint 매트릭스 (#62 동기화)
 
-> **추천 POST 임계 단일 진실**: `docs/features/recommendation-p95-regression-guard.md` §5-3. 본 표의 추천 POST 행은 본 spec 머지 후 후속 PR (PR 2) 에서 200ms 로 동기화. 다른 endpoint 는 본 표가 단일 진실 (별 spec 미작성).
+> **추천 POST 임계 단일 진실**: `docs/features/recommendation-p95-regression-guard.md` §5-3 (200ms p95 / 400ms p99). 본 표의 추천 POST 행은 그 spec 을 참조하며, 본 표에서 직접 숫자를 갱신하지 않는다 (역참조 금지). 다른 endpoint 는 본 표가 단일 진실 (별 spec 미작성).
 
 | Endpoint | Method | 목표 p95 | 비고 |
 |---|---|---|---|
-| `/api/v1/recommendations` | POST | **300ms** (→ 200ms 동기화 예정, recommendation-p95-regression-guard §5-3) | 추천 v1/v2 산정 + DB 조회. #62 회귀 가드 대상 |
+| `/api/v1/recommendations` | POST | **200ms** (단일 진실: recommendation-p95-regression-guard §5-3) | 추천 v1/v2 산정 + DB 조회. #62 회귀 가드 대상. 변경은 그 spec 갱신으로만. |
 | `/api/v1/recommendations/{id}/like` | POST/DELETE | 150ms | 단순 INSERT/DELETE |
 | `/api/v1/recommendations/{id}/bookmark` | POST/DELETE | 150ms | 단순 INSERT/DELETE |
 | `/api/v1/sessions/{id}/voice-range-history` | GET | 200ms | snapshot 조회 + 정렬 |
@@ -150,7 +150,7 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 | 규칙 | 트리거 | 채널 | 우선순위 |
 |---|---|---|---|
 | 외부 API 에러율 | `mobruji.external.*{outcome="error"}` 1분 sum >= 5 | Discord webhook (#모부르지) | P1 |
-| 추천 p95 임계 초과 | `mobruji.recommendation.request.duration` p95 5분 >= 600ms (목표 300ms 의 2배) | Discord webhook | P1 |
+| 추천 p95 임계 초과 | `mobruji.recommendation.request.duration` p95 5분 >= 400ms (단일 진실 §5-3 = 200ms × 2 휴리스틱, recommendation-p95-regression-guard §5-3 참조) | Discord webhook | P1 |
 | audio backfill 연속 실패 | `mobruji.song.audio.backfill.failed` 1시간 sum >= 10 | Discord webhook | P2 |
 | JVM heap 압박 | `jvm.memory.used / jvm.memory.max` > 0.85 5분 연속 | Discord webhook | P2 |
 
@@ -237,3 +237,4 @@ mobruji:
 ## 9) 결정 로그
 
 - **2026-05-22 (plan 28)**: 초안 작성 (status=draft). v0.3 P2 베이스라인 범위 확정 — 메트릭 + p95 + Grafana Cloud Free + Discord webhook 알림. 분산 트레이싱/SaaS 유료/SLO/로그 집계/web RUM 모두 v0.4 이후로 분리. 수집 스택은 ADR-0012 분리.
+- **2026-05-23 (plan)**: 추천 POST p95 단일 진실 박제 (closes #273). §5-4 추천 endpoint 목표 p95 = "300ms → 200ms 예정" 표현을 **200ms 확정**으로 박제하고, 단일 진실을 `recommendation-p95-regression-guard.md` §5-3 으로 명시 (역참조 금지). §5-6 알림 임계 600ms → **400ms** 로 동기화 (단일 진실 §5-3 = 200ms × 2 휴리스틱). 두 spec 의 cross-ref 결정 로그에 동시 박제. 후속: be PR 2 의 percentiles 설정 갱신 시 본 표 참조.
