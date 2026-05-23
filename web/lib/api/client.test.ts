@@ -622,3 +622,42 @@ describe("apiFetch error response body=Array message 추출 가드 (#725)", () =
     });
   });
 });
+
+describe("apiFetch path fragment (#section) raw concat 가드 (#727)", () => {
+  // 현 동작 lock: client.ts 는 path 를 URL 객체화 없이 raw concat → fragment 도 strip 없이 fetch URL 에 그대로 전달.
+  it.each([
+    { label: "단일 fragment `#section` → raw concat", path: "/api/v1/songs#top", expected: "http://localhost:8080/api/v1/songs#top" },
+    { label: "query + fragment 조합 → 둘 다 raw 보존", path: "/api/v1/songs?q=love#chart", expected: "http://localhost:8080/api/v1/songs?q=love#chart" },
+  ])("$label", async ({ path, expected }: { path: string; expected: string }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch(path);
+    expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
+  });
+});
+
+describe("apiFetch method default 가드 (#727)", () => {
+  // 현 동작 lock: 구조분해 default `method = "GET"` → options 자체/빈 객체/method 키 omit 모두 init.method='GET'.
+  it.each([
+    { label: "options 자체 미지정", options: undefined as RequestOptionsForTest | undefined },
+    { label: "options 빈 객체", options: {} as RequestOptionsForTest },
+    { label: "method 키만 omit (headers 만 지정)", options: { headers: { "X-Trace": "abc" } } as RequestOptionsForTest },
+  ])("$label → init.method='GET'", async ({ options }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/songs", options);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("GET");
+  });
+});
+
+describe("apiFetch JSON content-type variants 가드 (#727)", () => {
+  // 현 동작 lock: isJson 분기는 `contentType.includes("application/json")` substring 매칭.
+  // RFC 6838 +json suffix (vnd.api+json, problem+json) 는 substring 미일치 → text() 처리.
+  // application/json; charset=utf-8 는 substring 일치 → JSON 파싱. variant 별 분기 lock.
+  it.each([
+    { label: "application/vnd.api+json → text() (string 리턴)", contentType: "application/vnd.api+json", expected: '{"ok":true}' as unknown },
+    { label: "application/problem+json → text() (string 리턴)", contentType: "application/problem+json", expected: '{"ok":true}' as unknown },
+    { label: "application/json; charset=utf-8 → JSON 파싱", contentType: "application/json; charset=utf-8", expected: { ok: true } as unknown },
+  ])("$label", async ({ contentType, expected }: { contentType: string; expected: unknown }) => {
+    fetchMock.mockResolvedValueOnce(new Response('{"ok":true}', { status: 200, headers: { "Content-Type": contentType } }));
+    await expect(apiFetch("/api/v1/probe")).resolves.toEqual(expected);
+  });
+});
