@@ -95,10 +95,25 @@ context_pct_cache: dict[str, float | int | None] = {
     "pct": None,
     "updated_at": 0.0,
 }
-# ANSI escape sequence: CSI (`ESC [ ... letter`) + OSC (`ESC ] ... BEL/ST`) + 단일 ESC.
-# claude TUI 가 컬러/커서/타이틀 코드 다수 출력 — Discord 에 raw 노출 방지.
+# ANSI escape sequence 풀세트 (#797 강화).
+# 기존 CSI/OSC/단일 ESC 만 cover 했으나 사용자 실 사례에서 spinner glyph (`✶✻●✽✢·`)
+# 와 braille 스피너 (`⠂⠁⠃⠉`) 가 raw 로 Discord 에 흘러간 사례 발생. 풀세트로 확장:
+# - CSI: ESC `[` ... letter (컬러/커서/SGR)
+# - OSC: ESC `]` ... BEL 또는 ST (터미널 타이틀)
+# - DEC private + 문자셋 designator: ESC `(`/`)`/`*`/`+` 다음 letter
+# - 단일 ESC: 그 외 1-char escape
+# - 단순 BEL: `\x07` (TUI 알람)
 ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
-    r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-_])"
+    r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[()*+][0-?A-Za-z]|[@-_])|\x07"
+)
+# tmux/claude TUI spinner glyph — 진행 인디케이터의 잔여 문자. ANSI 시퀀스가 제거된 뒤
+# 남는 raw glyph 자체를 별도 패턴으로 제거. 사용자 본 사례:
+# `H*✶✻●✽✻✶*8 ✢·✢*●✶✻✽9✻ ✶3*✢·●✢50*✶✻✽`
+# - 도형/별 스피너: ✶ ✻ ● ✽ ✢ · ◆ ◇ ◉ ○ ⬢ ⬡
+# - braille 스피너: U+2800-U+28FF
+# 연속 3개 이상만 매칭 (정상 본문에 한두 개 들어가는 경우는 보존).
+SPINNER_GLYPH_RE: Final[re.Pattern[str]] = re.compile(
+    r"[⠀-⣿]{2,}|[✶✱✻●✽✢◆◇◉○⬢⬡]+"
 )
 # Secret masking — maestro tmux pane 에 PAT/토큰/패스워드가 echo 될 수 있으므로
 # Discord push 직전에 패턴 매칭으로 마스킹 (#742). 새 시크릿 형태 발견 시 패턴 추가.
@@ -183,9 +198,10 @@ MESSAGE_PREFIX: Final[dict[str, str]] = {
 # ETA 표기: 사용자가 "처리 중" 만 보고 무한정 기다리는 무의미한 ack 가 안 되도록
 # 일반 응답(1-5분) / sub-agent 가동 시(5-15분) 범위를 같이 노출.
 # 추가 진척이 필요하면 `/system:status <msg>` 로 ad-hoc push 가능 (STATUS_PROGRESS_PREFIX).
+# 정중체 강제 (#797) — 사용자 요구 "~합니다 / ~했습니다 / ~할까요?" 만 사용.
 AUTO_ACK_TEMPLATE: Final[str] = (
-    f"{MESSAGE_PREFIX['reply']} reply: 받음, maestro 처리 중 "
-    f"(queue: {{queue}}, ETA 1-5분 · sub-agent 가동 시 5-15분)"
+    f"{MESSAGE_PREFIX['reply']} reply: 받았습니다. 처리 중입니다 "
+    f"(queue: {{queue}}, ETA 1-5분 · sub-agent 가동 시 5-15분)."
 )
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분 cron digest 주기 (env override 가능)
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
@@ -912,8 +928,15 @@ async def digest_loop(
 
 
 def strip_ansi(text: str) -> str:
-    """ANSI escape sequence 제거. claude TUI 출력의 컬러/커서 코드 정리."""
-    return ANSI_ESCAPE_RE.sub("", text)
+    """ANSI escape sequence + TUI spinner glyph 제거 (#797 강화).
+
+    1) CSI/OSC/DEC private/단일 ESC/BEL 제거
+    2) spinner glyph 잔여 (`✶✻●✽✢` / braille) 제거
+    claude TUI 출력의 컬러/커서 코드 + 진행 인디케이터를 동시에 정리한다.
+    """
+    cleaned = ANSI_ESCAPE_RE.sub("", text)
+    cleaned = SPINNER_GLYPH_RE.sub("", cleaned)
+    return cleaned
 
 
 def mask_secrets(text: str) -> str:
@@ -963,11 +986,41 @@ def sanitize_mentions(text: str) -> str:
     return sanitized
 
 
+def _is_noise_line(line: str) -> bool:
+    """spinner 잔재 / TUI partial line 식별 (#797).
+
+    ANSI 제거 후에도 spinner glyph 와 일반 글자가 섞인 잔재 (`H*8 9 350`)
+    가 남을 수 있다. 알파벳/한글 비율이 낮고 별표/숫자만 듬성듬성 있는 라인은
+    의미 있는 본문이 아니라 TUI 진행 인디케이터의 잔재로 판단해 drop.
+
+    조건 (AND):
+    - 길이 < 40 자
+    - 영문자/한글 글자 수 < 4 (인사 한 글자 정도는 통과시키지 않음)
+    - 별표(`*`) 비율 >= 15% 또는 공백/숫자 비율 >= 70%
+    """
+    stripped = line.strip()
+    if not stripped or len(stripped) >= 40:
+        return False
+    alnum_letters = sum(
+        1 for c in stripped if c.isalpha()
+    )
+    if alnum_letters >= 4:
+        return False
+    star_count = stripped.count("*")
+    if star_count / len(stripped) >= 0.15:
+        return True
+    digit_space = sum(1 for c in stripped if c.isdigit() or c.isspace())
+    if digit_space / len(stripped) >= 0.70:
+        return True
+    return False
+
+
 def sanitize_chunk(text: str) -> str | None:
     """raw tmux pane buffer 를 Discord push 후보로 정리.
 
-    - ANSI escape 제거
+    - ANSI escape + spinner glyph 제거 (#797)
     - 라인 단위로 trim 후 빈 라인 압축 (연속 공백 라인 1개로)
+    - TUI partial line (별표·숫자 잔재) drop — `_is_noise_line`
     - 최소 길이 미만이면 None (노이즈 — 사용자 입력 echo / 짧은 prompt 등)
     - 최대 길이 초과 시 잘라낸 뒤 `…(truncated)` 표시
 
@@ -978,7 +1031,7 @@ def sanitize_chunk(text: str) -> str | None:
     등이 Discord mention 으로 발화되지 않도록 차단 (#754).
     """
     cleaned = sanitize_mentions(mask_secrets(strip_ansi(text)))
-    # 라인별 rstrip + 빈 라인 합치기
+    # 라인별 rstrip + 빈 라인 합치기 + noise line drop
     lines: list[str] = []
     blank_run = 0
     for raw_line in cleaned.split("\n"):
@@ -988,6 +1041,9 @@ def sanitize_chunk(text: str) -> str | None:
             if blank_run <= 1:
                 lines.append("")
             continue
+        if _is_noise_line(line):
+            # TUI spinner partial line — 다음 라인까지 보류했다가 noise 로 확인되면 drop.
+            continue
         blank_run = 0
         lines.append(line)
     compact = "\n".join(lines).strip()
@@ -996,6 +1052,122 @@ def sanitize_chunk(text: str) -> str | None:
     if len(compact) > MAESTRO_WATCHER_MAX_CHUNK_LEN:
         compact = compact[: MAESTRO_WATCHER_MAX_CHUNK_LEN - 16] + "\n…(truncated)"
     return compact
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 정형 응답 generator (#797)
+# ─────────────────────────────────────────────────────────────────────────────
+# 본진/watcher 가 Discord 에 보내는 메시지를 deterministic 하게 조립한다.
+# LLM 호출 없음. 모든 종결 어미는 "~합니다 / ~했습니다 / ~할까요?" 만 사용.
+# 사용자 요구 (#797): 비속체("받음", "끝", "켤까?") 차단 + 일관된 포맷.
+
+
+def formal_ack(
+    queue_n: int,
+    eta_min: int = 5,
+    sub_agent_active: bool = False,
+) -> str:
+    """사용자 메시지 수신 확인용 정중체 ack.
+
+    Args:
+        queue_n: 처리 대기열 길이 (마지막 윈도우 내 메시지 수).
+        eta_min: 일반 응답 예상 시간 (분). sub_agent_active=True 이면 5-15분 범위 표기.
+        sub_agent_active: sub-agent 가동 중 여부.
+
+    Returns:
+        `💬 reply: 받았습니다. 처리 중입니다 (queue: N, ETA M분).` 형태 메시지.
+    """
+    prefix = MESSAGE_PREFIX["reply"]
+    if sub_agent_active:
+        eta_text = f"ETA {eta_min}-15분 (sub-agent 가동 중)"
+    else:
+        eta_text = f"ETA {eta_min}분"
+    return (
+        f"{prefix} reply: 받았습니다. 처리 중입니다 "
+        f"(queue: {queue_n}, {eta_text})."
+    )
+
+
+def formal_status(
+    work_in_progress: list[str],
+    work_completed: list[str],
+    pending_decisions: list[str],
+) -> str:
+    """현재 작업 상황 정중체 status.
+
+    Args:
+        work_in_progress: 진행 중 항목 라인 (예: "PR #797 review 대기").
+        work_completed: 완료 항목 라인.
+        pending_decisions: 사용자 결정 대기 항목 라인.
+
+    Returns:
+        section 별로 구조화된 정중체 메시지. 빈 section 은 "없습니다." 로 표기.
+    """
+    prefix = MESSAGE_PREFIX["reply"]
+    lines: list[str] = [f"{prefix} status: 현재 상황을 보고드립니다."]
+    lines.append("")
+    lines.append("**진행 중**")
+    if work_in_progress:
+        for item in work_in_progress:
+            lines.append(f"- {item}")
+    else:
+        lines.append("- 없습니다.")
+    lines.append("")
+    lines.append("**완료**")
+    if work_completed:
+        for item in work_completed:
+            lines.append(f"- {item}")
+    else:
+        lines.append("- 없습니다.")
+    lines.append("")
+    lines.append("**결정 대기**")
+    if pending_decisions:
+        for item in pending_decisions:
+            lines.append(f"- {item}")
+    else:
+        lines.append("- 없습니다.")
+    return "\n".join(lines)
+
+
+def formal_error(error_type: str, retry_count: int = 0) -> str:
+    """오류 발생 정중체 알림.
+
+    Args:
+        error_type: 오류 유형 짧은 설명 (예: "tmux send 실패").
+        retry_count: 시도한 재시도 횟수. 0 이면 재시도 문구 생략.
+
+    Returns:
+        `🚨 alert: 오류가 발생했습니다 ({type}). 재시도 N회 진행합니다.` 형태.
+    """
+    prefix = MESSAGE_PREFIX["alert"]
+    if retry_count > 0:
+        return (
+            f"{prefix} alert: 오류가 발생했습니다 ({error_type}). "
+            f"재시도 {retry_count}회 진행했습니다."
+        )
+    return f"{prefix} alert: 오류가 발생했습니다 ({error_type})."
+
+
+def formal_digest(
+    merged_prs: int,
+    open_prs: int,
+    bugs: int,
+) -> str:
+    """cron digest 정중체 1줄.
+
+    Args:
+        merged_prs: 최근 윈도우 머지 PR 수.
+        open_prs: open PR 수.
+        bugs: open type:bug 이슈 수.
+
+    Returns:
+        `📊 digest: 머지 N건 / open M건 / bug K건입니다.` 형태.
+    """
+    prefix = MESSAGE_PREFIX["digest"]
+    return (
+        f"{prefix} digest: 머지 {merged_prs}건, "
+        f"open PR {open_prs}건, bug {bugs}건입니다."
+    )
 
 
 def parse_context_pct(pane_text: str) -> int | None:
@@ -1108,7 +1280,7 @@ async def context_auto_clear_loop(
                 if channel is not None:
                     try:
                         await channel.send(
-                            f"🧹 정리 완료 → /clear 전송 (마지막 context {pct_label})"
+                            f"🧹 정리를 완료했습니다. /clear 를 전송합니다 (마지막 context {pct_label})."
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("context auto-clear push 실패: %s", exc)
@@ -1137,7 +1309,7 @@ async def context_auto_clear_loop(
                     if channel is not None:
                         try:
                             await channel.send(
-                                f"🧠 context {pct}% → 자율 정리 시작"
+                                f"🧠 context {pct}% 에 도달했습니다. 자율 정리를 시작합니다."
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.warning("context auto-clear push 실패: %s", exc)
