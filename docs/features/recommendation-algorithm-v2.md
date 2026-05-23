@@ -61,20 +61,24 @@ last_reviewed: 2026-05-23
 - 변경 없음. `ScoreBreakdown` record에 `tempoMatch` 필드 추가(기존 5신호 → 6신호). `Song.musicalKey` / `Song.tempoBpm`는 be 17에서 이미 모델링됨.
 
 ### 5-2) 설정 (`RecommendationProperties`)
+실제 `backend/src/main/resources/application.yml:57-63` 가중치와 정합. 단일 진실은 `application.yml`, 본 spec 은 미러.
+
 ```yaml
 recommendation:
   weights:
-    voiceRangeFit: 0.5     # v1 유지
-    moodMatch: 0.2         # v1 유지
-    keyMatch: 0.15         # v2 신규 (활성화)
-    tempoMatch: 0.1        # v2 신규
-    popularityPrior: 0.05  # v1에서 0.15였으나 합 1.0 맞추려 조정 (§9 Q2)
+    voice-fit: 0.5     # v1 유지 — 음역 적합 1순위
+    genre: 0.2         # v1 보존 — 입력 신호 없음(가중치만 유지)
+    mood: 0.2          # v1 유지 — 분위기 일치 가산
+    popularity: 0.1    # v1 유지 — 모든 곡 popularity=1.0 → 동일 가산
+    tempo-match: 0.1   # v2 신규 — 곡 BPM ↔ target BPM 거리 기반
   moodBpm:
     신남: 130
     잔잔: 80
     감성: 95
 ```
-- 보호 영역(`application.yml`) 변경 → PR에서 `needs-human-review` 라벨 부여.
+- 합 = **1.1** (정규화 룰 없음 — total = Σ(signal × weight) 가산만, 상대 순위에는 영향 없음).
+- `keyMatch` — **메타 신호. 가중 합산 미포함 (v1 의도 유지)**. breakdown 응답 필드는 제공하나 total score 에는 0 기여. 활성화 결정은 별 사이클 (§9 Q2 후속).
+- 보호 영역(`application.yml`) 변경은 본 spec 범위 밖. 본 spec PR 은 docs only.
 
 ### 5-3) 스코어러 변경
 - `RecommendationScorer.score(...)`는 그대로 `Scored(total, breakdown)` 반환.
@@ -117,3 +121,4 @@ recommendation:
   - 가중치 합 1.0 유지 위해 `popularityPrior` 0.15 → 0.05 임시 (Q2 미해결).
   - ML 자동 가중치 조정은 v0.4+ spec으로 분리.
 - 2026-05-23 (plan): p95 단일 진실 cross-ref 강화 (PR #471 후속, closes #273 정합). v2 audio-features (`keyMatch`/`tempoMatch`) 가산 후에도 v1 과 동일 임계 (p95 200ms / p99 400ms) 박제 — 임계 단일 진실은 `recommendation-p95-regression-guard.md` §5-3 (PR #471), 본 spec §3 비기능은 참조만. v2 신호 2개 추가의 in-memory 계산 비용이 무시 가능하므로 임계 상향 사유 없음. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차로만 변경 가능 — 본 spec 직접 갱신 금지.
+- 2026-05-23 (#838): 가중치 spec vs 코드 drift 정합 — 옵션 A (코드 → spec 반영) 채택. keyMatch 활성 + popularityPrior 조정은 별 사이클 결정.
