@@ -327,10 +327,17 @@ resolve_reply_to_id() {
   local raw_id=""
   if [[ "$NO_REPLY" -eq 0 && -r "$LAST_USER_MSG_ID_FILE" ]]; then
     raw_id=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null | tr -d '[:space:]' || true)
-    # Discord snowflake = 정수 (보통 17~20자리). 비숫자/빈 값은 무시.
-    if [[ "$raw_id" =~ ^[0-9]+$ ]]; then
+    # Discord snowflake 길이 가드 (#964, 2026-05-24).
+    # snowflake = 64bit unsigned = 2015 epoch 이후 항상 17~19 자리 (보수적으로
+    # 20 까지 허용). 짧은 정수 ("4" 등) / 비숫자 / 빈 값 → Discord API 10008
+    # (Unknown Message) → 채팅창에 "메시지를 불러올 수 없어요" 노출. write 단계
+    # (#964 bot.py 가드) 와 read 단계 모두 방어해 외부 오염 / legacy 파일도
+    # graceful standalone 으로 처리.
+    if [[ "$raw_id" =~ ^[0-9]{17,20}$ ]]; then
       printf '%s' "$raw_id"
       return 0
+    elif [[ -n "$raw_id" ]]; then
+      echo "discord-reply.sh: last-user-msg-id 비-snowflake (\"$raw_id\") — standalone 으로 push (#964)" >&2
     fi
   fi
   printf ''

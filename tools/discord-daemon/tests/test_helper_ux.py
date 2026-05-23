@@ -523,13 +523,18 @@ class WriteLastUserMsgIdTests(unittest.TestCase):
     def test_overwrites_existing_value_atomically(self) -> None:
         # 두 번째 호출이 첫 값을 완전히 대체. mktemp + replace 패턴이므로
         # 부분 파일이 절대 남지 않음.
+        # #964: fixture 를 valid snowflake (17+ digit) 로 교체 — 새 가드가
+        # "111" / "222" 같은 짧은 값을 거부하므로 atomic overwrite 동작 자체를
+        # 검증하려면 valid snowflake 가 필요.
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "last-user-msg-id.txt"
             with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
-                bot.write_last_user_msg_id("111")
-                bot.write_last_user_msg_id("222")
-            self.assertEqual(target.read_text(encoding="utf-8"), "222")
+                bot.write_last_user_msg_id("11111111111111111")  # 17 digits
+                bot.write_last_user_msg_id("22222222222222222")  # 17 digits
+            self.assertEqual(
+                target.read_text(encoding="utf-8"), "22222222222222222"
+            )
             # 임시 파일 (`.last-user-msg-id-XXXXXX`) 잔재 없음.
             leftover = [
                 p for p in Path(tmpdir).iterdir()
@@ -672,11 +677,16 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         self.assertNotIn("message_reference", payload)
 
     def test_reply_mode_no_reply_flag_disables_reference(self) -> None:
-        """--no-reply flag 면 파일 있어도 standalone."""
+        """--no-reply flag 면 파일 (valid snowflake) 있어도 standalone.
+
+        #964 (2026-05-24) 후 fixture 를 valid snowflake (17+ digit) 로 교체.
+        그래야 --no-reply flag 자체의 효과를 검증 (이전 "12345" 는 새 가드에
+        걸려 거부되므로 --no-reply 와 무관하게 message_reference 누락).
+        """
         result, capture_path, _ = self._run_reply_test(
             "--no-reply",
             "body",
-            last_id_content="12345",
+            last_id_content="12345678901234567",
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._parse_first_payload(Path(capture_path).read_text())
@@ -845,6 +855,125 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         payload = self._parse_first_payload(Path(capture_path).read_text())
         self.assertNotIn("message_reference", payload)
         self.assertIn("stream-line", payload["content"])
+
+    # #964 (2026-05-24): 비-snowflake (짧은 정수 / 길이 < 17 / 길이 > 20) → graceful standalone.
+    def test_reply_mode_rejects_short_non_snowflake_id(self) -> None:
+        """파일에 "4" 같은 짧은 정수가 들어 있어도 message_reference 미적용.
+
+        2026-05-24 실제 운영 사고: ~/.mobruji/last-user-msg-id.txt 가 "4" 로
+        오염 → Discord API 10008 (Unknown Message) → "메시지를 불러올 수
+        없어요" 채팅창 노출. read 단계 길이 가드로 graceful standalone fallback +
+        stderr 알림.
+        """
+        result, capture_path, _ = self._run_reply_test(
+            "body",
+            last_id_content="4",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+        self.assertIn("body", payload["content"])
+        self.assertIn("비-snowflake", result.stderr)
+
+    def test_reply_mode_rejects_too_long_id(self) -> None:
+        """#964: 길이 > 20 (snowflake 범위 초과) 도 graceful standalone."""
+        result, capture_path, _ = self._run_reply_test(
+            "body",
+            last_id_content="1" * 30,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #964: bot.py write_last_user_msg_id — invalid snowflake 거부 가드
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class WriteLastUserMsgIdValidatesSnowflakeTests(unittest.TestCase):
+    """`write_last_user_msg_id` 가 invalid snowflake (짧은 정수 / 비숫자 /
+    빈 값 / 너무 긴 값) 를 거부 — 파일 자체가 valid snowflake 만 보유하도록 보장.
+
+    2026-05-24 운영 사고: 파일이 "4" 로 오염 → discord-reply.sh reply mode 가
+    Discord API 10008 받음 → 사용자 채팅창 "메시지를 불러올 수 없어요" 노출.
+    bot.py 정상 경로 (`str(message.id)`) 는 항상 18-19 digit snowflake 이므로
+    이 가드에 걸리는 케이스는 외부 오염 / 수동 디버깅 잔재.
+    """
+
+    def test_rejects_single_digit_id(self) -> None:
+        """\"4\" 같은 단일 digit (사고 재현) → skip + 기존 파일 미수정."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            target.write_text("9876543210987654321", encoding="utf-8")
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("4")
+            # 기존 valid 값이 그대로 — invalid write 가 덮어쓰지 못함.
+            self.assertEqual(
+                target.read_text(encoding="utf-8"), "9876543210987654321"
+            )
+
+    def test_rejects_non_numeric_id(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("not-a-snowflake")
+            self.assertFalse(
+                target.exists(),
+                "invalid write 가 파일 자체를 생성하면 안 됨",
+            )
+
+    def test_rejects_empty_string(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("")
+            self.assertFalse(target.exists())
+
+    def test_rejects_too_long_id(self) -> None:
+        """길이 > 20 → 비-snowflake — graceful skip."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("1" * 25)
+            self.assertFalse(target.exists())
+
+    def test_accepts_18_digit_snowflake(self) -> None:
+        """경계값 — 정상 18-digit (현실 Discord 사용자 message id) 통과."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("123456789012345678")
+            self.assertEqual(
+                target.read_text(encoding="utf-8"), "123456789012345678"
+            )
+
+    def test_accepts_17_digit_boundary(self) -> None:
+        """최소 길이 17 통과 (LAST_USER_MSG_ID_MIN_DIGITS)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("12345678901234567")  # 17 digits
+            self.assertEqual(
+                target.read_text(encoding="utf-8"), "12345678901234567"
+            )
+
+    def test_accepts_20_digit_max_boundary(self) -> None:
+        """최대 길이 20 통과 (LAST_USER_MSG_ID_MAX_DIGITS)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("1" * 20)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"), "1" * 20
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

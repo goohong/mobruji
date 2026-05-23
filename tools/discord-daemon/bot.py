@@ -66,6 +66,17 @@ LAST_USER_MSG_ID_PATH: Final[Path] = Path(
 ).expanduser()
 LAST_USER_MSG_ID_FILE_MODE: Final[int] = 0o600
 
+# Discord snowflake 길이 가드 (#964, 2026-05-24).
+# Discord snowflake = unix timestamp(42b) + worker(5b) + process(5b) + increment(12b)
+# = 64bit. 2015 epoch 이후 항상 17~19 자리 양의 정수 (보수적으로 20 까지 허용).
+# 짧은 정수 ("4" 등) 가 들어가면 Discord API 가 10008 (Unknown Message) 반환 →
+# 채팅창에 "메시지를 불러올 수 없어요" 로 본답 reply 가 깨짐. 2026-05-24 실제
+# 운영 사고 (root cause 미상 — 외부 오염 추정) 이후 write/read 양단 가드 도입.
+# 정상 코드 경로 (`str(message.id)`) 로는 발생할 수 없지만 외부 오염 / 수동 echo /
+# 디버깅 잔재로부터 사용자 UX 보호.
+LAST_USER_MSG_ID_MIN_DIGITS: Final[int] = 17
+LAST_USER_MSG_ID_MAX_DIGITS: Final[int] = 20
+
 # digest cron 튜닝값 — cycle-status.json (사용자 룰 2026-05-23).
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
@@ -357,8 +368,28 @@ def write_last_user_msg_id(message_id: str) -> None:
 
     Args:
         message_id: Discord message snowflake (정수 또는 문자열). 항상 str
-            로 받아 그대로 저장.
+            로 받아 그대로 저장. invalid snowflake (#964) 는 skip + warning.
     """
+    # #964 (2026-05-24): invalid snowflake 거부 가드.
+    # 정상 코드 경로 (str(message.id)) 로는 항상 18-19 digit snowflake 이므로
+    # 이 가드에 걸리는 케이스는 외부 오염 / 수동 echo / 디버깅 잔재. 사용자 본답
+    # reply 가 깨지면 채팅창에 "메시지를 불러올 수 없어요" 가 노출되므로
+    # (사용자 UX 회귀) write 자체를 막아 파일이 valid snowflake 만 보유하도록 보장.
+    if (
+        not isinstance(message_id, str)
+        or not message_id.isdigit()
+        or not (
+            LAST_USER_MSG_ID_MIN_DIGITS
+            <= len(message_id)
+            <= LAST_USER_MSG_ID_MAX_DIGITS
+        )
+    ):
+        logger.warning(
+            "write_last_user_msg_id: invalid snowflake %r — skip (#964 가드)",
+            message_id,
+        )
+        return
+
     import tempfile as _tempfile  # local — module top scope 변경 회피.
     try:
         LAST_USER_MSG_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
