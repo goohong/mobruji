@@ -14,7 +14,7 @@ last_reviewed: 2026-05-24
 ## 1) 개요 (What / Why)
 polling 대상 tmux pane (nmae `mobruji:0.0`, helper `helper:0.0`) 이 컨텍스트 사용량 95%에 도달하면 **bot.py가 해당 pane에 핸드오프 정리 prompt를 inject**하고, 그 안의 Claude 세션이 정리를 마치고 `===CLEAR_READY===` marker를 stdout으로 출력하면 **bot.py가 `tmux send-keys "/clear" Enter`로 컨텍스트를 비운다**. 다음 wake 시 첫 turn에서 MEMORY.md 자동 로드 → 자율 회복.
 
-문제: v6 사이클에서 컨텍스트 97% 도달 후 본진이 사실상 멈춤. 사용자가 부재이면 회복 불가. 기존 `maestro-auto-wake` (60분 wake) 와는 다른 axis — wake는 idle 회복, 본 spec은 **context 포화 회복**.
+문제: v6 사이클에서 컨텍스트 97% 도달 후 maestro가 사실상 멈춤. 사용자가 부재이면 회복 불가. 기존 `maestro-auto-wake` (60분 wake) 와는 다른 axis — wake는 idle 회복, 본 spec은 **context 포화 회복**.
 
 [[feedback-autonomous-wake-pattern]] + [[project-session-handoff-2026-05-23-v6]] 메모리에 명시된 위험을 spec으로 정형화.
 

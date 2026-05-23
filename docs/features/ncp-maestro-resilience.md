@@ -43,7 +43,7 @@ NCP maestro 자율 사이클이 멈추는 위험을 15가지로 정리. 각 위�
 
 ### 제외
 - NCP VM 자체 multi-region 이중화 — v0.4 prod 진입 후
-- 본진 외부 모니터링 (Grafana Cloud 등) — observability-baseline.md 따로
+- maestro 외부 모니터링 (Grafana Cloud 등) — observability-baseline.md 따로
 - Anthropic API 자체 outage — third-party SLO 불가
 
 ## 5) 설계
@@ -64,7 +64,7 @@ NCP maestro 자율 사이클이 멈추는 위험을 15가지로 정리. 각 위�
 | 11 | bridge queue overflow | 사용자가 빠르게 N 개 메시지 → bot.py 직렬 tmux send-keys → maestro queue 누적 | DedupLedger.count_since(300) 이상 임계 | auto-ack 에 queue 표시 (이미 #361). bot.py 가 rate limit (5/min) 또는 throttle 도입 | **P3** |
 | 12 | gh push / setup-git 인증 만료 | NCP gh CLI credential 만료 또는 push 권한 잃음 | git push fail with auth error | gh auth refresh 또는 token regenerate — 사용자 액션. secondary 가 push fail 시 Discord alert | **P2** |
 | 13 | Discord 단방향 가시성 (bridge 부재) | bot.py 가동 안 되면 사용자 메시지 미수신 + maestro reply 불가 | `systemctl is-active mobruji-discord-bridge.service` ≠ active | systemd auto-restart (Restart=always, 이미). secondary 가 inactive 감지 시 SSH로 alert (별 경로 필요 — webhook 또는 mac maestro 경유) | **P1** |
-| 14 | OAuth max token 만료 + `.claude.json` corruption | Claude Max OAuth 만료 시 maestro Claude TUI 인증 실패. 또는 `.claude.json` (Claude TUI state file) 이 partial-write / disk-full / SIGKILL 로 깨져 maestro 가 콜드스타트 불가. | claude TUI error "auth required" / `jq . ~/.claude.json` non-zero exit / maestro 응답 부재 | (a) mac 에서 새 OAuth → NCP `.credentials.json` 복사. (b) `.claude.json` corruption: **hourly cron backup → 손상 감지 시 직전 백업 자동 복원** (2026-05-23 본진 적용 완료). wake-stuck alert 가 이 케이스를 cover | **P1** |
+| 14 | OAuth max token 만료 + `.claude.json` corruption | Claude Max OAuth 만료 시 maestro Claude TUI 인증 실패. 또는 `.claude.json` (Claude TUI state file) 이 partial-write / disk-full / SIGKILL 로 깨져 maestro 가 콜드스타트 불가. | claude TUI error "auth required" / `jq . ~/.claude.json` non-zero exit / maestro 응답 부재 | (a) mac 에서 새 OAuth → NCP `.credentials.json` 복사. (b) `.claude.json` corruption: **hourly cron backup → 손상 감지 시 직전 백업 자동 복원** (2026-05-23 maestro 적용 완료). wake-stuck alert 가 이 케이스를 cover | **P1** |
 | 15 | NCP VM OOM / disk / network | VM 4GB RAM full, 10G disk full, 네트워크 down | `free -h` 음수, `df -h` 90%+, ping fail | swap 1GB 보강 (이미). image cleanup (docker system prune). NCP support ticket. secondary 가 임계 감지 시 Discord alert | **P2** |
 
 ### 5-2) 회복 자동화 정책
@@ -99,7 +99,7 @@ PR #385 후속 — 매트릭스(§5-1)에서 P1로 표시된 5건의 운영 핸�
   - 수동: 사용자 또는 maestro 자체가 `/clear` 입력 + 사전에 `project_session_handoff_YYYY-MM-DD.md` 메모리 갱신.
 - **자동화 후보**
   - bot.py 가 직접 `/clear` 를 발사하지 **않음** — context 손실 결정은 사용자/maestro 권한.
-  - 메모리 디렉토리 6h tar snapshot cron (2026-05-23 본진 적용 완료) 으로 갱신 누락 시 롤백 가능.
+  - 메모리 디렉토리 6h tar snapshot cron (2026-05-23 maestro 적용 완료) 으로 갱신 누락 시 롤백 가능.
 
 #### 위험 #8 — mac/NCP Claude Max OAuth token 충돌
 - **감지 방법**
@@ -180,7 +180,7 @@ P 우선순위로:
 
 ## 9) 결정 로그
 - 2026-05-23: 초안 작성 + 즉시 운영 적용 (status=approved). 사용자 위임 — NCP 멈춤 위험 15 정리. P1 묶음 즉시 진행 권장. secondary 는 bot.py 통합 + watchdog systemd timer 이중화.
-- 2026-05-23 (PR #385 후속): §5-2-a P1 5건 (감지/복구/자동화 후보) detail 보강 + §10 `resilience_monitor_loop` 의사코드 추가. 위험 #14 행에 `.claude.json` corruption + hourly cron backup (본진 적용 완료) 반영.
+- 2026-05-23 (PR #385 후속): §5-2-a P1 5건 (감지/복구/자동화 후보) detail 보강 + §10 `resilience_monitor_loop` 의사코드 추가. 위험 #14 행에 `.claude.json` corruption + hourly cron backup (maestro 적용 완료) 반영.
 - 2026-05-23 (PR #385/#391 후속, 분할 1차): §11-1~§11-3 신설 — 의사코드(§10) 한 단계 더 내려간 실 구현 spec (함수 signature + state 관리 / 5건 점검 명령·임계·비용 / 푸시 메시지 템플릿). §11-4~§11-6 (회복 자동화 / systemd 통합 / 회귀 가드) 는 stub. be 사이클 입력으로 전달.
 
 ## 10) `resilience_monitor_loop` 의사코드 (PR B 입력)
@@ -206,7 +206,7 @@ ALERT_COOLDOWN_SEC = {
 }
 
 # 알람 채널 — NOTIFY_CHANNEL_ID 가 우선, 없으면 MOBRUJI_CHANNEL_ID fallback
-# (NOTIFY_CHANNEL_ID 변경분이 본진에서 stash 보관 중이라 fallback 필수)
+# (NOTIFY_CHANNEL_ID 변경분이 maestro에서 stash 보관 중이라 fallback 필수)
 NOTIFY_CHANNEL_ID = int(os.getenv("NOTIFY_CHANNEL_ID", os.getenv("MOBRUJI_CHANNEL_ID", "0")))
 ```
 

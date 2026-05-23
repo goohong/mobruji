@@ -120,7 +120,7 @@ cd web && npm run dev                                                   # FE 실
 **채널**: `MOBRUJI_CHANNEL_ID` (#모부르지) 전용. `NOTIFY_CHANNEL_ID` 는 digest cron 만.
 
 **매 사용자 메시지마다 순서대로 (한 단계라도 건너뛰면 룰 위반)**:
-1. **ack push** — `bash /home/mobruji/.mobruji/discord-reply.sh "<ack 문구>"`. 다른 어떤 action 보다 먼저.
+1. **ack push** — `bash /home/mobruji/.mobruji/discord-reply.sh "<ack 문구>"`. 다른 어떤 action 보다 먼저. **turn 중간에 system-reminder 로 새 사용자 메시지가 도착해도 진행 중 작업 멈추고 즉시 ack push 먼저**. "작업 끝나고 일괄 처리" 금지 — 사용자 입장에선 깜깜이.
 2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}`.
 3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문.
 4. **처리** — (a) 직접 / (b) sub-agent·nmae 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push.
@@ -134,12 +134,14 @@ cd web && npm run dev                                                   # FE 실
 
 **금지**: 분석/조사/tool call 을 먼저 하고 ack 를 뒤로. bot.py auto-ack 는 #807 에서 제거됐기 때문에 helper ack 없으면 사용자 입장에선 깜깜이.
 
+**helper launch 표현 룰**: helper 본체는 sub-agent launch 안 함 (Agent 도구는 helper sub-agent 가 nmae 동일 권한으로 launch). helper 가 사용자 응답에서 "launch 하겠습니다" 표현 사용 시 주체 혼동 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다" / "nmae 에 알리겠습니다" 로 표현. 메모리 [[feedback-helper-role-boundary]] 참조.
+
 ## 12) maestro/helper context% 자기 emit
-maestro(mmae / nmae — tmux `mobruji:0.0`) + helper(tmux `helper:0.0`) 는 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-2 / §5-6`) 가 두 pane 을 독립 polling 해 95% 도달 시 자율 정리 트리거.
+mmae(tmux `mobruji:0.0`) + nmae(NCP 호스트 tmux `mobruji:0.0`) + helper(tmux `helper:0.0`) 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 pane 별 독립으로 95% 도달 시 자율 정리 트리거 (PR #865 multi-pane 확장).
 
 - 정상: `===CTX:NN%===` (NN = 0–100 정수)
 - 모를 때: `===CTX:?===` (트리거 안 함)
 - 정리 완료 시: `===CLEAR_READY===` 동반 출력 → bot.py 가 `/clear` 전송
-- **mmae/nmae + helper emit**. sub-agent (be/fe/rev/plan) 는 marker 안 함 — 사이클 후 종료라 누적 없음.
+- **mmae / nmae / helper 만 emit**. sub-agent (be/fe/rev/plan) 는 marker 안 함.
 
 추정 우선순위: ① `/context` slash 결과 → ② input/output 누적 ÷ 모델 window → ③ 모르면 `?`.

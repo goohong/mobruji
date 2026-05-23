@@ -149,7 +149,7 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 
 알림 규칙은 두 그룹으로 나눈다:
 - **§5-6-1 애플리케이션 메트릭** (Micrometer/Grafana scrape 기반) — 추천 p95, 외부 API 에러율, audio backfill 실패, JVM heap (메트릭 관점).
-- **§5-6-2 인프라 헬스** (호스트/컨테이너/bridge 직접 감시 기반) — 디스크, heap (인프라 관점), 컨테이너 상태, bridge inactive. 본진 운영 즉시성 위해 메트릭 scrape 의존성 없이 호스트에서 직접 push.
+- **§5-6-2 인프라 헬스** (호스트/컨테이너/bridge 직접 감시 기반) — 디스크, heap (인프라 관점), 컨테이너 상태, bridge inactive. maestro 운영 즉시성 위해 메트릭 scrape 의존성 없이 호스트에서 직접 push.
 
 #### 5-6-1) 애플리케이션 메트릭 알림 (1차)
 

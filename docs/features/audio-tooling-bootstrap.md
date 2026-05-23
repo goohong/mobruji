@@ -14,7 +14,7 @@ last_reviewed: 2026-05-21
 ## 1) 개요 (What / Why)
 - ADR 0006 (YouTube 기반 audio 추출) 및 ADR 0010 (Python worker 분리 결정)의 후속 구현 spec.
 - 곡 메타데이터의 `audio_url` (YouTube)에서 음원을 추출하고 보컬 stem 분리 + pitch detection을 거쳐 곡의 음역대(min/max/median pitch)와 보컬 특성을 JSON으로 산출하는 **Python 분석 파이프라인 부트스트랩**.
-- Spring Boot (Java 21) 본진은 분석 자체를 수행하지 않고 Python 워커를 호출(`ProcessBuilder` 또는 향후 HTTP)하여 결과를 수신한다.
+- Spring Boot (Java 21) maestro는 분석 자체를 수행하지 않고 Python 워커를 호출(`ProcessBuilder` 또는 향후 HTTP)하여 결과를 수신한다.
 - 대상 액터: 백엔드 (재추천 알고리즘이 사용할 곡 음역대 데이터의 공급원), 데이터 큐레이터 (시드 100곡 자동 분석).
 
 ## 2) 사용자 시나리오

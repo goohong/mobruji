@@ -1,6 +1,6 @@
 ---
 name: discord-only-operation
-description: "Discord-only 운영 — helper + nmae 분리 아키텍처. 사용자가 폰 Discord만으로 mmae 종료 후에도 mobruji 본진을 운영하는 전체 셋업 가이드"
+description: "Discord-only 운영 — helper + nmae 분리 아키텍처. 사용자가 폰 Discord만으로 mmae 종료 후에도 mobruji 를 운영하는 전체 셋업 가이드"
 status: implementing
 metadata:
   type: runbook
@@ -8,7 +8,7 @@ metadata:
 
 # Discord-only 운영 런북 — helper + nmae 분리
 
-mac maestro(mmae) 종료 후 사용자가 **폰 Discord만으로 mobruji 본진 운영**을 가능하게 하는 셋업 가이드입니다. 다른 서버/환경에 그대로 복제할 수 있도록 1회 명령 시퀀스 + 검증 + 트러블슈팅을 정리했습니다.
+mac maestro(mmae) 종료 후 사용자가 **폰 Discord 만으로 mobruji 운영**을 가능하게 하는 셋업 가이드입니다. 다른 서버/환경에 그대로 복제할 수 있도록 1회 명령 시퀀스 + 검증 + 트러블슈팅을 정리했습니다.
 
 ## 1) 배경 / 동기
 

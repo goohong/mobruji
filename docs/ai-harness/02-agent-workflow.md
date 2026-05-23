@@ -75,7 +75,7 @@ git log origin/main..origin/develop --oneline
 ### 8-1-1) Release trigger 임계치 (옵션 C)
 > 출처: `docs/features/release-cadence-v0.4.0.md` §5-1 (PR #774). v0.5.0 회고 때 재평가.
 
-본진은 매 사이클 끝에 다음 조건을 확인하고, 도달 시 release 후보 진입을 자동 트리거한다.
+maestro는 매 사이클 끝에 다음 조건을 확인하고, 도달 시 release 후보 진입을 자동 트리거한다.
 
 - **트리거 조건 (OR)**:
   - `type:fix` + `type:feat` PR 합산 **5 건 이상** 머지 (마지막 release tag 이후)
@@ -95,7 +95,7 @@ gh pr list --base develop --state merged \
 git rev-list --count origin/main..origin/develop
 ```
 
-트리거 도달 시 본진 흐름:
+트리거 도달 시 maestro 흐름:
 1. release PR draft 생성 (다음 §8-2 절차).
 2. rev 워크트리에 release-readiness 점검 위임 → 모든 포함 PR에 `reviewed:claude` 라벨 부여 확인.
 3. `#모부르지` 채널에 draft 링크 + 카운트 요약 push.
@@ -108,7 +108,7 @@ git rev-list --count origin/main..origin/develop
 - 라벨 정책: `release:skip` 라벨이 부여된 PR은 changelog에서 제외. 기본은 "전부 포함".
 
 ### 8-2-1) 버전 결정 룰 (patch / minor / major)
-현 0.x.y 체계 유지. 트리거 시 본진이 자동 판정.
+현 0.x.y 체계 유지. 트리거 시 maestro가 자동 판정.
 
 - **patch (vX.Y.Z+1)**: 포함된 PR 중 **사용자 facing `feat` 0 건** (fix / chore / docs / test / refactor 만).
 - **minor (vX.Y+1.0)**: 포함된 PR 중 **사용자 facing `feat` 1 건 이상**.
@@ -203,7 +203,7 @@ maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 �
 - **be** (`mobruji-be`): `backend/**` 구현 전용.
 - **fe** (`mobruji-fe`): `web/**` 구현 전용.
 - **rev** (`mobruji-rev`): 사후 감사 + QA 실행 검증. 파일 수정 금지 (`pre-push` hook 차단).
-- **plan** (`mobruji-plan`): ADR/spec/`docs/ai-harness/**` 갱신 전담. v0.2 메타 전환 후 본진 부담 분산용 (`feedback-plan-session-option`, `project-plan-session-active`).
+- **plan** (`mobruji-plan`): ADR/spec/`docs/ai-harness/**` 갱신 전담. v0.2 메타 전환 후 maestro 부담 분산용 (`feedback-plan-session-option`, `project-plan-session-active`).
 
 > 풀스택 기능은 be/fe 두 PR로 분리. 같은 PR에서 두 에이전트가 평행 작업 후 사람이 픽하는 패턴은 비용 크므로 학습/비교 목적에만.
 
@@ -219,11 +219,11 @@ maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 �
 - `.github/workflows/session-collision-check.yml`이 PR 열릴 때 자동으로 다른 open PR과의 파일 겹침을 검출해 코멘트로 경고.
 
 ### 10-6) 항시 가동 + 자율 사이클 룰
-maestro 본진은 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상 유지**한다. 1개 완료 통지가 들어오면 같은 워크트리에 즉시 다음 백로그를 launch (idle 워크트리 default 금지).
+maestro는 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상 유지**한다. 1개 완료 통지가 들어오면 같은 워크트리에 즉시 다음 백로그를 launch (idle 워크트리 default 금지).
 
-- 본진 자체 작업 default는 메타 (spec/ADR/메모리/orchestration). 코드/테스트/문서 본문 작성은 sub-agent 위임.
-- 통지 우선 처리: sub-agent 완료 통지는 본진 자기 작업보다 우선 (§11 §0-8).
-- 자율 운영: 사용자 부재 시에도 maestro은 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
+- maestro 자체 작업 default는 메타 (spec/ADR/메모리/orchestration). 코드/테스트/문서 본문 작성은 sub-agent 위임.
+- 통지 우선 처리: sub-agent 완료 통지는 maestro 자기 작업보다 우선 (§11 §0-8).
+- 자율 운영: 사용자 부재 시에도 maestro는 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
 - **백로그 발굴 메타 단계**: 백로그 고갈 시 idle로 두지 않고 다음 후보를 순차 탐색한다 — (1) 직전 사이클 follow-up, (2) rev 코멘트 미해결 항목, (3) spec drift(문서 vs 코드 불일치), (4) 테스트 누락. 후보가 잡히면 가치 점검(비용 대비 우선순위 비교) 후 새 이슈 등록까지 한 호흡으로 진행한다 (`feedback-keep-4-cycles-active`, [ADR-0014 §Decision 3](../decisions/0014-multi-agent-worktree-orchestration.md#decision)).
 
 구체 사이클 명명(§11 §0-4) / idle 룰(§0-5) / 사용자 결정 묶음(§0-6) / Discord 가시성(§0-6-1, §0-6-2) / 워크트리 정리(§0-7) / rev 코멘트 자동 등록(§0-9) / 항시 가동 점검 의무(§0-10)는 모두 §11에 정형화. 본 절은 §10 일관성 유지를 위한 한 줄 요약.

@@ -1,10 +1,10 @@
 # Release Prompt Template — 1-shot release PR 자동화
 
-> 본진(maestro)이 release cutoff 임계치 도달 시 **1번 호출**해서 release PR draft 까지 한 번에 생성하는 Bash command snippet.
+> maestro가 release cutoff 임계치 도달 시 **1번 호출**해서 release PR draft 까지 한 번에 생성하는 Bash command snippet.
 > 후속 PR #774-2 산출물. 본 문서는 spec(`docs/features/release-cadence-v0.4.0.md`) + workflow(`docs/ai-harness/02-agent-workflow.md` §8) 의 **실행 layer**다.
 
 ## 1) 사용 시점
-본진 사이클 끝에 다음 조건 모두 충족 시 호출한다.
+maestro 사이클 끝에 다음 조건 모두 충족 시 호출한다.
 
 1. `git rev-list --count origin/main..origin/develop` ≥ 20 **OR** `type:fix` + `type:feat` 머지 카운트 ≥ 5
 2. `release:hotfix` 라벨 PR 머지 (임계치 무시)
@@ -153,7 +153,7 @@ echo "${PR_URL}"
 ## 4) 사용 예시
 
 ```bash
-# 본진이 release cutoff 도달 후 1번 호출
+# maestro가 release cutoff 도달 후 1번 호출
 bash docs/ai-harness/release-prompt-template.md   # (snippet 추출 후 실행)
 
 # 또는 inline:
@@ -197,14 +197,14 @@ $ git log --oneline origin/main..origin/develop | grep -oE '^[a-f0-9]+ [a-z]+\('
 - 수정: scope_filter 를 `\((${scope_filter})\)` 로 한 번 더 group 으로 감싸 precedence 고정.
 - FEAT_USER 카운트는 원래부터 `feat\((web|...)\)` 로 group 되어 있어 v0.4.0 산정은 정상 동작.
 
-### 5-4) 본진 인지 비용 비교
+### 5-4) maestro 인지 비용 비교
 | 항목 | Before (수동) | After (template) |
 |---|---|---|
 | changelog 작성 시간 | rev 위임 ~10분 | 0 (자동) |
-| version 산정 | 본진 판단 | 자동 (override 가능) |
+| version 산정 | maestro 판단 | 자동 (override 가능) |
 | body markdown | 수동 작성 | 자동 grouping |
 | PR 라벨 부여 | 별도 step | 한 명령 안에 포함 |
-| 본진 명령 수 | 4-5 | **1** |
+| maestro 명령 수 | 4-5 | **1** |
 
 ## 6) 한계 / 후속
 
@@ -216,4 +216,4 @@ $ git log --oneline origin/main..origin/develop | grep -oE '^[a-f0-9]+ [a-z]+\('
 ## 7) 참고 문서
 - `docs/features/release-cadence-v0.4.0.md` — cadence + label 정책 spec (PR #774)
 - `docs/ai-harness/02-agent-workflow.md` §8 — release workflow 박제 (PR #777)
-- `docs/ai-harness/12-sub-agent-prompt-template.md` — 본진 prompt template 후속 통합 지점 (PR #774-3 예정)
+- `docs/ai-harness/12-sub-agent-prompt-template.md` — maestro prompt template 후속 통합 지점 (PR #774-3 예정)
