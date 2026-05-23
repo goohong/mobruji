@@ -6,8 +6,8 @@ pending: user-decision (v0.4.0 release cut 진행 여부 — rev audit D12, 2026
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [774, 856, 871, 875, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Release Cadence v0.4.0 — cutoff 룰 + 범위 결정

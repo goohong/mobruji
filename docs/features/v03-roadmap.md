@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: [69, 68, 71, 62, 209, 238, 242, 243]
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [246, 255, 264, 283, 315, 324, 892, 939]
+last_reviewed: 2026-05-24
 ---
 
 # v0.3 P1~P3 로드맵 (백로그 우선순위 정리)

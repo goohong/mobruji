@@ -5,8 +5,8 @@ status: draft
 owner: "@goohong"
 scope: song
 related_issues: [69, 68]
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [264, 825, 841, 892, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Spotify Audio Features 통합 — mood signal (valence/energy) 보강

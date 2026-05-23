@@ -4,9 +4,9 @@ slug: discord-status-push
 status: approved
 owner: @mobruji-maestro
 scope: infra
-related_issues: [#352]
-related_prs: []
-last_reviewed: 2026-05-23
+related_issues: [352]
+related_prs: [352, 353]
+last_reviewed: 2026-05-24
 ---
 
 # Discord 상태 push 룰

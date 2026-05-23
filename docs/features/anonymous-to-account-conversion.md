@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: user
 related_issues: [243, 209, 238]
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [324]
+last_reviewed: 2026-05-24
 ---
 
 # 비회원/회원 흐름 정책 + 계정 전환 트리거 (v0.4)

@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: [180]
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [181, 349, 467, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Discord 실시간 양방향 소통 인프라

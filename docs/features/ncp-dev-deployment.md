@@ -4,9 +4,9 @@ slug: ncp-dev-deployment
 status: shipped
 owner: @mobruji-maestro
 scope: infra
-related_issues: [#356]
-related_prs: []
-last_reviewed: 2026-05-23
+related_issues: [356]
+related_prs: [356, 357, 852, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Phase 4 — NCP maestro VM에 mobruji dev 환경 격리 배포 (A안)

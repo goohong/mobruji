@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [338, 349, 827, 830, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Discord-driven maestro (tmux interactive + Discord bridge)
