@@ -126,3 +126,53 @@ describe("SongDetailContent 의 large AlbumCover", () => {
     ).toBeInTheDocument();
   });
 });
+
+/*
+ * PR #500 후속 회귀 가드 (closes #529):
+ *  - onError fallback 후 placeholder size 차등 (large=h-48 vs thumbnail=h-14)
+ *  - onError → 동일 song rerender 시에도 placeholder 유지 (failed state 보존)
+ *  - 동일 img onError 두 번 연속 호출되어도 안전 (idempotent fallback)
+ */
+describe("onError fallback 회귀 가드 (PR #500 후속, closes #529)", () => {
+  it("large onError fallback placeholder 는 h-48 사이즈로 렌더된다", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/big-404.jpg" });
+    renderWithQueryClient(<SongDetailContent song={song} />);
+    fireEvent.error(screen.getByAltText("테스트 곡 앨범 커버"));
+    const placeholder = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
+    expect(placeholder.className).toMatch(/h-48/);
+    expect(placeholder.className).toMatch(/w-48/);
+  });
+
+  it("thumbnail onError fallback placeholder 는 h-14 사이즈로 렌더된다", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/thumb-404.jpg" });
+    render(<AlbumCoverThumbnail song={song} />);
+    fireEvent.error(screen.getByAltText("테스트 곡 앨범 커버"));
+    const placeholder = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
+    expect(placeholder.className).toMatch(/h-14/);
+    expect(placeholder.className).toMatch(/w-14/);
+  });
+
+  it("thumbnail onError 후 동일 song rerender 해도 placeholder 유지 (failed state 보존)", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/thumb-cors.jpg" });
+    const { rerender } = render(<AlbumCoverThumbnail song={song} />);
+    fireEvent.error(screen.getByAltText("테스트 곡 앨범 커버"));
+    rerender(<AlbumCoverThumbnail song={song} />);
+    expect(
+      screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByAltText("테스트 곡 앨범 커버")).toBeNull();
+  });
+
+  it("thumbnail onError 가 두 번 연속 호출되어도 안전 fallback (idempotent)", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/double-error.jpg" });
+    render(<AlbumCoverThumbnail song={song} />);
+    const img = screen.getByAltText("테스트 곡 앨범 커버");
+    fireEvent.error(img);
+    // 1차 fallback 후 img 가 제거되므로 같은 노드에 두 번째 error 를 fire 해도
+    // 컴포넌트는 이미 placeholder 상태 — 에러 throw 없이 그대로 유지.
+    fireEvent.error(img);
+    expect(
+      screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+    ).toBeInTheDocument();
+  });
+});
