@@ -134,6 +134,25 @@ describe("VoiceRangeProgressCard", () => {
     expect(svgTexts).toContain("C5");
   });
 
+  it("#567: points 가 빈 배열이면 role=status 안내 메시지만 노출하고 차트는 그리지 않는다", () => {
+    // 부모(page.tsx)가 EmptyHistory 분기를 보장하지만, 회귀 방지 차원의 방어 가드.
+    const empty = buildSummary({
+      points: [],
+      minLowMidi: 0,
+      maxHighMidi: 0,
+      latestSpanSemitones: 0,
+      earliestSpanSemitones: 0,
+      spanDeltaSemitones: 0,
+      lowMidiDeltaSemitones: 0,
+      highMidiDeltaSemitones: 0,
+    });
+    render(<VoiceRangeProgressCard summary={empty} />);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/측정 기록이 없어요/);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
   it("#249: 가시 범위에 옥타브 시작음이 전혀 없으면 가장 가까운 C-노트 1개를 표시한다 (fallback)", () => {
     // D4(62) ~ G4(67) — 차트 가시 범위 yMin=60,yMax=69 에 C4(60)는 경계 위에 있으므로
     // 'fallback path' 가 아닌 정상 후보 path 가 실행된다.
