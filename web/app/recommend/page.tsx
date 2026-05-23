@@ -319,6 +319,47 @@ function RecommendationFeed({
     return data.pages.flatMap((page) => page.recommendations);
   }, [data]);
 
+  /**
+   * (closes #426) 스크린 리더용 라이브 영역 메시지.
+   *
+   * 시각 사용자는 무한 스크롤로 카드가 화면에 추가되는 것을 자연스럽게 보지만,
+   * 스크린 리더 사용자에게는 "내가 스크롤한 결과로 추천이 더 로드됐는지" 가
+   * 불투명하다. `aria-live="polite"` 영역에 메시지를 갱신해 다음을 안내한다:
+   *   - 첫 페이지 도착: "추천 N건을 불러왔습니다."
+   *   - 추가 페이지 도착: "추천 M건이 더 추가되었습니다. (총 N건)"
+   *
+   * 메시지는 페이지 수가 증가한 시점에만 갱신한다(`useEffect` + ref 로 직전
+   * 페이지 수 추적). `isFetchingNextPage` 토글이 아니라 데이터 도착 시점을
+   * 기준으로 갱신해 "로딩 중" 메시지와 중복되지 않도록 한다.
+   */
+  const previousPageCountRef = useRef(0);
+  const [liveMessage, setLiveMessage] = useState("");
+
+  useEffect(() => {
+    const pageCount = data?.pages.length ?? 0;
+    const previousPageCount = previousPageCountRef.current;
+    if (pageCount === previousPageCount) {
+      return;
+    }
+    if (pageCount === 0) {
+      // 쿼리 reset 등으로 페이지가 사라진 경우 메시지도 초기화.
+      previousPageCountRef.current = 0;
+      setLiveMessage("");
+      return;
+    }
+    const latestPage = data?.pages[pageCount - 1];
+    const addedCount = latestPage?.recommendations.length ?? 0;
+    const totalCount = allRecommendations.length;
+    if (previousPageCount === 0) {
+      setLiveMessage(`추천 ${totalCount}건을 불러왔습니다.`);
+    } else {
+      setLiveMessage(
+        `추천 ${addedCount}건이 더 추가되었습니다. (총 ${totalCount}건)`,
+      );
+    }
+    previousPageCountRef.current = pageCount;
+  }, [data, allRecommendations.length]);
+
   // IntersectionObserver 로 sentinel 진입을 감지해 다음 batch 페치.
   // ref 콜백 패턴: sentinel DOM 노드가 마운트/언마운트될 때마다 observer 를
   // 다시 연결한다. 의존성에 fetchNextPage/hasNextPage/isFetchingNextPage 가 들어가서
@@ -416,6 +457,21 @@ function RecommendationFeed({
 
   return (
     <div className="flex flex-col gap-4">
+      {/*
+        (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
+        시각적으로는 `sr-only` 로 숨기지만 SR 은 polite 큐로 안내 메시지를 읽는다.
+        `aria-atomic="true"` 로 메시지 전체를 매번 새로 읽도록 강제 — 부분 갱신
+        헤더리스 announce 를 피한다.
+      */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="recommend-live-region"
+        className="sr-only"
+      >
+        {liveMessage}
+      </div>
       <ul className="flex flex-col gap-3">
         {allRecommendations.map((item) => (
           <SongCard
