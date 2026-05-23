@@ -799,6 +799,32 @@ def send_clear_command(pane_target: str) -> bool:
     return tmux_send_payload(pane_target, "/clear")
 
 
+def clear_pane_history(pane_target: str) -> bool:
+    """`tmux clear-history -t <pane>` — 스크롤백 cleanup (G-1, #910 묶음 B).
+
+    `/clear` 직후 호출해 직전 turn 의 `===CLEAR_READY===` marker 가 다음
+    polling iter 의 `capture-pane -S -N` 결과에 잔존해서 false detect → 즉시
+    `/clear` 재전송 → sub-agent 작업 손실 시나리오를 차단한다.
+
+    실패해도 caller 흐름을 막지 않는다 (warning log 만 남기고 False 반환).
+    """
+    cmd = ["tmux", "clear-history", "-t", pane_target]
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    except OSError as exc:
+        logger.warning("tmux clear-history OSError: pane=%s err=%s", pane_target, exc)
+        return False
+    if result.returncode != 0:
+        logger.warning(
+            "tmux clear-history 실패: pane=%s rc=%d stderr=%s",
+            pane_target,
+            result.returncode,
+            truncate_for_log(result.stderr or ""),
+        )
+        return False
+    return True
+
+
 def append_clear_log(pct: int, event: str, pane: str = "-") -> None:
     """`project_context_clear_log.md` 에 한 줄 append. 파일 없으면 header 생성.
 
@@ -943,6 +969,9 @@ async def context_auto_clear_loop(
                             pane,
                         )
                     send_clear_command(pane)
+                    # G-1 (#910): /clear 직후 스크롤백 cleanup. 다음 iter capture-pane
+                    # 결과에서 직전 turn 의 CLEAR_READY marker 잔존을 차단.
+                    clear_pane_history(pane)
                     append_clear_log(
                         pct if pct is not None else -1, "cleared", pane=pane
                     )
@@ -1068,9 +1097,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 cycle_status_path,
             )
 
-        # context auto-clear loop (spec §5-2, #809 → #855 multi-pane).
-        # opt-in 이고 적어도 1 pane 의 세션이 존재할 때만 launch.
-        # 일부 pane 만 존재하면 그 pane 만 polling (loop 안에서 graceful skip).
+        # context auto-clear loop (spec §5-2, #809 → #855 multi-pane → #910 G-4).
+        # opt-in 시 **항상 launch**. pane 존재 체크는 loop 안의 매 iter 에서
+        # graceful skip — NCP 재부팅 순서 (bot.py boot < maestro tmux 세션 생성)
+        # 의존성으로 loop 가 영구 dead 되는 버그(#910 G-4) 차단.
         if context_auto_clear_enabled and not hasattr(
             client, "_context_auto_clear_task_started"
         ):
@@ -1084,31 +1114,27 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             ]
             if missing_panes:
                 logger.warning(
-                    "context auto-clear: 부재 pane(들) graceful skip: %s",
+                    "context auto-clear: 부재 pane(들) graceful skip (loop 안에서 매 iter 재확인): %s",
                     ", ".join(missing_panes),
                 )
-            if not available_panes:
-                logger.warning(
-                    "context auto-clear skip: polling 대상 모든 pane 의 tmux 세션 없음 (panes=%s)",
-                    ", ".join(context_pane_targets),
+            client._context_auto_clear_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                context_auto_clear_loop(
+                    client,
+                    notify_channel_id,
+                    pane_targets=context_pane_targets,
+                    trigger_pct=context_trigger_pct,
+                    hysteresis_pct=context_hysteresis_pct,
                 )
-            else:
-                client._context_auto_clear_task_started = True  # type: ignore[attr-defined]
-                client.loop.create_task(
-                    context_auto_clear_loop(
-                        client,
-                        notify_channel_id,
-                        pane_targets=context_pane_targets,
-                        trigger_pct=context_trigger_pct,
-                        hysteresis_pct=context_hysteresis_pct,
-                    )
-                )
-                logger.info(
-                    "context_auto_clear_loop launched: panes=%s trigger=%d%% hysteresis=%d%%",
-                    ", ".join(context_pane_targets),
-                    context_trigger_pct,
-                    context_hysteresis_pct,
-                )
+            )
+            logger.info(
+                "context_auto_clear_loop launched: panes=%s trigger=%d%% hysteresis=%d%% available=%d/%d",
+                ", ".join(context_pane_targets),
+                context_trigger_pct,
+                context_hysteresis_pct,
+                len(available_panes),
+                len(context_pane_targets),
+            )
         elif not context_auto_clear_enabled:
             logger.info("context auto-clear disabled (CONTEXT_AUTO_CLEAR_ENABLED=0)")
 
