@@ -144,3 +144,17 @@ describe("apiFetch NEXT_PUBLIC_API_BASE_URL 분기", () => {
     expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
   });
 });
+
+describe("apiFetch path leading-slash 가드 (#680)", () => {
+  // 현 동작 lock: client.ts는 path를 normalize 하지 않는다.
+  // 호출자가 leading `/`를 빠뜨리면 비정상 URL이 생성된다는 사실을 회귀 테스트로 명시.
+  it.each([
+    { label: "leading `/` 있는 path → base와 single slash로 결합 (정상)", path: "/api/v1/songs", expected: "http://localhost:8080/api/v1/songs" },
+    { label: "leading `/` 없는 path → base 끝과 path 시작이 그대로 붙는다 (호출자 책임)", path: "api/v1/songs", expected: "http://localhost:8080api/v1/songs" },
+    { label: "빈 path → base URL 그대로 호출", path: "", expected: "http://localhost:8080" },
+  ])("$label", async ({ path, expected }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch(path);
+    expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
+  });
+});
