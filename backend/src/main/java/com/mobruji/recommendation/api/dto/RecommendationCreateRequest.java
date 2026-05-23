@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import com.mobruji.recommendation.application.CreateRecommendationCommand;
 import com.mobruji.song.domain.Mood;
@@ -25,7 +26,7 @@ import com.mobruji.song.domain.Mood;
  * 결정성 보장을 위해 {@code SeedDeriver}의 입력에도 포함된다.
  */
 public record RecommendationCreateRequest(
-        @NotBlank String sessionId,
+        @NotBlank @Size(max = 64) String sessionId,
         @NotNull @Min(12) @Max(119) Integer voiceRangeLow,
         @NotNull @Min(12) @Max(119) Integer voiceRangeHigh,
         Mood mood,
