@@ -129,7 +129,8 @@ describe("apiFetch NEXT_PUBLIC_API_BASE_URL 분기", () => {
   it.each([
     { label: "env 미설정 → default localhost:8080", env: undefined, expected: "http://localhost:8080/api/v1/songs", base: "http://localhost:8080" },
     { label: "env 정상 URL → 그대로 base + path 정확 결합", env: "https://api.example.com", expected: "https://api.example.com/api/v1/songs", base: "https://api.example.com" },
-    { label: "env trailing slash → 결합 시 double slash (현재 동작 lock)", env: "https://api.example.com/", expected: "https://api.example.com//api/v1/songs", base: "https://api.example.com/" },
+    { label: "env trailing slash → sanitize 후 single slash 결합 (#678)", env: "https://api.example.com/", expected: "https://api.example.com/api/v1/songs", base: "https://api.example.com" },
+    { label: "env 다중 trailing slash → 모두 sanitize", env: "https://api.example.com///", expected: "https://api.example.com/api/v1/songs", base: "https://api.example.com" },
   ])("$label", async ({ env, expected, base }) => {
     vi.resetModules();
     if (env === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;

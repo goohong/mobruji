@@ -8,8 +8,11 @@
  * 도메인 함수(web/lib/api/voice-range.ts, recommendation.ts)는 이 래퍼만 사용한다.
  */
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+// trailing slash sanitize: env에 `https://api.example.com/` 처럼 들어와도
+// path와 결합 시 double slash가 생기지 않도록 끝의 `/`를 제거한다 (#678).
+export const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080"
+).replace(/\/+$/, "");
 
 export class ApiError extends Error {
   readonly status: number;
