@@ -126,4 +126,65 @@ class SongSeedLoaderIntegrationTest {
         assertThat(afterFirst).isEqualTo(afterSecond);
         assertThat(afterFirst).isGreaterThan(0);
     }
+
+    @Test
+    @DisplayName("충돌 해소 (#276, spec §5-7): seed → audio-analysis 갱신 → seed 재적재 시 audio 값이 보존된다")
+    void seedReload_afterAudioAnalysisBackfill_preservesAudioValues() throws Exception {
+        // given: 시드 최초 적재 — "벚꽃 엔딩" 이 lowMidi=57, highMidi=76 (MANUAL_SEED) 으로 들어감
+        loader.run(null);
+        final Song afterSeed = songRepository.findByTitleAndArtist("벚꽃 엔딩", "버스커 버스커").orElseThrow();
+        assertThat(afterSeed.getLowMidi()).isEqualTo(57);
+        assertThat(afterSeed.getHighMidi()).isEqualTo(76);
+        final Long sameRowId = afterSeed.getId();
+
+        // when: audio-analysis backfill 시뮬레이션 — 임의 lowMidi/highMidi 로 갱신 시도
+        // (spec §5-7 priority 3: AUDIO_ANALYSIS 가 MANUAL_SEED 의 null 자리만 채워야 하지만, 본 회귀는
+        //  "seed 재적재 시점에서 기존 row 값이 보존되는가" 한 측면만 잠근다 — backfillMissingFields 의 의미)
+        final Song audioUpdated = songRepository.findById(sameRowId).orElseThrow();
+        audioUpdated.backfillFromAudioAnalysis(
+                new com.mobruji.song.domain.AudioAnalysisResult(
+                        60, 73, "A", 132.0, 200.0, 0.8, "analyze-py-test"),
+                0.6);
+        songRepository.save(audioUpdated);
+        assertThat(songRepository.findById(sameRowId).orElseThrow().getLowMidi()).isEqualTo(60);
+
+        // and: 시드를 한 번 더 적재 (배포 재기동 시나리오)
+        loader.run(null);
+
+        // then: 같은 row 가 살아 있고, audio-analysis 가 쓴 값이 seed 재적재로 덮이지 않음
+        //       (spec §5-7 의 핵심 의미: seed 재적재는 null-only backfill, 기존 값 보존)
+        final Song reloaded = songRepository.findById(sameRowId).orElseThrow();
+        assertThat(reloaded.getLowMidi())
+                .as("seed 재적재가 audio-analysis 갱신값을 덮어쓰면 안 됨 (spec §5-7)")
+                .isEqualTo(60);
+        assertThat(reloaded.getHighMidi())
+                .as("seed 재적재가 audio-analysis 갱신값을 덮어쓰면 안 됨 (spec §5-7)")
+                .isEqualTo(73);
+        // 새 row 생성 없이 같은 id 가 유지돼야 함
+        assertThat(songRepository.findByTitleAndArtist("벚꽃 엔딩", "버스커 버스커").orElseThrow().getId())
+                .isEqualTo(sameRowId);
+    }
+
+    @Test
+    @DisplayName("충돌 해소 (#276, spec §5-7): lowMidi/highMidi 가 비대칭으로 채워진 row 도 seed 재적재로 null 자리만 backfill")
+    void seedReload_partiallyFilledRow_backfillsOnlyNullSlots() throws Exception {
+        // given: 운영자가 highMidi 만 수동 입력해둔 "벚꽃 엔딩" 시뮬레이션 (lowMidi=null)
+        final Song partial = songRepository.save(Song.builder()
+                .title("벚꽃 엔딩").artist("버스커 버스커")
+                .keyOriginal(MusicalKey.A_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .highMidi(80) // 운영자가 임의로 설정한 값, seed 값(76)과 다름
+                .build());
+        final Long partialId = partial.getId();
+
+        // when
+        loader.run(null);
+
+        // then: lowMidi 는 seed 의 57 로 backfill, highMidi 는 운영자 값 80 그대로 보존
+        final Song reloaded = songRepository.findById(partialId).orElseThrow();
+        assertThat(reloaded.getLowMidi()).as("null 이던 lowMidi 는 seed 값으로 backfill")
+                .isEqualTo(57);
+        assertThat(reloaded.getHighMidi()).as("이미 값이 있던 highMidi 는 보존 (spec §5-7)")
+                .isEqualTo(80);
+    }
 }
