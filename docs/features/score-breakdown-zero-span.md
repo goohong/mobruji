@@ -5,8 +5,8 @@ status: blocked
 owner: @mobruji-maestro
 scope: recommendation
 related_issues: [756, 765]
-related_prs: [748, 762]
-last_reviewed: 2026-05-23
+related_prs: [748, 756, 762, 765, 789, 945, 953, 955, 959]
+last_reviewed: 2026-05-24
 ---
 
 # scoreBreakdown zero-span (single-note) 정책

@@ -5,8 +5,8 @@ status: implementing
 owner: @mobruji-maestro
 scope: infra
 related_issues: []
-related_prs: [811, 822, 826, 830, 832, 839, 842, 843, 844, 852, 856]
-last_reviewed: 2026-05-23
+related_prs: [811, 822, 826, 830, 832, 839, 842, 843, 844, 852, 856, 861, 871, 875]
+last_reviewed: 2026-05-24
 ---
 
 # 자율 사이클 오케스트레이션 — 4 워크트리 동시 가동 + cycle-status digest

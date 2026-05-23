@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [799, 801, 871, 875, 880, 891]
+last_reviewed: 2026-05-24
 ---
 
 # Helper Agent — nmae 영구 가동으로 mmae 대체 + 사용자 양방향 전담

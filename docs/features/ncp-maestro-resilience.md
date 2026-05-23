@@ -4,9 +4,9 @@ slug: ncp-maestro-resilience
 status: approved
 owner: @mobruji-maestro
 scope: infra
-related_issues: [#384]
-related_prs: [#385, #391]
-last_reviewed: 2026-05-23
+related_issues: [384]
+related_prs: [385, 391, 871, 875]
+last_reviewed: 2026-05-24
 ---
 
 # NCP maestro 전체 사이클 멈춤 위험 점검 (15 + 회복 자동화)

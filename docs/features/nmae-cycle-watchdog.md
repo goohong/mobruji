@@ -5,7 +5,7 @@ status: draft
 owner: @mobruji-maestro
 scope: infra
 related_issues: [941, 956, 972]
-related_prs: []
+related_prs: [941, 950, 956, 966, 972, 977]
 last_reviewed: 2026-05-24
 ---
 

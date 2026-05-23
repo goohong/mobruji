@@ -3,6 +3,12 @@
 **/.DS_Store
 *.log
 
+### Python (글로벌 — 모든 디렉토리, e.g. tools/discord-daemon/tests/__pycache__/) ###
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+
 ### Environment / Secrets ###
 .env
 .env.*
