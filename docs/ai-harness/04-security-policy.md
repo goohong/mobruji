@@ -31,64 +31,66 @@
 - 민감정보 마스킹 확인
 - 외부 연동/전송 경로 변경 시 보안 검토 완료
 
-## 7) Discord bridge / maestro watcher 보안 룰
+## 7) Discord bridge 보안 룰
 
-`tools/discord-daemon/bot.py` 는 maestro tmux pane 캡처를 Discord 채널 (#모부르지) 에 push 한다. claude TUI 가 `gh auth`, `curl -H 'Authorization: ...'`, `env`, `mysql` 등 명령을 echo 하면 raw PAT/토큰/패스워드/mention 이 그대로 노출될 위험이 있어 다음 룰을 강제한다.
+`tools/discord-daemon/bot.py` 는 PR #807 단순화 이후 **routing + cycle digest** 만 담당한다 (maestro pane 캡처 watcher 폐기). helper/maestro 의 응답 push 는 `tools/discord-daemon/discord-reply.sh` 가 Discord REST API 를 직접 호출하는 단방향 경로다. 노출 표면이 좁아진 만큼 본 §7 은 **실제 운영 중인 코드와 1:1 대응되는 룰** 만 남긴다.
 
-### 7-1) sanitize_chunk pipeline (필수 순서)
-모든 Discord push 경로는 ANSI 제거 직후, 라인 압축·길이 자르기·dedup 이전에 다음 순서로 sanitize 한다:
+### 7-1) Discord push 보안
+- helper/maestro 응답은 `tools/discord-daemon/discord-reply.sh` 만 사용한다. MCP Discord plugin / 임시 `curl` 스크립트는 금지 (`.env` 경로 일관성 + 채널 분리 보장).
+- `tools/discord-daemon/.env` 파일 권한은 `600` 으로 유지한다 (`chmod 600 tools/discord-daemon/.env`). `setup-launchagent.sh` / `setup-gcp-systemd.sh` 가 첫 셋업 시 자동 적용.
+- `DISCORD_BOT_TOKEN` / 채널 id 를 평문으로 git commit 금지. `.gitignore` 의 `.env` 룰을 PR 마다 점검 (`git status` 에 `.env` 가 잡히면 즉시 중단).
+- `discord-reply.sh` 는 `.env` 를 읽을 때 `DISCORD_DAEMON_ENV_PATH` 환경변수 override 만 허용. 인자로 토큰을 받지 않는다 (shell history 누출 차단).
 
-1. `strip_ansi` — ANSI escape 제거
-2. `mask_secrets` — 7-2 패턴 적용
-3. `sanitize_mentions` — 7-3 패턴 적용
-
-chunk 가 잘리거나 dedup 되어도 raw 시크릿/mention 이 send 되지 않도록 **압축·자르기 이전 단계 적용** 이 핵심.
-
-### 7-2) SECRET_MASK_PATTERNS (PR #751/#771)
-
-| 패턴 | placeholder | 비고 |
-| --- | --- | --- |
-| `ghp_[A-Za-z0-9]{36,}` | `ghp_***` | GitHub classic PAT |
-| `github_pat_[A-Za-z0-9_]{50,}` | `github_pat_***` | GitHub fine-grained PAT |
-| Discord bot token `[MN]…{23}.…{6}.…{27+}` | `discord_token_***` | |
-| env-style `*_TOKEN/SECRET/KEY/PASSWORD=value` | `{KEY}=***` | 7-2-a 예외 적용 |
-| `password=value` (case-insensitive) | `password=***` | |
-
-#### 7-2-a) env-style 예외 (false positive narrow, PR #771)
-env-style 광역 패턴이 공개 의도 변수를 마스킹하는 회귀를 막기 위해 `_mask_env_style_secret` 콜백에서 다음을 skip 한다:
-
-- **키 이름 블록리스트 포함 시 skip**: `PUBLIC` / `VERSION` / `COUNT` / `LIMIT` / `INDEX` / `SIZE` / `LENGTH`
-  - 예: `NEXT_PUBLIC_API_KEY=...`, `PUBLIC_KEY=...`, `API_VERSION_KEY=...`, `SHARD_COUNT_KEY=...`
-- **값 길이 12자 미만 skip** — 일반 PAT/API key 는 32+ 가 표준. 짧은 메타값은 false positive 차단 우선.
-
-위 블록리스트/임계는 가독성 회귀 방지 목적이며, **특정 패턴(`ghp_*`, `github_pat_*`, Discord token, `password=`) 은 length/blocklist 무관 항상 마스킹** 한다.
-
-### 7-3) MENTION_SANITIZE_PATTERNS (PR #767)
-
-PR/issue title 또는 maestro pane chunk 에 Discord mention 토큰이 포함되면 알림 폭주 + 채널 전체 ping 위험이 있다. `sanitize_mentions(text)` 가 prefix 직후에 zero-width space (U+200B) 를 삽입해 mention 발화를 무력화한다.
+### 7-2) Mention sanitization
+PR title / open issue title 등이 cycle digest 에 노출될 때 `@everyone` / `@here` / `<@USER_ID>` 토큰이 그대로 출력되면 채널 전체 ping / 사용자 mention 폭주가 발생한다. `bot.py` 의 `sanitize_mentions(text)` 가 prefix 직후에 zero-width space (U+200B) 를 삽입해 mention 발화를 무력화한다.
 
 | 토큰 | 처리 후 (ZWSP 삽입) |
 | --- | --- |
 | `@everyone` | `@​everyone` |
 | `@here` | `@​here` |
-| `<@USER_ID>` / `<@!USER_ID>` | `<@​USER_ID>` / `<@​!USER_ID>` |
-| `<@&ROLE_ID>` | `<@​&ROLE_ID>` |
+| `<@USER_ID>` / `<@!USER_ID>` | `<​@USER_ID>` / `<​@!USER_ID>` |
+| `<@&ROLE_ID>` | `<​@&ROLE_ID>` |
 
-적용 대상:
-- `build_digest_payload` 의 머지 PR / open PR / bug issue 3 카테고리 title 출력
-- `sanitize_chunk` pipeline (7-1) 모든 watcher push 경로
+적용 대상 (현 bot.py 기준):
+- `format_cycle_digest` 에서 cycle-status 의 in-progress / recent 텍스트 출력 직전 (`bot.py:622-623`).
 
-`@` 단일 문자 / `<@>` (digit 없음) 등 benign 토큰은 미변경 보존.
+`@` 단일 문자 / `<@>` (digit 없음) 등 benign 토큰은 미변경 보존. 신규 digest 출력 경로를 추가하면 같은 함수를 거치도록 한다.
 
-### 7-4) buffer cap + drop counter (PR #785)
+> 사용자 입력 본문을 Discord embed 등으로 inline 노출하지 않는다 (현 단순화본은 embed 미사용). 신규 embed 도입 시 본 문서에 입력 sanitize 룰을 추가한 뒤 구현.
 
-Discord 장기 outage 또는 transient 5xx/429 폭주 시 메모리/관측 안전을 보장한다.
+### 7-3) Discord 채널 ID 분리
+사용자 응답과 자동 알림 (digest) 을 분리해 노이즈/오발송을 차단한다.
 
-- **exponential backoff**: 재시도 실패 직후 `await sleep(BASE^retry_count)`. 환경변수 `MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE` (default `2.0`) 로 조정. transient outage 의 burst drop 방지.
-- **buffer cap**: `MAESTRO_WATCHER_MAX_BUFFER_LEN = MAX_CHUNK_LEN * 10` (=18000자) 초과 시 앞쪽(oldest) 절반 drop + WARN log + counter 증가. **무한 누적 절대 금지** — 메모리 폭주 방지.
-- **drop counter**: 모듈 전역 `maestro_watcher_counters = {'send_drop': 0, 'buffer_overflow_drop': 0}` 노출. send retry 초과 / buffer overflow 둘 다 카운트. 향후 metric export (`/healthz` 등) 시 그대로 재사용.
+| env | 용도 | 비고 |
+| --- | --- | --- |
+| `MOBRUJI_CHANNEL_ID` | #모부르지. **사용자 응답 전용** (helper/maestro → 사용자). | `discord-reply.sh` 기본 송신 채널. |
+| `NOTIFY_CHANNEL_ID` | #알림. **cycle digest 전용**. | 미설정 시 `MOBRUJI_CHANNEL_ID` fallback (단일 채널 운영). |
 
-### 7-5) 변경 시 의무
-- `tools/discord-daemon/bot.py` 변경 PR 은 `tools/discord-daemon/tests/` 하위 회귀 + 신규 unit test 추가 필수.
-- 머지 후 **bridge restart 필요**: `sudo systemctl restart mobruji-discord-bridge.service`.
-- secret mask / mention sanitize 패턴 추가/수정 시 본 문서 §7-2 / §7-3 을 같은 PR 에서 갱신.
+- 두 채널을 분리 운영할 때 `NOTIFY_CHANNEL_ID` 를 반드시 명시한다. fallback 인지 않고 운영하면 digest 가 사용자 응답 채널에 섞여 push 된다.
+- `discord-reply.sh` 가 사용자 응답을 NOTIFY 채널로 보내지 않도록 `MOBRUJI_CHANNEL_ID` 우선순위를 유지한다 (`discord-reply.sh:48-56` 참조).
+
+### 7-4) cycle-status.json 보안
+`~/.mobruji/cycle-status.json` 은 nmae 4 워크트리 (be/fe/rev/plan) 상태를 bot.py digest 가 읽는 호스트 로컬 파일이다.
+
+- 파일 권한은 `644` 로 유지 (host owner 만 쓰기, daemon 사용자가 같은 owner). 다중 사용자 호스트에서는 `600` 으로 좁힐 것.
+- **sessionId / 사용자 PII / DB 식별자 / 토큰 평문 저장 금지**. 진행 상황은 PR 번호 + 한 줄 요약만.
+- 외부에 공유할 때는 `cycle-status.json` 을 그대로 업로드하지 말고 발췌 (sub-agent 이름 + 상태) 만 전달.
+
+### 7-5) 폐기 항목 (PR #807 단순화, 이력 보존)
+다음 함수/env/카운터는 PR #807 단순화에서 **bot.py 에서 제거됨**. 본 문서 과거판 (§7-1 ~ §7-4) 에 명시되어 있던 룰의 실코드 참조점이 사라졌으므로 신규 sub-agent 가 호출/참조하지 않도록 명시한다.
+
+- `sanitize_chunk` pipeline (`strip_ansi → mask_secrets → sanitize_mentions` 3-step) — pane 캡처 watcher 자체가 폐기되어 사용처 없음.
+- `mask_secrets` / `_mask_env_style_secret` / `SECRET_MASK_PATTERNS` — bot.py grep 0건. 폐기.
+- `MAESTRO_WATCHER_MAX_BUFFER_LEN` / `MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE` — watcher 폐기로 무의미.
+- `maestro_watcher_counters` (`send_drop` / `buffer_overflow_drop`) — 카운터 자체 제거.
+- exponential backoff (watcher 전용) — watcher 폐기.
+
+> watcher 가 다시 도입되면 본 §7-5 를 deprecation note 로 옮기고 §7-1 ~ §7-4 사이에 신규 룰 섹션을 추가한다. 코드 추가 없이 본 문서만 부활시키지 않는다 (스펙-코드 drift 재발 차단).
+
+### 7-6) 변경 시 의무
+- `bot.py` / `discord-reply.sh` 변경 PR 은 `tools/discord-daemon/tests/` 하위 회귀 또는 신규 unit test 추가를 권장. routing/digest 경로 변경 시 필수.
+- 머지 후 daemon restart:
+  - **Linux/GCP/NCP**: `sudo systemctl restart mobruji-discord-daemon` (+ 필요 시 `mobruji-discord-bridge`).
+  - **macOS LaunchAgent**: `launchctl kickstart -k gui/$(id -u)/com.mobruji.discord-daemon`.
+- mention sanitize 패턴 / 채널 ID 룰 변경 시 본 문서 §7-2 / §7-3 을 같은 PR 에서 갱신한다.
+- 신규 secret mask 가 필요하다고 판단되면 (예: 새 외부 API 키) 본 §7 에 패턴을 추가하고 `bot.py` / `discord-reply.sh` 의 실제 push 경로에 구현 코드를 같은 PR 에서 함께 넣는다 — 문서만 갱신 금지.
