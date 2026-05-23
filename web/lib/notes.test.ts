@@ -131,3 +131,39 @@ describe("midiToCombinedNoteName (#318 A안 — 한국어 (SPN) 병기)", () => 
     expect(midiToCombinedNoteName(61)).toBe("도♯4 (C#4)");
   });
 });
+
+describe("MIDI 경계 회귀 가드 (#576)", () => {
+  // 지원 범위([12,119]) 밖이지만 SPN 절대 경계(MIDI 0=C-1, 127=G9)에서
+  // 모듈로/floor 계산이 깨지지 않는지 잠금. 음수 옥타브 처리도 명세.
+  it("MIDI 0 → C-1 / 도-1 (SPN 하한)", () => {
+    expect(midiToNoteName(0)).toBe("C-1");
+    expect(midiToKoreanNoteName(0)).toBe("도-1");
+  });
+
+  it("MIDI 127 → G9 / 솔9 (SPN 상한)", () => {
+    expect(midiToNoteName(127)).toBe("G9");
+    expect(midiToKoreanNoteName(127)).toBe("솔9");
+  });
+
+  it("음수 MIDI(-12) → C-2 (음수 옥타브 가드)", () => {
+    // ((midi % 12) + 12) % 12 가 음수 입력에서도 [0,11] 반환해야 함.
+    expect(midiToNoteName(-12)).toBe("C-2");
+    expect(midiToKoreanNoteName(-12)).toBe("도-2");
+  });
+
+  it("비유한 입력(NaN)은 'NaN' octave 문자열을 반환한다 (현재 동작 잠금)", () => {
+    // 가드 함수 부재. 호출자가 사전 필터링하지 않으면 표시 깨짐 — 회귀 시
+    // 명세 변경(throw/NaN-safe)이 들어가는지 PR 리뷰에서 강제 가시화.
+    expect(midiToNoteName(Number.NaN)).toBe("NaNNaN");
+  });
+
+  it("SPN-한국어 옥타브 일치 round-trip (MIDI 0~127 전수)", () => {
+    // midiToNoteName / midiToKoreanNoteName 의 octave 계산이 동일 식 사용.
+    // 한쪽만 바뀌면 UI 병기에서 옥타브 어긋남 → 즉시 fail.
+    for (let midi = 0; midi <= 127; midi += 1) {
+      const spnOctave = midiToNoteName(midi).match(/-?\d+$/)?.[0];
+      const koreanOctave = midiToKoreanNoteName(midi).match(/-?\d+$/)?.[0];
+      expect(spnOctave).toBe(koreanOctave);
+    }
+  });
+});
