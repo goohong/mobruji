@@ -30,18 +30,20 @@ mac maestro(mmae) 종료 후 사용자가 **폰 Discord 만으로 mobruji 운영
 ```
 사용자 (폰 Discord)
   ↓ Discord Gateway WebSocket
-NCP bot.py (Python, discord.py)
-  ├─ 사용자 메시지 → tmux send-keys → helper session
-  └─ helper stdout pipe-pane 캡처 → ANSI strip + Discord raw push
+NCP bot.py (Python, discord.py)  — 이슈 #807 단순화본
+  ├─ 사용자 메시지 → tmux send-keys → helper session (TMUX_SESSION_NAME=helper)
+  └─ cycle-status.json digest cron → NOTIFY_CHANNEL_ID push (be/fe/rev/plan 4 워크트리)
         ↓
    NCP tmux session "helper" (claude CLI, bypass permissions)
-      ├─ 자체 답 (tmux capture + gh/git 정보)
-      └─ 필요 시 nmae(다른 tmux session)에 send-keys로 위임
+      ├─ 자체 답 → ~/.mobruji/discord-reply.sh "<msg>" → Discord REST API 로 직접 push
+      └─ 필요 시 nmae(tmux session "mobruji")에 send-keys 로 위임
             ↓
        NCP tmux session "mobruji" (claude CLI, bypass permissions, nmae)
           ├─ 작업 (sub-agent launch, PR 머지, 사이클)
-          └─ digest/보고 → Discord (별 channel 또는 메인) 직접 push
+          └─ ~/.mobruji/cycle-status.json 갱신 → digest cron 이 push 로 노출
 ```
+
+> 본 spec 의 옛 모델 (bot.py 가 helper pane 의 stdout 을 pipe-pane 으로 캡처해 push) 은 미구현이며, helper 가 응답을 직접 push 하는 방식으로 단순화됐다 (#807). §4 참조.
 
 ### 2-1) tmux session 분리
 - **`helper`**: 사용자 응답 전담. 작업 X.
@@ -86,7 +88,11 @@ tmux send-keys -t helper Enter
 
 ### 3-4) helper systemd unit (재부팅 시 자동 시작)
 
-`/etc/systemd/system/mobruji-helper.service`:
+> **현재 상태 (2026-05-23)**: `mobruji-helper.service` systemd unit 은 **아직 운영 호스트에 등록되지 않았다**. 운영 호스트(`/etc/systemd/system/`) 에는 `mobruji-maestro.service`, `mobruji-discord-bridge.service` 두 개만 활성. helper 는 현재 사람이 `tmux new-session -d -s helper ...` 로 ad-hoc 가동 중이며, 재부팅 시 수동 재기동이 필요하다.
+>
+> 본 절차는 helper 자동 가동을 목표로 한 **권장 설정**이다. 운영 호스트에 unit 파일 작성/`systemctl enable --now` 는 보호 영역(systemd) 변경이므로 별 운영 사이클에서 사람 사후 리뷰와 함께 적용한다.
+
+`/etc/systemd/system/mobruji-helper.service` (권장 unit, 미적용):
 
 ```ini
 [Unit]
@@ -110,52 +116,69 @@ RestartSec=10s
 WantedBy=multi-user.target
 ```
 
-활성화:
+활성화 (운영 호스트 적용 시, 보호 영역이므로 사람 사후 리뷰 권장):
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now mobruji-helper
 ```
 
-## 4) bot.py routing 변경 (코드 fix)
+대안 — ad-hoc 가동 (현재 운영 모드):
+```bash
+# helper systemd unit 없을 때 수동 가동
+tmux new-session -d -s helper -c /home/mobruji/mobruji \
+  "HOME=/home/mobruji XDG_CONFIG_HOME=/home/mobruji/.claude-helper /usr/bin/claude --dangerously-skip-permissions"
 
-### 4-1) 기존 (anti-pattern)
+# 재부팅 후 매번 다시 실행 필요 (자동 복구 X)
+```
+
+## 4) bot.py routing (현재 구현 상태)
+
+### 4-1) 안티패턴 (이 spec 이전, 사실상의 기록)
+사용자 메시지를 nmae(`mobruji` session) 에 직접 send-keys 로 보냈음. nmae 가 작업 중이면 응답이 끊겨 사용자 깜깜이.
+
+### 4-2) 현재 구현 (이슈 #807 단순화본)
+실 `tools/discord-daemon/bot.py` 는 단일 `TMUX_SESSION_NAME` env 로 routing 한다. 본 런북의 helper 분리 모델에 맞춰 운영 시 `TMUX_SESSION_NAME=helper` 로 지정하면 사용자 메시지가 helper pane 으로 들어간다.
+
 ```python
-# 사용자 메시지 → nmae tmux send-keys
-TMUX_SESSION = "mobruji"
-tmux_send(TMUX_SESSION, user_msg)
+# bot.py (요지 — 실 코드는 tools/discord-daemon/bot.py 참조)
+env["TMUX_SESSION_NAME"] = os.environ.get("TMUX_SESSION_NAME", "helper")
+env["TMUX_TARGET_PANE"]  = os.environ.get("TMUX_TARGET_PANE", "helper:0.0")
+
+# 사용자 메시지 → 단일 tmux pane 으로 단순 fan-out (분기 없음)
+tmux_send_payload(env["TMUX_TARGET_PANE"], user_msg)
 ```
 
-### 4-2) 신 routing (helper 우선)
-```python
-# 사용자 메시지 → helper tmux send-keys
-USER_TARGET_TMUX = os.environ.get("USER_TARGET_TMUX", "helper")  # helper 또는 nmae fallback
-tmux_send(USER_TARGET_TMUX, user_msg)
+- helper 응답은 helper 측에서 별도 스크립트 `~/.mobruji/discord-reply.sh "<msg>"` 로 Discord REST API 에 직접 push (bot.py 안에 응답 watcher 없음). spec: [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md), 룰 요지: [`CLAUDE.md` §11-pre](../../CLAUDE.md).
+- nmae digest 보고는 bot.py 의 cycle-status.json digest cron 이 `~/.mobruji/cycle-status.json` 을 polling 해서 `NOTIFY_CHANNEL_ID` 채널에 push (helper/maestro 가 status JSON 을 갱신).
+- 본 spec 의 §4-2/§4-3 옛 의사 코드 (`USER_TARGET_TMUX`, `pipe-pane` 분기, `DIGEST_CHANNEL_ID` 별 채널 watcher) 는 **현재 구현되지 않은 미래 모델**이며, 이슈 #807 단순화로 의도적으로 폐기됐다. 향후 다시 도입 시 본 런북을 갱신한다 (spec status: `implementing`).
 
-# helper stdout pipe-pane → Discord raw push (ANSI strip)
-helper_pipe_pane(USER_TARGET_TMUX, "/tmp/helper-pane.log")
-watch_and_push(log_file="/tmp/helper-pane.log", channel_id=MAIN_CHANNEL_ID)
+### 4-3) `.env` 키 (실 운영)
+실제 bot.py 가 읽는 env 는 다음과 같다 (`bot.py` build_env 참조):
 
-# nmae stdout pipe-pane → Discord digest 채널 (옵션)
-nmae_pipe_pane("mobruji", "/tmp/nmae-pane.log")
-watch_and_push_digest(log_file="/tmp/nmae-pane.log", channel_id=DIGEST_CHANNEL_ID)
-```
+| 키 | 필수 | 비고 |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | 필수 | Discord Developer Portal |
+| `ALLOWED_USER_IDS` | 필수 | 콤마 구분 user id 화이트리스트 |
+| `MOBRUJI_CHANNEL_ID` | 필수 | 사용자 양방향 채널 (#모부르지) |
+| `TMUX_SESSION_NAME` | 옵션 (기본 `helper`) | 사용자 메시지 routing 대상 세션 |
+| `TMUX_TARGET_PANE`  | 옵션 (기본 `helper:0.0`) | tmux send-keys target |
+| `CLAUDE_BIN`        | 옵션 (기본 `claude`)    | tmux 세션 부트 시 실행 명령 |
+| `NOTIFY_CHANNEL_ID` | 옵션 (기본 = `MOBRUJI_CHANNEL_ID`) | digest cron 전용 채널 |
+| `DIGEST_ENABLED`    | 옵션 (기본 `1`) | cycle-status digest cron on/off |
+| `CYCLE_STATUS_PATH` | 옵션 (기본 `~/.mobruji/cycle-status.json`) | digest 입력 JSON |
+| `DEDUP_LEDGER_PATH` | 옵션 | SQLite dedup ledger |
+| `GITHUB_PAT` / `GITHUB_REPO` | 옵션 | repository_dispatch fallback |
 
-### 4-3) `.env` 추가
-```
-USER_TARGET_TMUX=helper
-HELPER_PIPE_PANE_PATH=/tmp/helper-pane.log
-NMAE_PIPE_PANE_PATH=/tmp/nmae-pane.log
-DIGEST_CHANNEL_ID=<별 채널 ID, 옵션>
-```
+옛 spec 의 `USER_TARGET_TMUX`, `HELPER_PIPE_PANE_PATH`, `NMAE_PIPE_PANE_PATH`, `DIGEST_CHANNEL_ID` 는 현재 bot.py 가 인식하지 않는다. helper/nmae 채널 분리는 `NOTIFY_CHANNEL_ID` (digest 전용) 와 `MOBRUJI_CHANNEL_ID` (사용자 양방향) 로 갈음한다.
 
 ## 5) 검증 시나리오
 
 ### 5-1) 사용자 query → helper 즉시 답
 1. 사용자가 Discord에 "지금 뭐 하고 있어?" 보냄
-2. bot.py 1초 안 auto-ack: "📥 받음, helper 처리 중"
-3. helper가 tmux capture-pane으로 nmae 상태 + `gh pr list` 수집
-4. helper가 정중체 응답: "현재 PR #XXX 머지 중이고, sub-agent 4개 가동 중입니다..."
-5. bot.py가 helper stdout pipe-pane 캡처 → Discord raw push (10~30초 안)
+2. bot.py 1초 안 auto-ack: "📥 받음 — helper 작업 중 (구체 ack 곧 도착)" (`BOT_AUTO_ACK_TEXT`)
+3. bot.py 가 helper pane(`TMUX_TARGET_PANE`) 에 send-keys 로 메시지 inject
+4. helper 가 tmux capture-pane 으로 nmae 상태 + `gh pr list` 수집 후 정중체 응답
+5. helper 가 `bash ~/.mobruji/discord-reply.sh "<응답 본문>"` 호출로 Discord 채널에 직접 push (10~30 초 안)
 
 ### 5-2) helper가 nmae에 위임
 1. 사용자가 Discord에 "release v0.4.0 진행해" 보냄
@@ -187,7 +210,10 @@ DIGEST_CHANNEL_ID=<별 채널 ID, 옵션>
 
 ### 6-4) helper가 답을 안 함 (idle)
 - 원인: helper context 한계 (~95% used) 또는 stall
-- fix: tmux send-keys "/clear" Enter (단 핸드오프 메모리 먼저 갱신) 또는 systemctl restart mobruji-helper
+- fix:
+  1. **systemd unit 적용 호스트**: `sudo systemctl restart mobruji-helper`
+  2. **ad-hoc 가동 호스트 (현재 운영 모드)**: `tmux kill-session -t helper` → §3-3 절차로 helper 재기동
+  3. context 한계만의 문제면 `tmux send-keys -t helper:0.0 "/clear" Enter` (단 핸드오프 메모리 먼저 갱신)
 
 ### 6-5) nmae 작업과 helper 작업이 같은 워크트리에서 충돌
 - 원인: helper가 git 작업하면 nmae sub-agent와 같은 워크트리 점유
@@ -202,8 +228,8 @@ DIGEST_CHANNEL_ID=<별 채널 ID, 옵션>
 - [ ] mobruji repo clone + 워크트리 4개 (be/fe/rev/plan)
 - [ ] nmae credentials (.credentials.json) — OAuth 1회 또는 기존 NCP에서 scp
 - [ ] helper credentials 복사 (multi-device 또는 별 OAuth)
-- [ ] bot.py 환경 변수 셋업 (.env): `DISCORD_BOT_TOKEN`, `GITHUB_PAT`, `USER_TARGET_TMUX=helper`, `MOBRUJI_CHANNEL_ID`, (옵션) `DIGEST_CHANNEL_ID`
-- [ ] systemd unit 2개 (`mobruji-maestro.service`, `mobruji-helper.service`, `mobruji-discord-bridge.service`)
+- [ ] bot.py 환경 변수 셋업 (.env, §4-3 표 참조): 필수 — `DISCORD_BOT_TOKEN`, `ALLOWED_USER_IDS`, `MOBRUJI_CHANNEL_ID`. 권장 — `TMUX_SESSION_NAME=helper`, `TMUX_TARGET_PANE=helper:0.0`, `NOTIFY_CHANNEL_ID=<digest 별 채널>`
+- [ ] systemd unit — 현재 적용 2개 (`mobruji-maestro.service`, `mobruji-discord-bridge.service`). helper 자동 가동을 원하면 `mobruji-helper.service` 추가 (§3-4 보호 영역, 사람 사후 리뷰). 미적용 시 §3-4 대안 절차로 ad-hoc 가동.
 - [ ] 디스크 확장 (Phase 4 dev container 가동 시 추가 필요)
 - [ ] GitHub Secrets 3건 (`NCP_SSH_HOST`, `NCP_SSH_USER`, `NCP_SSH_KEY`) — CD workflow용
 - [ ] Discord bot 권한 (메시지 읽기/쓰기, 이 채널 추가)
