@@ -23,12 +23,13 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { type MouseEvent, useEffect, useState } from "react";
+import { type MouseEvent, useCallback, useState } from "react";
 
 import {
   toggleBookmark as toggleBookmarkApi,
   toggleLike as toggleLikeApi,
 } from "@/lib/api/feedback";
+import { useAutoDismiss } from "@/hooks/useAutoDismiss";
 import { safeLog } from "@/lib/logging";
 import type {
   RecommendedSongResponse,
@@ -425,17 +426,9 @@ function DetailLikeButton({ songId, songTitle }: DetailFeedbackButtonProps) {
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!errorMessage) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      setErrorMessage(null);
-    }, INTERACTION_FEEDBACK_DURATION_MS);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [errorMessage]);
+  // 3초 뒤 자동 dismiss — 공용 hook 통합 (#295 항목 1).
+  const clearError = useCallback(() => setErrorMessage(null), []);
+  useAutoDismiss(clearError, INTERACTION_FEEDBACK_DURATION_MS, errorMessage !== null);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -510,17 +503,9 @@ function DetailBookmarkButton({ songId, songTitle }: DetailFeedbackButtonProps) 
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!errorMessage) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      setErrorMessage(null);
-    }, INTERACTION_FEEDBACK_DURATION_MS);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [errorMessage]);
+  // 3초 뒤 자동 dismiss — 공용 hook 통합 (#295 항목 1).
+  const clearError = useCallback(() => setErrorMessage(null), []);
+  useAutoDismiss(clearError, INTERACTION_FEEDBACK_DURATION_MS, errorMessage !== null);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
