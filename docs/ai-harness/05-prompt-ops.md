@@ -13,7 +13,7 @@
 ```markdown
 ---
 purpose: 무엇을 만드는 프롬프트인가
-scope: user|song|recommendation|voice|infra|web  (PR scope 화이트리스트와 동일)
+scope: user|song|recommendation|voice|infra|web|feedback  (PR scope 화이트리스트와 동일)
 owner: 담당자 GitHub 핸들
 last_reviewed: YYYY-MM-DD
 ---

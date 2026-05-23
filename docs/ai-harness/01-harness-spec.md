@@ -8,7 +8,7 @@
 
 - 기본 단위: 이슈 1건 = 브랜치 1개 = PR 1개
 - 브랜치 이름 형식: `<type>/<요약>-#<이슈번호>` (예: `feature/voice-range-input-#12`)
-- 파생 브랜치 타입: `feature`, `refactor`, `chore`, `fix` (base: `develop`)
+- 파생 브랜치 타입(type 화이트리스트, 8종): `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `release` (base: `develop`. `release`는 `release-prompt-template`로 자동 생성되는 develop→main 머지 PR 전용)
 
 ## 3) 입력 계약 (AI 작업 요청 시)
 
@@ -36,9 +36,9 @@
 - 아래 경로를 AI가 변경한 PR은 사람이 1줄 이상 코멘트로 검토 의견을 남긴 뒤에만 머지한다.
 - DB 마이그레이션: `**/db/migration/**`, `**/resources/db/**`
 - 시크릿/환경 설정: `**/application*.yml`, `**/application*.properties`, `.env*`
-- CI/CD 워크플로우: `.github/workflows/**`
+- CI/CD 워크플로우: `.github/workflows/**`, `.github/CODEOWNERS`
 - Backend 빌드 스크립트: `backend/build.gradle*`, `backend/settings.gradle*`, `backend/gradle/**`
-- Web 빌드/설정: `web/next.config.*`, `web/package.json`, `web/*-lock.*`
+- Web 빌드/설정: `web/next.config.*`, `web/package.json`, `web/pnpm-lock.yaml`, `web/package-lock.json`
 - 인프라: `Dockerfile`, `docker-compose*.yml`
 - 라이선스: `LICENSE`
 - AI 단독으로 위 파일을 신규 생성/삭제하는 PR은 원칙적으로 분할하거나 사람이 직접 작성한다.

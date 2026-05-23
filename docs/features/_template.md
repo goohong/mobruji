@@ -3,7 +3,7 @@ feature: <기능 이름>
 slug: <파일명과 동일>
 status: draft
 owner: @<github-handle>
-scope: <user|song|recommendation|voice|infra|web>
+scope: <user|song|recommendation|voice|infra|web|feedback>
 related_issues: []
 related_prs: []
 last_reviewed: YYYY-MM-DD
