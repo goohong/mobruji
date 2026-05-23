@@ -12,16 +12,18 @@ import com.mobruji.song.domain.MetadataSource;
  * <p>spec rev 14 후속(#208/#212): SongAudioBackfill 운영 가시성. metadataSource 분포와 평균 confidence,
  * 마지막 backfill 시각을 노출한다.
  *
- * @param total            전체 곡 수
- * @param byMetadataSource {@link MetadataSource} 별 곡 수 — 0 건인 source 도 enum 전체에 대해 0 으로 채운다
- * @param avgConfidence    평균 metadataConfidence (0.0~1.0). 곡 0 건이면 {@code 0.0}
- * @param lastBackfillAt   마지막 backfill batch 완료 시각 — 미실행/재기동 후 미실행 시 {@code null}
+ * @param total                    전체 곡 수
+ * @param byMetadataSource         {@link MetadataSource} 별 곡 수 — 0 건인 source 도 enum 전체에 대해 0 으로 채운다
+ * @param avgConfidence            평균 metadataConfidence (0.0~1.0). 곡 0 건이면 {@code 0.0}
+ * @param lastBackfillAt           마지막 audio backfill batch 완료 시각 — 미실행/재기동 후 미실행 시 {@code null}
+ * @param lastAlbumCoverBackfillAt 마지막 album cover backfill batch 완료 시각 — 미실행/재기동 후 미실행 시 {@code null} (이슈 #863)
  */
 public record SongStatsResponse(
         long total,
         Map<MetadataSource, Long> byMetadataSource,
         double avgConfidence,
-        Instant lastBackfillAt
+        Instant lastBackfillAt,
+        Instant lastAlbumCoverBackfillAt
 ) {
 
     public static SongStatsResponse from(final SongStats stats) {
@@ -29,6 +31,7 @@ public record SongStatsResponse(
                 stats.total(),
                 stats.byMetadataSource(),
                 stats.avgConfidence(),
-                stats.lastBackfillAt());
+                stats.lastBackfillAt(),
+                stats.lastAlbumCoverBackfillAt());
     }
 }

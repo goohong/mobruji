@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+import com.mobruji.song.application.albumcover.AlbumCoverBackfillCommand;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.infrastructure.SongRepository;
 import com.mobruji.song.infrastructure.SongRepository.MetadataSourceCount;
@@ -41,6 +42,7 @@ public class SongStatsService {
                 total,
                 byMetadataSource,
                 avgConfidence,
-                SongAudioBackfillCommand.getLastBackfillCompletedAt());
+                SongAudioBackfillCommand.getLastBackfillCompletedAt(),
+                AlbumCoverBackfillCommand.getLastBackfillCompletedAt());
     }
 }

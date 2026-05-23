@@ -9,6 +9,15 @@ spring:
     properties:
       hibernate:
         format_sql: false
+  # @Scheduled 전용 thread pool 크기 (이슈 #863).
+  # default(1) 일 경우 AudioAnalysisScheduledBackfill (cron 4:00 SUN) 과
+  # AlbumCoverScheduledBackfill (cron 4:30 SUN) 이 동일 스레드를 공유 — AudioAnalysisRunner
+  # 곡당 60s timeout 이라 1k 곡 시 최악 60분 blocking, AlbumCover scheduled 시각 침범 위험.
+  # size: 2 로 분리해 starvation 회피. 향후 @Scheduled 추가 시 재평가.
+  task:
+    scheduling:
+      pool:
+        size: 2
 
 # Admin endpoint 보호용 임시 토큰 (v0.3 P0, #224 #228).
 # 평문 yml 금지 — 환경변수 MOBRUJI_ADMIN_TOKEN 로 주입.
