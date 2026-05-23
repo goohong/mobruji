@@ -31,6 +31,23 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 - maestro default = 메타 (spec/ADR/메모리/orchestration/Discord 답). 코드/테스트/문서 본문 작성은 sub-agent 위임 default.
 - sub-agent 본인은 maestro 룰을 직접 적용할 일은 없지만, 완료 보고 시 "다음 사이클 후보" 제시로 maestro launch loop 를 돕는다 (§4 보고 양식).
 
+#### nmae watchdog inject 대응 의무 절차 (#972, 2026-05-24 박제)
+
+`bot.py:cycle_idle_watch_loop` 가 5분 polling 으로 idle 발견 → tmux pane (`mobruji:0.0`) 에 `[watchdog ...] cycle-status.json idle 발견 — <ws>. ...` inject. nmae 본진(maestro) 이 inject 받으면 **다음 turn 시작 즉시** 아래 4단계 순서 그대로 수행. 한 단계라도 누락 시 다음 5분 polling 에서 또 inject — **무한 idle inject loop** (이전 사고: #970 직전 fe 워크트리 1시간 idle inject 6회 연속, in_progress NULL 유지).
+
+| 단계 | 명령 | 의미 |
+|---|---|---|
+| 1 | 백로그 후보 1개 선정 (이슈 / PR follow-up / docs drift) | 위반 시: 그냥 inject 무시 = 무한 loop |
+| 2 | `bash /home/mobruji/mobruji/tools/cycle-status/update.sh <ws> set-active --title "<선정 후보 한 줄>"` | cycle-status.json `in_progress` 채워 다음 polling 에서 idle 분류 탈출 |
+| 3 | `Agent` tool 로 sub-agent launch (worktree=`/home/mobruji/mobruji-<ws>`) | 실제 작업 위임. prompt 첫 줄 §1 워크트리 격리 규약 |
+| 4 | `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <선정 후보>"` | 사용자 가시성 + cycle-status.json digest 업데이트 |
+
+##### escalation 임계
+같은 워크트리 inject **3회 연속** 후에도 in_progress 가 NULL 이면 `bot.py` 가 MOBRUJI_CHANNEL_ID (사용자 채널) 에 `🚨 nmae 무응답 — <ws> 워크트리 watchdog inject 3회 연속 후 in_progress 여전히 NULL. nmae 룰 위반 — 사용자 확인 필요` 직접 push (debounce 1h). 이 알림이 뜨면 nmae 룰 위반 입증된 상태 — 사용자 개입 신호.
+
+##### sub-agent 입장
+본 절은 maestro(nmae) 룰. sub-agent 본인은 직접 따를 일은 없으나, 자기 완료 보고 시 "다음 사이클 후보 N개" 를 §4 양식대로 제시해 maestro 가 1초 안에 단계 1 후보를 선정할 수 있게 돕는다 — 이게 idle loop 차단의 1차 방어선.
+
 ### 워크트리 lock (한 워크트리 = 동시 1 sub-agent)
 - maestro는 한 워크트리에 동시 1 sub-agent 만 launch ([[feedback-worktree-lock]]). 같은 도메인 사이클 동시 launch 시 git stash/checkout 충돌로 in-progress 변경 유실 위험.
 - sub-agent 본인은 자기 워크트리의 git state 를 다른 sub-agent 가 만지지 않는다고 가정 가능. 단 maestro가 룰을 어겨 동시 launch 한 경우, `git status` 가 예상과 다르면 즉시 maestro에 보고 후 중단.
@@ -47,6 +64,12 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 ### 메모리 보호
 - `~/.claude/projects/*/memory/` 디렉토리 **쓰기 금지**.
 - 메모리 갱신은 maestro만 담당 (race 회피, `11-multi-session-runbook.md §1-2`).
+
+### cycle-status.json 보호
+- `~/.mobruji/cycle-status.json` **수동 편집 금지**. nmae 가 `tools/cycle-status/update.sh` 헬퍼로만 갱신 (atomic write + 스키마 안전성).
+- sub-agent 가 cycle-status 를 직접 수정해야 할 일은 거의 없음. 필요 시 maestro 에 보고만.
+- 4 워크트리 상태 source-of-truth — 손상 시 watchdog idle 분류 오작동 + Discord digest 깨짐.
+- 상세: `tools/cycle-status/README.md`, `docs/features/nmae-cycle-watchdog.md`, `11-runbook §0-11`.
 
 ### hook 우회 금지
 - `git push --no-verify`, `git commit --no-verify`, `--no-gpg-sign` 등으로 hook을 우회하지 마.
@@ -403,8 +426,7 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
 - 2026-05-23 — fe 역할에 의존성 설치 금지 룰 + `node_modules` symlink 보존 룰 추가. 사고: sub-agent `npm install --no-save` 실행으로 외부 디스크 symlink 풀림 (이슈 #187).
 - 2026-05-23 — NCP Linux 워크트리 절대경로 박제 (`/home/mobruji/...`) + §1 maestro 항시 가동 / 워크트리 lock / 5분 reasoning 룰 박스 / fe `npm install` 1회 룰 / §4 sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢) / §5 안티패턴 매트릭스 신설 (이슈 #405, PR TBD). 메모리 [[feedback-keep-4-cycles-active]] [[feedback-worktree-lock]] [[feedback-reasoning-chunk-limit]] [[feedback-sub-agent-launch-mandatory]] 영속화.
-<<<<<<< HEAD
 - 2026-05-24 — rev §E-2 추가: 3단계 e2e 절차 명문화 (단계 1 코멘트 + 라벨 의무 / 단계 2 develop 사후 검사 / 단계 3 release production 검증) + 라벨 reference 표 (`rev-post-merge-pass`, `rev-prod-pass`, `regression:dev|prod`). 트리거: helper 자율 머지가 rev 우회한 사고 → `.github/workflows/rev-gate.yml` 신설로 머지 차단 강제 (이슈 #945).
-=======
 - 2026-05-24 — rev §E-3 추가: 매 사이클 첫 액션으로 `tools/rev-queue/rev-queue.sh all` 호출 의무 (discovery 단계). §E-2 절차의 prelude — 큐 출력 → §E-2 절차 적용 → 라벨 → 다음 호출에서 자동 제외. 메모리/룰 학습 의존 X — GitHub 라벨 + 스크립트가 single source of truth (이슈 #952). 메모리 [[feedback-rev-queue-script]] 영속화.
->>>>>>> 469c6ba (feat(infra): rev 큐 스크립트 신설 — tools/rev-queue/rev-queue.sh stage1/2/3 (#952))
+- 2026-05-24 — §1 nmae watchdog inject 대응 의무 절차 추가: inject 받으면 (1) 백로그 선정 → (2) `update.sh set-active` → (3) Agent launch → (4) Discord push 4단계 순서 명문화. escalation 임계 명시 (3회 연속 inject + in_progress NULL → MOBRUJI_CHANNEL_ID 사용자 직접 push). 트리거: watchdog detect 정상이나 nmae 가 inject 받고 행동 안 함 → 무한 idle inject loop (이슈 #972).
+- 2026-05-24 — §1 cycle-status.json 보호 절 추가: sub-agent 가 `~/.mobruji/cycle-status.json` 직접 수정 금지, `tools/cycle-status/update.sh` 헬퍼 경유. 4-way 룰 sync audit (#973) 발견 — 기존엔 nmae 만 인지, sub-agent prompt 룰에 부재.
