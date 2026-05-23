@@ -1,0 +1,429 @@
+"""cycle_idle_watch_loop 단위 테스트 (#941).
+
+spec: docs/features/nmae-cycle-watchdog.md.
+
+검증 범위:
+1. `resolve_cycle_targets` — CSV / None / 공백 / 중복 (4건).
+2. `parse_cycle_status` — 정상 / null 본문 / 파일 부재 / malformed JSON (4건).
+3. `detect_idle_worktrees` — 모두 idle / 일부 idle / 모두 active / in_progress dict (4건).
+4. `cycle_idle_watch_loop` (asyncio mock) — idle → inject+push / debounce /
+   tmux 부재 graceful / parse fail graceful / threshold 0 disabled (5건).
+
+총 17건.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest import mock
+
+PARENT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PARENT_DIR))
+
+# discord — 실제 모듈 우선 (embed 호환), 없으면 stub.
+try:
+    import discord as _real_discord  # noqa: F401
+except ImportError:
+    sys.modules["discord"] = mock.MagicMock()
+
+for missing in ("requests", "dotenv"):
+    if missing not in sys.modules:
+        stub = mock.MagicMock()
+        if missing == "dotenv":
+            stub.load_dotenv = lambda *a, **kw: None
+        sys.modules[missing] = stub
+
+import bot  # noqa: E402
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1) resolve_cycle_targets — 4건
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ResolveCycleTargetsTest(unittest.TestCase):
+
+    def test_none_returns_default_four(self) -> None:
+        self.assertEqual(
+            bot.resolve_cycle_targets(None), ["be", "fe", "rev", "plan"]
+        )
+
+    def test_csv_with_whitespace_trimmed(self) -> None:
+        self.assertEqual(
+            bot.resolve_cycle_targets("be , fe , rev , plan"),
+            ["be", "fe", "rev", "plan"],
+        )
+
+    def test_empty_tokens_ignored(self) -> None:
+        self.assertEqual(
+            bot.resolve_cycle_targets("be,,fe,"),
+            ["be", "fe"],
+        )
+
+    def test_duplicates_removed_preserving_order(self) -> None:
+        self.assertEqual(
+            bot.resolve_cycle_targets("fe,be,fe,plan"),
+            ["fe", "be", "plan"],
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2) parse_cycle_status — 4건
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ParseCycleStatusTest(unittest.TestCase):
+
+    def test_valid_json_returns_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "cycle.json"
+            payload = {"be": {"in_progress": None, "last_completed": None}}
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            result = bot.parse_cycle_status(str(path))
+            self.assertEqual(result, payload)
+
+    def test_explicit_null_returns_none(self) -> None:
+        # JSON 본문이 "null" 이면 json.load 가 None 반환 — 호출부에서 status None
+        # 으로 받아 graceful skip.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "cycle.json"
+            path.write_text("null", encoding="utf-8")
+            self.assertIsNone(bot.parse_cycle_status(str(path)))
+
+    def test_missing_file_returns_none(self) -> None:
+        self.assertIsNone(bot.parse_cycle_status("/nonexistent/path.json"))
+
+    def test_malformed_json_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "cycle.json"
+            path.write_text("{not valid json", encoding="utf-8")
+            self.assertIsNone(bot.parse_cycle_status(str(path)))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3) detect_idle_worktrees — 4건
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DetectIdleWorktreesTest(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _make_entry(self, in_progress, minutes_ago: int | None) -> dict:
+        last_completed = None
+        if minutes_ago is not None:
+            ts = self.now - timedelta(minutes=minutes_ago)
+            last_completed = {
+                "pr": "#000",
+                "title": "test title",
+                "completed_at": ts.isoformat().replace("+00:00", "Z"),
+            }
+        return {"in_progress": in_progress, "last_completed": last_completed}
+
+    def test_all_idle_returns_all_four(self) -> None:
+        status = {
+            "be": self._make_entry(None, minutes_ago=30),
+            "fe": self._make_entry(None, minutes_ago=20),
+            "rev": self._make_entry(None, minutes_ago=15),
+            "plan": self._make_entry(None, minutes_ago=999),
+        }
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now
+        )
+        self.assertEqual(
+            sorted(e["workspace"] for e in idle),
+            ["be", "fe", "plan", "rev"],
+        )
+
+    def test_partial_idle_skips_recent(self) -> None:
+        # be idle (30분 전), fe 최근 완료 (5분 전 < threshold 10), rev/plan active.
+        status = {
+            "be": self._make_entry(None, minutes_ago=30),
+            "fe": self._make_entry(None, minutes_ago=5),
+            "rev": self._make_entry({"target": "PR #1", "title": "audit"}, None),
+            "plan": self._make_entry("작업 중", None),
+        }
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now
+        )
+        self.assertEqual([e["workspace"] for e in idle], ["be"])
+
+    def test_all_active_returns_empty(self) -> None:
+        status = {
+            "be": self._make_entry({"issue": "#1", "title": "feat"}, None),
+            "fe": self._make_entry({"issue": "#2", "title": "fix"}, None),
+            "rev": self._make_entry({"target": "PR #3", "title": "audit"}, None),
+            "plan": self._make_entry({"issue": "#4", "title": "docs"}, None),
+        }
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now
+        )
+        self.assertEqual(idle, [])
+
+    def test_in_progress_dict_active_recognized(self) -> None:
+        # in_progress dict 인 동안엔 last_completed.completed_at 시각과 무관하게
+        # active 로 인정 (현행 nmae 스키마).
+        status = {
+            "be": self._make_entry({"issue": "#1", "title": "feat"}, minutes_ago=999),
+            "fe": self._make_entry(None, minutes_ago=999),
+        }
+        idle = bot.detect_idle_worktrees(
+            status,
+            threshold_minutes=10,
+            now=self.now,
+            workspaces=["be", "fe"],
+        )
+        self.assertEqual([e["workspace"] for e in idle], ["fe"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4) cycle_idle_watch_loop — 5건 (asyncio mock)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class FakeChannel:
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def send(self, content=None, embed=None) -> None:
+        if content is not None:
+            self.sent.append(content)
+
+
+class FakeClient:
+    def __init__(self, channel: FakeChannel | None) -> None:
+        self._channel = channel
+
+    def get_channel(self, channel_id: int):
+        return self._channel
+
+
+async def _run_loop_iters(loop_coro, iterations: int) -> None:
+    """loop coroutine 을 task 로 띄우고 iterations 만큼 양보 후 cancel."""
+    task = asyncio.create_task(loop_coro)
+    for _ in range(iterations):
+        await asyncio.sleep(0)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
+
+    def _write_status(self, dir_path: Path, payload: dict) -> Path:
+        path = dir_path / "cycle.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    async def test_idle_triggers_tmux_inject_and_discord_push(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                },
+                "fe": {
+                    "in_progress": {"issue": "#1", "title": "active"},
+                    "last_completed": None,
+                },
+                "rev": {
+                    "in_progress": {"target": "X", "title": "y"},
+                    "last_completed": None,
+                },
+                "plan": {
+                    "in_progress": {"issue": "#2", "title": "doc"},
+                    "last_completed": None,
+                },
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            self.assertGreaterEqual(inject.call_count, 1)
+            inject_args = inject.call_args_list[0].args
+            self.assertEqual(inject_args[0], "mobruji:0.0")
+            self.assertIn("watchdog", inject_args[1])
+            self.assertIn("be", inject_args[1])
+            self.assertTrue(any("nmae watchdog" in m for m in channel.sent))
+            self.assertTrue(any("be" in m for m in channel.sent))
+
+    async def test_debounce_prevents_repeat_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                },
+                "fe": {
+                    "in_progress": {"issue": "#1", "title": "active"},
+                    "last_completed": None,
+                },
+                "rev": {
+                    "in_progress": {"target": "X", "title": "y"},
+                    "last_completed": None,
+                },
+                "plan": {
+                    "in_progress": {"issue": "#2", "title": "doc"},
+                    "last_completed": None,
+                },
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+            # monotonic 시각이 진행 안 함 → debounce 영구 활성.
+            fake_mono = [1000.0]
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    time_source=lambda: fake_mono[0],
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=15)
+
+            # 여러 iter 돌았어도 inject 는 정확히 1번 (debounce 활성).
+            self.assertEqual(inject.call_count, 1)
+
+    async def test_tmux_session_absent_graceful_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=False), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            # tmux session 부재 → inject 호출 0, Discord push 0.
+            inject.assert_not_called()
+            self.assertEqual(channel.sent, [])
+
+    async def test_parse_failure_graceful_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            broken = Path(tmp_dir) / "cycle.json"
+            broken.write_text("{broken json", encoding="utf-8")
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(broken),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    now_provider=lambda: datetime(2026, 5, 24, tzinfo=timezone.utc),
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            # parse fail → 조용히 skip (raise 없음, inject/push 없음).
+            inject.assert_not_called()
+            self.assertEqual(channel.sent, [])
+
+    async def test_threshold_zero_disables_loop(self) -> None:
+        """threshold_minutes <= 0 → 즉시 return (테스트 용 disable 경로)."""
+        channel = FakeChannel()
+        client = FakeClient(channel)
+
+        with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+             mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+            # 짧게 await — return 즉시 끝나야 함.
+            await asyncio.wait_for(
+                bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path="/tmp/none.json",
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=0,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                ),
+                timeout=1.0,
+            )
+
+        inject.assert_not_called()
+        self.assertEqual(channel.sent, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

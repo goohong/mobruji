@@ -496,5 +496,220 @@ class DiscordReplyScriptModeDispatchTests(unittest.TestCase):
                 Path(env_path).unlink(missing_ok=True)
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #946: bot.py last-user-msg-id.txt write — write_last_user_msg_id
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class WriteLastUserMsgIdTests(unittest.TestCase):
+    """`write_last_user_msg_id` atomic file write 검증 (#946).
+
+    bot.py 가 on_message 시 사용자 message_id 를 캐시 파일에 기록 →
+    discord-reply.sh bare body 모드가 읽어 자동 reply payload 빌드.
+    """
+
+    def test_writes_message_id_to_path(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("1234567890123456789")
+            self.assertTrue(target.exists())
+            self.assertEqual(
+                target.read_text(encoding="utf-8"), "1234567890123456789"
+            )
+
+    def test_overwrites_existing_value_atomically(self) -> None:
+        # 두 번째 호출이 첫 값을 완전히 대체. mktemp + replace 패턴이므로
+        # 부분 파일이 절대 남지 않음.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last-user-msg-id.txt"
+            with mock.patch.object(bot, "LAST_USER_MSG_ID_PATH", target):
+                bot.write_last_user_msg_id("111")
+                bot.write_last_user_msg_id("222")
+            self.assertEqual(target.read_text(encoding="utf-8"), "222")
+            # 임시 파일 (`.last-user-msg-id-XXXXXX`) 잔재 없음.
+            leftover = [
+                p for p in Path(tmpdir).iterdir()
+                if p.name.startswith(".last-user-msg-id-")
+            ]
+            self.assertEqual(leftover, [], f"임시 파일 잔재: {leftover}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #946: discord-reply.sh reply mode → message_reference payload
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DiscordReplyMessageReferenceTests(unittest.TestCase):
+    """본답 모드가 `~/.mobruji/last-user-msg-id.txt` 를 읽어 Discord REST
+    payload 에 `message_reference` 를 포함시키는지 검증 (#946).
+
+    fake curl 로 payload 캡처 → JSON 파싱.
+    """
+
+    SCRIPT_PATH = (
+        Path(__file__).resolve().parent.parent / "discord-reply.sh"
+    )
+
+    def _make_fake_curl(self, tmpdir: str, capture_path: str) -> Path:
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  if [[ \"$1\" == \"-d\" ]]; then\n"
+            "    shift\n"
+            "    PAYLOAD=\"$1\"\n"
+            "  fi\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$PAYLOAD\" >> {capture_path}\n"
+            "printf '{\"id\": \"99999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+        return fake_curl
+
+    def _run_reply_test(
+        self,
+        *args: str,
+        last_id_content: str | None,
+    ):
+        """tmpdir 안에서 fake curl + env + last-user-msg-id 파일 setup → 실행.
+
+        Returns (CompletedProcess, captured_payloads_path, tmpdir_path).
+        호출부가 tmpdir 정리 책임 (또는 그냥 ephemeral 로 둠).
+        """
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        capture_path = str(Path(tmpdir) / "payloads.txt")
+        self._make_fake_curl(tmpdir, capture_path)
+
+        env_path = Path(tmpdir) / "test.env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=stub\n"
+            "MOBRUJI_CHANNEL_ID=42\n"
+            "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n",
+            encoding="utf-8",
+        )
+
+        last_id_path = Path(tmpdir) / "last-user-msg-id.txt"
+        if last_id_content is not None:
+            last_id_path.write_text(last_id_content, encoding="utf-8")
+
+        new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+        run_env = os.environ.copy()
+        run_env.update({
+            "DISCORD_DAEMON_ENV_PATH": str(env_path),
+            "PATH": new_path,
+            "LAST_USER_MSG_ID_FILE": str(last_id_path),
+        })
+        result = subprocess.run(
+            ["bash", str(self.SCRIPT_PATH), *args],
+            capture_output=True,
+            text=True,
+            env=run_env,
+            timeout=5,
+        )
+        return result, capture_path, tmpdir
+
+    def _parse_first_payload(self, captured: str) -> dict:
+        import json
+        line = captured.splitlines()[0]
+        return json.loads(line)
+
+    def test_reply_mode_includes_message_reference_when_last_id_present(self) -> None:
+        """본답 + last-user-msg-id 존재 → payload 에 message_reference 포함."""
+        result, capture_path, _ = self._run_reply_test(
+            "hello body",
+            last_id_content="9876543210987654321\n",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertIn("message_reference", payload)
+        ref = payload["message_reference"]
+        self.assertEqual(ref["message_id"], "9876543210987654321")
+        self.assertEqual(ref["channel_id"], "42")
+        self.assertFalse(ref["fail_if_not_exists"])
+        # ZWSP+\n leading prepend (#921) 도 그대로 유지.
+        self.assertIn("hello body", payload["content"])
+        self.assertTrue(
+            payload["content"].startswith("​\n"),
+            f"ZWSP+\\n prefix 누락: {payload['content']!r}",
+        )
+
+    def test_reply_mode_no_reference_when_file_absent(self) -> None:
+        """last-user-msg-id 파일 없음 → standalone (message_reference 누락)."""
+        result, capture_path, _ = self._run_reply_test(
+            "standalone body",
+            last_id_content=None,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+        self.assertIn("standalone body", payload["content"])
+
+    def test_reply_mode_no_reference_when_file_empty(self) -> None:
+        """파일 빈 값 → graceful standalone (parse 실패 무시)."""
+        result, capture_path, _ = self._run_reply_test(
+            "body",
+            last_id_content="",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+
+    def test_reply_mode_no_reference_when_file_non_numeric(self) -> None:
+        """파일 비숫자 값 → graceful standalone (snowflake 형식 가드)."""
+        result, capture_path, _ = self._run_reply_test(
+            "body",
+            last_id_content="not-a-snowflake",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+
+    def test_reply_mode_no_reply_flag_disables_reference(self) -> None:
+        """--no-reply flag 면 파일 있어도 standalone."""
+        result, capture_path, _ = self._run_reply_test(
+            "--no-reply",
+            "body",
+            last_id_content="12345",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+        self.assertIn("body", payload["content"])
+
+    def test_ack_mode_does_not_include_message_reference(self) -> None:
+        """ack 모드는 last-user-msg-id 있어도 message_reference 미적용 (회귀 가드)."""
+        result, capture_path, _ = self._run_reply_test(
+            "--ack",
+            "ack-text",
+            last_id_content="12345",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        import json
+        lines = Path(capture_path).read_text().splitlines()
+        ack_payload = json.loads(lines[0])
+        self.assertNotIn("message_reference", ack_payload)
+        self.assertIn("ack-text", ack_payload["content"])
+
+    def test_thread_mode_does_not_include_message_reference(self) -> None:
+        """thread 모드는 last-user-msg-id 있어도 message_reference 미적용 (회귀 가드)."""
+        result, capture_path, _ = self._run_reply_test(
+            "--thread",
+            "55555",
+            "stream-line",
+            last_id_content="12345",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = self._parse_first_payload(Path(capture_path).read_text())
+        self.assertNotIn("message_reference", payload)
+        self.assertIn("stream-line", payload["content"])
+
+
 if __name__ == "__main__":
     unittest.main()

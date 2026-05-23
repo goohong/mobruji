@@ -54,6 +54,18 @@ BOT_AUTO_ACK_TEXT: Final[str] = "🤖 helper bot 수신 — helper 가 nmae 상�
 REPLY_CONTEXT_PREVIEW_LEN: Final[int] = 30
 REPLY_CONTEXT_PREFIX_TEMPLATE: Final[str] = "[답장→ {preview}] {body}"
 
+# helper 본답 → 사용자 메시지 reply (#946, 2026-05-24).
+# bot.py 가 사용자 메시지를 helper 로 forward 할 때 그 message_id 를 file 에
+# atomic 으로 기록. discord-reply.sh bare body 모드가 그 파일을 읽어
+# Discord REST API payload 에 `message_reference` 를 포함시켜 자동 reply.
+#
+# Why: 사용자 입장에서 채널 누적 메시지 중 어떤 본문에 대한 helper 답인지
+# 시각적으로 추적하기 위함. standalone 메시지는 짝짓기가 어려움.
+LAST_USER_MSG_ID_PATH: Final[Path] = Path(
+    "~/.mobruji/last-user-msg-id.txt"
+).expanduser()
+LAST_USER_MSG_ID_FILE_MODE: Final[int] = 0o600
+
 # digest cron 튜닝값 — cycle-status.json (사용자 룰 2026-05-23).
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
@@ -150,6 +162,24 @@ CONTEXT_CLEANUP_PROMPT: Final[str] = (
     "5) 그 후 정지 (ScheduleWakeup 재호출 안 함 — /clear 후 다음 wake 가 처리)"
 )
 
+# nmae 사이클 watchdog (spec: docs/features/nmae-cycle-watchdog.md).
+# 메모리 [[feedback-keep-4-cycles-active]] nmae 자기 점검 반복 누락 →
+# 외부 데몬 안전망. 5분 polling cycle-status.json, idle 워크트리 발견 시
+# 자동 nmae tmux inject + Discord push.
+CYCLE_IDLE_WATCH_DEFAULT_ENABLED: Final[str] = "1"
+CYCLE_IDLE_THRESHOLD_DEFAULT_MINUTES: Final[int] = 10
+CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
+CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET: Final[str] = "mobruji:0.0"
+CYCLE_IDLE_WATCH_DEFAULT_WORKSPACES: Final[str] = "be,fe,rev,plan"
+# 동일 워크트리 재알림 debounce — spam 방지.
+CYCLE_IDLE_WATCH_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
+# tmux inject prompt 템플릿. {date}/{workspaces}/{summary} 치환.
+CYCLE_IDLE_WATCH_INJECT_TEMPLATE: Final[str] = (
+    "[watchdog {date}] cycle-status.json idle 발견 — {workspaces}. "
+    "{summary}. keep-4-cycles 룰 위반. "
+    "즉시 다음 백로그 launch 또는 root cause 보고."
+)
+
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
 
@@ -208,6 +238,27 @@ def load_env() -> dict[str, str]:
         os.environ.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
     )
     env["BOT_AUTO_ACK"] = os.environ.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED)
+    # nmae cycle watchdog (#941, spec: docs/features/nmae-cycle-watchdog.md)
+    env["CYCLE_IDLE_WATCH"] = os.environ.get(
+        "CYCLE_IDLE_WATCH", CYCLE_IDLE_WATCH_DEFAULT_ENABLED
+    )
+    env["CYCLE_IDLE_THRESHOLD_MINUTES"] = os.environ.get(
+        "CYCLE_IDLE_THRESHOLD_MINUTES", str(CYCLE_IDLE_THRESHOLD_DEFAULT_MINUTES)
+    )
+    env["CYCLE_IDLE_WATCH_INTERVAL_SECONDS"] = os.environ.get(
+        "CYCLE_IDLE_WATCH_INTERVAL_SECONDS",
+        str(CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS),
+    )
+    env["CYCLE_INJECT_TARGET"] = os.environ.get(
+        "CYCLE_INJECT_TARGET", CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET
+    )
+    env["CYCLE_WATCH_WORKSPACES"] = os.environ.get(
+        "CYCLE_WATCH_WORKSPACES", CYCLE_IDLE_WATCH_DEFAULT_WORKSPACES
+    )
+    # CYCLE_NOTIFY_CHANNEL_ID 부재 시 NOTIFY_CHANNEL_ID fallback.
+    env["CYCLE_NOTIFY_CHANNEL_ID"] = os.environ.get(
+        "CYCLE_NOTIFY_CHANNEL_ID", env["NOTIFY_CHANNEL_ID"]
+    )
     return env
 
 
@@ -277,6 +328,49 @@ def append_inbox(payload: dict[str, str]) -> None:
             handle.write(json.dumps(truncated_payload, ensure_ascii=False) + "\n")
     except OSError as exc:
         logger.warning("inbox.jsonl write 실패: %s", exc)
+
+
+def write_last_user_msg_id(message_id: str) -> None:
+    """`~/.mobruji/last-user-msg-id.txt` 에 최신 사용자 message_id 를 atomic write (#946).
+
+    discord-reply.sh bare body (본답) 모드가 이 파일을 읽어 Discord REST API
+    payload 에 `message_reference: {message_id, channel_id, fail_if_not_exists: false}`
+    를 포함시켜 자동으로 사용자 메시지에 reply 형태로 push.
+
+    동작:
+      - 부모 디렉토리 부재 시 생성.
+      - mktemp + os.replace 로 same-fs atomic rename — 동시 on_message 가
+        부분 파일을 읽지 않도록 보장 (POSIX rename(2) atomicity).
+      - 파일 권한 0o600 강제 — message_id 자체는 민감 정보 아니지만 PII
+        디렉토리 일관성 유지 (helper-queue.jsonl 등과 동일).
+      - 실패는 warning 만 — reply 표시 누락은 quality-of-life 저하일 뿐
+        본 forwarding 흐름을 막아서는 안 됨.
+
+    Args:
+        message_id: Discord message snowflake (정수 또는 문자열). 항상 str
+            로 받아 그대로 저장.
+    """
+    import tempfile as _tempfile  # local — module top scope 변경 회피.
+    try:
+        LAST_USER_MSG_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_path = _tempfile.mkstemp(
+            prefix=".last-user-msg-id-",
+            dir=str(LAST_USER_MSG_ID_PATH.parent),
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+                handle.write(message_id)
+            os.chmod(tmp_path, LAST_USER_MSG_ID_FILE_MODE)
+            os.replace(tmp_path, LAST_USER_MSG_ID_PATH)
+        except OSError:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            raise
+    except OSError as exc:
+        logger.warning("last-user-msg-id 기록 실패: %s", exc)
 
 
 def build_reply_context_prefix(
@@ -1187,6 +1281,299 @@ async def context_auto_clear_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# nmae cycle watchdog (spec: docs/features/nmae-cycle-watchdog.md)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def resolve_cycle_targets(raw: str | None) -> list[str]:
+    """`CYCLE_WATCH_WORKSPACES` CSV (또는 default `be,fe,rev,plan`) 을 list 로 반환.
+
+    공백 trim. 빈 토큰 무시. 중복 제거 (순서 보존). None / 빈 문자열 → default.
+    """
+    if raw is None or not raw.strip():
+        raw = CYCLE_IDLE_WATCH_DEFAULT_WORKSPACES
+    seen: set[str] = set()
+    result: list[str] = []
+    for token in raw.split(","):
+        stripped = token.strip()
+        if not stripped or stripped in seen:
+            continue
+        seen.add(stripped)
+        result.append(stripped)
+    return result
+
+
+def parse_cycle_status(path: str) -> dict | None:
+    """cycle-status.json 을 dict 로 읽거나, 부재/parse fail/OSError 시 None.
+
+    `read_cycle_status` 와 의미상 동일하지만 watchdog 전용 thin wrapper —
+    호출부에서 graceful skip 흐름을 일관되게 가져가기 위해 별도 함수로 둠.
+    테스트는 이 함수 직접 검증 (정상 / null / missing / malformed 4건).
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+    except OSError:
+        return None
+
+
+def _parse_iso_datetime(text: object) -> datetime | None:
+    """`last_completed.completed_at` 등 ISO8601 문자열을 aware datetime 으로 파싱.
+
+    str 가 아니거나 파싱 실패 → None. ``Z`` suffix 는 ``+00:00`` 로 치환.
+    naive datetime 은 UTC 로 간주 (보수적 — naive 면 timezone 모름).
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    candidate = text.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def detect_idle_worktrees(
+    status: dict | None,
+    *,
+    threshold_minutes: int,
+    now: datetime,
+    workspaces: list[str] | tuple[str, ...] = ("be", "fe", "rev", "plan"),
+) -> list[dict]:
+    """4 워크트리(be/fe/rev/plan) idle 판정 결과 list 반환.
+
+    idle 정의:
+        ``in_progress`` 가 None / 누락 / 빈 문자열 AND
+        ``last_completed.completed_at`` 이 ``now - threshold_minutes`` 보다
+        오래됨 (또는 last_completed 부재 / completed_at 부재 / 파싱 실패).
+
+    Returns:
+        idle 워크트리 dict 의 list. 각 dict 키:
+            ``workspace`` (str) — be/fe/rev/plan 등
+            ``last_completed_title`` (str) — last_completed.title 또는 "없음"
+            ``last_completed_at`` (datetime|None) — 파싱된 시각 또는 None
+        idle 0건이면 빈 list.
+
+    Args:
+        status: cycle-status.json dict 또는 None. None 이면 빈 list (alert 안 함
+            — 파일 부재는 별 alert path).
+        threshold_minutes: idle 임계 분. 0 이면 모든 비-in-progress 가 idle.
+        now: 현재 시각 (aware datetime). 테스트 deterministic 용.
+        workspaces: 검사할 워크트리 list.
+    """
+    if not isinstance(status, dict):
+        return []
+
+    cutoff_seconds = threshold_minutes * 60
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    idle: list[dict] = []
+    for ws in workspaces:
+        entry = status.get(ws)
+        if not isinstance(entry, dict):
+            # 워크트리 자체 누락 — idle 로 간주 (cycle-status.json 미초기화).
+            idle.append({
+                "workspace": ws,
+                "last_completed_title": "없음",
+                "last_completed_at": None,
+            })
+            continue
+        in_progress_raw = entry.get("in_progress")
+        is_active = False
+        if isinstance(in_progress_raw, dict) and in_progress_raw:
+            is_active = True
+        elif isinstance(in_progress_raw, str) and in_progress_raw.strip():
+            is_active = True
+        if is_active:
+            continue
+
+        last_completed = entry.get("last_completed")
+        completed_at: datetime | None = None
+        title_text = "없음"
+        if isinstance(last_completed, dict):
+            completed_at = _parse_iso_datetime(last_completed.get("completed_at"))
+            title_raw = last_completed.get("title")
+            if isinstance(title_raw, str) and title_raw.strip():
+                title_text = title_raw.strip()
+
+        if completed_at is None:
+            # last_completed 부재 / completed_at 없음 → idle 로 간주.
+            idle.append({
+                "workspace": ws,
+                "last_completed_title": title_text,
+                "last_completed_at": None,
+            })
+            continue
+
+        elapsed = (now - completed_at).total_seconds()
+        if elapsed > cutoff_seconds:
+            idle.append({
+                "workspace": ws,
+                "last_completed_title": title_text,
+                "last_completed_at": completed_at,
+            })
+    return idle
+
+
+def _format_idle_summary(idle: list[dict]) -> str:
+    """tmux inject prompt 의 ``{summary}`` 부분 빌드.
+
+    각 워크트리 별 "<ws>: <title 앞 60자>" 콤마 join.
+    """
+    parts: list[str] = []
+    for entry in idle:
+        ws = entry.get("workspace", "?")
+        title = entry.get("last_completed_title") or "없음"
+        if len(title) > 60:
+            title = title[:59] + "…"
+        parts.append(f"last_completed[{ws}]={title}")
+    return " / ".join(parts) if parts else "last_completed: 없음"
+
+
+def tmux_inject_text(pane_target: str, text: str) -> bool:
+    """tmux send-keys 로 한 줄 inject (watchdog 알림).
+
+    `tmux_send_payload` 와 동일한 패턴 (-l literal + Enter). 단, watchdog 알림은
+    sentinel 처리 불필요하므로 단순 wrapper.
+    """
+    return tmux_send_payload(pane_target, text)
+
+
+async def cycle_idle_watch_loop(
+    client: "discord.Client",
+    notify_channel_id: int,
+    *,
+    cycle_status_path: str,
+    inject_target: str = CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET,
+    threshold_minutes: int = CYCLE_IDLE_THRESHOLD_DEFAULT_MINUTES,
+    poll_interval: int = CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS,
+    workspaces: list[str] | tuple[str, ...] = ("be", "fe", "rev", "plan"),
+    debounce_seconds: int = CYCLE_IDLE_WATCH_DEBOUNCE_SECONDS,
+    time_source=time.monotonic,
+    now_provider=lambda: datetime.now(timezone.utc),
+) -> None:
+    """5분 polling cycle-status.json — idle 워크트리 발견 시 nmae tmux inject + Discord push.
+
+    spec: docs/features/nmae-cycle-watchdog.md.
+
+    동작:
+      1. ``poll_interval`` 초 마다 cycle-status.json read.
+      2. ``detect_idle_worktrees`` 로 idle list 산출.
+      3. debounce 적용 — 워크트리 별 마지막 alert 시각 cache. 같은 워크트리에
+         ``debounce_seconds`` 내 재알림 안 함.
+      4. debounce 통과한 idle ≥ 1 이면:
+         - nmae tmux pane (``inject_target``) 에 `tmux_inject_text` 알림 inject.
+         - Discord ``notify_channel_id`` 에 경고 push.
+      5. graceful skip — cycle-status.json 부재/parse fail / tmux session 부재 /
+         Discord channel 미발견 시 warn 1회 후 skip.
+      6. ``threshold_minutes <= 0`` 이면 disabled — 즉시 return (테스트 용).
+
+    asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
+
+    Args:
+        time_source: debounce 비교용 monotonic 시각 source. 테스트 stub.
+        now_provider: idle 판정용 wall-clock provider (aware datetime).
+    """
+    if threshold_minutes <= 0:
+        logger.info("cycle_idle_watch_loop disabled (threshold_minutes<=0)")
+        return
+
+    inject_session = inject_target.split(":", 1)[0]
+    last_alert_at: dict[str, float] = {}
+    missing_session_warned = False
+    missing_channel_warned = False
+    missing_status_warned = False
+
+    while True:
+        try:
+            await asyncio.sleep(poll_interval)
+            status = parse_cycle_status(cycle_status_path)
+            if status is None:
+                if not missing_status_warned:
+                    logger.warning(
+                        "cycle_idle_watch_loop: cycle-status.json 읽기 실패 — skip (path=%s)",
+                        cycle_status_path,
+                    )
+                    missing_status_warned = True
+                continue
+            missing_status_warned = False
+
+            idle_all = detect_idle_worktrees(
+                status,
+                threshold_minutes=threshold_minutes,
+                now=now_provider(),
+                workspaces=workspaces,
+            )
+            if not idle_all:
+                continue
+
+            mono_now = time_source()
+            fresh_idle = [
+                entry
+                for entry in idle_all
+                if (mono_now - last_alert_at.get(entry["workspace"], 0.0))
+                >= debounce_seconds
+            ]
+            if not fresh_idle:
+                continue
+
+            if not tmux_has_session(inject_session):
+                if not missing_session_warned:
+                    logger.warning(
+                        "cycle_idle_watch_loop: tmux session 부재 — skip (target=%s)",
+                        inject_target,
+                    )
+                    missing_session_warned = True
+                continue
+            missing_session_warned = False
+
+            workspaces_label = ", ".join(e["workspace"] for e in fresh_idle)
+            summary = _format_idle_summary(fresh_idle)
+            today = now_provider().strftime("%Y-%m-%d")
+            inject_text = CYCLE_IDLE_WATCH_INJECT_TEMPLATE.format(
+                date=today, workspaces=workspaces_label, summary=summary
+            )
+            tmux_inject_text(inject_target, inject_text)
+
+            channel = client.get_channel(notify_channel_id)
+            if channel is None:
+                if not missing_channel_warned:
+                    logger.warning(
+                        "cycle_idle_watch_loop: Discord channel 부재 — push skip (channel_id=%s)",
+                        notify_channel_id,
+                    )
+                    missing_channel_warned = True
+            else:
+                missing_channel_warned = False
+                discord_text = (
+                    f"⚠️ nmae watchdog — {len(fresh_idle)} 워크트리 idle "
+                    f"({workspaces_label}) — nmae 에 알림 inject 완료"
+                )
+                await send_with_retry(channel, content=discord_text)
+
+            now_mono = time_source()
+            for entry in fresh_idle:
+                last_alert_at[entry["workspace"]] = now_mono
+            logger.info(
+                "cycle_idle_watch_loop: idle alert workspaces=%s",
+                workspaces_label,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cycle_idle_watch_loop iter 실패: %s", exc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Discord client
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1226,6 +1613,51 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     bot_auto_ack_enabled = (
         env.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED) == "1"
     )
+
+    # cycle watchdog (#941) — env 해석.
+    cycle_idle_watch_enabled = (
+        env.get("CYCLE_IDLE_WATCH", CYCLE_IDLE_WATCH_DEFAULT_ENABLED) == "1"
+    )
+
+    def _resolve_int_env(key: str, default: int, *, allow_zero: bool = True) -> int:
+        raw = env.get(key)
+        if raw is None:
+            return default
+        try:
+            parsed = int(raw)
+        except ValueError:
+            logger.warning("%s 정수 아님(%r) — 기본값 %d 사용", key, raw, default)
+            return default
+        if not allow_zero and parsed <= 0:
+            logger.warning("%s 양수 아님(%d) — 기본값 %d 사용", key, parsed, default)
+            return default
+        if allow_zero and parsed < 0:
+            logger.warning("%s 음수(%d) — 기본값 %d 사용", key, parsed, default)
+            return default
+        return parsed
+
+    cycle_idle_threshold_minutes = _resolve_int_env(
+        "CYCLE_IDLE_THRESHOLD_MINUTES", CYCLE_IDLE_THRESHOLD_DEFAULT_MINUTES
+    )
+    cycle_idle_poll_interval = _resolve_int_env(
+        "CYCLE_IDLE_WATCH_INTERVAL_SECONDS",
+        CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    cycle_inject_target = env.get(
+        "CYCLE_INJECT_TARGET", CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET
+    )
+    cycle_workspaces = resolve_cycle_targets(env.get("CYCLE_WATCH_WORKSPACES"))
+    cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(notify_channel_id))
+    try:
+        cycle_notify_channel_id = int(cycle_notify_raw)
+    except ValueError:
+        logger.warning(
+            "CYCLE_NOTIFY_CHANNEL_ID 정수 아님(%r) — notify_channel_id(%d) fallback",
+            cycle_notify_raw,
+            notify_channel_id,
+        )
+        cycle_notify_channel_id = notify_channel_id
 
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
@@ -1310,6 +1742,34 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not context_auto_clear_enabled:
             logger.info("context auto-clear disabled (CONTEXT_AUTO_CLEAR_ENABLED=0)")
 
+        # nmae cycle watchdog (#941, spec: docs/features/nmae-cycle-watchdog.md).
+        # 5분 polling cycle-status.json — idle 워크트리 자동 nmae 알림 + Discord push.
+        if cycle_idle_watch_enabled and not hasattr(
+            client, "_cycle_idle_watch_task_started"
+        ):
+            client._cycle_idle_watch_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                cycle_idle_watch_loop(
+                    client,
+                    cycle_notify_channel_id,
+                    cycle_status_path=cycle_status_path,
+                    inject_target=cycle_inject_target,
+                    threshold_minutes=cycle_idle_threshold_minutes,
+                    poll_interval=cycle_idle_poll_interval,
+                    workspaces=cycle_workspaces,
+                )
+            )
+            logger.info(
+                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s",
+                cycle_notify_channel_id,
+                cycle_idle_poll_interval,
+                cycle_idle_threshold_minutes,
+                cycle_inject_target,
+                ",".join(cycle_workspaces),
+            )
+        elif not cycle_idle_watch_enabled:
+            logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
+
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
@@ -1365,6 +1825,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             referenced_content is not None,
         )
         append_inbox(payload)
+        # #946: helper 본답 자동 reply 용 message_id 캐시.
+        # discord-reply.sh bare body 모드가 이 파일을 읽어
+        # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
+        write_last_user_msg_id(message_id)
 
         # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
         # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
