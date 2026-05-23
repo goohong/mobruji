@@ -376,4 +376,25 @@ describe("VoiceRangePage 폼 Tab 키보드 탐색", () => {
     await user.tab();
     expect(submitButton).toHaveFocus();
   });
+
+  // closes #563 — PR #554 후속. forward Tab 순서만 가드되어 있어
+  // Shift+Tab 역방향에 focusable 요소가 끼어드는 회귀를 잡지 못한다.
+  // submit → 최고음 → 최저음 의 backward 순서가 자연스럽게 유지되는지 검증한다.
+  it("submit → 최고음 → 최저음 순으로 Shift+Tab 포커스가 역방향 이동한다 (#563)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    const submitButton = screen.getByRole("button", { name: /추천 받기/ });
+
+    submitButton.focus();
+    expect(submitButton).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(highSelect).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(lowSelect).toHaveFocus();
+  });
 });
