@@ -438,6 +438,62 @@ class RecommendationScorerTest {
         assertThat(a.breakdown()).isEqualTo(b.breakdown());
     }
 
+    @Test
+    @DisplayName("tempoMatch (회귀 가드): mood 표에 해당 mood 엔트리 없음 + fallbackBpm 존재 → fallbackBpm 사용")
+    void tempoMatch_moodMissingFromTable_fallsBackToFallbackBpm() {
+        // given: moodDefaultBpm 표에 UPBEAT 만 등록, fallbackBpm=110
+        final Map<Mood, Integer> onlyUpbeat = new EnumMap<>(Mood.class);
+        onlyUpbeat.put(Mood.UPBEAT, 128);
+        final RecommendationProperties.Tempo tempo = new RecommendationProperties.Tempo(40.0, onlyUpbeat, 110);
+        // when: 입력 mood=CALM (표에 없음) → fallbackBpm(110) 사용, songBpm=110 → distance 0
+        // then
+        assertThat(RecommendationScorer.tempoMatch(110, null, Mood.CALM, tempo)).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("tempoMatch (회귀 가드): mood 표에 엔트리 없음 + fallbackBpm null → target 결정 불가 → 중립 0.5")
+    void tempoMatch_moodMissingFromTableAndNoFallback_returnsNeutral() {
+        // given: 빈 표, fallbackBpm null
+        final Map<Mood, Integer> empty = new EnumMap<>(Mood.class);
+        final RecommendationProperties.Tempo tempo = new RecommendationProperties.Tempo(40.0, empty, null);
+        // when: mood 입력 있음에도 표/fallback 모두 부재 → resolveTargetBpm null
+        // then: songBpm 있어도 target 부재로 neutral 0.5
+        assertThat(RecommendationScorer.tempoMatch(120, null, Mood.NOSTALGIC, tempo)).isEqualTo(0.5);
+    }
+
+    @Test
+    @DisplayName("tempoMatch (회귀 가드): distance == tolerance 정확 경계 → 정확히 0.0 (clamp 시작점)")
+    void tempoMatch_distanceEqualsToleranceExact_returnsZero() {
+        // given: tolerance=40, songBpm=80, preferredBpm=120 → distance=40 정확
+        // when / then: 1.0 - min(1.0, 40/40) = 0.0
+        assertThat(RecommendationScorer.tempoMatch(80, 120, null, defaultTempo())).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("tempoMatch (회귀 가드): tolerance 최소값(1.0) — distance=0 → 1.0, distance=1 → 0.0")
+    void tempoMatch_minimumTolerance_boundaryBehavior() {
+        // given: tolerance=1.0 (Bean Validation @DecimalMin 최소값)
+        final Map<Mood, Integer> empty = new EnumMap<>(Mood.class);
+        final RecommendationProperties.Tempo tightTempo = new RecommendationProperties.Tempo(1.0, empty, 120);
+        // when / then: 정확 매칭
+        assertThat(RecommendationScorer.tempoMatch(120, 120, null, tightTempo)).isEqualTo(1.0);
+        // distance 1 = tolerance → 0.0
+        assertThat(RecommendationScorer.tempoMatch(121, 120, null, tightTempo)).isEqualTo(0.0);
+        // distance 2 > tolerance → clamp 0.0 (음수 방지)
+        assertThat(RecommendationScorer.tempoMatch(122, 120, null, tightTempo)).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("tempoMatch (회귀 가드): distance 가 tolerance 직전이면 양수 정밀값 보존")
+    void tempoMatch_distanceJustBelowTolerance_preservesPrecision() {
+        // given: tolerance=40, distance=39 → 1.0 - 39/40 = 0.025
+        // when
+        final double signal = RecommendationScorer.tempoMatch(159, 120, null, defaultTempo());
+        // then: clamp 이전 정밀값
+        assertThat(signal).isEqualTo(1.0 - 39.0 / 40.0);
+        assertThat(signal).isGreaterThan(0.0);
+    }
+
     private static Song buildSong(final MusicalKey key, final Mood mood, final Integer bpm) {
         return Song.builder()
                 .title("t").artist("a")
