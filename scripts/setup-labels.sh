@@ -46,6 +46,7 @@ create "needs-human-review" "B60205" "보호 영역 변경 PR (사람 사후 리
 create "session:backend"  "1F77B4" "백엔드 구현 세션이 진행 중인 PR"
 create "session:frontend" "2CA02C" "프론트엔드 구현 세션이 진행 중인 PR"
 create "session:review"   "9467BD" "리뷰 세션의 산출물 (코멘트로 진행, 브랜치 없음)"
+create "session:plan"     "FF7F0E" "기획 세션(docs/ADR/spec)이 진행 중인 PR"
 create "reviewed:claude"  "BCBD22" "Claude 리뷰 세션이 검토 완료한 PR"
 
 echo "완료."
