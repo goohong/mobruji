@@ -3,13 +3,20 @@ package com.mobruji.recommendation.api.dto;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.Set;
 
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +24,20 @@ import com.mobruji.recommendation.application.CreateRecommendationCommand;
 import com.mobruji.song.domain.Mood;
 
 class RecommendationCreateRequestTest {
+
+    private static ValidatorFactory validatorFactory;
+    private static Validator validator;
+
+    @BeforeAll
+    static void setUp() {
+        validatorFactory = Validation.buildDefaultValidatorFactory();
+        validator = validatorFactory.getValidator();
+    }
+
+    @AfterAll
+    static void tearDown() {
+        validatorFactory.close();
+    }
 
     @Test
     @DisplayName("excludeSongIdsOrEmpty: null 입력은 빈 리스트로 정규화")
@@ -94,5 +115,51 @@ class RecommendationCreateRequestTest {
                 .getDeclaredMethod("preferredBpm").getAnnotation(Max.class);
         assertThat(preferredBpmMin.value()).isEqualTo(30L);
         assertThat(preferredBpmMax.value()).isEqualTo(300L);
+    }
+
+    @Test
+    @DisplayName("Validator 실행: 정상 입력(sessionId 64자 + MIDI/BPM 경계값) → violation 없음 (#666)")
+    void validator_validBoundaryInput_passes() {
+        final String sessionId64 = "r".repeat(64);
+        final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
+                sessionId64, 12, 119, Mood.UPBEAT, 30, List.of(1L));
+
+        final Set<ConstraintViolation<RecommendationCreateRequest>> violations = validator.validate(
+                recommendationCreateRequest);
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Validator 실행: 선택 필드(mood/preferredBpm/excludeSongIds) 모두 null → violation 없음")
+    void validator_optionalFieldsAllNull_passes() {
+        final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
+                "session-1", 48, 72, null, null, null);
+
+        final Set<ConstraintViolation<RecommendationCreateRequest>> violations = validator.validate(
+                recommendationCreateRequest);
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Validator 실행: sessionId 65자 / blank / MIDI 범위 외 / BPM 범위 외 / 필수 null → violation 발생 (#666)")
+    void validator_invalidInputs_produceViolations() {
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "r".repeat(65), 48, 72, null, null, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "", 48, 72, null, null, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "s", 11, 72, null, null, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "s", 48, 120, null, null, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "s", null, 72, null, null, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "s", 48, null, null, null, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "s", 48, 72, null, 29, null))).isNotEmpty();
+        assertThat(validator.validate(new RecommendationCreateRequest(
+                "s", 48, 72, null, 301, null))).isNotEmpty();
     }
 }
