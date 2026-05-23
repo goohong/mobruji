@@ -24,12 +24,12 @@ public class VoiceRangeService {
     public VoiceRange createOrReplace(final CreateVoiceRangeCommand createVoiceRangeCommand) {
         final VoiceRange voiceRange = voiceRangeRepository
                 .findBySessionId(createVoiceRangeCommand.sessionId())
-                .map(existing -> {
-                    existing.updateRange(
+                .map(existingVoiceRange -> {
+                    existingVoiceRange.updateRange(
                             createVoiceRangeCommand.lowestNoteMidi(),
                             createVoiceRangeCommand.highestNoteMidi(),
                             createVoiceRangeCommand.sourceMethod());
-                    return existing;
+                    return existingVoiceRange;
                 })
                 .orElseGet(() -> voiceRangeRepository.save(VoiceRange.create(
                         createVoiceRangeCommand.sessionId(),
