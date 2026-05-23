@@ -698,6 +698,8 @@ def build_digest_payload(
     kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
 
     # 최근 머지 PR 3개 title preview (가장 최신 순). 데이터 없으면 라인 생략.
+    # title 에 `@everyone`/`@here`/`<@USER>` 가 포함되면 Discord 가 mention 으로
+    # 해석해 알림 폭주가 발생하므로 sanitize_mentions 적용 (#754).
     recent_lines: list[str] = []
     if merged_recent:
         sorted_recent = sorted(
@@ -709,7 +711,7 @@ def build_digest_payload(
             title = pr.get("title", "")
             if len(title) > 60:
                 title = title[:60] + "…"
-            recent_lines.append(f"  · #{pr.get('number')} {title}")
+            recent_lines.append(f"  · #{pr.get('number')} {sanitize_mentions(title)}")
 
     # 백로그 시그널: open PR 3개 title preview.
     backlog_lines: list[str] = []
@@ -718,7 +720,7 @@ def build_digest_payload(
             title = pr.get("title", "")
             if len(title) > 60:
                 title = title[:60] + "…"
-            backlog_lines.append(f"  · #{pr.get('number')} {title}")
+            backlog_lines.append(f"  · #{pr.get('number')} {sanitize_mentions(title)}")
 
     bug_lines: list[str] = []
     if bug_issues:
@@ -726,7 +728,7 @@ def build_digest_payload(
             title = issue.get("title", "")
             if len(title) > 60:
                 title = title[:60] + "…"
-            bug_lines.append(f"  · #{issue.get('number')} {title}")
+            bug_lines.append(f"  · #{issue.get('number')} {sanitize_mentions(title)}")
 
     parts = [
         f"📊 **{kst.strftime('%H:%M')} KST digest**",
@@ -848,6 +850,37 @@ def mask_secrets(text: str) -> str:
     return masked
 
 
+# Discord mention 토큰 차단 패턴 (#754).
+# PR title / tmux pane chunk 에 `@everyone` / `@here` / `<@USER_ID>` 등이 그대로
+# 들어가면 Discord 가 mention 으로 해석해 알림 폭주를 일으킨다. zero-width space (​)
+# 를 끼워 넣어 시각적으로는 거의 동일하되 mention parsing 은 무력화한다.
+# Discord mention 문법:
+#   - `@everyone` / `@here` (literal)
+#   - `<@USER_ID>` / `<@!USER_ID>` (user)
+#   - `<@&ROLE_ID>` (role)
+# 모두 prefix 직후에 ​ 를 삽입하면 안전하게 깨진다.
+MENTION_SANITIZE_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
+    (re.compile(r"@everyone"), "@​everyone"),
+    (re.compile(r"@here"), "@​here"),
+    # `<@123>`, `<@!123>`, `<@&123>` — `<@` 다음에 ​ 삽입.
+    (re.compile(r"<@(?=[!&]?\d)"), "<​@"),
+)
+
+
+def sanitize_mentions(text: str) -> str:
+    """Discord mention 토큰을 zero-width space 로 무력화 (#754).
+
+    PR title / maestro tmux pane chunk 가 Discord 로 송신되기 전 호출.
+    `@everyone`, `@here`, `<@USER_ID>`, `<@!USER_ID>`, `<@&ROLE_ID>` 등
+    Discord 가 mention 으로 해석하는 모든 토큰의 prefix 직후에 U+200B
+    (zero-width space) 를 삽입해 알림 폭주를 차단한다.
+    """
+    sanitized = text
+    for pattern, replacement in MENTION_SANITIZE_PATTERNS:
+        sanitized = pattern.sub(replacement, sanitized)
+    return sanitized
+
+
 def sanitize_chunk(text: str) -> str | None:
     """raw tmux pane buffer 를 Discord push 후보로 정리.
 
@@ -859,8 +892,10 @@ def sanitize_chunk(text: str) -> str | None:
     Discord 한도 2000자. 너무 길면 잘라야 send 가 성공.
     시크릿 마스킹은 ANSI 제거 후 / 라인 압축 전에 수행 — chunk 가 잘리거나 dedup
     되더라도 원문 시크릿이 절대 send 되지 않도록 보장 (#742).
+    mention sanitize 도 같은 위치에서 수행 — maestro pane 에 echo 된 `@everyone`
+    등이 Discord mention 으로 발화되지 않도록 차단 (#754).
     """
-    cleaned = mask_secrets(strip_ansi(text))
+    cleaned = sanitize_mentions(mask_secrets(strip_ansi(text)))
     # 라인별 rstrip + 빈 라인 합치기
     lines: list[str] = []
     blank_run = 0
