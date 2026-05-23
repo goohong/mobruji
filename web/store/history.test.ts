@@ -143,6 +143,46 @@ describe("useHistoryStore.clearHistory", () => {
   });
 });
 
+describe("useHistoryStore 경계 회귀 가드 (#592)", () => {
+  it("같은 requestId 를 여러 번 push 해도 dedupe 하지 않는다 (현 동작 명시)", () => {
+    // store-side ID 가 충돌 방지용 — 향후 dedupe 정책 도입 시 본 테스트가 먼저 깨져야.
+    const { appendRecommendation } = useHistoryStore.getState();
+    appendRecommendation(buildInput(7));
+    appendRecommendation(buildInput(7));
+    const list = useHistoryStore.getState().recommendations;
+    expect(list).toHaveLength(2);
+    expect(list[0].id).not.toBe(list[1].id);
+  });
+
+  it("removeRecommendation 에 존재하지 않는 id 를 줘도 상태가 변하지 않는다", () => {
+    const { appendRecommendation, removeRecommendation } =
+      useHistoryStore.getState();
+    appendRecommendation(buildInput(1));
+    const before = useHistoryStore.getState().recommendations;
+    removeRecommendation("does-not-exist");
+    expect(useHistoryStore.getState().recommendations).toEqual(before);
+  });
+
+  it("clearHistory 후에도 새 항목을 정상 append 할 수 있다", () => {
+    const { appendRecommendation, clearHistory } = useHistoryStore.getState();
+    appendRecommendation(buildInput(1));
+    clearHistory();
+    appendRecommendation(buildInput(2));
+    const list = useHistoryStore.getState().recommendations;
+    expect(list).toHaveLength(1);
+    expect(list[0].requestId).toBe(2);
+  });
+
+  it("localStorage 가 손상되어도 메모리 상태 접근에 예외를 던지지 않는다", () => {
+    // persist hydrate 는 모듈 로드 시 끝났으므로 손상된 raw 가 후속 흐름을 깨면 안 됨.
+    localStorage.setItem("mobruji-history", "{not json");
+    expect(() => useHistoryStore.getState().recommendations).not.toThrow();
+    const { appendRecommendation } = useHistoryStore.getState();
+    expect(() => appendRecommendation(buildInput(9))).not.toThrow();
+    expect(useHistoryStore.getState().recommendations).toHaveLength(1);
+  });
+});
+
 describe("useHistoryStore persist 라운드트립", () => {
   it("localStorage 에 직렬화된 형태로 저장되며 JSON 라운드트립 시 동일 데이터를 보존한다", () => {
     const { appendRecommendation } = useHistoryStore.getState();
