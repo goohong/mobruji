@@ -43,7 +43,7 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 | 4 | `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <선정 후보>"` | 사용자 가시성 + cycle-status.json digest 업데이트 |
 
 ##### escalation 임계
-같은 워크트리 inject **3회 연속** 후에도 in_progress 가 NULL 이면 `bot.py` 가 MOBRUJI_CHANNEL_ID (사용자 채널) 에 `🚨 nmae 무응답 — <ws> 워크트리 watchdog inject 3회 연속 후 in_progress 여전히 NULL. nmae 룰 위반 — 사용자 확인 필요` 직접 push (debounce 1h). 이 알림이 뜨면 nmae 룰 위반 입증된 상태 — 사용자 개입 신호.
+같은 워크트리 inject **3회 연속** 후에도 in_progress 가 NULL 이면 `bot.py` 가 MOBRUJI_CHANNEL_ID (사용자 채널) 에 `🚨 nmae 무응답 가시화 — <ws> 워크트리 watchdog inject 3회 연속 후 in_progress 여전히 NULL. 자율 처리 진행 중 (조치 무관)` 직접 push (debounce 1h). 가시화 알림 — 사용자 조치 무관, nmae 자율 처리 진행 중 ([[feedback-sub-agent-no-user-wait]]).
 
 ##### sub-agent 입장
 본 절은 maestro(nmae) 룰. sub-agent 본인은 직접 따를 일은 없으나, 자기 완료 보고 시 "다음 사이클 후보 N개" 를 §4 양식대로 제시해 maestro 가 1초 안에 단계 1 후보를 선정할 수 있게 돕는다 — 이게 idle loop 차단의 1차 방어선.
@@ -64,6 +64,19 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 ### 메모리 보호
 - `~/.claude/projects/*/memory/` 디렉토리 **쓰기 금지**.
 - 메모리 갱신은 maestro만 담당 (race 회피, `11-multi-session-runbook.md §1-2`).
+
+### sub-agent 자율 결정 (사용자 없는 것처럼)
+
+sub-agent (be/fe/rev/plan/일회성 helper sub-agent) 는 작업 도중 **사용자 결정 wait state 금지**:
+- 금지 표현: "사용자 결정 대기", "사용자 확인 필요", "사용자 승인 후 진행", "wait for user"
+- 결정 책임 순서:
+  1. sub-agent 자체 자율 결정 (대부분 — task brief 의 spec 따라)
+  2. 분기 점 있으면 nmae (orchestrator) 가 결정 — sub-agent 가 nmae 에 보고
+  3. helper 본체만 사용자 인터페이스 — sub-agent 는 사용자에게 직접 메시지 보내거나 답 받지 않음
+
+**Why:** 2026-05-24 사용자: "나는 없다고 생각해야돼 걔네는". sub-agent 가 사용자 wait 면 wall-clock 정체. 자율 결정이 redo 비용보다 낫음. nmae 가 책임자.
+
+**watchdog escalation 표현**: "확인 필요" → "가시화 알림". 사용자 결정 대기 X, 단순 알림.
 
 ### cycle-status.json 보호
 - `~/.mobruji/cycle-status.json` **수동 편집 금지**. nmae 가 `tools/cycle-status/update.sh` 헬퍼로만 갱신 (atomic write + 스키마 안전성).
@@ -441,3 +454,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — rev §E-3 추가: 매 사이클 첫 액션으로 `tools/rev-queue/rev-queue.sh all` 호출 의무 (discovery 단계). §E-2 절차의 prelude — 큐 출력 → §E-2 절차 적용 → 라벨 → 다음 호출에서 자동 제외. 메모리/룰 학습 의존 X — GitHub 라벨 + 스크립트가 single source of truth (이슈 #952). 메모리 [[feedback-rev-queue-script]] 영속화.
 - 2026-05-24 — §1 nmae watchdog inject 대응 의무 절차 추가: inject 받으면 (1) 백로그 선정 → (2) `update.sh set-active` → (3) Agent launch → (4) Discord push 4단계 순서 명문화. escalation 임계 명시 (3회 연속 inject + in_progress NULL → MOBRUJI_CHANNEL_ID 사용자 직접 push). 트리거: watchdog detect 정상이나 nmae 가 inject 받고 행동 안 함 → 무한 idle inject loop (이슈 #972).
 - 2026-05-24 — §1 cycle-status.json 보호 절 추가: sub-agent 가 `~/.mobruji/cycle-status.json` 직접 수정 금지, `tools/cycle-status/update.sh` 헬퍼 경유. 4-way 룰 sync audit (#973) 발견 — 기존엔 nmae 만 인지, sub-agent prompt 룰에 부재.
+- 2026-05-24 — §1 "sub-agent 자율 결정 (사용자 없는 것처럼)" 절 추가: 사용자 결정 wait state 금지 (금지 표현 + 결정 책임 순서 명시). watchdog escalation 메시지의 "사용자 확인 필요" → "가시화 알림" 표현 정정 동반 (`bot.py` `CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE`). 트리거: 2026-05-24 사용자 "나는 없다고 생각해야돼 걔네는" (#981). 메모리 [[feedback-sub-agent-no-user-wait]] 영속화.
