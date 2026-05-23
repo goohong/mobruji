@@ -1,14 +1,12 @@
 ---
 feature: 추천 히스토리 백엔드 동기화 & 좋아요/북마크 피드백
 slug: recommendation-history-and-feedback
-status: draft
+status: implementing
 owner: @goohong
 scope: recommendation, feedback
 related_issues: [160, 238, 261]
-related_prs: [161, 237, 244]
+related_prs: [161, 237, 244, 305, 429]
 last_reviewed: 2026-05-23
-status_pr_c: shipped (#237)
-status_pr_f: shipped (#244 + #305 + #429 closes #258)
 ---
 
 # 추천 히스토리 백엔드 동기화 & 좋아요/북마크 피드백
@@ -32,12 +30,12 @@ status_pr_f: shipped (#244 + #305 + #429 closes #258)
 
 ### 기능 요구사항
 
-- [ ] **Like 도메인**: sessionId 단위로 Song에 좋아요를 토글할 수 있다. (`Like(id, sessionId, songId, createdAt)`)
-- [ ] **Bookmark 도메인**: sessionId 단위로 Song을 북마크에 담을 수 있다. (`Bookmark(id, sessionId, songId, createdAt)`)
+- [x] **Like 도메인**: sessionId 단위로 Song에 좋아요를 토글할 수 있다. (`Like(id, sessionId, songId, createdAt)`) 구현: `com.mobruji.feedback.domain.Like` + `LikeRepository` (PR #185).
+- [x] **Bookmark 도메인**: sessionId 단위로 Song을 북마크에 담을 수 있다. (`Bookmark(id, sessionId, songId, createdAt)`) 구현: `com.mobruji.feedback.domain.Bookmark` + `BookmarkRepository` (PR #185).
 - [x] `POST /api/v1/likes` — **좋아요 toggle** (body: `{sessionId, songId}`). 같은 (session, song) 재호출 시 좋아요 상태가 토글(생성 ↔ 취소). 응답: `{liked: boolean}`. 구현: be PR #185 (`LikeController.toggle()`), 인증 게이트 #429 (closes #258). **DELETE endpoint 는 코드 미존재** — 별 DELETE 대신 단일 POST toggle 채택. (§9 결정 로그 2026-05-23, ~~Q6~~ closed)
 - [x] `POST /api/v1/bookmarks` — 동일 toggle 패턴 (`BookmarkController.toggle()`), 응답 `{bookmarked: boolean}`.
-- [ ] `GET /api/v1/sessions/{sessionId}/likes` — 해당 세션의 좋아요 목록 (Song 페이로드 join)
-- [ ] `GET /api/v1/sessions/{sessionId}/bookmarks` — 동일 패턴
+- [x] `GET /api/v1/sessions/{sessionId}/likes` — 해당 세션의 좋아요 목록 (Song 페이로드 join). 구현: `LikeController.list()` (PR #305).
+- [x] `GET /api/v1/sessions/{sessionId}/bookmarks` — 동일 패턴. 구현: `BookmarkController.list()` (PR #305).
 - [x] **추천 히스토리 백엔드 영속화**: `RecommendationRequest`(기존)에 더해 응답 결과(추천된 곡 리스트)를 영속 저장한다. spec 용어 `RecommendationResultEntry` 는 코드 상 기존 엔티티 `com.mobruji.recommendation.domain.Recommendation`(테이블 `recommendation`) 에 매핑됨 — V1 부터 (id, recommendation_request_id, song_id, score, match_reason, rank_position, created_at) 컬럼 전부 존재. (구현: PR #237)
 - [x] `GET /api/v1/sessions/{sessionId}/recommendation-history` — 해당 세션의 추천 요청 + 결과 목록 (최신순). 페이지네이션은 응답 wrapper `RecommendationHistoryListResponse` 로 향후 추가 가능하도록 여지를 둔다. (구현: PR #237. spec 표의 `/recommendations` 경로 명을 voice-range-progress 의 `/voice-range-history` 와 일관되게 `/recommendation-history` 로 확정.)
 - [ ] **fe 통합**: SongCard에 좋아요 버튼 추가, `/history` 페이지는 backend 우선, fallback으로 localStorage 사용.
@@ -168,7 +166,7 @@ sequenceDiagram
 ## 6) 작업 분할 (예상 PR 리스트)
 
 - [x] **PR A** (본 PR, #161): Feature Spec 초안 작성, `06-domain-model.md` §4 유비쿼터스 랭귀지 후보어 메모.
-- [ ] **PR B** (be, scope:recommendation): `Like`, `Bookmark` 엔티티 + CRUD API + E2E. 06-domain-model.md §4/§5/§6 갱신.
+- [x] **PR B** (be, scope:recommendation, #185): `Like`, `Bookmark` 엔티티 + POST toggle / GET list API + E2E. 06-domain-model.md §4/§5/§6 갱신.
 - [x] **PR C** (be, scope:recommendation, #237): `RecommendationResultEntry` 영속화(기존 `Recommendation` 엔티티에 매핑 — 신설 없음) + `GET /api/v1/sessions/{sid}/recommendation-history` API + V6 보조 인덱스.
 - [ ] **PR D** (fe, scope:web): SongCard 좋아요/북마크 버튼 + `/history` backend 우선 전환.
 - [ ] **PR E** (optional, scope:infra): 관측성 metric — `like.created` 등 카운터 등록.
