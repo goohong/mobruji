@@ -57,6 +57,10 @@ describe("voice-range API", () => {
     expect(url).toMatch(/\/api\/v1\/voice-ranges$/);
     expect((init as RequestInit).method).toBe("POST");
     expect((init as RequestInit).body).toBe(JSON.stringify(req));
+    // PR #881 SessionAuthGuard — body sessionId 와 동일한 X-Session-Id 헤더.
+    expect((init as RequestInit).headers).toMatchObject({
+      "X-Session-Id": "sess-1",
+    });
     expect(result).toEqual(sample);
   });
 
@@ -66,6 +70,10 @@ describe("voice-range API", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/api/v1/voice-ranges/a%2Fb%20c%3Fd");
     expect((init as RequestInit).method ?? "GET").toBe("GET");
+    // path 는 encode, 헤더는 raw sessionId (PR #881 비교 일치).
+    expect((init as RequestInit).headers).toMatchObject({
+      "X-Session-Id": "a/b c?d",
+    });
   });
 
   it("readVoiceRange: 404 응답 시 ApiError(status=404) 전파", async () => {
@@ -149,6 +157,10 @@ describe("voice-range API", () => {
     expect(url).toMatch(/\/api\/v1\/voice-ranges\/sess-1$/);
     expect((init as RequestInit).method).toBe("PUT");
     expect((init as RequestInit).body).toBe(JSON.stringify(body));
+    // PR #881 SessionAuthGuard — path sessionId 와 동일한 X-Session-Id 헤더.
+    expect((init as RequestInit).headers).toMatchObject({
+      "X-Session-Id": "sess-1",
+    });
   });
 
   const updateBody = {
@@ -189,5 +201,66 @@ describe("voice-range API", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(
       controller.signal,
     );
+  });
+
+  // PR #881 (SessionAuthGuard) — 3 함수가 모두 X-Session-Id 헤더를 전달해야
+  // BE 가 401 을 돌려주지 않는다. 회귀 방지용 전용 케이스.
+  describe("X-Session-Id 헤더 전달 (PR #881)", () => {
+    it("createVoiceRange: body sessionId 와 동일한 X-Session-Id 헤더를 보낸다", async () => {
+      fetchMock.mockResolvedValueOnce(json(sample, 201));
+      const req = {
+        sessionId: "sess-create",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 72,
+        sourceMethod: "SELF_REPORT" as const,
+      };
+      await createVoiceRange(req);
+      const [, init] = fetchMock.mock.calls[0];
+      expect((init as RequestInit).headers).toMatchObject({
+        "X-Session-Id": "sess-create",
+      });
+    });
+
+    it("readVoiceRange: path sessionId 와 동일한 (raw) X-Session-Id 헤더를 보낸다", async () => {
+      fetchMock.mockResolvedValueOnce(json(sample));
+      await readVoiceRange("sess-read");
+      const [, init] = fetchMock.mock.calls[0];
+      expect((init as RequestInit).headers).toMatchObject({
+        "X-Session-Id": "sess-read",
+      });
+    });
+
+    it("updateVoiceRange: path sessionId 와 동일한 X-Session-Id 헤더를 보낸다", async () => {
+      fetchMock.mockResolvedValueOnce(json(sample));
+      await updateVoiceRange("sess-update", updateBody);
+      const [, init] = fetchMock.mock.calls[0];
+      expect((init as RequestInit).headers).toMatchObject({
+        "X-Session-Id": "sess-update",
+      });
+    });
+
+    it("createVoiceRange: BE 401 SessionAuthGuard 실패 시 ApiError(401) 전파", async () => {
+      fetchMock.mockResolvedValueOnce(json({ message: "unauthorized" }, 401));
+      await expect(createVoiceRange(baseReq)).rejects.toMatchObject({
+        name: "ApiError",
+        status: 401,
+      });
+    });
+
+    it("readVoiceRange: BE 401 SessionAuthGuard 실패 시 ApiError(401) 전파", async () => {
+      fetchMock.mockResolvedValueOnce(json({ message: "unauthorized" }, 401));
+      await expect(readVoiceRange("sess-x")).rejects.toMatchObject({
+        name: "ApiError",
+        status: 401,
+      });
+    });
+
+    it("updateVoiceRange: BE 401 SessionAuthGuard 실패 시 ApiError(401) 전파", async () => {
+      fetchMock.mockResolvedValueOnce(json({ message: "unauthorized" }, 401));
+      await expect(updateVoiceRange("sess-x", updateBody)).rejects.toMatchObject({
+        name: "ApiError",
+        status: 401,
+      });
+    });
   });
 });
