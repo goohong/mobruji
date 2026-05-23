@@ -6,7 +6,7 @@ owner: "@goohong"
 scope: song
 related_issues: [3, 17]
 related_prs: [4, 18]
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-23
 ---
 
 # 곡 메타데이터 출처 (song-metadata-source)
@@ -74,6 +74,12 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
 | GET | /api/v1/songs?keyword=... | 키워드(제목/아티스트) 검색 | 익명 가능 | query | `List<SongResponse>` |
 
 > 추천 결과에서 호출되는 read API만 1차로 둔다. POST/PUT은 admin 분리 후 결정.
+
+**키워드 검색 정책 (BE↔FE 계약)** — `keyword` 가 비/공백/null 이면 200 OK + 빈 배열(`[]`) 반환. 400 Bad Request 가 아니다. 이유:
+1. Repository 는 `LIKE '%keyword%'` 라 빈 키워드면 전체 풀스캔. 200 OK + 빈 배열로 풀스캔을 차단한다.
+2. fe(`web/app/songs/page.tsx`) 는 입력 전 호출도 안전하게 "검색 결과 없음"으로 fallback. 400 응답을 따로 분기하지 않아도 된다.
+
+회귀 가드: `SongServiceTest#searchByKeyword_emptyKeyword_returnsEmpty`. 정책 변경 시 fe 페이지 헤더 주석("BE 약속")과 본 표를 동시 갱신.
 
 ### 5-3) 외부 연동 후보
 | 출처 | 장점 | 단점/리스크 |
