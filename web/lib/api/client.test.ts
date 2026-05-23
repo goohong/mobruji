@@ -159,6 +159,41 @@ describe("apiFetch path leading-slash 가드 (#680)", () => {
   });
 });
 
+describe("apiFetch headers spread + 204 + body 가드 (#685)", () => {
+  // 호출자 헤더가 마지막에 spread → 기본 Accept/Content-Type 을 덮어쓰거나 추가 헤더 부여.
+  it("Accept 호출자 override", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 200, headers: { "Content-Type": "text/plain" } }));
+    await apiFetch("/api/v1/probe", { headers: { Accept: "text/plain" } });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Accept: "text/plain" });
+  });
+
+  it("커스텀 X-Session-Id 추가 + 기본 Accept 유지", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/me", { headers: { "X-Session-Id": "sess-42" } });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ "X-Session-Id": "sess-42", Accept: "application/json" });
+  });
+
+  it("body 있는 POST에서 호출자 Content-Type override", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/upload", { method: "POST", body: "raw", headers: { "Content-Type": "text/plain" } });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ "Content-Type": "text/plain" });
+  });
+
+  it("204 No Content → body 파싱 skip + undefined 리턴", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    expect(await apiFetch<void>("/api/v1/sessions/abc", { method: "DELETE" })).toBeUndefined();
+  });
+
+  it("body 있으면 JSON.stringify + Content-Type=application/json 자동 부여", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const body = { lowestNote: "C3", highestNote: "G4" };
+    await apiFetch("/api/v1/voice-range", { method: "POST", body });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect(init.body).toBe(JSON.stringify(body));
+  });
+});
+
 describe("apiFetch path query string 가드 (#683)", () => {
   // 현 동작 lock: client.ts는 URL/URLSearchParams 변환 없이 path를 raw concat한다.
   // → query string은 호출자가 미리 조립·인코딩한 형태 그대로 fetch URL에 전달된다.
