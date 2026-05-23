@@ -202,11 +202,10 @@ class LoadEnvTests(unittest.TestCase):
 
 
 class MessagePrefixTests(unittest.TestCase):
-    """7 카테고리 emoji prefix — 단순화본도 호환 유지."""
+    """단순화본은 digest 만 사용 — 나머지 6종 #819 에서 dead branch 제거."""
 
-    def test_all_seven_categories_present(self) -> None:
-        expected = {"reply", "cycle-start", "cycle-end", "digest", "alert", "recovery", "decision"}
-        self.assertEqual(set(bot.MESSAGE_PREFIX.keys()), expected)
+    def test_only_digest_present(self) -> None:
+        self.assertEqual(set(bot.MESSAGE_PREFIX.keys()), {"digest"})
 
     def test_digest_emoji(self) -> None:
         self.assertEqual(bot.MESSAGE_PREFIX["digest"], "📊")
