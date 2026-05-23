@@ -36,8 +36,17 @@ public class BookmarkController {
 
     private final SessionAuthGuard sessionAuthGuard;
 
+    /**
+     * 북마크 토글. 같은 (sessionId, songId)로 두 번째 호출하면 bookmarked=false(취소)를 반환한다.
+     *
+     * <p>인증: §5-2-1 / ADR-0011 — body 의 {@code sessionId} 와 {@code X-Session-Id} 헤더가 일치해야 한다
+     * (누락/blank/불일치 모두 401). #258 후속 적용.
+     */
     @PostMapping("/api/v1/bookmarks")
-    public BookmarkToggleResponse toggle(@Valid @RequestBody final BookmarkToggleRequest bookmarkToggleRequest) {
+    public BookmarkToggleResponse toggle(
+            @Valid @RequestBody final BookmarkToggleRequest bookmarkToggleRequest,
+            @RequestHeader(value = "X-Session-Id", required = false) final String presentedSessionId) {
+        sessionAuthGuard.verify(bookmarkToggleRequest.sessionId(), presentedSessionId);
         final ToggleResult toggleResult = bookmarkService.toggle(
                 bookmarkToggleRequest.sessionId(), bookmarkToggleRequest.songId());
         return BookmarkToggleResponse.from(toggleResult);
