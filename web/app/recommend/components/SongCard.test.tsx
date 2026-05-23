@@ -9,7 +9,13 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongCard, buildYouTubeSearchUrl } from "./SongCard";
@@ -670,6 +676,38 @@ describe("SongCard", () => {
         </ul>,
       );
       await expectNoA11yViolations(container);
+    });
+  });
+
+  // closes #502 — SongCard 가 AlbumCoverThumbnail 을 실제로 마운트하고 song.albumCoverUrl
+  // 을 pass-through 하는지 회귀 가드. Thumbnail 단독 동작은 AlbumCover.test.tsx 가
+  // 검증하지만, SongCard 내부 import/prop 배선이 끊기면 그쪽 테스트는 통과해도 카드
+  // 표면에서 thumbnail 이 사라지므로 별도 통합 가드를 둔다.
+  describe("AlbumCoverThumbnail 통합 (closes #502)", () => {
+    it("albumCoverUrl 가 string 이면 카드 안에 <img src> 가 pass-through 된다", () => {
+      const item = buildItem({ albumCoverUrl: "https://example.com/cover.jpg" });
+      renderWithQueryClient(<SongCard item={item} />);
+      const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
+      expect(img.getAttribute("src")).toBe("https://example.com/cover.jpg");
+      expect(img.getAttribute("loading")).toBe("lazy");
+    });
+
+    it("albumCoverUrl 가 null 이면 카드 안에서 placeholder 로 fallback", () => {
+      const item = buildItem({ albumCoverUrl: null });
+      renderWithQueryClient(<SongCard item={item} />);
+      expect(
+        screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+      ).toBeInTheDocument();
+    });
+
+    it("img onError → 카드 안에서 placeholder 로 fallback (#322 + #499 통합)", () => {
+      const item = buildItem({ albumCoverUrl: "https://example.com/404.jpg" });
+      renderWithQueryClient(<SongCard item={item} />);
+      const img = screen.getByAltText("테스트 곡 앨범 커버");
+      fireEvent.error(img);
+      expect(
+        screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+      ).toBeInTheDocument();
     });
   });
 });
