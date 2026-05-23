@@ -21,13 +21,17 @@ from unittest import mock
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 
-# discord / dotenv 가 venv 에 없어도 import 가능하도록 stub.
-for missing in ("discord", "dotenv"):
-    if missing not in sys.modules:
-        stub = mock.MagicMock()
-        if missing == "dotenv":
-            stub.load_dotenv = lambda *a, **kw: None
-        sys.modules[missing] = stub
+# discord 는 가능한 한 실제 모듈을 사용 — embed 검증과 일관성 (#840).
+try:
+    import discord as _real_discord  # noqa: F401
+except ImportError:
+    sys.modules["discord"] = mock.MagicMock()
+
+# dotenv 는 단순 stub.
+if "dotenv" not in sys.modules:
+    stub = mock.MagicMock()
+    stub.load_dotenv = lambda *a, **kw: None
+    sys.modules["dotenv"] = stub
 
 import bot  # noqa: E402
 
@@ -248,8 +252,9 @@ class DigestLoopTests(unittest.TestCase):
         sleeps: list[int] = []
 
         class FakeChannel:
-            async def send(self_inner, text):  # noqa: ANN001
-                sent.append(text)
+            async def send(self_inner, content=None, *, embed=None):  # noqa: ANN001
+                # 단순화본 #840: digest 는 embed 로 push. content 는 사용 안 함.
+                sent.append(embed if embed is not None else content)
 
         class FakeClient:
             def get_channel(self_inner, channel_id):  # noqa: ANN001
@@ -264,7 +269,8 @@ class DigestLoopTests(unittest.TestCase):
 
         sig_iter = iter(signatures)
 
-        def fake_format(_status):
+        # `interval_seconds` keyword 를 받는 새 시그니처 (#840).
+        def fake_format(_status, *_, **_kwargs):
             line, sig = next(sig_iter)
             return line, sig
 

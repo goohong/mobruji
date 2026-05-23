@@ -51,6 +51,20 @@ CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
 # timezone 에 의존하므로 본문에 KST 명시로 한눈에 emit 시각 확인.
 CYCLE_DIGEST_TZ: Final[ZoneInfo] = ZoneInfo("Asia/Seoul")
 CYCLE_DIGEST_TIME_FORMAT: Final[str] = "%Y-%m-%d %H:%M KST"
+# Embed 시각화 — UX 개선 #840.
+# 워크트리별 역할 인지용 emoji prefix. field name 에 적용.
+CYCLE_DIGEST_WORKSPACE_EMOJI: Final[dict[str, str]] = {
+    "be": "🛠",
+    "fe": "🎨",
+    "rev": "🔍",
+    "plan": "📋",
+}
+# Embed 색상: 모든 워크트리 idle 이면 gray (조용한 상태), 그 외 blue (활동 중).
+CYCLE_DIGEST_COLOR_ACTIVE: Final[int] = 0x3498DB  # blue
+CYCLE_DIGEST_COLOR_IDLE: Final[int] = 0x95A5A6  # gray
+# Field value 한 줄 최대 길이 — 너무 길면 truncate (Discord embed field 1024 자
+# 제한이 있지만 가독성 위해 더 엄격하게 적용).
+CYCLE_DIGEST_FIELD_LINE_LEN: Final[int] = 180
 
 # digest emoji prefix — spec: docs/features/discord-message-style.md §3.
 # bot.py 단순화본은 digest 만 사용. 나머지 6종 (reply/cycle-start/cycle-end/
@@ -447,44 +461,73 @@ def _format_in_progress(raw: object) -> str:
     return "idle"
 
 
+def _truncate_field_line(text: str, limit: int = CYCLE_DIGEST_FIELD_LINE_LEN) -> str:
+    """Field value 한 줄 길이 가드. limit 초과 시 ``…`` suffix 로 표시."""
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
 def format_cycle_digest(
     status: dict | None,
     now: datetime | None = None,
-) -> tuple[str, str]:
-    """4 워크트리(be/fe/rev/plan) 의 진행/최근 한 줄씩 digest 본문을 만듭니다.
+    *,
+    interval_seconds: int | None = None,
+) -> tuple["discord.Embed", str]:
+    """4 워크트리(be/fe/rev/plan) digest 를 Discord Embed 로 빌드합니다.
+
+    UX 개선 #840: 기존 plain markdown multiline 텍스트 → Discord native embed.
+    스캔 친화적 시각 hierarchy + 워크트리별 emoji prefix + 활동 색상.
 
     Args:
         status: `read_cycle_status()` 반환 dict, 또는 None (파일 없음/깨짐).
         now: 헤더 timestamp 산출 기준 시각. 기본값 None → 호출 시점 KST.
             테스트 deterministic 용으로만 외부 주입.
+        interval_seconds: footer 에 ``interval=Ns`` 명시. None 이면 footer 생략.
 
     Returns:
-        (rendered, signature) 튜플.
-          - rendered: Discord 에 push 할 multiline 메시지.
+        (embed, signature) 튜플.
+          - embed: ``discord.Embed`` 인스턴스 (channel.send(embed=...) 로 push).
           - signature: delta 비교용 (시간 무관). 동일 signature 면 heartbeat 만 push.
 
-    한 줄 형식:
-        [be] 진행: <in_progress 또는 "idle"> / 최근: <pr> (<title>)
-        [be] 진행: idle / 최근: 없음   ← last_completed 가 null 인 경우
+    Embed 구조:
+        title       : ``🔁 Cycle Digest``
+        description : ``🕒 YYYY-MM-DD HH:MM KST``
+        color       : 모두 idle → gray, 그 외 → blue
+        fields      : be/fe/rev/plan 4 개 (inline=False), 각:
+                        name  = "🛠 be" (워크트리별 emoji)
+                        value = "진행: ...\\n최근: ..." (2 줄)
+        footer.text : f"interval={N}s" (interval_seconds 주어진 경우)
+        timestamp   : ``now`` (KST). Discord 클라이언트 locale 로 footer 옆에 렌더.
 
     스키마 누락/타입 이상 시 해당 필드만 "idle" / "없음" 으로 대체합니다.
-
-    헤더 바로 아래에 `🕒 YYYY-MM-DD HH:MM KST` timestamp 라인을 항상 삽입합니다
-    (사용자 요청 #811). timestamp 는 signature 에 포함하지 않으므로 delta push
-    판정에는 영향을 주지 않습니다.
+    cycle-status.json 자체 읽기 실패 시 (status=None) description 에 fallback
+    한 줄 추가, signature="unavailable" 반환.
     """
-    prefix = MESSAGE_PREFIX["digest"]
     if now is None:
         now = datetime.now(CYCLE_DIGEST_TZ)
     elif now.tzinfo is not None:
         now = now.astimezone(CYCLE_DIGEST_TZ)
-    timestamp_line = f"🕒 {now.strftime(CYCLE_DIGEST_TIME_FORMAT)}"
-    lines: list[str] = [f"{prefix} **cycle digest**", timestamp_line]
-    sig_parts: list[str] = []
+    timestamp_text = f"🕒 {now.strftime(CYCLE_DIGEST_TIME_FORMAT)}"
+
+    embed = discord.Embed(
+        title="🔁 Cycle Digest",
+        description=timestamp_text,
+        color=CYCLE_DIGEST_COLOR_ACTIVE,
+    )
+    embed.timestamp = now
 
     if status is None or not isinstance(status, dict):
-        lines.append("(cycle-status.json 읽기 실패 — 본진 갱신 대기)")
-        return "\n".join(lines), "unavailable"
+        embed.description = (
+            f"{timestamp_text}\n(cycle-status.json 읽기 실패 — 본진 갱신 대기)"
+        )
+        embed.color = CYCLE_DIGEST_COLOR_IDLE
+        if interval_seconds is not None:
+            embed.set_footer(text=f"interval={interval_seconds}s")
+        return embed, "unavailable"
+
+    sig_parts: list[str] = []
+    any_active = False
 
     for ws in CYCLE_DIGEST_WORKSPACES:
         entry = status.get(ws)
@@ -512,17 +555,26 @@ def format_cycle_digest(
                 recent_text = "없음"
             sig_parts.append(f"{ws}={in_progress_text}|{recent_text}")
 
+        if in_progress_text != "idle":
+            any_active = True
+
         in_progress_text = sanitize_mentions(in_progress_text)
         recent_text = sanitize_mentions(recent_text)
 
-        line = f"[{ws}] 진행: {in_progress_text} / 최근: {recent_text}"
-        if len(line) > CYCLE_DIGEST_MAX_LINE_LEN:
-            line = line[: CYCLE_DIGEST_MAX_LINE_LEN - 1] + "…"
-        lines.append(line)
+        in_progress_text = _truncate_field_line(in_progress_text)
+        recent_text = _truncate_field_line(recent_text)
 
-    rendered = "\n".join(lines)
+        emoji = CYCLE_DIGEST_WORKSPACE_EMOJI.get(ws, "")
+        field_name = f"{emoji} {ws}".strip() if emoji else ws
+        field_value = f"진행: {in_progress_text}\n최근: {recent_text}"
+        embed.add_field(name=field_name, value=field_value, inline=False)
+
+    embed.color = CYCLE_DIGEST_COLOR_ACTIVE if any_active else CYCLE_DIGEST_COLOR_IDLE
+    if interval_seconds is not None:
+        embed.set_footer(text=f"interval={interval_seconds}s")
+
     signature = "||".join(sig_parts)
-    return rendered, signature
+    return embed, signature
 
 
 def resolve_digest_interval(env_value: str | None) -> int:
@@ -561,8 +613,8 @@ async def digest_loop(
     """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push 합니다.
 
     사용자 룰 (2026-05-23 #모부르지): nmae 가 실시간 갱신하는
-    `~/.mobruji/cycle-status.json` 의 4 워크트리(be/fe/rev/plan) 진행/최근
-    한 줄씩을 push 합니다.
+    `~/.mobruji/cycle-status.json` 의 4 워크트리(be/fe/rev/plan) 진행/최근을
+    Discord embed (UX 개선 #840) 로 push 합니다.
 
     - 직전 push 와 signature(시간 제외) 가 동일하면 noise 라고 보고 skip.
     - signature 가 바뀌면 즉시 push (= delta push).
@@ -581,7 +633,9 @@ async def digest_loop(
                 logger.warning("digest: channel_id=%s 찾을 수 없음 — skip 후 재시도", channel_id)
             else:
                 status = read_cycle_status(cycle_status_path)
-                line, signature = format_cycle_digest(status)
+                embed, signature = format_cycle_digest(
+                    status, interval_seconds=interval
+                )
                 now_ts = time_source()
                 should_push = False
                 reason = ""
@@ -599,7 +653,7 @@ async def digest_loop(
                     reason = "heartbeat"
 
                 if should_push:
-                    await channel.send(line)
+                    await channel.send(embed=embed)
                     last_signature = signature
                     last_pushed_at = now_ts
                     logger.info("digest push: reason=%s signature=%s", reason, signature)

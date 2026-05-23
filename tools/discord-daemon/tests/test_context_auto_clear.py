@@ -27,8 +27,14 @@ from unittest import mock
 PARENT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PARENT_DIR))
 
-# discord/requests/dotenv 외부 의존 stub.
-for missing in ("discord", "requests", "dotenv"):
+# discord 는 가능한 한 실제 모듈을 사용 (다른 테스트의 embed 검증 호환, #840).
+try:
+    import discord as _real_discord  # noqa: F401
+except ImportError:
+    sys.modules["discord"] = mock.MagicMock()
+
+# requests/dotenv 는 단순 stub.
+for missing in ("requests", "dotenv"):
     if missing not in sys.modules:
         stub = mock.MagicMock()
         if missing == "dotenv":
