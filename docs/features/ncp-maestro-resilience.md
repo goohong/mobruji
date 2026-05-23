@@ -394,11 +394,116 @@ transcript: {transcript_mb}MB, memory: {memory_kb}KB (임계 200MB / 100KB)
 - 변화 있으면 push + state write. 없으면 push 안 함.
 - heartbeat 는 별도 ledger (`last_heartbeat_ts`) — alert push 가 있으면 heartbeat reset (alert 가 곧 살아있음 신호).
 
-### 11-4) 회복 자동화 (stub — §11-4 본 PR 범위 아님, 다음 PR §11-4~§11-6 분할 2차)
-> 특정 위험 시 systemctl restart / docker compose restart / mysql reconnect / `/wake` trigger 실 발사. dry-run flag → 본 적용 flow.
+### 11-4) 회복 자동화
 
-### 11-5) systemd 통합 (stub — 다음 PR)
-> `mobruji-resilience-monitor.service` 별도 분리 검토 vs bot.py 내장 유지. trade-off: 별 service → bot down 무관, 내장 → 코드 단순.
+P1 5건 별 자동 회복 시도. 회복 후 검증 → 결과 push (성공 시 🟢 / 실패 시 🔴 escalation).
 
-### 11-6) 회귀 가드 (stub — 다음 PR)
-> Python unittest + `unittest.mock.patch` 로 subprocess / tmux / docker mock. 위험 5건 각각 (a) 정상, (b) 임계 초과 → push, (c) 회복 → 회복 push, (d) graceful skip 시나리오.
+#### 11-4-a) 회복 매트릭스
+
+| 위험 | trigger 조건 | 회복 command | 검증 방법 | 실패 시 |
+|---|---|---|---|---|
+| 디스크 90%+ | `disk_pct >= 90` | `docker system prune -af --volumes` → `journalctl --vacuum-time=7d` → `npm cache clean --force` (best-effort) | 재측정 `disk_pct < 85` | escalation (사용자 멘션) |
+| heap 95%+ | `heap_pct >= 95` (backend JVM) | `docker compose restart backend` | 60s 후 `/actuator/health` UP + heap_pct < 80 | escalation |
+| container exit | `docker ps -a` 에서 `Exited` 상태인 mobruji-* 컨테이너 존재 | `docker compose up -d <name>` (최대 3회 retry, 각 retry 간 10s 백오프) | `docker ps` 에서 해당 컨테이너 `Up` | escalation |
+| bridge inactive | `systemctl is-active mobruji-discord-bridge` ≠ `active` | `sudo systemctl restart mobruji-discord-bridge` | 30s 후 `systemctl is-active` = `active` + heartbeat ledger 갱신 | escalation |
+| mysql connection denied | backend log 에 `Access denied` / `Communications link failure` 5회 이상 (1분 window) | `docker compose restart mysql` → 30s 대기 → backend connection pool refresh (`docker compose restart backend`) | `mysql -e "SELECT 1"` 성공 + backend `/actuator/health` UP | escalation |
+
+#### 11-4-b) 공통 동작
+
+- (개) `--dry-run` flag: command 실행 대신 `[DRY-RUN] would execute: <cmd>` 로그만. 회귀 테스트 + 초기 배포 검증용.
+- (개) `--auto-recover` flag (default `False`): 명시적 opt-in. 미설정 시 §11-3 alert push 만, 회복 시도 안 함.
+- (개) 회복 시도마다 별 push 발사 (alert push 와 분리):
+  - 시작: `🔧 [<위험명>] 회복 시도 중 (<command>)`
+  - 성공: `🟢 [<위험명>] 회복 완료 — <검증 결과>`
+  - 실패: `🔴 [<위험명>] 회복 실패 — <ERR> @모부르지` (사용자 멘션 포함)
+- (개) `recovery_attempts` ledger: 위험별 마지막 회복 시도 ts + 결과. 동일 위험 1시간 내 3회 실패 시 cooldown (이후 1시간 동안 회복 안 함, alert push 만).
+- (개) 회복 command 는 sudo 필요 항목 → `/etc/sudoers.d/mobruji-resilience` 별 entry 추가 (구현 PR 에서 명세).
+
+#### 11-4-c) 회복 함수 signature
+
+```python
+def attempt_recovery(
+    risk_name: str,
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """
+    returns: {
+        "attempted": bool,
+        "command": str,
+        "stdout": str,
+        "stderr": str,
+        "recovered": bool,  # 검증 결과
+        "escalated": bool,  # 실패 시 멘션 push 여부
+    }
+    """
+```
+
+### 11-5) systemd 통합
+
+#### 11-5-a) trade-off
+
+| 항목 | (a) bot.py 내장 | (b) 별 service (`mobruji-resilience-monitor.service`) |
+|---|---|---|
+| 의존성 | discord.py (이미 bot 에 있음) | 없음 (subprocess + requests 만) |
+| Discord 푸시 | client 인스턴스 직접 사용 (즉시) | webhook URL 호출 (env 필요) |
+| 가시성 | Discord 자체 push + bot journalctl | journalctl 단독 |
+| crash 영향 | bot down 시 monitor 도 down (단일 실패점) | bot 와 독립 |
+| 코드 중복 | 없음 — bot 의 utility 재사용 | 일부 중복 (push helper 등) |
+| 배포 복잡도 | bot 재배포 = monitor 재배포 | service unit 별도 관리 + systemd Timer |
+| 회복 권한 | bot user (sudoers 필요) | 전용 user (격리 가능, 더 안전) |
+
+#### 11-5-b) 권장: (a) bot.py 내장
+
+- 이유:
+  - Discord 푸시가 핵심 가치 — 같은 프로세스에서 client 재사용이 가장 신뢰성 높음 (webhook 실패 케이스 회피).
+  - 현재 bot.py 가 이미 `digest_loop` 등 background loop 패턴을 가짐 → `resilience_monitor_loop` 추가는 자연스러움.
+  - 배포 단순 (bot 만 관리).
+- 단점 보완:
+  - bot down 시 monitor 도 down → **secondary backup**: cron 30분 간격 `resilience_check_minimal.sh` (별 PR 로 분리). bot 살아있음 자체를 watchdog 으로 확인하고, dead 면 systemctl restart 시도 + Discord webhook 푸시 (env 필요).
+  - secondary 는 임계값 검사 안 함 — 오직 "bot 살아있나" + "디스크 95%+ emergency" 만.
+
+#### 11-5-c) 후속 작업
+
+- 본 PR 범위 외:
+  - (a) bot.py 내장 구현은 §11-1~§11-3 + §11-4 구현 PR (be 사이클) 에서 함께.
+  - secondary backup cron 은 별 PR (`infra/resilience-secondary-backup-cron`).
+  - (b) 옵션이 다시 매력적이 되는 트리거: bot 가 OAuth/discord.py 이슈로 자주 죽거나, 회복 권한을 bot user 에서 분리해야 할 보안 요구가 생기면 재검토.
+
+### 11-6) 회귀 가드
+
+#### 11-6-a) 테스트 프레임워크
+
+- Python `unittest` + `unittest.mock` (`pytest` + `pytest-mock` 도 허용).
+- mock 대상:
+  - `subprocess.run` (docker / systemctl / mysql / journalctl)
+  - `psutil` (디스크 / heap proxy)
+  - `requests.get` (`/actuator/health`)
+  - `discord.Client.get_channel(...).send` (push)
+  - 시계 (`time.time`, `datetime.now`) — ledger cooldown 검증용
+
+#### 11-6-b) 시나리오 매트릭스 (5 위험 × 4 시나리오 = 20 케이스)
+
+| 시나리오 | 기대 동작 |
+|---|---|
+| 정상 (임계 미만) | active=False, push 없음, 회복 시도 없음 |
+| 임계 직전 (경고선) | active=False, push 없음 (임계 ≠ 경고) |
+| 임계 초과 (회복 성공) | active=True → alert push → 회복 시도 push → 검증 성공 → 🟢 push → ledger 갱신 |
+| 임계 초과 (회복 실패) | active=True → alert push → 회복 시도 push → 검증 실패 → 🔴 escalation push → cooldown ledger |
+
+#### 11-6-c) 위험별 mock 예시
+
+- 디스크: `psutil.disk_usage('/').percent = 92` → `subprocess.run(['docker','system','prune',...])` 호출 검증 → 재호출 시 `percent = 80` 반환 → recovered=True.
+- bridge inactive: `subprocess.run(['systemctl','is-active','mobruji-discord-bridge'])` returncode=3 → restart 호출 검증 → 재호출 시 returncode=0 → recovered=True.
+- mysql denied: backend log mock 에서 `Access denied` 5회 주입 → mysql restart 호출 검증 → `SELECT 1` mock 성공 → recovered=True.
+
+#### 11-6-d) cooldown 검증
+
+- 동일 위험 1시간 내 3회 회복 실패 → 4번째 cycle 에서 회복 시도 skip (alert push 만), ledger 검증.
+- 1시간 경과 후 (시계 mock 으로 +3601s) → 회복 시도 재개 검증.
+
+#### 11-6-e) 의존성
+
+- `backend/` 가 아닌 `tools/discord-daemon/tests/` 하위에 위치 (bot.py 내장 안 — §11-5 권장).
+- `requirements-dev.txt` 에 `pytest`, `pytest-mock` 추가.
+- CI 게이트: 별 GitHub Actions job (`resilience-tests`) — 본 PR 범위 외, 구현 PR 에서 추가.
