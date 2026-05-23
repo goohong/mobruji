@@ -385,6 +385,39 @@ describe("SongCard", () => {
       const collapsed = screen.getByRole("button", { name: /자세히 보기/ });
       expect(collapsed).toHaveAttribute("aria-expanded", "false");
     });
+
+    // closes #542 — aria-controls 값이 펼침 패널 id와 정확히 매칭되어야 한다.
+    it("토글 aria-controls가 펼침 패널 id와 일치한다 (useId 회귀 가드)", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const toggle = screen.getByRole("button", { name: /자세히 보기/ });
+      const controlsId = toggle.getAttribute("aria-controls");
+      expect(controlsId).toBeTruthy();
+      await user.click(toggle);
+      const panel = document.getElementById(controlsId as string);
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveTextContent("키 매칭");
+    });
+
+    // closes #542 — 카드 여러 개 렌더 시 panelId가 카드 간 충돌하지 않아야 한다.
+    it("카드 다수 렌더 시 각 토글 aria-controls가 unique하다", () => {
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={buildItem({}, { rankPosition: 1 })} />
+          <SongCard item={buildItem({}, { rankPosition: 2 })} />
+        </ul>,
+      );
+      const controlsIds = screen
+        .getAllByRole("button", { name: /자세히 보기/ })
+        .map((toggle) => toggle.getAttribute("aria-controls"));
+      expect(controlsIds).toHaveLength(2);
+      expect(new Set(controlsIds).size).toBe(controlsIds.length);
+    });
   });
 
   // closes #176 — 좋아요 토글. closes #184 — BE 연동 mutation flow.
