@@ -303,6 +303,38 @@ describe("apiFetch 200 OK 빈 body 분기 가드 (#702)", () => {
   });
 });
 
+describe("apiFetch Response header case-insensitivity 가드 (#706)", () => {
+  // Fetch spec 상 Headers.get 은 case-insensitive 매칭.
+  // 백엔드가 `Content-Type` / `content-type` 어떤 표기로 응답해도 JSON 분기가 동일하게 적용됨을 lock.
+  it.each([
+    { label: "Content-Type (canonical) → JSON 파싱", headerKey: "Content-Type" },
+    { label: "content-type (lower) → JSON 파싱", headerKey: "content-type" },
+    { label: "CONTENT-TYPE (upper) → JSON 파싱", headerKey: "CONTENT-TYPE" },
+  ])("$label", async ({ headerKey }: { headerKey: string }) => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { [headerKey]: "application/json" } }),
+    );
+    await expect(apiFetch<{ ok: boolean }>("/api/v1/probe")).resolves.toEqual({ ok: true });
+  });
+});
+
+describe("apiFetch non-falsy primitive/Array body 가드 (#706)", () => {
+  // #702 는 falsy primitive (0, "", false) 만 lock → non-falsy 분기 보강.
+  // body 처리 분기는 `body !== undefined` 단일 조건이므로 Array/number(42)/true 모두
+  // JSON.stringify 통과 + Content-Type=application/json 자동 부여.
+  it.each([
+    { label: "body=Array → JSON.stringify 배열", body: [1, 2, 3] as unknown, expectedBody: "[1,2,3]" },
+    { label: "body=number(42) → '42' stringify", body: 42 as unknown, expectedBody: "42" },
+    { label: "body=true → 'true' stringify", body: true as unknown, expectedBody: "true" },
+  ])("$label", async ({ body, expectedBody }: { body: unknown; expectedBody: string }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { method: "POST", body });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe(expectedBody);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+});
+
 describe("apiFetch non-GET 메서드 body 처리 가드 (#699)", () => {
   // 현 동작 lock: body 처리 분기는 method 와 무관하게 `body !== undefined` 단일 조건.
   // PUT/DELETE 도 body 가 있으면 POST 와 동일하게 JSON.stringify + Content-Type 자동 부여,
