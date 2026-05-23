@@ -52,16 +52,11 @@ CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
 CYCLE_DIGEST_TZ: Final[ZoneInfo] = ZoneInfo("Asia/Seoul")
 CYCLE_DIGEST_TIME_FORMAT: Final[str] = "%Y-%m-%d %H:%M KST"
 
-# 7 카테고리 emoji prefix — spec: docs/features/discord-message-style.md §3.
-# bot.py 단순화본은 digest 만 사용하지만 헬퍼 import 호환을 위해 전체 보존.
+# digest emoji prefix — spec: docs/features/discord-message-style.md §3.
+# bot.py 단순화본은 digest 만 사용. 나머지 6종 (reply/cycle-start/cycle-end/
+# alert/recovery/decision) 은 외부 import 없음 확인 후 #819 에서 제거.
 MESSAGE_PREFIX: Final[dict[str, str]] = {
-    "reply": "💬",
-    "cycle-start": "🚀",
-    "cycle-end": "✅",
     "digest": "📊",
-    "alert": "🚨",
-    "recovery": "🟢",
-    "decision": "📌",
 }
 
 # Discord mention 토큰 차단 패턴 — digest 안 PR title 에 `@everyone` 등이
