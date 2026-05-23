@@ -2,7 +2,7 @@
 
 ## 1) 브랜치 전략
 - 유지 브랜치: `main`, `develop`
-- 작업 브랜치: `develop`에서 파생 (`feature`, `refactor`, `chore`, `fix`, `docs`, `test`)
+- 작업 브랜치: `develop`에서 파생. type 화이트리스트(8종): `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `release` (`release`는 release-prompt-template 자동 생성 PR 전용)
 - 브랜치 이름 예시: `feature/voice-range-input-#12`, `docs/voice-range-input-spec-#1`
 - 이슈는 `.github/ISSUE_TEMPLATE/task.md` 템플릿으로 생성하고, 제목은 브랜치 목적이 드러나게 간결하게 작성한다.
 
@@ -10,8 +10,8 @@
 1. 작업 브랜치에서 변경
 2. PR 생성 (base: `develop`)
 3. **PR 생성 직후 즉시(같은 작업 단계에서) 아래를 모두 수행한다. 이 단계를 건너뛴 PR은 리뷰 대상이 아니다.**
-   - [ ] `type:*` 라벨 1개 부여 (`type:feat` `type:fix` `type:refactor` `type:chore` `type:docs` `type:test` `type:style`)
-   - [ ] `scope:*` 라벨 1개 부여 (화이트리스트: `user` `song` `recommendation` `voice` `infra` `web`)
+   - [ ] `type:*` 라벨 1개 부여 (`type:feat` `type:fix` `type:refactor` `type:chore` `type:docs` `type:test` `type:style` `type:release`)
+   - [ ] `scope:*` 라벨 1개 부여 (화이트리스트: `user` `song` `recommendation` `voice` `infra` `web` `feedback`)
    - [ ] AI가 작성/보조한 PR이면 `ai-generated` 라벨 부여
    - [ ] 보호 영역(`docs/ai-harness/01-harness-spec.md` §6) 변경 시 `needs-human-review` 라벨 부여
    - [ ] PR 본문이 `.github/PULL_REQUEST_TEMPLATE.md`를 덮어쓴 경우 AI 체크리스트 블록을 수동으로 다시 채워 넣는다 (`gh pr create --body`는 템플릿을 무시함).
@@ -23,7 +23,7 @@
 ## 3) PR 작성 규칙
 - 제목 형식(고정): `type(scope): 제목`
   - 예시: `feat(recommendation): 음역대 기반 1차 추천 알고리즘 구현`
-  - `scope`는 아래 화이트리스트에서 선택 (final): `user`, `song`, `recommendation`, `voice`, `infra`, `web`
+  - `scope`는 아래 화이트리스트에서 선택 (final): `user`, `song`, `recommendation`, `voice`, `infra`, `web`, `feedback`
   - 신규 scope가 필요하면 이 문서를 먼저 PR로 갱신한 뒤 사용한다.
 - PR 본문은 `.github/PULL_REQUEST_TEMPLATE.md` 템플릿을 사용한다.
 - PR 본문은 `AS-IS`, `TO-BE` 중심으로 간결하게 작성한다.
@@ -49,7 +49,7 @@
 
 ## 6) 커밋 컨벤션
 - AngularJS commit convention 사용
-- 타입: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+- 타입: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `release` (`release`는 release-prompt-template 자동 생성 PR 전용)
 - 형식:
 
 ```text
@@ -180,7 +180,7 @@ gh release create vX.Y.Z --generate-notes
 
 복수의 AI 에이전트가 같은 레포에서 동시에 동작할 수 있다. 충돌과 추적성 손실을 막기 위한 룰.
 
-> **현재 운영 형태 (2026-05-23 기준)**: maestro 1 + sub-agent 워크트리 4(be/fe/rev/plan), 총 **5 워크트리** 동시 가동. maestro가 단일 Claude 세션으로 오케스트레이션하고 `Agent` 도구로 각 워크트리에 sub-agent를 background 가동한다. 항시 가동 룰과 셋업은 [§11 multi-session-runbook §0-10](./11-multi-session-runbook.md#0-10-항시-4-워크트리-가동-룰)과 [ADR-0014](../decisions/0014-multi-agent-worktree-orchestration.md) 참조. (초기엔 Claude+Codex 2 에이전트 가정이었으나 Codex 미사용 + 워크트리 분리 패턴으로 진화)
+> **현재 운영 형태 (2026-05-23 기준)**: 총 **5 워크트리 (maestro 1 + sub-agent 4: be/fe/rev/plan)** 동시 가동. maestro가 단일 Claude 세션으로 오케스트레이션하고 `Agent` 도구로 각 워크트리에 sub-agent를 background 가동한다. 항시 가동 룰과 셋업은 [§11 multi-session-runbook §0-10](./11-multi-session-runbook.md#0-10-항시-4-워크트리-가동-룰)과 [ADR-0014](../decisions/0014-multi-agent-worktree-orchestration.md) 참조. (초기엔 Claude+Codex 2 에이전트 가정이었으나 Codex 미사용 + 워크트리 분리 패턴으로 진화)
 
 ### 10-1) 1 브랜치 = 1 에이전트
 - 한 브랜치/PR에는 **한 에이전트만** 커밋한다. 다른 에이전트가 같은 브랜치에 직접 push 금지.

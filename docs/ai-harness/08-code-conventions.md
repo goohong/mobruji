@@ -142,7 +142,7 @@ ADR 0005에 따라 모든 BoundedContext(BC)는 다음 4계층 패키지를 갖�
 com.mobruji.<bc>.{domain, application, infrastructure, api}
 ```
 
-현재 BC 목록: `voice`, `song`, `recommendation`, `feedback`. 횡단 코드가 생기면 `com.mobruji.common.*`을 BC 외부에 추가한다(현재는 두지 않음).
+현재 BC 목록: `voice`, `song`, `recommendation`, `feedback` (코드로 존재하는 BC). 06-domain-model.md §3 의 `user` BC 는 v0.2 익명 세션 모델 채택(ADR-0011)으로 별도 패키지를 두지 않고 `sessionId` 컬럼만 보유한다 — 회원 도입 시점에 `com.mobruji.user.*` 신설 + 본 표 갱신. 횡단 코드가 생기면 `com.mobruji.common.*`을 BC 외부에 추가한다(현재는 두지 않음).
 
 | BC | 패키지 prefix | 주요 도메인 객체 | 비고 |
 |---|---|---|---|

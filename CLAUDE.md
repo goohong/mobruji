@@ -23,6 +23,10 @@
 - `docs/ai-harness/08-code-conventions.md` — **코드 컨벤션 전체**
 - `docs/ai-harness/10-observability.md` — 로깅/메트릭/트레이싱
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 런북
+- `docs/ai-harness/12-sub-agent-prompt-template.md` — **sub-agent launch single SoT (우선순위 최상위)**
+- `docs/ai-harness/13-memory-promote-tracking.md` — 메모리 promote/tracking
+- `docs/ai-harness/14-discord-notify-setup.md` — Discord notify 셋업
+- `docs/ai-harness/15-discord-message-templates.md` — Discord 메시지 템플릿
 - `docs/decisions/` — ADR
 - `docs/features/` — Feature Spec
 - `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션 (4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary)
