@@ -1,18 +1,14 @@
-"""Mobruji Discord daemon (Phase 3 tmux bridge 포함).
+"""Mobruji Discord daemon — 단순화본 (이슈 #807).
 
-기능:
-- Discord Gateway WebSocket 으로 24/7 연결을 유지한다.
-- 지정된 채널(MOBRUJI_CHANNEL_ID)에서 화이트리스트(ALLOWED_USER_IDS)
-  사용자가 보낸 메시지만 처리한다.
-- `TMUX_BRIDGE_ENABLED=1` 이면 메시지를 maestro tmux 세션 stdin 에 주입한다.
-  세션이 없으면 `tmux new-session -d -s <name> '<CLAUDE_BIN>'` 으로 생성한다.
-- `TMUX_BRIDGE_ENABLED=0` (또는 미설정) 이면 종전대로 GitHub
-  `repository_dispatch` 호출만 수행한다.
-- dedup ledger 는 SQLite (`DEDUP_LEDGER_PATH`, 기본 `~/.mobruji/discord-bridge.sqlite`).
-  `message_id` PK + `processed_at` TIMESTAMP, 24h TTL 후 GC.
-- 옵션으로 inbox 파일에도 메시지를 append 한다 (디버깅/백업용).
-- `TMUX_PIPE_PANE_ENABLED=1` 이면 부팅 시 `tmux pipe-pane` 으로 pane stdout 을
-  파일로 캡처하고 size 기반 자체 rotation 을 수행한다.
+기능 (사용자 결정 2026-05-23 큰 단순화 위임):
+1. Discord Gateway WebSocket 24/7 유지.
+2. 지정 채널(MOBRUJI_CHANNEL_ID) + 화이트리스트(ALLOWED_USER_IDS) 사용자 메시지를
+   `tmux send-keys -t helper:0.0 "<msg>" Enter` 로 helper pane 에 단순 routing.
+3. cycle-status.json digest cron — `~/.mobruji/cycle-status.json` 을 일정 주기로
+   읽어 4 워크트리(be/fe/rev/plan) 진행/최근 한 줄씩 Discord 알림 채널에 push.
+
+helper 응답은 helper 측 신규 script `~/.mobruji/discord-reply.sh "<msg>"` 가
+직접 Discord REST API 로 push 합니다 (bot.py 안에서 응답 watcher 가동 안 함).
 
 운영 가이드와 셋업 절차는 같은 디렉토리의 README.md 참고.
 spec: docs/features/discord-driven-mobruji.md
@@ -21,216 +17,80 @@ spec: docs/features/discord-driven-mobruji.md
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import re
-import shlex
 import sqlite3
 import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
 
 import discord
-import requests
 from dotenv import load_dotenv
 
-LOG_FORMAT: Final[str] = (
-    "%(asctime)s %(levelname)s %(name)s :: %(message)s"
-)
+LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
-REQUEST_TIMEOUT_SECONDS: Final[int] = 10
 MAX_TEXT_PREVIEW_LEN: Final[int] = 80
 DEDUP_TTL_SECONDS: Final[int] = 24 * 60 * 60  # 24h
 DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
-PIPE_PANE_ROTATE_INTERVAL_SECONDS: Final[int] = 5 * 60  # 5min
-DEFAULT_PIPE_PANE_MAX_BYTES: Final[int] = 100 * 1024 * 1024  # 100MB
-# maestro_response_watcher_loop 튜닝값. tmux pane 캡처 파일을 tail 하여 idle 임계 도달 시
-# 누적 buffer 를 한 응답 chunk 로 push. 노이즈 줄이려고 짧은 chunk skip + sha256 dedup.
-MAESTRO_WATCHER_POLL_INTERVAL_SECONDS: Final[float] = 1.0
-MAESTRO_WATCHER_IDLE_SECONDS: Final[float] = 30.0
-MAESTRO_WATCHER_MIN_CHUNK_LEN: Final[int] = 100  # 이보다 짧은 chunk 는 노이즈로 skip
-MAESTRO_WATCHER_MAX_CHUNK_LEN: Final[int] = 1800  # Discord 한도 2000 여유 200
-MAESTRO_WATCHER_DEDUP_PREFIX: Final[str] = "maestro:"
-MAESTRO_WATCHER_SEND_MAX_RETRIES: Final[int] = 3  # transient send 실패 시 최대 재시도 횟수
-# 재시도 사이 exponential backoff. 실제 sleep = BASE ** retry_count
-# (retry 1 → 2s, retry 2 → 4s). poll_interval 과는 독립. #764 (rev round 2).
-MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE: Final[float] = 2.0
-# pending 재시도 중 새 chunk 가 무한 누적되어 메모리 폭주하는 것을 방지.
-# Discord 장기 outage 시나리오. 기본 200000 char (helper 한 응답 1KB~10KB 다수 cover, #795 긴급).
-# 초과 시 oldest(앞쪽) 절반을 drop 하고 WARN. env `MAESTRO_WATCHER_MAX_BUFFER_LEN` 으로 외부화.
-# 이전 default `MAX_CHUNK_LEN * 10 = 18000` 은 helper 응답 단일 turn 도 넘쳐 drop 발생 (#795).
-MAESTRO_WATCHER_MAX_BUFFER_LEN: Final[int] = int(
-    os.environ.get("MAESTRO_WATCHER_MAX_BUFFER_LEN", "200000")
-)
-# context_auto_clear_loop 튜닝값. maestro 가 매 turn 끝에 emit 하는 `===CTX:NN%===` 마커를
-# pipe-pane capture 파일에서 tail 하여 95% 도달 시 정리 prompt inject, ===CLEAR_READY===
-# 마커 감지 시 /clear 전송. spec: docs/features/context-auto-clear.md §5-6 옵션 A.
-CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS: Final[float] = 5.0
-CONTEXT_DEFAULT_TRIGGER_PCT: Final[int] = 95
-CONTEXT_DEFAULT_HYSTERESIS_PCT: Final[int] = 80
-CONTEXT_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"===CTX:(\d{1,3})%===")
-CONTEXT_CLEAR_READY_MARKER: Final[str] = "===CLEAR_READY==="
-CONTEXT_CLEANUP_PROMPT: Final[str] = (
-    ":memory: 95% 도달. 진행 중 sub-agent 완료 대기 + 핸드오프 메모리 갱신 + "
-    "===CLEAR_READY=== 출력 후 정지"
-)
-CONTEXT_AUTO_CLEAR_TAIL_BYTES: Final[int] = 64 * 1024  # 최근 64KB 만 스캔 (큰 로그 회피)
-# context_refresh_loop 튜닝값 (ADR-0016 옵션 D). 5분 간격으로 maestro tmux pane 에 `/context`
-# slash 명령을 inject 한 뒤 응답 화면을 pipe-pane log 에서 tail 하여 token 사용량 % 를
-# 메모리 cache 로 갱신한다. context_auto_clear_loop 가 cache 우선 사용하면 maestro 가 marker
-# emit 못한 turn 에서도 임계 판정 가능. opt-in (CONTEXT_REFRESH_ENABLED=1).
-CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
-# `/context` 응답 line 예: "Total tokens used: 73,481 / 1,000,000" (실측 형식 — 변경 시 spec 갱신).
-# 콤마/공백 가변. NN / DD 두 그룹 캡처 후 ÷ × 100 로 % 산출.
-CONTEXT_RESPONSE_RE: Final[re.Pattern[str]] = re.compile(
-    r"Total tokens used:\s*([\d,]+)\s*/\s*([\d,]+)"
-)
-# in-memory cache. 단일 maestro pane 전제 (mobruji:0.0). 다중 pane 시 key 화 필요.
-# - pct: 마지막 파싱 % (int) 또는 None
-# - updated_at: monotonic seconds (stale 판정용)
-context_pct_cache: dict[str, float | int | None] = {
-    "pct": None,
-    "updated_at": 0.0,
-}
-# ANSI escape sequence 풀세트 (#797 강화).
-# 기존 CSI/OSC/단일 ESC 만 cover 했으나 사용자 실 사례에서 spinner glyph (`✶✻●✽✢·`)
-# 와 braille 스피너 (`⠂⠁⠃⠉`) 가 raw 로 Discord 에 흘러간 사례 발생. 풀세트로 확장:
-# - CSI: ESC `[` ... letter (컬러/커서/SGR)
-# - OSC: ESC `]` ... BEL 또는 ST (터미널 타이틀)
-# - DEC private + 문자셋 designator: ESC `(`/`)`/`*`/`+` 다음 letter
-# - 단일 ESC: 그 외 1-char escape
-# - 단순 BEL: `\x07` (TUI 알람)
-ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
-    r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[()*+][0-?A-Za-z]|[@-_])|\x07"
-)
-# tmux/claude TUI spinner glyph — 진행 인디케이터의 잔여 문자. ANSI 시퀀스가 제거된 뒤
-# 남는 raw glyph 자체를 별도 패턴으로 제거. 사용자 본 사례:
-# `H*✶✻●✽✻✶*8 ✢·✢*●✶✻✽9✻ ✶3*✢·●✢50*✶✻✽`
-# - 도형/별 스피너: ✶ ✻ ● ✽ ✢ · ◆ ◇ ◉ ○ ⬢ ⬡
-# - braille 스피너: U+2800-U+28FF
-# 연속 3개 이상만 매칭 (정상 본문에 한두 개 들어가는 경우는 보존).
-SPINNER_GLYPH_RE: Final[re.Pattern[str]] = re.compile(
-    r"[⠀-⣿]{2,}|[✶✱✻●✽✢◆◇◉○⬢⬡]+"
-)
-# Secret masking — maestro tmux pane 에 PAT/토큰/패스워드가 echo 될 수 있으므로
-# Discord push 직전에 패턴 매칭으로 마스킹 (#742). 새 시크릿 형태 발견 시 패턴 추가.
-# 순서 중요: 더 구체적인 패턴(github_pat, discord token)이 일반 env-style 보다 먼저 매칭되도록 배치.
-SECRET_MASK_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
-    # GitHub fine-grained PAT — `github_pat_` + 82자 (실측 prefix 11 + body)
-    (re.compile(r"github_pat_[A-Za-z0-9_]{50,}"), "github_pat_***"),
-    # GitHub classic PAT — `ghp_` + 36자 영숫자
-    (re.compile(r"ghp_[A-Za-z0-9]{36,}"), "ghp_***"),
-    # Discord bot token — `[MN][A-Za-z0-9-_]{23}.[A-Za-z0-9-_]{6}.[A-Za-z0-9-_]{27+}`
-    (
-        re.compile(
-            r"[MN][A-Za-z0-9_-]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}"
-        ),
-        "discord_token_***",
-    ),
-    # MySQL/DB password 패턴 — `password=value` (case-insensitive).
-    # 일반 env-style (KEY/TOKEN/SECRET/PASSWORD) 은 _ENV_STYLE_SECRET_RE 로 별도 처리.
-    (re.compile(r"(?i)\bpassword=\S+"), "password=***"),
-)
 
-# 일반 env-style `*_TOKEN=` / `*_SECRET=` / `*_KEY=` / `*_PASSWORD=` 매칭 (#759 narrow).
-# 단순 광역 패턴은 `NEXT_PUBLIC_API_KEY=`, `PUBLIC_KEY=` (RSA pub), `API_VERSION_KEY=` 등
-# 공개 의도 변수까지 마스킹해 가독성 회귀를 일으켰다. 콜백에서 화이트리스트/블랙리스트 + 길이
-# 임계로 false positive 를 줄인다.
-_ENV_STYLE_SECRET_RE: Final[re.Pattern[str]] = re.compile(
-    r"([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD))=(\S+)"
-)
-# 키 이름에 이 단어들이 포함되어 있으면 secret 이 아니므로 마스킹 제외.
-# - PUBLIC: `NEXT_PUBLIC_*` (Next.js 클라이언트 노출), `PUBLIC_KEY` (RSA pub) 등 공개 의도.
-# - VERSION/COUNT/LIMIT/INDEX/SIZE/LENGTH: 비밀이 아닌 메타 식별자.
-_ENV_STYLE_SECRET_KEYNAME_BLOCKLIST: Final[tuple[str, ...]] = (
-    "PUBLIC",
-    "VERSION",
-    "COUNT",
-    "LIMIT",
-    "INDEX",
-    "SIZE",
-    "LENGTH",
-)
-# 값 최소 길이 임계. 너무 짧은 값은 secret 일 가능성이 낮고 가독성 손해가 더 큼.
-# 일반 PAT/토큰/api key 는 32+ 가 일반적이지만, 짧은 dev secret 도 보호 가능하도록 12 로 설정.
-_ENV_STYLE_SECRET_MIN_VALUE_LEN: Final[int] = 12
-
-
-def _mask_env_style_secret(match: re.Match[str]) -> str:
-    """env-style `KEY=value` 매칭 1건에 대해 화이트리스트/블랙리스트/길이 임계 적용."""
-    key_name = match.group(1)
-    value = match.group(2)
-    if any(blocked in key_name for blocked in _ENV_STYLE_SECRET_KEYNAME_BLOCKLIST):
-        return match.group(0)  # 공개 의도 / 비-secret 메타 — 원문 유지
-    if len(value) < _ENV_STYLE_SECRET_MIN_VALUE_LEN:
-        return match.group(0)  # 너무 짧음 — secret 아닐 가능성 높음, 원문 유지
-    return f"{key_name}=***"
-SENTINEL_PREFIX: Final[str] = "/system:"
-STATUS_COMMAND_PREFIX: Final[str] = "/status"
-STATUS_GH_TIMEOUT_SECONDS: Final[int] = 8
-STATUS_OPEN_PR_LIMIT: Final[int] = 8
-STATUS_MERGED_PR_LIMIT: Final[int] = 5
-STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
-STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
-AUTO_ACK_QUEUE_WINDOW_SECONDS: Final[int] = 300  # 5분 안 dedup mark 수 = queue 표시
-# `/system:status <msg>` — 사용자가 maestro 진척을 강제로 채널에 push 하고 싶을 때.
-# 일반 메시지 dispatch (tmux/repository_dispatch) 는 건너뛰고 reply 카테고리로만 발화.
-# maestro 자신이 자기 진척을 알릴 때도 (tmux pane 에 이 prefix 로 입력) 같은 경로로 push 됨.
-STATUS_PROGRESS_PREFIX: Final[str] = "/system:status"
-
-# 7 카테고리 emoji prefix — spec: docs/features/discord-message-style.md §3.
-# 한 메시지 = 한 카테고리. 첫 줄 emoji 만 보고 사용자가 종류 즉시 식별 (시나리오 S1).
-MESSAGE_PREFIX: Final[dict[str, str]] = {
-    "reply": "💬",        # 사용자 메시지에 maestro 답 (메인 채널)
-    "cycle-start": "🚀",  # 사이클 시작 (알림 채널)
-    "cycle-end": "✅",    # 사이클 정상 종료 (알림 채널)
-    "digest": "📊",       # cron 상태 1줄 (알림 채널)
-    "alert": "🚨",        # 위험 발생 (P1+ 메인 동시)
-    "recovery": "🟢",     # 위험 회복 1회 (알림 채널)
-    "decision": "📌",     # 사용자 결정 묶음 질문 (메인 채널)
-}
-
-# auto-ack 은 reply 카테고리 — 사용자 메시지에 즉시 응답하는 maestro 답이므로 spec §3 reply 분류.
-# template §4-1 에 따라 첫 줄 `💬 reply: {요약}` 형식.
-# ETA 표기: 사용자가 "처리 중" 만 보고 무한정 기다리는 무의미한 ack 가 안 되도록
-# 일반 응답(1-5분) / sub-agent 가동 시(5-15분) 범위를 같이 노출.
-# 추가 진척이 필요하면 `/system:status <msg>` 로 ad-hoc push 가능 (STATUS_PROGRESS_PREFIX).
-# 정중체 강제 (#797) — 사용자 요구 "~합니다 / ~했습니다 / ~할까요?" 만 사용.
-AUTO_ACK_TEMPLATE: Final[str] = (
-    f"{MESSAGE_PREFIX['reply']} reply: 받았습니다. 처리 중입니다 "
-    f"(queue: {{queue}}, ETA 1-5분 · sub-agent 가동 시 5-15분)."
-)
-DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분 cron digest 주기 (env override 가능)
-DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
-DIGEST_MERGED_WINDOW_HOURS: Final[int] = 24  # "최근 머지" 24h 윈도우 (legacy /status 만 사용)
-DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 push (생존 신호)
-# cycle-status digest (사용자 룰 2026-05-23): 4 워크트리(be/fe/rev/plan) 진행/최근 한 줄씩.
-# nmae 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는 JSON 을 cron 으로 push.
-# 스키마: {workspace: {in_progress: str|null, last_completed: {pr, title, merged_at}|null}}
+# digest cron 튜닝값 — cycle-status.json (사용자 룰 2026-05-23).
+DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
+DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
+DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 push
 DEFAULT_CYCLE_STATUS_PATH: Final[str] = "/home/mobruji/.mobruji/cycle-status.json"
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
-CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200  # 한 워크트리 라인 최대 길이 (Discord 가독성)
+CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
+
+# 7 카테고리 emoji prefix — spec: docs/features/discord-message-style.md §3.
+# bot.py 단순화본은 digest 만 사용하지만 헬퍼 import 호환을 위해 전체 보존.
+MESSAGE_PREFIX: Final[dict[str, str]] = {
+    "reply": "💬",
+    "cycle-start": "🚀",
+    "cycle-end": "✅",
+    "digest": "📊",
+    "alert": "🚨",
+    "recovery": "🟢",
+    "decision": "📌",
+}
+
+# Discord mention 토큰 차단 패턴 — digest 안 PR title 에 `@everyone` 등이
+# 들어가도 실제 mention 알림이 발생하지 않도록 zero-width space 삽입.
+MENTION_SANITIZE_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
+    (re.compile(r"@everyone"), "@​everyone"),
+    (re.compile(r"@here"), "@​here"),
+    (re.compile(r"<@(?=[!&]?\d)"), "<​@"),
+)
+
+SENTINEL_PREFIX: Final[str] = "/system:"
+SENTINEL_KEYS: Final[dict[str, list[str]]] = {
+    "ctrl-c": ["C-c"],
+    "ctrl-d": ["C-d"],
+    "enter": ["Enter"],
+    "esc": ["Escape"],
+}
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
 
 
 def load_env() -> dict[str, str]:
-    """필수 환경변수를 로드한다. 누락 시 즉시 종료한다."""
+    """필수 환경변수를 로드합니다. 누락 시 즉시 종료합니다.
+
+    단순화본 (이슈 #807): repository_dispatch 경로를 폐기했으므로
+    `GITHUB_PAT` / `GITHUB_REPO` 는 필수가 아닙니다.
+    """
     load_dotenv(Path(__file__).resolve().parent / ".env")
 
     required = (
         "DISCORD_BOT_TOKEN",
         "ALLOWED_USER_IDS",
         "MOBRUJI_CHANNEL_ID",
-        "GITHUB_PAT",
-        "GITHUB_REPO",
     )
     missing = [key for key in required if not os.environ.get(key)]
     if missing:
@@ -238,41 +98,13 @@ def load_env() -> dict[str, str]:
         sys.exit(1)
 
     env: dict[str, str] = {key: os.environ[key] for key in required}
-    env["TMUX_BRIDGE_ENABLED"] = os.environ.get("TMUX_BRIDGE_ENABLED", "0")
-    env["TMUX_SESSION_NAME"] = os.environ.get("TMUX_SESSION_NAME", "mobruji")
-    env["TMUX_TARGET_PANE"] = os.environ.get("TMUX_TARGET_PANE", "mobruji:0.0")
+    env["TMUX_SESSION_NAME"] = os.environ.get("TMUX_SESSION_NAME", "helper")
+    env["TMUX_TARGET_PANE"] = os.environ.get("TMUX_TARGET_PANE", "helper:0.0")
     env["CLAUDE_BIN"] = os.environ.get("CLAUDE_BIN", "claude")
     env["DEDUP_LEDGER_PATH"] = os.path.expanduser(
         os.environ.get("DEDUP_LEDGER_PATH", "~/.mobruji/discord-bridge.sqlite")
     )
-    env["TMUX_PIPE_PANE_ENABLED"] = os.environ.get("TMUX_PIPE_PANE_ENABLED", "0")
-    env["TMUX_PIPE_PANE_PATH"] = os.path.expanduser(
-        os.environ.get("TMUX_PIPE_PANE_PATH", "~/.mobruji/tmux-pane.log")
-    )
-    env["TMUX_PIPE_PANE_MAX_BYTES"] = os.environ.get(
-        "TMUX_PIPE_PANE_MAX_BYTES", str(DEFAULT_PIPE_PANE_MAX_BYTES)
-    )
-    env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "0")
-    # maestro 응답 자동 캡처 + 메인 채널 push 워처. opt-in (긴급 위임).
-    # TMUX_PIPE_PANE_ENABLED=1 + 동일 capture 파일 사용 전제.
-    env["MAESTRO_RESPONSE_WATCHER_ENABLED"] = os.environ.get(
-        "MAESTRO_RESPONSE_WATCHER_ENABLED", "0"
-    )
-    # context auto-clear loop (spec PR C). opt-in — default off.
-    # `===CTX:NN%===` 마커 polling → 95% 도달 시 inject + /clear.
-    # TMUX_BRIDGE_ENABLED=1 + TMUX_PIPE_PANE_ENABLED=1 전제.
-    env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
-        "CONTEXT_AUTO_CLEAR_ENABLED", "0"
-    )
-    env["CONTEXT_CLEAR_TRIGGER_PCT"] = os.environ.get(
-        "CONTEXT_CLEAR_TRIGGER_PCT", str(CONTEXT_DEFAULT_TRIGGER_PCT)
-    )
-    env["CONTEXT_CLEAR_HYSTERESIS_PCT"] = os.environ.get(
-        "CONTEXT_CLEAR_HYSTERESIS_PCT", str(CONTEXT_DEFAULT_HYSTERESIS_PCT)
-    )
-    # NOTIFY_CHANNEL_ID — 알림 카테고리(cycle/digest/alert/recovery) 발사 채널.
-    # 미설정 시 MOBRUJI_CHANNEL_ID 로 fallback (현재 동작 유지, 채널 분리 전 단계).
-    # spec: docs/features/discord-message-style.md §5-2.
+    env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "1")
     env["NOTIFY_CHANNEL_ID"] = os.environ.get(
         "NOTIFY_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"]
     )
@@ -280,7 +112,7 @@ def load_env() -> dict[str, str]:
 
 
 def parse_allowed_user_ids(raw: str) -> set[int]:
-    """CSV 형태 user id 목록을 정수 집합으로 변환한다."""
+    """CSV user id 목록을 정수 집합으로 변환합니다."""
     ids: set[int] = set()
     for token in raw.split(","):
         token = token.strip()
@@ -294,64 +126,35 @@ def parse_allowed_user_ids(raw: str) -> set[int]:
 
 
 def truncate_for_log(text: str) -> str:
-    """로그에 메시지를 남길 때 너무 길지 않도록 자른다."""
+    """로그에 메시지를 남길 때 너무 길지 않도록 자릅니다."""
     if len(text) <= MAX_TEXT_PREVIEW_LEN:
         return text
     return text[:MAX_TEXT_PREVIEW_LEN] + "…"
 
 
 def append_inbox(payload: dict[str, str]) -> None:
-    """inbox.jsonl 에 한 줄 JSON 으로 append (백업/디버깅용)."""
+    """inbox.jsonl 에 한 줄 JSON 으로 append 합니다 (백업/디버깅용)."""
     try:
         with INBOX_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except OSError as exc:  # 디스크 문제는 데몬을 죽이지 않는다
+    except OSError as exc:
         logger.warning("inbox.jsonl write 실패: %s", exc)
 
 
-def dispatch_to_github(
-    github_pat: str,
-    github_repo: str,
-    payload: dict[str, str],
-) -> None:
-    """GitHub repository_dispatch 호출 (tmux bridge off 시 fallback 경로)."""
-    url = f"https://api.github.com/repos/{github_repo}/dispatches"
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {github_pat}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    body = {
-        "event_type": "discord_message",
-        "client_payload": payload,
-    }
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            json=body,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as exc:
-        logger.error("repository_dispatch 요청 실패: %s", exc)
-        return
+def sanitize_mentions(text: str) -> str:
+    """Discord mention 토큰을 zero-width space 로 무력화합니다.
 
-    if response.status_code >= 300:
-        logger.error(
-            "repository_dispatch 비정상 응답: %s %s",
-            response.status_code,
-            truncate_for_log(response.text),
-        )
-        return
-
-    logger.info(
-        "repository_dispatch 성공: repo=%s event=discord_message",
-        github_repo,
-    )
+    digest 안 PR title / 진행 메시지에 `@everyone` / `@here` / `<@USER_ID>` 가
+    들어가도 실제 알림이 발생하지 않도록 prefix 직후에 U+200B 삽입.
+    """
+    sanitized = text
+    for pattern, replacement in MENTION_SANITIZE_PATTERNS:
+        sanitized = pattern.sub(replacement, sanitized)
+    return sanitized
 
 
 class DedupLedger:
-    """SQLite 기반 dedup ledger. message_id PK + processed_at TIMESTAMP.
+    """SQLite 기반 dedup ledger — 사용자 메시지 중복 처리 방지.
 
     spec Q6 답: SQLite (JSONL 대비 TTL GC / 동시성 안전).
     """
@@ -403,22 +206,9 @@ class DedupLedger:
             self._conn.commit()
             return cursor.rowcount
 
-    def count_since(self, window_seconds: int) -> int:
-        """마지막 window_seconds 안에 처리된 메시지 수.
-
-        auto-ack 의 'queue: N' 값. maestro 처리 부하 가시화 목적.
-        """
-        cutoff = int(time.time()) - window_seconds
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM processed_messages WHERE processed_at >= ?",
-                (cutoff,),
-            ).fetchone()
-            return int(row[0]) if row else 0
-
 
 def start_dedup_gc_thread(ledger: DedupLedger) -> None:
-    """백그라운드에서 주기적으로 dedup ledger GC 를 수행한다."""
+    """백그라운드에서 주기적으로 dedup ledger GC 를 수행합니다."""
 
     def loop() -> None:
         while True:
@@ -444,7 +234,7 @@ def tmux_has_session(session_name: str) -> bool:
 
 
 def tmux_create_session(session_name: str, claude_bin: str) -> bool:
-    """tmux new-session -d 로 maestro 세션을 만든다."""
+    """tmux new-session -d 로 helper 세션을 만듭니다."""
     cmd = ["tmux", "new-session", "-d", "-s", session_name, claude_bin]
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
@@ -464,19 +254,11 @@ def ensure_tmux_session(session_name: str, claude_bin: str) -> bool:
     return tmux_create_session(session_name, claude_bin)
 
 
-SENTINEL_KEYS: Final[dict[str, list[str]]] = {
-    "ctrl-c": ["C-c"],
-    "ctrl-d": ["C-d"],
-    "enter": ["Enter"],
-    "esc": ["Escape"],
-}
-
-
 def resolve_sentinel(text: str) -> list[str] | None:
-    """`/system:<key>` 형태 sentinel 을 tmux send-keys 인자 리스트로 변환.
+    """`/system:<key>` 형태 sentinel 을 tmux send-keys 인자 리스트로 변환합니다.
 
-    Q5 답(c): 명시 sentinel 만 종료/제어 입력으로 받는다. `/exit` 같은
-    일반 슬래시 명령은 maestro Claude TUI 에 그대로 전달한다.
+    Q5 답(c): 명시 sentinel 만 종료/제어 입력으로 받습니다. `/exit` 같은
+    일반 슬래시 명령은 helper Claude TUI 에 그대로 전달합니다.
     """
     if not text.startswith(SENTINEL_PREFIX):
         return None
@@ -484,29 +266,10 @@ def resolve_sentinel(text: str) -> list[str] | None:
     return SENTINEL_KEYS.get(key)
 
 
-def parse_status_progress(text: str) -> str | None:
-    """`/system:status <msg>` 면 메시지 본문을 반환. 아니면 None.
-
-    maestro 진척 ad-hoc push 용. on_message 에서 가로채서 dispatch (tmux/repository_dispatch)
-    를 건너뛰고 reply 카테고리(📡 status) 메시지만 채널에 send 한다.
-    본문 없는 (`/system:status` 단독) 경우는 None 반환 — 의미 없는 빈 push 방지.
-    """
-    if not text.startswith(STATUS_PROGRESS_PREFIX):
-        return None
-    remainder = text[len(STATUS_PROGRESS_PREFIX):]
-    # prefix 뒤가 공백 또는 EOL 이어야 정확한 매칭 (예: `/system:statusxyz` 는 거부).
-    if remainder and not remainder[0].isspace():
-        return None
-    body = remainder.strip()
-    if not body:
-        return None
-    return body
-
-
 def tmux_send_payload(target_pane: str, text: str) -> bool:
-    """일반 텍스트는 `-l` (literal) 로 보낸 뒤 Enter 키를 누른다.
+    """일반 텍스트는 `-l` (literal) 로 보낸 뒤 Enter 키를 누릅니다.
 
-    sentinel(/system:ctrl-c 등) 은 컨트롤 키 인자로 직접 전송한다.
+    sentinel(/system:ctrl-c 등) 은 컨트롤 키 인자로 직접 전송합니다.
     multiline 은 줄마다 `-l` + Enter.
     """
     sentinel = resolve_sentinel(text)
@@ -547,221 +310,9 @@ def tmux_send_payload(target_pane: str, text: str) -> bool:
     return True
 
 
-def start_tmux_pipe_pane(
-    target_pane: str,
-    log_path: str,
-    max_bytes: int,
-) -> None:
-    """pane stdout 을 파일로 캡처한다. 동시에 size 기반 self-rotation 스레드 가동.
-
-    spec §5-2 컴포넌트 3: Phase 1 디버깅 용도. 메시지 원문이 포함될 수 있어
-    chmod 600. 로그 파일이 max_bytes 초과 시 `.1` 로 회전(단일 백업).
-    """
-    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(log_path).touch(exist_ok=True)
-    try:
-        os.chmod(log_path, 0o600)
-    except OSError:
-        pass
-
-    pipe_shell = f"cat >> {shlex.quote(log_path)}"
-    cmd = ["tmux", "pipe-pane", "-t", target_pane, "-o", pipe_shell]
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        logger.warning(
-            "tmux pipe-pane 시작 실패: rc=%d stderr=%s",
-            result.returncode,
-            truncate_for_log(result.stderr or ""),
-        )
-        return
-    logger.info("tmux pipe-pane 시작: target=%s log=%s", target_pane, log_path)
-
-    def rotate_loop() -> None:
-        while True:
-            time.sleep(PIPE_PANE_ROTATE_INTERVAL_SECONDS)
-            try:
-                size = Path(log_path).stat().st_size
-            except OSError:
-                continue
-            if size < max_bytes:
-                continue
-            rotated = log_path + ".1"
-            try:
-                if Path(rotated).exists():
-                    Path(rotated).unlink()
-                Path(log_path).rename(rotated)
-                Path(log_path).touch(exist_ok=True)
-                os.chmod(log_path, 0o600)
-                logger.info(
-                    "tmux pipe-pane 로그 회전: %s → %s (size=%d)",
-                    log_path,
-                    rotated,
-                    size,
-                )
-                subprocess.run(
-                    ["tmux", "pipe-pane", "-t", target_pane],
-                    check=False,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    ["tmux", "pipe-pane", "-t", target_pane, "-o", pipe_shell],
-                    check=False,
-                    capture_output=True,
-                )
-            except OSError as exc:
-                logger.warning("pipe-pane 로그 회전 실패: %s", exc)
-
-    threading.Thread(target=rotate_loop, name="pipe-pane-rotate", daemon=True).start()
-
-
-def _run_gh_json(args: list[str], github_pat: str) -> list[dict] | None:
-    """gh CLI 호출 후 JSON 배열을 파싱한다. 실패 시 None — 호출부에서 graceful degradation."""
-    env = os.environ.copy()
-    if github_pat:
-        env["GH_TOKEN"] = github_pat
-    try:
-        result = subprocess.run(
-            ["gh", *args],
-            capture_output=True,
-            text=True,
-            timeout=STATUS_GH_TIMEOUT_SECONDS,
-            env=env,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        logger.warning("gh 호출 실패: args=%s err=%s", args, exc)
-        return None
-    if result.returncode != 0:
-        logger.warning(
-            "gh 비정상 종료: args=%s rc=%s stderr=%s",
-            args,
-            result.returncode,
-            truncate_for_log(result.stderr),
-        )
-        return None
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        logger.warning("gh JSON 파싱 실패: %s", exc)
-        return None
-
-
-def _systemd_is_active(unit: str) -> str:
-    """systemctl is-active 결과 한 줄. 실패 시 'unknown'."""
-    try:
-        result = subprocess.run(
-            ["systemctl", "is-active", unit],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return "unknown"
-    return (result.stdout or "").strip() or "unknown"
-
-
-def _truncate_title(title: str, limit: int = 60) -> str:
-    if len(title) <= limit:
-        return title
-    return title[: limit - 1] + "…"
-
-
-def build_status_report(
-    github_repo: str,
-    github_pat: str,
-    *,
-    maestro_unit: str = "mobruji-maestro.service",
-    bridge_unit: str = "mobruji-discord-bridge.service",
-    now: datetime | None = None,
-) -> str:
-    """결정성 /status 응답을 1 메시지로 조립한다.
-
-    구성: maestro/bridge systemd 상태 + 진행 중 PR + 최근 머지 + 오픈 type:bug 이슈.
-    LLM 호출 없음. 외부는 gh CLI + systemctl 만. 실패 항목은 '(조회 실패)'로 표시.
-    """
-    now = now or datetime.now(timezone.utc)
-    repo_args = ["--repo", github_repo]
-
-    open_prs = _run_gh_json(
-        ["pr", "list", *repo_args, "--state", "open", "--limit", str(STATUS_OPEN_PR_LIMIT),
-         "--json", "number,title,isDraft,labels"],
-        github_pat,
-    )
-    merged_prs = _run_gh_json(
-        ["pr", "list", *repo_args, "--state", "merged", "--limit", str(STATUS_MERGED_PR_LIMIT),
-         "--json", "number,title,mergedAt"],
-        github_pat,
-    )
-    bug_issues = _run_gh_json(
-        ["issue", "list", *repo_args, "--state", "open", "--label", "type:bug",
-         "--limit", str(STATUS_BUG_ISSUE_LIMIT), "--json", "number,title"],
-        github_pat,
-    )
-
-    maestro_state = _systemd_is_active(maestro_unit)
-    bridge_state = _systemd_is_active(bridge_unit)
-
-    lines: list[str] = ["🎼 **mobruji status**"]
-    lines.append(
-        f"- maestro: `{maestro_state}` · bridge: `{bridge_state}`"
-    )
-
-    if open_prs is None:
-        lines.append("- 진행 중 PR: (조회 실패)")
-    elif not open_prs:
-        lines.append("- 진행 중 PR: (없음)")
-    else:
-        lines.append(f"- 진행 중 PR ({len(open_prs)}):")
-        for pr in open_prs:
-            draft = " 📝" if pr.get("isDraft") else ""
-            lines.append(f"  • #{pr['number']}{draft} {_truncate_title(pr['title'])}")
-
-    if merged_prs is None:
-        lines.append("- 최근 머지: (조회 실패)")
-    elif not merged_prs:
-        lines.append("- 최근 머지: (없음)")
-    else:
-        lines.append(f"- 최근 머지 ({len(merged_prs)}):")
-        for pr in merged_prs:
-            lines.append(f"  • #{pr['number']} {_truncate_title(pr['title'])}")
-
-    if bug_issues is None:
-        lines.append("- 알려진 오류: (조회 실패)")
-    elif not bug_issues:
-        lines.append("- 알려진 오류: (없음)")
-    else:
-        lines.append(f"- 알려진 오류 ({len(bug_issues)}):")
-        for issue in bug_issues:
-            lines.append(f"  • #{issue['number']} {_truncate_title(issue['title'])}")
-
-    kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
-    lines.append(f"- as of: {kst.strftime('%Y-%m-%d %H:%M %Z')}")
-
-    report = "\n".join(lines)
-    if len(report) > STATUS_DISCORD_MAX_LEN:
-        report = report[: STATUS_DISCORD_MAX_LEN - 1] + "…"
-    return report
-
-
-def build_digest_line(
-    github_repo: str,
-    github_pat: str,
-    *,
-    now: datetime | None = None,
-) -> str:
-    """cron digest 1줄. /status 보다 압축.
-
-    형식: 📊 PR open:N / 머지 24h:N / bug:N — HH:MM KST
-    (`type:bug:` 표기는 Discord 가 :bug: 를 🐛 emoji 로 변환하므로 prefix 제거.)
-    조회 실패는 '?' 로 표시. LLM 호출 없음.
-
-    NOTE: 사용자 룰 (2026-05-23 #모부르지) 에 따라 cron digest 본 경로는
-    cycle-status.json 기반 `format_cycle_digest` 로 교체되었습니다. 본 함수는
-    legacy `/status` 명령 등 디버그 진입점에서만 사용됩니다.
-    """
-    line, _signature = build_digest_payload(github_repo, github_pat, now=now)
-    return line
+# ─────────────────────────────────────────────────────────────────────────────
+# cycle-status digest (사용자 룰 2026-05-23)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
@@ -771,7 +322,7 @@ def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
     상태 파일입니다. 파일이 없거나 JSON 파싱이 실패하면 None 을 반환하고,
     호출부 (`format_cycle_digest`) 가 graceful fallback 합니다.
 
-    스키마 (메모리 박제: [[feedback-cycle-status-json]]):
+    스키마:
         {
             "be":  {"in_progress": str|null, "last_completed": {...}|null},
             "fe":  {...},
@@ -844,13 +395,11 @@ def format_cycle_digest(status: dict | None) -> tuple[str, str]:
                 if isinstance(pr_raw, str) and pr_raw.strip():
                     recent_text = f"{pr_raw.strip()} ({title_text})"
                 else:
-                    # pr 이 null 이어도 title 만 있으면 표시 (rev 처럼 PR 없는 항목).
                     recent_text = title_text
             else:
                 recent_text = "없음"
             sig_parts.append(f"{ws}={in_progress_text}|{recent_text}")
 
-        # mention sanitize — title 에 `@everyone` 등이 들어가면 Discord 알림 폭주.
         in_progress_text = sanitize_mentions(in_progress_text)
         recent_text = sanitize_mentions(recent_text)
 
@@ -864,97 +413,8 @@ def format_cycle_digest(status: dict | None) -> tuple[str, str]:
     return rendered, signature
 
 
-def build_digest_payload(
-    github_repo: str,
-    github_pat: str,
-    *,
-    now: datetime | None = None,
-) -> tuple[str, str]:
-    """digest 1줄(rendered) 과 delta 비교용 signature(시간 제외) 를 함께 반환한다.
-
-    signature 는 'open=N|merged24=N|bug=N' 형태. 호출 실패한 항목은 '?' 그대로 들어가므로
-    조회 실패가 연속되어도 '동일 signature' 로 잡혀 delta skip 된다.
-    """
-    now = now or datetime.now(timezone.utc)
-    repo_args = ["--repo", github_repo]
-
-    open_prs = _run_gh_json(
-        ["pr", "list", *repo_args, "--state", "open", "--limit", "30",
-         "--json", "number,title"],
-        github_pat,
-    )
-    since = (now - timedelta(hours=DIGEST_MERGED_WINDOW_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    merged_recent = _run_gh_json(
-        ["pr", "list", *repo_args, "--state", "merged", "--search", f"merged:>{since}",
-         "--limit", "30", "--json", "number,title,mergedAt"],
-        github_pat,
-    )
-    bug_issues = _run_gh_json(
-        ["issue", "list", *repo_args, "--state", "open", "--label", "type:bug",
-         "--limit", "30", "--json", "number,title"],
-        github_pat,
-    )
-
-    def fmt(value: list | None) -> str:
-        return "?" if value is None else str(len(value))
-
-    open_count = fmt(open_prs)
-    merged_count = fmt(merged_recent)
-    bug_count = fmt(bug_issues)
-
-    kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
-
-    # 최근 머지 PR 3개 title preview (가장 최신 순). 데이터 없으면 라인 생략.
-    # title 에 `@everyone`/`@here`/`<@USER>` 가 포함되면 Discord 가 mention 으로
-    # 해석해 알림 폭주가 발생하므로 sanitize_mentions 적용 (#754).
-    recent_lines: list[str] = []
-    if merged_recent:
-        sorted_recent = sorted(
-            merged_recent,
-            key=lambda pr: pr.get("mergedAt", ""),
-            reverse=True,
-        )[:3]
-        for pr in sorted_recent:
-            title = pr.get("title", "")
-            if len(title) > 60:
-                title = title[:60] + "…"
-            recent_lines.append(f"  · #{pr.get('number')} {sanitize_mentions(title)}")
-
-    # 백로그 시그널: open PR 3개 title preview.
-    backlog_lines: list[str] = []
-    if open_prs:
-        for pr in open_prs[:3]:
-            title = pr.get("title", "")
-            if len(title) > 60:
-                title = title[:60] + "…"
-            backlog_lines.append(f"  · #{pr.get('number')} {sanitize_mentions(title)}")
-
-    bug_lines: list[str] = []
-    if bug_issues:
-        for issue in bug_issues[:3]:
-            title = issue.get("title", "")
-            if len(title) > 60:
-                title = title[:60] + "…"
-            bug_lines.append(f"  · #{issue.get('number')} {sanitize_mentions(title)}")
-
-    parts = [
-        f"📊 **{kst.strftime('%H:%M')} KST digest**",
-        f"✅ 머지 {DIGEST_MERGED_WINDOW_HOURS}h: {merged_count}",
-    ]
-    parts.extend(recent_lines)
-    parts.append(f"🔄 open PR: {open_count}")
-    parts.extend(backlog_lines)
-    bug_label = "🐛 OPEN" if bug_count not in {"0", "?"} else "🐛 없음"
-    parts.append(f"{bug_label}: {bug_count}")
-    parts.extend(bug_lines)
-
-    line = "\n".join(parts)
-    signature = f"open={open_count}|merged{DIGEST_MERGED_WINDOW_HOURS}={merged_count}|bug={bug_count}"
-    return line, signature
-
-
 def resolve_digest_interval(env_value: str | None) -> int:
-    """DIGEST_INTERVAL_SECONDS env 값을 정수로 해석. 부재/이상값이면 default."""
+    """DIGEST_INTERVAL_SECONDS env 값을 정수로 해석합니다. 부재/이상값이면 default."""
     if env_value is None:
         return DEFAULT_DIGEST_INTERVAL_SECONDS
     try:
@@ -979,8 +439,6 @@ def resolve_digest_interval(env_value: str | None) -> int:
 async def digest_loop(
     client: "discord.Client",
     channel_id: int,
-    github_repo: str,
-    github_pat: str,
     *,
     interval: int = DEFAULT_DIGEST_INTERVAL_SECONDS,
     initial_delay: int = DIGEST_INITIAL_DELAY_SECONDS,
@@ -988,23 +446,19 @@ async def digest_loop(
     time_source=time.monotonic,
     cycle_status_path: str = DEFAULT_CYCLE_STATUS_PATH,
 ) -> None:
-    """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push.
+    """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push 합니다.
 
-    사용자 룰 (2026-05-23 #모부르지): 기존 PR open/머지 24h 카운트 기반 digest 는
-    폐기하고, nmae 가 실시간 갱신하는 `~/.mobruji/cycle-status.json` 의 4 워크트리
-    (be/fe/rev/plan) 진행/최근 한 줄씩을 push.
+    사용자 룰 (2026-05-23 #모부르지): nmae 가 실시간 갱신하는
+    `~/.mobruji/cycle-status.json` 의 4 워크트리(be/fe/rev/plan) 진행/최근
+    한 줄씩을 push 합니다.
 
     - 직전 push 와 signature(시간 제외) 가 동일하면 noise 라고 보고 skip.
     - signature 가 바뀌면 즉시 push (= delta push).
     - 동일해도 마지막 push 로부터 heartbeat_seconds 경과 시 한 번 push (생존 신호).
     - 첫 iter 는 last signature 가 없으므로 무조건 push (초기 baseline).
 
-    `github_repo` / `github_pat` 인자는 호환성 유지를 위해 시그니처에 남겨두지만,
-    cycle-status digest 본 경로에서는 사용하지 않습니다 (call site 안정성 보존).
-
-    bot 종료 시 cancel 됨. asyncio.CancelledError 는 외부로 전파.
+    bot 종료 시 cancel 됩니다. asyncio.CancelledError 는 외부로 전파.
     """
-    del github_repo, github_pat  # unused — legacy 호환 인자
     await asyncio.sleep(initial_delay)
     last_signature: str | None = None
     last_pushed_at: float | None = None
@@ -1050,893 +504,13 @@ async def digest_loop(
         await asyncio.sleep(interval)
 
 
-def strip_ansi(text: str) -> str:
-    """ANSI escape sequence + TUI spinner glyph 제거 (#797 강화).
-
-    1) CSI/OSC/DEC private/단일 ESC/BEL 제거
-    2) spinner glyph 잔여 (`✶✻●✽✢` / braille) 제거
-    claude TUI 출력의 컬러/커서 코드 + 진행 인디케이터를 동시에 정리한다.
-    """
-    cleaned = ANSI_ESCAPE_RE.sub("", text)
-    cleaned = SPINNER_GLYPH_RE.sub("", cleaned)
-    return cleaned
-
-
-def mask_secrets(text: str) -> str:
-    """tmux pane buffer 의 PAT/토큰/패스워드 마스킹 (#742).
-
-    maestro Claude TUI 가 gh/curl/env 명령 echo 시 PAT 가 raw 노출될 수 있으므로
-    Discord push 전 SECRET_MASK_PATTERNS 순서대로 치환한다. 패턴 미매칭이면 원문 반환.
-
-    env-style `KEY=value` 는 _ENV_STYLE_SECRET_RE + _mask_env_style_secret 콜백으로
-    별도 처리 — PUBLIC/VERSION 등 화이트리스트 / 짧은 값 false positive 제외 (#759).
-    """
-    masked = text
-    for pattern, replacement in SECRET_MASK_PATTERNS:
-        masked = pattern.sub(replacement, masked)
-    masked = _ENV_STYLE_SECRET_RE.sub(_mask_env_style_secret, masked)
-    return masked
-
-
-# Discord mention 토큰 차단 패턴 (#754).
-# PR title / tmux pane chunk 에 `@everyone` / `@here` / `<@USER_ID>` 등이 그대로
-# 들어가면 Discord 가 mention 으로 해석해 알림 폭주를 일으킨다. zero-width space (​)
-# 를 끼워 넣어 시각적으로는 거의 동일하되 mention parsing 은 무력화한다.
-# Discord mention 문법:
-#   - `@everyone` / `@here` (literal)
-#   - `<@USER_ID>` / `<@!USER_ID>` (user)
-#   - `<@&ROLE_ID>` (role)
-# 모두 prefix 직후에 ​ 를 삽입하면 안전하게 깨진다.
-MENTION_SANITIZE_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
-    (re.compile(r"@everyone"), "@​everyone"),
-    (re.compile(r"@here"), "@​here"),
-    # `<@123>`, `<@!123>`, `<@&123>` — `<@` 다음에 ​ 삽입.
-    (re.compile(r"<@(?=[!&]?\d)"), "<​@"),
-)
-
-
-def sanitize_mentions(text: str) -> str:
-    """Discord mention 토큰을 zero-width space 로 무력화 (#754).
-
-    PR title / maestro tmux pane chunk 가 Discord 로 송신되기 전 호출.
-    `@everyone`, `@here`, `<@USER_ID>`, `<@!USER_ID>`, `<@&ROLE_ID>` 등
-    Discord 가 mention 으로 해석하는 모든 토큰의 prefix 직후에 U+200B
-    (zero-width space) 를 삽입해 알림 폭주를 차단한다.
-    """
-    sanitized = text
-    for pattern, replacement in MENTION_SANITIZE_PATTERNS:
-        sanitized = pattern.sub(replacement, sanitized)
-    return sanitized
-
-
-def _is_noise_line(line: str) -> bool:
-    """spinner 잔재 / TUI partial line 식별 (#797).
-
-    ANSI 제거 후에도 spinner glyph 와 일반 글자가 섞인 잔재 (`H*8 9 350`)
-    가 남을 수 있다. 알파벳/한글 비율이 낮고 별표/숫자만 듬성듬성 있는 라인은
-    의미 있는 본문이 아니라 TUI 진행 인디케이터의 잔재로 판단해 drop.
-
-    조건 (AND):
-    - 길이 < 40 자
-    - 영문자/한글 글자 수 < 4 (인사 한 글자 정도는 통과시키지 않음)
-    - 별표(`*`) 비율 >= 15% 또는 공백/숫자 비율 >= 70%
-    """
-    stripped = line.strip()
-    if not stripped or len(stripped) >= 40:
-        return False
-    alnum_letters = sum(
-        1 for c in stripped if c.isalpha()
-    )
-    if alnum_letters >= 4:
-        return False
-    star_count = stripped.count("*")
-    if star_count / len(stripped) >= 0.15:
-        return True
-    digit_space = sum(1 for c in stripped if c.isdigit() or c.isspace())
-    if digit_space / len(stripped) >= 0.70:
-        return True
-    return False
-
-
-def sanitize_chunk(text: str) -> str | None:
-    """raw tmux pane buffer 를 Discord push 후보로 정리.
-
-    - ANSI escape + spinner glyph 제거 (#797)
-    - 라인 단위로 trim 후 빈 라인 압축 (연속 공백 라인 1개로)
-    - TUI partial line (별표·숫자 잔재) drop — `_is_noise_line`
-    - 최소 길이 미만이면 None (노이즈 — 사용자 입력 echo / 짧은 prompt 등)
-    - 최대 길이 초과 시 잘라낸 뒤 `…(truncated)` 표시
-
-    Discord 한도 2000자. 너무 길면 잘라야 send 가 성공.
-    시크릿 마스킹은 ANSI 제거 후 / 라인 압축 전에 수행 — chunk 가 잘리거나 dedup
-    되더라도 원문 시크릿이 절대 send 되지 않도록 보장 (#742).
-    mention sanitize 도 같은 위치에서 수행 — maestro pane 에 echo 된 `@everyone`
-    등이 Discord mention 으로 발화되지 않도록 차단 (#754).
-    """
-    cleaned = sanitize_mentions(mask_secrets(strip_ansi(text)))
-    # 라인별 rstrip + 빈 라인 합치기 + noise line drop
-    lines: list[str] = []
-    blank_run = 0
-    for raw_line in cleaned.split("\n"):
-        line = raw_line.rstrip()
-        if not line:
-            blank_run += 1
-            if blank_run <= 1:
-                lines.append("")
-            continue
-        if _is_noise_line(line):
-            # TUI spinner partial line — 다음 라인까지 보류했다가 noise 로 확인되면 drop.
-            continue
-        blank_run = 0
-        lines.append(line)
-    compact = "\n".join(lines).strip()
-    if len(compact) < MAESTRO_WATCHER_MIN_CHUNK_LEN:
-        return None
-    if len(compact) > MAESTRO_WATCHER_MAX_CHUNK_LEN:
-        compact = compact[: MAESTRO_WATCHER_MAX_CHUNK_LEN - 16] + "\n…(truncated)"
-    return compact
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# 정형 응답 generator (#797)
+# Discord client
 # ─────────────────────────────────────────────────────────────────────────────
-# 본진/watcher 가 Discord 에 보내는 메시지를 deterministic 하게 조립한다.
-# LLM 호출 없음. 모든 종결 어미는 "~합니다 / ~했습니다 / ~할까요?" 만 사용.
-# 사용자 요구 (#797): 비속체("받음", "끝", "켤까?") 차단 + 일관된 포맷.
-
-
-def formal_ack(
-    queue_n: int,
-    eta_min: int = 5,
-    sub_agent_active: bool = False,
-) -> str:
-    """사용자 메시지 수신 확인용 정중체 ack.
-
-    Args:
-        queue_n: 처리 대기열 길이 (마지막 윈도우 내 메시지 수).
-        eta_min: 일반 응답 예상 시간 (분). sub_agent_active=True 이면 5-15분 범위 표기.
-        sub_agent_active: sub-agent 가동 중 여부.
-
-    Returns:
-        `💬 reply: 받았습니다. 처리 중입니다 (queue: N, ETA M분).` 형태 메시지.
-    """
-    prefix = MESSAGE_PREFIX["reply"]
-    if sub_agent_active:
-        eta_text = f"ETA {eta_min}-15분 (sub-agent 가동 중)"
-    else:
-        eta_text = f"ETA {eta_min}분"
-    return (
-        f"{prefix} reply: 받았습니다. 처리 중입니다 "
-        f"(queue: {queue_n}, {eta_text})."
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# auto-ack 동적화 (#802) — nmae 상태 capture 기반 4분기 매핑
-# ─────────────────────────────────────────────────────────────────────────────
-# 사용자 룰 (2026-05-23 #모부르지):
-#   사용자 메시지 수신 즉시 tmux capture-pane 으로 nmae(mobruji session) 상태 파악 후
-#   정중체 ack 1줄 발송. 정적 AUTO_ACK_TEMPLATE 폐기.
-#
-# 4분기 매핑:
-#   1) idle / 짧은 작업   → "📥 받았어요. 곧 답변 드릴게요."
-#   2) reasoning N분      → "📥 받았어요. nmae가 reasoning N분째라 답이 늦을 수 있어요."
-#   3) sub-agent 가동     → "📥 받았어요. nmae가 [작업명] 처리 중입니다. 곧 helper가 우선 답변 드립니다."
-#   4) stall / 무응답     → "📥 받았어요. nmae가 응답이 없어 helper가 직접 답합니다."
-
-NMAE_STATE_IDLE: Final[str] = "idle"
-NMAE_STATE_REASONING: Final[str] = "reasoning"
-NMAE_STATE_SUBAGENT: Final[str] = "subagent"
-NMAE_STATE_STALL: Final[str] = "stall"
-
-# stall 판정: 마지막 capture hash 가 이 시간 이상 동일하면 stall 로 본다.
-NMAE_STALL_THRESHOLD_SECONDS: Final[int] = 300  # 5분
-
-# reasoning indicator regex: Kneading / thought for / Pondering 등 + 초/분 표시.
-# 예: "Kneading… (42s)", "thought for 3m 12s", "Pondering… (1m 5s)"
-_REASONING_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"(?:Kneading|thought for|Pondering|Thinking|Reasoning|Considering|Reticulating|Mulling|Reflecting|Cogitating)"
-    r"[…\s.]*\(?\s*"
-    r"(?:(?P<min>\d+)\s*m[\s,]*)?"
-    r"(?:(?P<sec>\d+)\s*s)?",
-    re.IGNORECASE,
-)
-
-# sub-agent 가동 indicator. Task tool in_progress 또는 Async agent launched.
-# 예: "[in_progress] running task: …", "Async agent launched (id=…)"
-_SUBAGENT_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"\[in_progress\]|Async agent launched|sub-agent (?:가동|launch|running)|Running\s+\w+\s*\(",
-    re.IGNORECASE,
-)
-
-# 작업명 추출. "[in_progress] foo bar" / "Async agent launched: foo" / "Running Task(...)" 등.
-_SUBAGENT_TASK_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"(?:\[in_progress\]\s*|Async agent launched[:\s]+|Running\s+)"
-    r"(?P<name>[A-Za-z][\w\-./]{1,40})",
-)
-
-# idle prompt: "❯" 만 보이는 마지막 라인. (capture 의 trailing 라인 검사)
-_IDLE_PROMPT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\s*[❯>]\s*$", re.MULTILINE)
-
-# stall 추적용 모듈 전역. (마지막 capture hash + 시각)
-_LAST_CAPTURE_HASH: dict[str, tuple[str, float]] = {}
-
-
-def _capture_pane(target_pane: str) -> str | None:
-    """tmux capture-pane -t <pane> -p 결과 반환. 실패 시 None."""
-    try:
-        result = subprocess.run(
-            ["tmux", "capture-pane", "-t", target_pane, "-p"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("tmux capture-pane 실패: %s", exc)
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout or ""
-
-
-def inspect_nmae_state(
-    target_pane: str = "mobruji:0.0",
-    *,
-    now_ts: float | None = None,
-    capture_override: str | None = None,
-) -> dict[str, object]:
-    """nmae(mobruji main session) 상태를 tmux capture 기반으로 분류.
-
-    Args:
-        target_pane: tmux pane 식별자.
-        now_ts: stall 판정용 timestamp. 미지정 시 time.time().
-        capture_override: 테스트용 — 실제 tmux 호출 대신 사용할 capture 문자열.
-
-    Returns:
-        {
-            "state": "idle" | "reasoning" | "subagent" | "stall",
-            "reasoning_minutes": Optional[int],  # state=reasoning 일 때
-            "task_name": Optional[str],          # state=subagent 일 때
-        }
-        capture 실패 시 idle 로 fallback.
-    """
-    capture = capture_override if capture_override is not None else _capture_pane(target_pane)
-    if capture is None:
-        # tmux 사용 불가 — idle 로 fallback (안전 ack).
-        return {"state": NMAE_STATE_IDLE, "reasoning_minutes": None, "task_name": None}
-
-    timestamp = now_ts if now_ts is not None else time.time()
-    capture_hash = hashlib.sha256(capture.encode("utf-8", errors="replace")).hexdigest()
-
-    # stall 판정: 동일 hash 가 임계치 이상 지속.
-    last = _LAST_CAPTURE_HASH.get(target_pane)
-    if last is not None and last[0] == capture_hash:
-        if timestamp - last[1] >= NMAE_STALL_THRESHOLD_SECONDS:
-            return {"state": NMAE_STATE_STALL, "reasoning_minutes": None, "task_name": None}
-    else:
-        _LAST_CAPTURE_HASH[target_pane] = (capture_hash, timestamp)
-
-    # reasoning indicator 우선 검출 (가장 즉시성 높음).
-    reasoning_match = _REASONING_PATTERN.search(capture)
-    if reasoning_match is not None:
-        minutes_raw = reasoning_match.group("min")
-        seconds_raw = reasoning_match.group("sec")
-        total_seconds = 0
-        if minutes_raw:
-            total_seconds += int(minutes_raw) * 60
-        if seconds_raw:
-            total_seconds += int(seconds_raw)
-        # 분 단위 올림 (최소 1분 표기). 0 이면 "곧" 수준이라 idle 로 강등.
-        if total_seconds > 0:
-            minutes = max(1, (total_seconds + 59) // 60)
-            return {
-                "state": NMAE_STATE_REASONING,
-                "reasoning_minutes": minutes,
-                "task_name": None,
-            }
-
-    # sub-agent 가동 indicator.
-    subagent_match = _SUBAGENT_PATTERN.search(capture)
-    if subagent_match is not None:
-        name_match = _SUBAGENT_TASK_NAME_PATTERN.search(capture)
-        task_name = name_match.group("name") if name_match is not None else "sub-agent"
-        return {
-            "state": NMAE_STATE_SUBAGENT,
-            "reasoning_minutes": None,
-            "task_name": task_name,
-        }
-
-    # 그 외 idle (prompt 만 보이는 경우 포함).
-    return {"state": NMAE_STATE_IDLE, "reasoning_minutes": None, "task_name": None}
-
-
-def formal_dynamic_ack(state: dict[str, object]) -> str:
-    """nmae 상태 기반 정중체 dynamic ack 1줄.
-
-    Args:
-        state: inspect_nmae_state() 반환 dict.
-
-    Returns:
-        4분기 매핑 ack 메시지. 이모지 📥 허용 (사용자 룰 #모부르지 2026-05-23).
-    """
-    kind = state.get("state", NMAE_STATE_IDLE)
-    if kind == NMAE_STATE_REASONING:
-        minutes = state.get("reasoning_minutes") or 1
-        return f"📥 받았어요. nmae가 reasoning {minutes}분째라 답이 늦을 수 있어요."
-    if kind == NMAE_STATE_SUBAGENT:
-        task_name = state.get("task_name") or "sub-agent"
-        return (
-            f"📥 받았어요. nmae가 {task_name} 처리 중입니다. "
-            f"곧 helper가 우선 답변 드립니다."
-        )
-    if kind == NMAE_STATE_STALL:
-        return "📥 받았어요. nmae가 응답이 없어 helper가 직접 답합니다."
-    # idle / fallback
-    return "📥 받았어요. 곧 답변 드릴게요."
-
-
-def formal_status(
-    work_in_progress: list[str],
-    work_completed: list[str],
-    pending_decisions: list[str],
-) -> str:
-    """현재 작업 상황 정중체 status.
-
-    Args:
-        work_in_progress: 진행 중 항목 라인 (예: "PR #797 review 대기").
-        work_completed: 완료 항목 라인.
-        pending_decisions: 사용자 결정 대기 항목 라인.
-
-    Returns:
-        section 별로 구조화된 정중체 메시지. 빈 section 은 "없습니다." 로 표기.
-    """
-    prefix = MESSAGE_PREFIX["reply"]
-    lines: list[str] = [f"{prefix} status: 현재 상황을 보고드립니다."]
-    lines.append("")
-    lines.append("**진행 중**")
-    if work_in_progress:
-        for item in work_in_progress:
-            lines.append(f"- {item}")
-    else:
-        lines.append("- 없습니다.")
-    lines.append("")
-    lines.append("**완료**")
-    if work_completed:
-        for item in work_completed:
-            lines.append(f"- {item}")
-    else:
-        lines.append("- 없습니다.")
-    lines.append("")
-    lines.append("**결정 대기**")
-    if pending_decisions:
-        for item in pending_decisions:
-            lines.append(f"- {item}")
-    else:
-        lines.append("- 없습니다.")
-    return "\n".join(lines)
-
-
-def formal_error(error_type: str, retry_count: int = 0) -> str:
-    """오류 발생 정중체 알림.
-
-    Args:
-        error_type: 오류 유형 짧은 설명 (예: "tmux send 실패").
-        retry_count: 시도한 재시도 횟수. 0 이면 재시도 문구 생략.
-
-    Returns:
-        `🚨 alert: 오류가 발생했습니다 ({type}). 재시도 N회 진행합니다.` 형태.
-    """
-    prefix = MESSAGE_PREFIX["alert"]
-    if retry_count > 0:
-        return (
-            f"{prefix} alert: 오류가 발생했습니다 ({error_type}). "
-            f"재시도 {retry_count}회 진행했습니다."
-        )
-    return f"{prefix} alert: 오류가 발생했습니다 ({error_type})."
-
-
-def formal_digest(
-    merged_prs: int,
-    open_prs: int,
-    bugs: int,
-) -> str:
-    """cron digest 정중체 1줄.
-
-    Args:
-        merged_prs: 최근 윈도우 머지 PR 수.
-        open_prs: open PR 수.
-        bugs: open type:bug 이슈 수.
-
-    Returns:
-        `📊 digest: 머지 N건 / open M건 / bug K건입니다.` 형태.
-    """
-    prefix = MESSAGE_PREFIX["digest"]
-    return (
-        f"{prefix} digest: 머지 {merged_prs}건, "
-        f"open PR {open_prs}건, bug {bugs}건입니다."
-    )
-
-
-def parse_context_pct(pane_text: str) -> int | None:
-    """`===CTX:NN%===` 마커의 마지막 occurrence 를 정수로 반환. 없으면 None.
-
-    spec §5-6 옵션 A — maestro 가 매 turn 끝에 self-emit. footer scrape 안 함.
-    NN 은 0~100 이외 (예: 105) 일 수 있으나 호출부에서 임계값과 비교 시 자연 통과.
-    """
-    matches = CONTEXT_MARKER_RE.findall(pane_text)
-    if not matches:
-        return None
-    try:
-        return int(matches[-1])
-    except ValueError:
-        return None
-
-
-def read_tail_text(path: Path, max_bytes: int) -> str:
-    """파일 끝 max_bytes 만 utf-8 로 디코딩하여 반환. 파일 없으면 빈 문자열.
-
-    pipe-pane log 가 100MB 까지 성장 가능 — 매 polling 마다 전부 읽지 않도록 tail.
-    UTF-8 경계가 잘릴 수 있어 errors='replace'.
-    """
-    try:
-        stat = path.stat()
-    except OSError:
-        return ""
-    size = stat.st_size
-    start = max(0, size - max_bytes)
-    try:
-        with path.open("rb") as handle:
-            handle.seek(start)
-            data = handle.read(size - start)
-    except OSError as exc:
-        logger.debug("context auto-clear: tail read 실패 %s", exc)
-        return ""
-    return strip_ansi(data.decode("utf-8", errors="replace"))
-
-
-def inject_cleanup_prompt(target_pane: str) -> bool:
-    """tmux send-keys 로 정리 prompt 한 줄 inject + Enter. 성공 시 True.
-
-    tmux_send_payload 와 동일 동작 — 코드 재사용. sentinel 우회 (`/system:` prefix 없음)
-    이므로 일반 literal path.
-    """
-    return tmux_send_payload(target_pane, CONTEXT_CLEANUP_PROMPT)
-
-
-def send_clear_command(target_pane: str) -> bool:
-    """tmux send-keys '/clear' Enter. Claude TUI 의 /clear slash 명령 트리거."""
-    return tmux_send_payload(target_pane, "/clear")
-
-
-async def context_auto_clear_loop(
-    client: "discord.Client",
-    channel_id: int,
-    pipe_pane_path: str,
-    target_pane: str,
-    *,
-    trigger_pct: int = CONTEXT_DEFAULT_TRIGGER_PCT,
-    hysteresis_pct: int = CONTEXT_DEFAULT_HYSTERESIS_PCT,
-    poll_interval: float = CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS,
-    tail_bytes: int = CONTEXT_AUTO_CLEAR_TAIL_BYTES,
-    sleep=asyncio.sleep,
-    inject_fn=None,
-    clear_fn=None,
-) -> None:
-    """`===CTX:NN%===` 마커 polling — trigger_pct 도달 시 정리 prompt inject,
-    `===CLEAR_READY===` 마커 감지 시 /clear 전송.
-
-    State machine (3 상태):
-      ARMED: 트리거 대기 상태. pct >= trigger_pct 시 inject → AWAITING_MARKER.
-      AWAITING_MARKER: 정리 prompt inject 후 maestro 의 정리 완료 marker 대기.
-        marker 감지 시 /clear 송신 → DEBOUNCED.
-      DEBOUNCED: /clear 완료. pct <= hysteresis_pct 떨어져야 ARMED 복귀.
-        그동안 추가 trigger 안 됨.
-
-    dedup: 같은 NN% 가 연속 polling 에 보여도 (state 가 ARMED 가 아니면) 추가 발화 없음.
-    inject_fn / clear_fn 주입 가능 — 테스트에서 tmux 호출 mock.
-
-    bot 종료 시 cancel. asyncio.CancelledError 는 외부로 전파.
-    """
-    path = Path(pipe_pane_path)
-    inject = inject_fn if inject_fn is not None else (lambda: inject_cleanup_prompt(target_pane))
-    clear = clear_fn if clear_fn is not None else (lambda: send_clear_command(target_pane))
-    state = "ARMED"
-    logger.info(
-        "context_auto_clear_loop 시작: path=%s pane=%s trigger=%d%% hysteresis=%d%% poll=%.1fs",
-        pipe_pane_path,
-        target_pane,
-        trigger_pct,
-        hysteresis_pct,
-        poll_interval,
-    )
-    while True:
-        try:
-            tail = read_tail_text(path, tail_bytes)
-            pct = parse_context_pct(tail)
-            marker_seen = CONTEXT_CLEAR_READY_MARKER in tail
-
-            if state == "AWAITING_MARKER" and marker_seen:
-                # 정리 완료 — /clear 전송. pct 는 marker 와 함께 emit 안 됐을 수도
-                # 있으므로 None 허용.
-                pct_label = f"{pct}%" if pct is not None else "?"
-                logger.info(
-                    "context auto-clear: CLEAR_READY 감지 (pct=%s) → /clear 송신",
-                    pct_label,
-                )
-                channel = client.get_channel(channel_id)
-                if channel is not None:
-                    try:
-                        await channel.send(
-                            f"🧹 정리를 완료했습니다. /clear 를 전송합니다 (마지막 context {pct_label})."
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("context auto-clear push 실패: %s", exc)
-                if clear():
-                    state = "DEBOUNCED"
-                else:
-                    # /clear 송신 실패 — AWAITING_MARKER 유지하고 다음 iter 에 재시도.
-                    logger.warning("context auto-clear: /clear 송신 실패 — 다음 iter 재시도")
-            elif state == "DEBOUNCED":
-                # hysteresis 해제 — pct 가 임계 이하로 떨어졌을 때만 ARMED 복귀.
-                if pct is not None and pct <= hysteresis_pct:
-                    logger.info(
-                        "context auto-clear: hysteresis 해제 (pct=%d%% <= %d%%) → ARMED",
-                        pct,
-                        hysteresis_pct,
-                    )
-                    state = "ARMED"
-            elif state == "ARMED":
-                if pct is not None and pct >= trigger_pct:
-                    logger.info(
-                        "context auto-clear: 트리거 (pct=%d%% >= %d%%) → cleanup prompt inject",
-                        pct,
-                        trigger_pct,
-                    )
-                    channel = client.get_channel(channel_id)
-                    if channel is not None:
-                        try:
-                            await channel.send(
-                                f"🧠 context {pct}% 에 도달했습니다. 자율 정리를 시작합니다."
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("context auto-clear push 실패: %s", exc)
-                    if inject():
-                        state = "AWAITING_MARKER"
-                    else:
-                        logger.warning(
-                            "context auto-clear: inject 실패 — ARMED 유지하고 다음 iter 재시도"
-                        )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("context auto-clear loop 예외: %s", exc)
-
-        await sleep(poll_interval)
-
-
-def inject_context_slash(target_pane: str) -> bool:
-    """tmux send-keys 로 `/context` slash 명령 한 줄 inject + Enter.
-
-    Claude TUI 의 `/context` 명령은 현재 token 사용량을 별도 화면에 출력한다.
-    응답은 pipe-pane log 에 기록되므로 context_refresh_loop 가 다음 iter 에서 tail 한다.
-    """
-    return tmux_send_payload(target_pane, "/context")
-
-
-def parse_context_response(text: str) -> int | None:
-    """`/context` 응답 line (`Total tokens used: NN / DD`) 의 마지막 occurrence 파싱 → %.
-
-    response 형식이 다를 수 있어 (Claude Code 버전 변동) 부정합 시 None 반환 — 호출부에서
-    cache 미갱신. 0/None 분모 가드. 정수 % (소수 반올림).
-    """
-    matches = CONTEXT_RESPONSE_RE.findall(text)
-    if not matches:
-        return None
-    used_raw, total_raw = matches[-1]
-    try:
-        used = int(used_raw.replace(",", ""))
-        total = int(total_raw.replace(",", ""))
-    except ValueError:
-        return None
-    if total <= 0:
-        return None
-    return round(used * 100 / total)
-
-
-def get_cached_context_pct(max_age_seconds: float = 600.0) -> int | None:
-    """cache 가 신선 (max_age_seconds 이내) 이면 pct, stale 이면 None.
-
-    context_auto_clear_loop 가 cache 우선 사용할 때 호출. default max_age 는 refresh
-    interval (300s) 의 2배 — 1회 inject 실패 허용.
-    """
-    pct = context_pct_cache.get("pct")
-    updated_at = context_pct_cache.get("updated_at") or 0.0
-    if pct is None:
-        return None
-    age = time.monotonic() - float(updated_at)
-    if age > max_age_seconds:
-        return None
-    return int(pct)
-
-
-async def context_refresh_loop(
-    client: "discord.Client",
-    target_pane: str,
-    pipe_pane_path: str,
-    *,
-    interval_seconds: float = float(CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS),
-    tail_bytes: int = CONTEXT_AUTO_CLEAR_TAIL_BYTES,
-    sleep=asyncio.sleep,
-    inject_fn=None,
-    cache: dict[str, float | int | None] | None = None,
-    monotonic=time.monotonic,
-) -> None:
-    """ADR-0016 옵션 D — 5분 간격 `/context` inject + 응답 scrape → cache 갱신.
-
-    동작:
-      1. sleep(interval_seconds)
-      2. inject `/context` (tmux send-keys)
-      3. 짧은 grace (1s) 후 pipe-pane log tail → parse_context_response
-      4. 매칭되면 cache["pct"], cache["updated_at"] 갱신. 안 되면 cache 미갱신 (graceful).
-
-    bot 종료 시 cancel. asyncio.CancelledError 외부 전파.
-    inject_fn / cache / monotonic 주입 가능 — 테스트 격리.
-    """
-    path = Path(pipe_pane_path)
-    inject = inject_fn if inject_fn is not None else (lambda: inject_context_slash(target_pane))
-    store = cache if cache is not None else context_pct_cache
-    logger.info(
-        "context_refresh_loop 시작: pane=%s path=%s interval=%.0fs",
-        target_pane,
-        pipe_pane_path,
-        interval_seconds,
-    )
-    # client 인자는 후속 확장(예: 실패 N회 시 Discord 알림) 대비. 현재 미사용.
-    _ = client
-    while True:
-        try:
-            await sleep(interval_seconds)
-            if not inject():
-                logger.warning("context refresh: /context inject 실패 — 다음 iter 재시도")
-                continue
-            # /context 응답이 pane 에 출력될 시간 확보. 너무 길면 다음 inject 와 충돌.
-            await sleep(1.0)
-            tail = read_tail_text(path, tail_bytes)
-            pct = parse_context_response(tail)
-            if pct is None:
-                # 응답 형식 변동 또는 inject 직후 응답 미수신. 다음 iter 에 재시도.
-                logger.debug("context refresh: 응답 파싱 실패 (regex 부정합) — cache 미갱신")
-                continue
-            store["pct"] = pct
-            store["updated_at"] = monotonic()
-            logger.info("context refresh: cache 갱신 pct=%d%%", pct)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("context refresh loop 예외: %s", exc)
-
-
-def chunk_signature(text: str) -> str:
-    """chunk content 의 안정적 해시. dedup ledger message_id 로 사용.
-
-    `maestro:` prefix 로 사용자 메시지 id 와 namespace 분리.
-    """
-    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
-    return f"{MAESTRO_WATCHER_DEDUP_PREFIX}{digest[:32]}"
-
-
-# maestro watcher 운영 카운터. test 와 운영 진단(향후 metric export)에서 참조.
-# - send_drop: MAX_RETRIES 초과로 chunk 영구 폐기한 횟수.
-# - buffer_overflow_drop: MAX_BUFFER_LEN 초과로 oldest buffer 잘라낸 횟수.
-# 둘 다 단순 in-process int. 영속성 없음. #764 (rev round 2).
-maestro_watcher_counters: dict[str, int] = {
-    "send_drop": 0,
-    "buffer_overflow_drop": 0,
-}
-
-
-async def maestro_response_watcher_loop(
-    client: "discord.Client",
-    channel_id: int,
-    pipe_pane_path: str,
-    ledger: DedupLedger | None,
-    *,
-    poll_interval: float = MAESTRO_WATCHER_POLL_INTERVAL_SECONDS,
-    idle_seconds: float = MAESTRO_WATCHER_IDLE_SECONDS,
-    time_source=time.monotonic,
-    sleep=asyncio.sleep,
-    initial_offset: int | None = None,
-) -> None:
-    """tmux pipe-pane 캡처 파일을 tail 하여 maestro 응답을 자동 push.
-
-    동작:
-    - poll_interval 마다 파일 size 확인. 새 바이트가 있으면 읽어 buffer 누적.
-    - 마지막 신규 바이트 도착 후 idle_seconds 동안 신규 없음 = "응답 완료" 로 간주.
-    - buffer 를 sanitize → 최소 길이 통과 + dedup miss 면 channel.send + ledger mark.
-    - 사용자 입력 echo 등 짧은 chunk 는 sanitize_chunk 에서 None 으로 skip.
-
-    초기 offset 은 파일 현재 끝 (이미 쌓인 과거 출력을 한꺼번에 push 하지 않음).
-    initial_offset 지정 시 그 값으로 시작 (테스트용).
-
-    bot 종료 시 cancel 됨. asyncio.CancelledError 는 외부로 전파.
-    """
-    path = Path(pipe_pane_path)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch(exist_ok=True)
-    except OSError as exc:
-        logger.warning("maestro watcher: 캡처 파일 준비 실패 %s — loop 종료", exc)
-        return
-
-    if initial_offset is None:
-        try:
-            offset = path.stat().st_size
-        except OSError:
-            offset = 0
-    else:
-        offset = initial_offset
-
-    buffer = ""
-    last_new_at: float | None = None
-    # send 실패 재시도 상태. pending_candidate 가 존재하면 다음 idle flush 에서 같은 chunk 를 재시도한다.
-    pending_candidate: str | None = None
-    pending_sig: str | None = None
-    pending_retry_count = 0
-    logger.info(
-        "maestro_response_watcher_loop 시작: path=%s offset=%d idle=%.0fs poll=%.1fs",
-        pipe_pane_path,
-        offset,
-        idle_seconds,
-        poll_interval,
-    )
-
-    while True:
-        try:
-            try:
-                stat = path.stat()
-            except OSError as exc:
-                logger.debug("maestro watcher: stat 실패 %s", exc)
-                stat = None
-
-            if stat is not None:
-                size = stat.st_size
-                # 파일이 회전(truncate/rotate) 되었거나 새 파일로 교체된 경우 offset 리셋.
-                if size < offset:
-                    logger.info(
-                        "maestro watcher: 파일 회전 감지 (size=%d < offset=%d) — reset",
-                        size,
-                        offset,
-                    )
-                    offset = 0
-                    buffer = ""
-                    last_new_at = None
-
-                if size > offset:
-                    try:
-                        with path.open("rb") as handle:
-                            handle.seek(offset)
-                            new_bytes = handle.read(size - offset)
-                        chunk_text = new_bytes.decode("utf-8", errors="replace")
-                        buffer += chunk_text
-                        offset = size
-                        last_new_at = time_source()
-                        # buffer 무한 누적 방지 (#764). Discord 장기 outage 로
-                        # pending 재시도가 길어지는 동안 새 chunk 가 계속 들어와도
-                        # MAX_BUFFER_LEN 을 초과하지 않도록 앞쪽(oldest) 절반 drop.
-                        if len(buffer) > MAESTRO_WATCHER_MAX_BUFFER_LEN:
-                            dropped_bytes = len(buffer) - MAESTRO_WATCHER_MAX_BUFFER_LEN // 2
-                            buffer = buffer[-(MAESTRO_WATCHER_MAX_BUFFER_LEN // 2):]
-                            maestro_watcher_counters["buffer_overflow_drop"] += 1
-                            logger.warning(
-                                "maestro watcher: buffer overflow — oldest %d bytes drop "
-                                "(cap=%d, total_drop=%d)",
-                                dropped_bytes,
-                                MAESTRO_WATCHER_MAX_BUFFER_LEN,
-                                maestro_watcher_counters["buffer_overflow_drop"],
-                            )
-                    except OSError as exc:
-                        logger.warning("maestro watcher: 파일 read 실패 %s", exc)
-
-            # pending (직전 send 실패) 가 없을 때만 새 chunk 를 idle 임계로 확정한다.
-            # pending 이 있으면 그 chunk 를 우선 재시도한다 (새 buffer 는 계속 누적).
-            if pending_candidate is None and buffer and last_new_at is not None:
-                idle_for = time_source() - last_new_at
-                if idle_for >= idle_seconds:
-                    candidate = sanitize_chunk(buffer)
-                    buffer = ""
-                    last_new_at = None
-                    if candidate is None:
-                        logger.debug("maestro watcher: chunk skip (length < min)")
-                    else:
-                        pending_candidate = candidate
-                        pending_sig = chunk_signature(candidate)
-                        pending_retry_count = 0
-
-            # pending chunk 가 있으면 send 시도. 실패하면 다음 iteration 에서 재시도.
-            if pending_candidate is not None and pending_sig is not None:
-                if ledger is not None and ledger.is_processed(pending_sig):
-                    logger.info("maestro watcher: dedup hit sig=%s", pending_sig)
-                    pending_candidate = None
-                    pending_sig = None
-                    pending_retry_count = 0
-                else:
-                    channel = client.get_channel(channel_id)
-                    if channel is None:
-                        logger.warning(
-                            "maestro watcher: channel_id=%s 못 찾음 — skip",
-                            channel_id,
-                        )
-                        # 채널 미발견은 transient 가능 (bot 아직 ready 전 등) → 재시도 카운트.
-                        pending_retry_count += 1
-                        if pending_retry_count >= MAESTRO_WATCHER_SEND_MAX_RETRIES:
-                            maestro_watcher_counters["send_drop"] += 1
-                            logger.error(
-                                "maestro watcher: send drop (channel 미발견 %d회 연속) "
-                                "sig=%s len=%d total_drop=%d",
-                                pending_retry_count,
-                                pending_sig,
-                                len(pending_candidate),
-                                maestro_watcher_counters["send_drop"],
-                            )
-                            pending_candidate = None
-                            pending_sig = None
-                            pending_retry_count = 0
-                        else:
-                            # exponential backoff: 다음 재시도 전 추가 sleep (#764).
-                            backoff = MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE ** pending_retry_count
-                            await sleep(backoff)
-                    else:
-                        try:
-                            await channel.send(pending_candidate)
-                            if ledger is not None:
-                                ledger.mark_processed(pending_sig)
-                            logger.info(
-                                "maestro watcher push: sig=%s len=%d retries=%d",
-                                pending_sig,
-                                len(pending_candidate),
-                                pending_retry_count,
-                            )
-                            pending_candidate = None
-                            pending_sig = None
-                            pending_retry_count = 0
-                        except Exception as exc:  # noqa: BLE001
-                            pending_retry_count += 1
-                            if pending_retry_count >= MAESTRO_WATCHER_SEND_MAX_RETRIES:
-                                maestro_watcher_counters["send_drop"] += 1
-                                logger.error(
-                                    "maestro watcher: send drop (%d회 연속 실패) "
-                                    "sig=%s len=%d total_drop=%d 마지막 예외=%s",
-                                    pending_retry_count,
-                                    pending_sig,
-                                    len(pending_candidate),
-                                    maestro_watcher_counters["send_drop"],
-                                    exc,
-                                )
-                                pending_candidate = None
-                                pending_sig = None
-                                pending_retry_count = 0
-                            else:
-                                # exponential backoff: 다음 재시도 전 추가 sleep (#764).
-                                backoff = MAESTRO_WATCHER_SEND_RETRY_BACKOFF_BASE ** pending_retry_count
-                                logger.warning(
-                                    "maestro watcher send 실패 (재시도 %d/%d, backoff=%.1fs): %s",
-                                    pending_retry_count,
-                                    MAESTRO_WATCHER_SEND_MAX_RETRIES,
-                                    backoff,
-                                    exc,
-                                )
-                                await sleep(backoff)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("maestro watcher loop 예외: %s", exc)
-
-        await sleep(poll_interval)
 
 
 def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Client:
-    """discord.py Client 를 셋업하고 핸들러를 바인딩한다."""
+    """discord.py Client 를 셋업하고 핸들러를 바인딩합니다."""
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
@@ -1945,13 +519,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     try:
         target_channel_id = int(env["MOBRUJI_CHANNEL_ID"])
     except ValueError:
-        logger.error(
-            "MOBRUJI_CHANNEL_ID 가 정수 아님: %r", env["MOBRUJI_CHANNEL_ID"]
-        )
+        logger.error("MOBRUJI_CHANNEL_ID 가 정수 아님: %r", env["MOBRUJI_CHANNEL_ID"])
         sys.exit(1)
 
-    # NOTIFY_CHANNEL_ID 파싱 — 알림 카테고리 발사 채널. 값 이상 시 메인 채널로 fallback
-    # (운영 끊김 회피). spec: docs/features/discord-message-style.md §5-2.
     notify_raw = env.get("NOTIFY_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"])
     try:
         notify_channel_id = int(notify_raw)
@@ -1963,62 +533,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         )
         notify_channel_id = target_channel_id
 
-    tmux_enabled = env["TMUX_BRIDGE_ENABLED"] == "1"
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
     claude_bin = env["CLAUDE_BIN"]
 
-    digest_enabled = env.get("DIGEST_ENABLED", "0") == "1"
+    digest_enabled = env.get("DIGEST_ENABLED", "1") == "1"
     digest_interval = resolve_digest_interval(env.get("DIGEST_INTERVAL_SECONDS"))
-
-    maestro_watcher_enabled = env.get("MAESTRO_RESPONSE_WATCHER_ENABLED", "0") == "1"
-    maestro_watcher_path = env.get("TMUX_PIPE_PANE_PATH", "")
-
-    context_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
-    try:
-        context_trigger_pct = int(env.get("CONTEXT_CLEAR_TRIGGER_PCT",
-                                          str(CONTEXT_DEFAULT_TRIGGER_PCT)))
-    except ValueError:
-        logger.warning(
-            "CONTEXT_CLEAR_TRIGGER_PCT 정수 아님 — 기본값 %d 사용",
-            CONTEXT_DEFAULT_TRIGGER_PCT,
-        )
-        context_trigger_pct = CONTEXT_DEFAULT_TRIGGER_PCT
-    try:
-        context_hysteresis_pct = int(env.get("CONTEXT_CLEAR_HYSTERESIS_PCT",
-                                             str(CONTEXT_DEFAULT_HYSTERESIS_PCT)))
-    except ValueError:
-        logger.warning(
-            "CONTEXT_CLEAR_HYSTERESIS_PCT 정수 아님 — 기본값 %d 사용",
-            CONTEXT_DEFAULT_HYSTERESIS_PCT,
-        )
-        context_hysteresis_pct = CONTEXT_DEFAULT_HYSTERESIS_PCT
-
-    # ADR-0016 옵션 D — context_refresh_loop env. opt-in.
-    context_refresh_enabled = env.get("CONTEXT_REFRESH_ENABLED", "0") == "1"
-    try:
-        context_refresh_interval = float(
-            env.get(
-                "CONTEXT_REFRESH_INTERVAL_SEC",
-                str(CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS),
-            )
-        )
-    except ValueError:
-        logger.warning(
-            "CONTEXT_REFRESH_INTERVAL_SEC 숫자 아님 — 기본값 %d 사용",
-            CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS,
-        )
-        context_refresh_interval = float(CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS)
 
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s notify=%s allowed=%d tmux_bridge=%s digest=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s notify=%s allowed=%d digest=%s",
             client.user,
             target_channel_id,
             notify_channel_id,
             len(allowed_user_ids),
-            tmux_enabled,
             digest_enabled,
         )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
@@ -2028,8 +557,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 digest_loop(
                     client,
                     notify_channel_id,
-                    env["GITHUB_REPO"],
-                    env.get("GITHUB_PAT", ""),
                     interval=digest_interval,
                 )
             )
@@ -2040,72 +567,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 DIGEST_HEARTBEAT_SECONDS,
             )
 
-        if (
-            maestro_watcher_enabled
-            and maestro_watcher_path
-            and not hasattr(client, "_maestro_watcher_started")
-        ):
-            client._maestro_watcher_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                maestro_response_watcher_loop(
-                    client,
-                    target_channel_id,
-                    maestro_watcher_path,
-                    ledger,
-                )
-            )
-            logger.info(
-                "maestro_response_watcher_loop launched: channel=%d path=%s",
-                target_channel_id,
-                maestro_watcher_path,
-            )
-
-        if (
-            context_clear_enabled
-            and maestro_watcher_path
-            and not hasattr(client, "_context_clear_task_started")
-        ):
-            client._context_clear_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                context_auto_clear_loop(
-                    client,
-                    notify_channel_id,
-                    maestro_watcher_path,
-                    target_pane,
-                    trigger_pct=context_trigger_pct,
-                    hysteresis_pct=context_hysteresis_pct,
-                )
-            )
-            logger.info(
-                "context_auto_clear_loop launched: channel=%d path=%s pane=%s trigger=%d hysteresis=%d",
-                notify_channel_id,
-                maestro_watcher_path,
-                target_pane,
-                context_trigger_pct,
-                context_hysteresis_pct,
-            )
-
-        if (
-            context_refresh_enabled
-            and maestro_watcher_path
-            and not hasattr(client, "_context_refresh_task_started")
-        ):
-            client._context_refresh_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                context_refresh_loop(
-                    client,
-                    target_pane,
-                    maestro_watcher_path,
-                    interval_seconds=context_refresh_interval,
-                )
-            )
-            logger.info(
-                "context_refresh_loop launched: pane=%s path=%s interval=%.0fs",
-                target_pane,
-                maestro_watcher_path,
-                context_refresh_interval,
-            )
-
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
@@ -2113,46 +574,12 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         if message.channel.id != target_channel_id:
             return
         if message.author.id not in allowed_user_ids:
-            logger.info(
-                "허용되지 않은 사용자 무시: user_id=%s", message.author.id
-            )
+            logger.info("허용되지 않은 사용자 무시: user_id=%s", message.author.id)
             return
 
         message_id = str(message.id)
         if ledger is not None and ledger.is_processed(message_id):
             logger.info("dedup hit: message_id=%s", message_id)
-            return
-
-        # /status — 결정성 빠른 응답. tmux/dispatch 분기 건너뜀.
-        content = (message.content or "").strip()
-        if content.split(maxsplit=1)[:1] == [STATUS_COMMAND_PREFIX]:
-            logger.info("/status 요청: user=%s", message.author.id)
-            report = build_status_report(env["GITHUB_REPO"], env.get("GITHUB_PAT", ""))
-            try:
-                await message.channel.send(report)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("/status 응답 send 실패: %s", exc)
-            if ledger is not None:
-                ledger.mark_processed(message_id)
-            return
-
-        # /system:status <msg> — maestro 진척 ad-hoc push. dispatch 건너뜀.
-        # reply 카테고리(📡 status: ...) 한 줄로 채널에 push. ledger mark 로 dedup.
-        status_body = parse_status_progress(content)
-        if status_body is not None:
-            logger.info(
-                "/system:status push: user=%s preview=%r",
-                message.author.id,
-                truncate_for_log(status_body),
-            )
-            try:
-                await message.channel.send(
-                    f"{MESSAGE_PREFIX['reply']} status: {status_body}"
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.error("/system:status send 실패: %s", exc)
-            if ledger is not None:
-                ledger.mark_processed(message_id)
             return
 
         ts_iso = message.created_at.astimezone(timezone.utc).isoformat()
@@ -2173,29 +600,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         )
         append_inbox(payload)
 
-        # auto-ack — 1초 안 채널 응답. maestro 거치지 않음. /status 분기는 이미 위에서 처리됨.
-        # 동적화 (#802): tmux capture-pane 으로 nmae 상태 4분기 매핑 후 ack 발송.
-        # 기존 AUTO_ACK_TEMPLATE / formal_ack(queue=…) 폐기.
-        try:
-            nmae_state = inspect_nmae_state(target_pane)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("inspect_nmae_state 실패 — idle fallback: %s", exc)
-            nmae_state = {"state": NMAE_STATE_IDLE, "reasoning_minutes": None, "task_name": None}
-        ack_text = formal_dynamic_ack(nmae_state)
-        try:
-            await message.channel.send(ack_text)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("auto-ack 발송 실패: %s", exc)
-
-        if tmux_enabled:
-            if not ensure_tmux_session(session_name, claude_bin):
-                logger.error("tmux 세션 확보 실패 — 메시지 dropped: id=%s", message_id)
-                return
-            if not tmux_send_payload(target_pane, payload["text"]):
-                logger.error("tmux send-keys 실패 — 메시지 dropped: id=%s", message_id)
-                return
-        else:
-            dispatch_to_github(env["GITHUB_PAT"], env["GITHUB_REPO"], payload)
+        # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
+        # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
+        if not ensure_tmux_session(session_name, claude_bin):
+            logger.error("tmux 세션 확보 실패 — 메시지 dropped: id=%s", message_id)
+            return
+        if not tmux_send_payload(target_pane, payload["text"]):
+            logger.error("tmux send-keys 실패 — 메시지 dropped: id=%s", message_id)
+            return
 
         if ledger is not None:
             ledger.mark_processed(message_id)
@@ -2205,34 +617,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
 
 def main() -> None:
     env = load_env()
-    ledger: DedupLedger | None = None
-    # ledger 는 TMUX_BRIDGE_ENABLED 또는 MAESTRO_RESPONSE_WATCHER_ENABLED 중 하나라도 켜져 있으면 필요.
-    # (전자는 사용자 메시지 dedup, 후자는 maestro 응답 chunk dedup.)
-    needs_ledger = (
-        env["TMUX_BRIDGE_ENABLED"] == "1"
-        or env.get("MAESTRO_RESPONSE_WATCHER_ENABLED", "0") == "1"
-    )
-    if needs_ledger:
-        ledger = DedupLedger(env["DEDUP_LEDGER_PATH"])
-        start_dedup_gc_thread(ledger)
-    if env["TMUX_BRIDGE_ENABLED"] == "1":
-        ensure_tmux_session(env["TMUX_SESSION_NAME"], env["CLAUDE_BIN"])
-        if env["TMUX_PIPE_PANE_ENABLED"] == "1":
-            try:
-                max_bytes = int(env["TMUX_PIPE_PANE_MAX_BYTES"])
-            except ValueError:
-                max_bytes = DEFAULT_PIPE_PANE_MAX_BYTES
-                logger.warning(
-                    "TMUX_PIPE_PANE_MAX_BYTES 가 정수 아님 — 기본값 사용: %d",
-                    max_bytes,
-                )
-            start_tmux_pipe_pane(env["TMUX_TARGET_PANE"], env["TMUX_PIPE_PANE_PATH"], max_bytes)
+    ledger = DedupLedger(env["DEDUP_LEDGER_PATH"])
+    start_dedup_gc_thread(ledger)
+    ensure_tmux_session(env["TMUX_SESSION_NAME"], env["CLAUDE_BIN"])
 
     client = build_client(env, ledger)
     logger.info(
-        "Discord daemon 시작 (received_at=%s tmux_bridge=%s)",
+        "Discord daemon 시작 (received_at=%s)",
         datetime.now(timezone.utc).isoformat(),
-        env["TMUX_BRIDGE_ENABLED"],
     )
     client.run(env["DISCORD_BOT_TOKEN"], log_handler=None)
 
