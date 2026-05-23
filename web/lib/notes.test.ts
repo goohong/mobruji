@@ -151,10 +151,11 @@ describe("MIDI 경계 회귀 가드 (#576)", () => {
     expect(midiToKoreanNoteName(-12)).toBe("도-2");
   });
 
-  it("비유한 입력(NaN)은 'NaN' octave 문자열을 반환한다 (현재 동작 잠금)", () => {
-    // 가드 함수 부재. 호출자가 사전 필터링하지 않으면 표시 깨짐 — 회귀 시
-    // 명세 변경(throw/NaN-safe)이 들어가는지 PR 리뷰에서 강제 가시화.
-    expect(midiToNoteName(Number.NaN)).toBe("NaNNaN");
+  it("비유한 입력(NaN)은 'undefinedNaN' 문자열을 반환한다 (현재 동작 잠금)", () => {
+    // 가드 함수 부재. PITCH_CLASSES[NaN] = undefined, Math.floor(NaN) = NaN
+    // → 'undefinedNaN'. 호출자가 사전 필터링하지 않으면 표시 깨짐 — 회귀 시
+    // 명세 변경(throw/NaN-safe)이 들어가는지 PR 리뷰에서 강제 가시화 (#745).
+    expect(midiToNoteName(Number.NaN)).toBe("undefinedNaN");
   });
 
   it("SPN-한국어 옥타브 일치 round-trip (MIDI 0~127 전수)", () => {

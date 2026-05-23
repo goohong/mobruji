@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ThemeToggle } from "./ThemeToggle";
@@ -160,7 +160,8 @@ describe("ThemeToggle", () => {
     const fireOsChange = setOsPrefersDark(true);
     render(<ThemeToggle />);
     expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
-    fireOsChange(false);
+    // matchMedia listener 외부에서 trigger → React effect flush 강제 (#745).
+    act(() => fireOsChange(false));
     expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(false);
   });
 
@@ -177,10 +178,13 @@ describe("ThemeToggle", () => {
     render(<ThemeToggle />);
     expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(false);
     // 다른 탭 시뮬레이션 — setMode 우회, 순수 storage 이벤트 + 사전 localStorage 반영.
-    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
-    window.dispatchEvent(
-      new StorageEvent("storage", { key: THEME_STORAGE_KEY, newValue: "dark" }),
-    );
+    // dispatchEvent 는 React lifecycle 밖에서 트리거되므로 act 로 effect flush (#745).
+    act(() => {
+      window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: THEME_STORAGE_KEY, newValue: "dark" }),
+      );
+    });
     expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
   });
 

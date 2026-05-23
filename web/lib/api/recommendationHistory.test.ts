@@ -129,7 +129,8 @@ describe("readRecommendationHistory", () => {
   // 인자 boundary 대신 HTTP/envelope 경계만 검증한다.
 
   it("given BE 가 401 (SessionAuthGuard 헤더 불일치) 을 응답, when called, then ApiError 가 status=401 로 전파된다", async () => {
-    fetchMock.mockResolvedValueOnce(
+    // assertion 두 개라 호출 2회 — 매번 401 응답이 일관되게 와야 한다 (#745).
+    fetchMock.mockResolvedValue(
       jsonResponse({ message: "session mismatch" }, 401),
     );
 

@@ -17,7 +17,7 @@
  *   구독한다 (app/page.tsx `useHasHydratedSession` 와 동일 패턴).
  */
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -158,6 +158,14 @@ export function useTheme(): {
     () => resolveIsDark(readStoredMode()),
     () => false,
   );
+
+  // mount / store 변경 시 `<html.dark>` 클래스를 isDark 와 동기화.
+  // SSR safe: useEffect 는 client-only. THEME_INIT_SCRIPT 가 hydration 전에
+  // 클래스를 이미 적용했어도, system 모드의 OS prefers 변화 / 다른 탭의
+  // localStorage 변경은 이 effect 가 잡아 DOM 에 반영한다 (이슈 #745).
+  useEffect(() => {
+    applyHtmlClass(isDark);
+  }, [isDark]);
 
   const setMode = useCallback((next: ThemeMode): void => {
     applyHtmlClass(resolveIsDark(next));

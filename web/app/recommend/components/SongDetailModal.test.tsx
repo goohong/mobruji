@@ -199,8 +199,7 @@ describe("SongDetailModal", () => {
       });
     });
 
-    it("Tab 키가 마지막 요소에서 첫 요소로 순환한다 (forward wrap)", async () => {
-      const user = userEvent.setup();
+    it("Tab 키가 마지막 요소에서 첫 요소로 순환한다 (forward wrap)", () => {
       render(
         <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
           <button type="button">본문 버튼 A</button>
@@ -211,10 +210,12 @@ describe("SongDetailModal", () => {
       const buttonB = screen.getByRole("button", { name: /본문 버튼 B/ });
 
       // FOCUSABLE_SELECTOR 순서: DOM 순서 = [닫기, A, B]. 마지막(B)에 직접 포커스 후 Tab.
+      // happy-dom 의 user.tab() forward 시뮬은 모달 외부로 빠져나가는 동작이
+      // 불안정 → fireEvent.keyDown 으로 handleKeyDown 을 직접 trigger (#745).
       buttonB.focus();
       expect(document.activeElement).toBe(buttonB);
 
-      await user.tab();
+      fireEvent.keyDown(buttonB, { key: "Tab" });
       expect(document.activeElement).toBe(closeButton);
     });
 
@@ -277,8 +278,7 @@ describe("SongDetailModal", () => {
 
     // 추가 가드 (closes #556): 5 focusable 환경에서 양끝 wrap + 모달 외부 포커스
     // 강제 복귀 분기 (handleKeyDown line 148/153 `!dialog.contains(active)`).
-    it("5 focusable 환경에서 마지막(D) → Tab 시 첫(닫기)으로 wrap", async () => {
-      const user = userEvent.setup();
+    it("5 focusable 환경에서 마지막(D) → Tab 시 첫(닫기)으로 wrap", () => {
       render(
         <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
           <button type="button">A</button>
@@ -288,8 +288,10 @@ describe("SongDetailModal", () => {
         </SongDetailModal>,
       );
       const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
-      screen.getByRole("button", { name: "D" }).focus();
-      await user.tab();
+      const dButton = screen.getByRole("button", { name: "D" });
+      dButton.focus();
+      // happy-dom forward tab 시뮬 회피 — keyDown 으로 handleKeyDown 직접 트리거 (#745).
+      fireEvent.keyDown(dButton, { key: "Tab" });
       expect(document.activeElement).toBe(closeButton);
     });
 

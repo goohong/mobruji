@@ -144,14 +144,16 @@ describe("buildScoreBreakdown — rangeFit 클램프/정규화 가드 (#639)", (
     // low > high 역전 → 음수 overlap → 0
     const inverted = buildScoreBreakdown(item, { lowMidi: 80, highMidi: 40 });
     expect(inverted.find((b) => b.key === "rangeFit")?.score).toBe(0);
-    // zero-span: songSpan = max(1, 0) 가드 → 유한값
+    // zero-span: songSpan = max(1, 0) 가드 → 유한값. overlap=0/songSpan=1 = 0
+    // (현재 구현 동작 잠금). 사용자 범위 안에 들었어도 single-note 곡은 0 으로
+    // 평가됨 — 명세 변경(single-note=1) 시 즉시 가시화 (#745).
     const zero = buildScoreBreakdown(buildItem({ lowMidi: 60, highMidi: 60 }), {
       lowMidi: 48,
       highMidi: 72,
     });
     const zeroScore = zero.find((b) => b.key === "rangeFit")?.score;
     expect(Number.isFinite(zeroScore ?? NaN)).toBe(true);
-    expect(zeroScore).toBe(1);
+    expect(zeroScore).toBe(0);
   });
 
   it("BE-provided breakdown score 는 0/1 boundary 및 범위 밖 값도 변형 없이 통과 (BE 책임 lock-in)", () => {

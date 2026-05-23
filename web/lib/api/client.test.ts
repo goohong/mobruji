@@ -209,7 +209,10 @@ describe("ApiError JSON.stringify 보존 가드 (#689)", () => {
     const body = { error: "x", details: [1, 2, 3] };
     const error = new ApiError(500, "boom", body);
     const parsed = JSON.parse(JSON.stringify(error)) as Record<string, unknown>;
-    expect(parsed).toEqual({ status: 500, body });
+    // Error.name 의 enumerable 여부는 런타임마다 다르다 (Node 22+ 는 own
+    // property 로 직렬화). 핵심 잠금은 status/body 보존이므로 부분 매칭 (#745).
+    expect(parsed).toMatchObject({ status: 500, body });
+    expect(parsed.message).toBeUndefined();
   });
 });
 
@@ -408,13 +411,15 @@ describe("ApiError stack 보존 가드 (#713)", () => {
 describe("apiFetch Response body 단일 소비 가드 (#716)", () => {
   // Fetch spec: Response.body 는 ReadableStream → json()/text() 중 하나만 호출 가능.
   // apiFetch 내부 isJson 분기(client.ts L70-73)가 json/text 중 하나만 호출하는 이유를 lock.
-  it("Response.json() 호출 후 동일 인스턴스 text() 재시도 → TypeError (body stream lock)", async () => {
+  it("Response.json() 호출 후 동일 인스턴스 text() 재시도 → Error (body stream lock)", async () => {
     const response = new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
     await response.json();
-    await expect(response.text()).rejects.toBeInstanceOf(TypeError);
+    // happy-dom 은 DOMException(InvalidStateError), Node native fetch 는
+    // TypeError 를 던진다. 의미상 "재소비 실패" 가 본질 (#745).
+    await expect(response.text()).rejects.toBeInstanceOf(Error);
     expect(response.bodyUsed).toBe(true);
   });
 
@@ -509,11 +514,16 @@ describe("apiFetch headers={} vs undefined 분기 가드 (#721)", () => {
 describe("apiFetch body=Blob/FormData native 가드 (#721)", () => {
   // 현 동작 lock: body 분기는 무조건 JSON.stringify → Blob/FormData (toJSON 미정의, enumerable
   // own property 없음) 는 "{}" 직렬화 → multipart upload 는 apiFetch 우회 필요성 노출.
-  it("body=Blob → JSON.stringify('{}') 동작, native body 우회 불가", async () => {
+  it("body=Blob → JSON.stringify 통과, native body 우회 불가", async () => {
     fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
     const blob = new Blob(["hello"], { type: "text/plain" });
     await apiFetch("/api/v1/upload", { method: "POST", body: blob });
-    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe("{}");
+    // happy-dom Blob 은 type 등 enumerable own property 가 있어 '{"type":"text/plain"}'
+    // 으로 stringify 된다. Node native Blob 은 own property 가 없어 '{}'. 환경
+    // 의존 — 의미는 "blob 이 multipart 가 아닌 string 으로 직렬화 된다" (#745).
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body;
+    expect(typeof body).toBe("string");
+    expect(body).not.toBe("[object Blob]");
   });
 
   it("body=FormData → JSON.stringify('{}') 동작, multipart 직렬화 안 됨", async () => {
@@ -542,12 +552,15 @@ describe("apiFetch URL path 한글/유니코드 가드 (#713)", () => {
 describe("apiFetch headers=Headers 인스턴스 spread 가드 (#723)", () => {
   // 현 동작 lock: `...(headers ?? {})` spread → Headers 인스턴스는 enumerable own property 가
   // 없어 빈 객체로 spread → 추가 키 없음, 기본 Accept 만 남는다. (Record<string, string> 과 비호환.)
-  it("Headers 인스턴스 전달 → spread 시 무시되어 기본 Accept 만 남는다", async () => {
+  it("Headers 인스턴스 전달 → spread 시 X-Session-Id 손실 (Record 와 비호환)", async () => {
     fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
     const native = new Headers({ "X-Session-Id": "abc" });
     await apiFetch("/api/v1/probe", { headers: native as unknown as Record<string, string> });
     const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
-    expect(headers).toEqual({ Accept: "application/json" });
+    // Headers spread 가 enumerable own property 를 노출하지 않아 X-Session-Id 가
+    // 누락되는 것이 핵심 잠금. happy-dom 은 내부 Symbol prop 을 노출할 수 있어
+    // 정확한 key set 은 환경 의존 — Accept 보존 + 사용자 헤더 누락만 검증 (#745).
+    expect(headers["Accept"]).toBe("application/json");
     expect(headers["X-Session-Id"]).toBeUndefined();
   });
 });
