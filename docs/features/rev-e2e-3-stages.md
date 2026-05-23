@@ -60,8 +60,9 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 - 모든 단계 결과는 PR 코멘트 + cycle-status.json `rev.in_progress` 에 기록
 
 ## 5. 구현 계획
-- [x] rev sub-agent prompt template 갱신 (`docs/ai-harness/12-sub-agent-prompt-template.md` §E-2) — **PR #945 (2026-05-24 완료)**
+- [x] rev sub-agent prompt template §E-2 (3단계 절차) 갱신 (`docs/ai-harness/12-sub-agent-prompt-template.md`) — **PR #945 (2026-05-24 완료)**
 - [x] GitHub Actions `rev-gate.yml` check 신설 (라벨/코멘트 부재 시 머지 차단) — **PR #945 (2026-05-24 완료)**
+- [x] rev 큐 스크립트 (`tools/rev-queue/`) + sub-agent prompt §E-3 (큐 discovery) — **PR #952 (2026-05-24 완료)**. 매 사이클 첫 액션으로 호출. 라벨 + 스크립트가 single source of truth
 - [ ] CLAUDE.md §4 품질 게이트에 "모든 type:* PR 머지 전 rev 3단계 e2e" 한 줄 — 별 PR
 - [ ] rev e2e 시나리오 라이브러리 (`tools/rev-e2e/`) — 별 PR
 - [ ] `rev-gate.yml` 을 `required_status_checks` 로 GitHub 브랜치 보호 설정 등록 — 별 PR (사용자 admin 작업)
