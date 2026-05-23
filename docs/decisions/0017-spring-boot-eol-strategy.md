@@ -1,9 +1,10 @@
 ---
 id: 0017
 title: Spring Boot 3.5 EOL 대응 — 3.6 라인 채택
-status: proposed
+status: accepted
 date: 2026-05-24
-deciders: [TBD]
+accepted_at: 2026-05-24
+deciders: [nmae-mobruji-maestro (사용자 부재 자율 결정 — memory feedback-autonomous-default)]
 ---
 
 # 0017. Spring Boot 3.5 EOL 대응 — 3.6 라인 채택
@@ -26,7 +27,7 @@ EOL 시점이 한 달 남짓 남은 시점에서 다음 세 가지 선택지를 
 
 - 3.6.x release 출시 일정 확인 후 6월 중 마이그레이션 PR 한 건으로 이관한다.
 - 마이그레이션 spec 은 별도 Feature Spec (`docs/features/spring-boot-upgrade.md`) 으로 분리하여 deprecation list / breaking change 를 trace 한다.
-- 본 ADR 은 `proposed` 로 둔 채 사용자(`deciders`) 확정 후 `accepted` 전환한다. 옵션 B / C 가 선택될 경우 본 ADR 을 `superseded by NNNN` 으로 닫고 새 ADR 을 작성한다.
+- 본 ADR 은 **2026-05-24 accepted 전환** — nmae 가 사용자 부재 default (memory [[feedback-autonomous-default]]) 에 따라 옵션 A 자율 결정. 옵션 B / C 로 변경 필요 시 superseding ADR 작성.
 
 근거: LTS-스러운 라인 따라가기가 CLAUDE.md §2 의 Java 21 LTS 선호 정책과 일관되며, 1인 개발 + AI 보조 사이클 운영 컨텍스트에서 운영 부담(zombie CVE alert / 별도 구독 관리) 을 최소화한다.
 
