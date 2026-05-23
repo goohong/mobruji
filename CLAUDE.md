@@ -25,6 +25,7 @@
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 런북
 - `docs/decisions/` — ADR
 - `docs/features/` — Feature Spec
+- `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션 (4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary)
 
 ## 4) 비협상 룰
 
