@@ -1,4 +1,12 @@
 ---
+# Frontmatter 필드 룰 (자세한 내용 — `docs/features/README.md §10` 참조)
+# - feature/slug/status/owner/scope: 필수, 변경 시 PR 본문에 사유 명시
+# - status: 유효 값 = draft|approved|implementing|shipped|deprecated|blocked
+# - related_issues: 정수 배열 (`[123, 456]`). `#` prefix 금지
+# - related_prs: 정수 배열 (`[123, 456]`). `#` prefix 금지.
+#   *PR 머지 시 본 spec 본문에 영향을 미친 PR 번호를 즉시 추가할 의무*
+#   (rev 가 머지 직전 단계 1 audit 에서 누락 발견 시 fail 처리 가능 — README.md §10)
+# - last_reviewed: 마지막 종합 리뷰 일자 (YYYY-MM-DD). 부분 갱신만 한 PR 은 갱신 불요.
 feature: <기능 이름>
 slug: <파일명과 동일>
 status: draft
