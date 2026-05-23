@@ -40,7 +40,7 @@ import lombok.extern.slf4j.Slf4j;
  * 테이블에 대한 native DELETE 가 가장 명확. 보호 영역 확장(application.yml) 없음.
  *
  * <p><b>호출자 권한 검증 책임.</b> 본 클래스는 sessionId 만 받아 cascade DELETE 를 수행하며 권한
- * 검증을 안 한다. 호출자가 사전에 {@link com.mobruji.auth.SessionAuthGuard} / cron schedule
+ * 검증을 안 한다. 호출자가 사전에 {@link com.mobruji.user.application.SessionAuthGuard} / cron schedule
  * 등으로 권한을 확인해야 한다. 신규 호출자 추가 시 권한 검증 누락 위험 review 필수.
  */
 @Slf4j

@@ -5,7 +5,7 @@ status: implementing
 owner: @goohong
 scope: infra
 related_issues: [209, 238, 242, 243]
-related_prs: [913, 924, 925]
+related_prs: [913, 924, 925, 934, 936]
 last_reviewed: 2026-05-24
 ---
 
@@ -113,7 +113,7 @@ AnonymousSession
 ```
 
 - 첫 호출 시 `AnonymousSession` row 가 없는 문제: §5-5 의 "session bootstrap" 처리 — 첫 호출 시 자동 생성 또는 명시적 `POST /api/v1/sessions/bootstrap` endpoint. §8 Q2 에서 결정.
-- in-memory 캐시는 Spring Bean (`SessionActivityTracker`) 으로 분리, 5분마다 `@Scheduled` 가 DB UPDATE batch flush.
+- in-memory 캐시는 Spring Bean (`SessionActivityTracker`) 으로 분리. flush 정책: **per-request in-line flush** (5분 캐시 윈도우로 DB UPDATE 부담을 sessionId 당 5분에 1회로 제한). 별 트랜잭션(`REQUIRES_NEW`)은 `SessionActivityFlusher` 컴포넌트가 담당해 Spring AOP proxy self-invocation 문제를 회피한다 (rev follow-up #936). `@Scheduled` batch flush 대안은 채택하지 않음 — per-request in-line 이 race condition 없이 더 단순.
 
 ### 5-3) TTL 만료 batch 스케줄러
 
@@ -419,3 +419,4 @@ discoverability 작업은 **2개 PR 로 쪼개진다**:
 - **2026-05-22 (plan 33, 본 PR)**: 초안 작성 (status=draft). ADR-0013 의 §D-1~D-5 를 1:1 구현 항목으로 매핑. 7개 PR 로 분할 (엔티티/마이그레이션 → 가드 확장 → batch → 회전 endpoint → v0.4 spec 이관 → fe UX). 관측성 카운터 3종 신설 → observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 동반 필요. 첫 호출 시 AnonymousSession bootstrap 정책은 Q2 (PR 3 결정).
 - **2026-05-23 (plan, 본 PR)**: **§5-9 sessionId discoverability 추가** (rev 발견 — 외부 API 탐색자가 `POST /api/v1/sessions` 호출 시 default 404 라 client-side UUID 발급 규약을 알 수 없음). 해소 방안 3건: (1) `/api/v1/sessions` 루트 405 + hint body + `Link` 헤더, (2) `SessionAuthGuard` 401 응답 body 보강 (hint 추가), (3) `README.md` `### sessionId` 섹션 + `docs/api/sessionid-discovery.md` cookbook. PR 8 신설 (be + docs), PR 3 에 (2) 합류. §3 기능 요구사항 1개 추가, §5-9 신설, §6 PR 표 PR 8 추가, §8 Q6/Q7/Q8 신설. ADR-0011 §Decision (client 발급) 은 재검토하지 않음 — Q6 (a) 유지 default.
 - **2026-05-24 (be, F2)**: PR #913 머지 — PR 2 (`AnonymousSession` 엔티티 + V8 migration) + PR 4 (`AnonymousSessionTtlCleanup` 골격) + PR 5 (`SessionRotationService` + Controller) 동시 반영. spec frontmatter `status: draft` → `implementing` (docs/features/README.md §5 라이프사이클 룰), `related_prs: [913, 924, 925]` 보강, `last_reviewed: 2026-05-24`. §6 PR 표 재정렬 (V9 backfill 을 PR 6 으로 분리, Discord 알림 + 관측성 표 갱신을 PR 7 으로 분리, v0.4 spec 이관/fe UX 를 PR 9/10 으로 뒤로 이동). PR 3 (#924) / PR 7 (#925) 동시 진행 중. PR 6/8/9/10 미착수.
+- **2026-05-24 (be, #936)**: PR #934 (PR 3 fast-track) rev follow-up bundle. §5-2 flush 정책 drift 봉인 — 초안의 "5분마다 `@Scheduled` batch flush" 가 실제 구현은 "per-request in-line flush + 5분 캐시 윈도우" 였음. spec 문장을 구현 일치로 갱신 (race condition 없는 더 단순한 방식이라 채택 유지). 함께 (1) `SessionActivityTracker` self-invocation 해소 — `SessionActivityFlusher` 별 컴포넌트로 분리해 `@Transactional(REQUIRES_NEW)` AOP proxy 가 실효, (2) `SessionDataCascadeDeleter` javadoc broken link 수정 (`com.mobruji.auth` → `com.mobruji.user.application`), (3) `flushOne` catch 블록 `e.getMessage()` → `e.getClass().getSimpleName()` (JpaSystemException SQL 본문 내 sessionId 노출 차단, 04-security-policy.md).
