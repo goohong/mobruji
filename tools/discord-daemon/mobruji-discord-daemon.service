@@ -11,10 +11,13 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/mobruji/tools/discord-daemon
-EnvironmentFile=/home/ubuntu/mobruji/tools/discord-daemon/.env
-ExecStart=/home/ubuntu/mobruji/tools/discord-daemon/venv/bin/python bot.py
+# #909 F-2: NCP 실 운영 계정은 `mobruji`. 기존 `ubuntu` 는 bridge.service
+# (`User=mobruji`) 와 비대칭이라 두 unit 이 같은 계정 권한으로 동작하도록 통일.
+# 다른 계정 운영 환경은 `systemctl edit mobruji-discord-daemon` drop-in 으로 override.
+User=mobruji
+WorkingDirectory=/home/mobruji/mobruji/tools/discord-daemon
+EnvironmentFile=/home/mobruji/mobruji/tools/discord-daemon/.env
+ExecStart=/home/mobruji/mobruji/tools/discord-daemon/venv/bin/python bot.py
 Restart=always
 RestartSec=10
 StandardOutput=append:/var/log/mobruji-discord-daemon.out.log

@@ -8,8 +8,9 @@
  *  - axe-core a11y 자동 검사.
  */
 
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongDetailModal } from "./SongDetailModal";
@@ -43,6 +44,35 @@ describe("SongDetailModal", () => {
     expect(labelId).toBeTruthy();
     const heading = screen.getByRole("heading", { name: /테스트 곡/ });
     expect(heading).toHaveAttribute("id", labelId!);
+  });
+
+  // aria-labelledby ↔ heading id 매칭 회귀 가드 (closes #546):
+  // 두 모달 동시 마운트 시 useId() 가 인스턴스마다 고유 ID 를 발급하고,
+  // 각 모달의 aria-labelledby 가 자기 heading id 하나하고만 매칭되는지 검증.
+  it("두 모달 동시 오픈 시 aria-labelledby ↔ heading id 가 인스턴스별로 고유 매칭된다", () => {
+    render(
+      <>
+        <SongDetailModal open onClose={vi.fn()} titleLabel="첫 번째 곡">
+          <p>본문 1</p>
+        </SongDetailModal>
+        <SongDetailModal open onClose={vi.fn()} titleLabel="두 번째 곡">
+          <p>본문 2</p>
+        </SongDetailModal>
+      </>,
+    );
+    const dialogs = screen.getAllByRole("dialog");
+    expect(dialogs).toHaveLength(2);
+    const labelIds = dialogs.map((d) => d.getAttribute("aria-labelledby"));
+    expect(labelIds[0]).toBeTruthy();
+    expect(labelIds[1]).toBeTruthy();
+    // panelId unique: 두 모달이 같은 id 를 공유하면 스크린리더가 잘못된 heading 을 읽는다.
+    expect(labelIds[0]).not.toBe(labelIds[1]);
+    // 각 aria-labelledby 가 실제 DOM 에 정확히 1개의 heading 과만 매칭되는지.
+    for (const labelId of labelIds) {
+      const matched = document.querySelectorAll(`#${CSS.escape(labelId!)}`);
+      expect(matched).toHaveLength(1);
+      expect(matched[0].tagName).toBe("H2");
+    }
   });
 
   it("닫기 버튼 클릭 시 onClose가 호출된다", async () => {
@@ -113,5 +143,243 @@ describe("SongDetailModal", () => {
       </SongDetailModal>,
     );
     await expectNoA11yViolations(container);
+  });
+
+  // Escape 회귀 가드 (closes #509): 닫힘(unmount) 상태에서 no-op + 본문 focusable 케이스 + 비-ESC 키 분기.
+  describe("Escape 키 회귀 가드 (closes #509)", () => {
+    it("open=false 면 ESC 를 눌러도 onClose 가 호출되지 않는다", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SongDetailModal open={false} onClose={onClose} titleLabel="테스트 곡">
+          <p>본문</p>
+        </SongDetailModal>,
+      );
+      await user.keyboard("{Escape}");
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("ESC 이외 키('a')는 onClose 를 호출하지 않는다", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SongDetailModal open onClose={onClose} titleLabel="테스트 곡">
+          <p>본문</p>
+        </SongDetailModal>,
+      );
+      screen.getByRole("button", { name: /상세 닫기/ }).focus();
+      await user.keyboard("a");
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * focus trap + 포커스 복원 회귀 가드 (closes #438).
+   *
+   * 검증 목적: SongDetailModal 의 키보드 접근성 핵심 동작이 추후 리팩터링(셀렉터/
+   * useEffect 의존성/FOCUSABLE_SELECTOR 변경 등)으로 깨지지 않도록 가드한다.
+   *
+   * happy-dom 환경 특성:
+   *  - HTMLElement.focus() 호출 후 document.activeElement 갱신은 동기 보장.
+   *  - userEvent.tab() 이 disabled 가 아닌 focusable 노드 순회를 시뮬레이션.
+   *  - 초기 포커스는 useEffect 안 setTimeout(0) 으로 비동기 — vi.waitFor 로 대기.
+   */
+  describe("focus trap + 포커스 복원", () => {
+    it("오픈 시 첫 포커스 가능 요소(닫기 버튼)로 초기 포커스가 이동한다", async () => {
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">본문 버튼 A</button>
+          <button type="button">본문 버튼 B</button>
+        </SongDetailModal>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      // setTimeout(0) 으로 포커스가 다음 tick 에 이동하므로 waitFor 사용.
+      await waitFor(() => {
+        expect(document.activeElement).toBe(closeButton);
+      });
+    });
+
+    it("Tab 키가 마지막 요소에서 첫 요소로 순환한다 (forward wrap)", () => {
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">본문 버튼 A</button>
+          <button type="button">본문 버튼 B</button>
+        </SongDetailModal>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      const buttonB = screen.getByRole("button", { name: /본문 버튼 B/ });
+
+      // FOCUSABLE_SELECTOR 순서: DOM 순서 = [닫기, A, B]. 마지막(B)에 직접 포커스 후 Tab.
+      // happy-dom 의 user.tab() forward 시뮬은 모달 외부로 빠져나가는 동작이
+      // 불안정 → fireEvent.keyDown 으로 handleKeyDown 을 직접 trigger (#745).
+      buttonB.focus();
+      expect(document.activeElement).toBe(buttonB);
+
+      fireEvent.keyDown(buttonB, { key: "Tab" });
+      expect(document.activeElement).toBe(closeButton);
+    });
+
+    it("Shift+Tab 키가 첫 요소에서 마지막 요소로 순환한다 (backward wrap)", async () => {
+      const user = userEvent.setup();
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">본문 버튼 A</button>
+          <button type="button">본문 버튼 B</button>
+        </SongDetailModal>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      const buttonB = screen.getByRole("button", { name: /본문 버튼 B/ });
+
+      // 첫 요소(닫기 버튼)에 포커스 후 Shift+Tab → 마지막(B) 로 wrap.
+      closeButton.focus();
+      expect(document.activeElement).toBe(closeButton);
+
+      await user.tab({ shift: true });
+      expect(document.activeElement).toBe(buttonB);
+    });
+
+    // close → trigger focus 복귀 e2e 가드 (closes #519): onClose 콜백을 받은 부모가
+    // open=false 로 토글하는 실제 시나리오를 ESC/X 두 경로에서 모두 가드.
+    function FocusRestoreHarness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" data-testid="trigger" onClick={() => setOpen(true)}>
+            트리거
+          </button>
+          <SongDetailModal open={open} onClose={() => setOpen(false)} titleLabel="테스트 곡">
+            <p>본문</p>
+          </SongDetailModal>
+        </>
+      );
+    }
+
+    it("ESC 로 닫으면 onClose → open=false → trigger 로 포커스가 복귀한다", async () => {
+      const user = userEvent.setup();
+      render(<FocusRestoreHarness />);
+      const trigger = screen.getByTestId("trigger");
+      await user.click(trigger);
+      const closeButton = await screen.findByRole("button", { name: /상세 닫기/ });
+      await waitFor(() => expect(document.activeElement).toBe(closeButton));
+      await user.keyboard("{Escape}");
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it("X 버튼 클릭으로 닫으면 trigger 로 포커스가 복귀한다", async () => {
+      const user = userEvent.setup();
+      render(<FocusRestoreHarness />);
+      const trigger = screen.getByTestId("trigger");
+      await user.click(trigger);
+      const closeButton = await screen.findByRole("button", { name: /상세 닫기/ });
+      await waitFor(() => expect(document.activeElement).toBe(closeButton));
+      await user.click(closeButton);
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    // 추가 가드 (closes #556): 5 focusable 환경에서 양끝 wrap + 모달 외부 포커스
+    // 강제 복귀 분기 (handleKeyDown line 148/153 `!dialog.contains(active)`).
+    it("5 focusable 환경에서 마지막(D) → Tab 시 첫(닫기)으로 wrap", () => {
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">A</button>
+          <button type="button">B</button>
+          <button type="button">C</button>
+          <button type="button">D</button>
+        </SongDetailModal>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      const dButton = screen.getByRole("button", { name: "D" });
+      dButton.focus();
+      // happy-dom forward tab 시뮬 회피 — keyDown 으로 handleKeyDown 직접 트리거 (#745).
+      fireEvent.keyDown(dButton, { key: "Tab" });
+      expect(document.activeElement).toBe(closeButton);
+    });
+
+    it("5 focusable 환경에서 첫(닫기) → Shift+Tab 시 마지막(D)으로 wrap", async () => {
+      const user = userEvent.setup();
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">A</button>
+          <button type="button">B</button>
+          <button type="button">C</button>
+          <button type="button">D</button>
+        </SongDetailModal>,
+      );
+      screen.getByRole("button", { name: /상세 닫기/ }).focus();
+      await user.tab({ shift: true });
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "D" }));
+    });
+
+    // 외부 element focus 상태 분기 가드 (closes #xxxx): handleKeyDown line 148/153 의
+    // `!dialog.contains(active)` 분기. 모달이 떠 있지만 어떤 이유로 외부 element 가
+    // 포커스를 가진 상태(예: 화면 리더가 외부로 점프, 프로그램 포커스 이동)에서 Tab/
+    // Shift+Tab 이 모달로 입력되면, 양끝 wrap 과 무관하게 첫/마지막 요소로 강제 복귀해야 한다.
+    it("외부 element focus + Tab 시 모달 첫 요소로 강제 복귀한다", () => {
+      render(
+        <>
+          <button type="button" data-testid="outside">외부</button>
+          <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+            <button type="button">본문 버튼</button>
+          </SongDetailModal>
+        </>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      const outside = screen.getByTestId("outside");
+      outside.focus();
+      expect(document.activeElement).toBe(outside);
+
+      // dialog 자체에 keydown 을 dispatch — userEvent.tab 은 activeElement(outside)에서
+      // 시작해 모달 핸들러를 거치지 않으므로 fireEvent 로 직접 라우팅한다.
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+      expect(document.activeElement).toBe(closeButton);
+    });
+
+    it("외부 element focus + Shift+Tab 시 모달 마지막 요소로 강제 복귀한다", () => {
+      render(
+        <>
+          <button type="button" data-testid="outside">외부</button>
+          <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+            <button type="button">본문 버튼</button>
+          </SongDetailModal>
+        </>,
+      );
+      const bodyButton = screen.getByRole("button", { name: /본문 버튼/ });
+      const outside = screen.getByTestId("outside");
+      outside.focus();
+      expect(document.activeElement).toBe(outside);
+
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(bodyButton);
+    });
+
+    it("모달 unmount 시 직전 포커스 요소(open trigger)로 포커스가 복원된다", async () => {
+      // 모달 외부 trigger 버튼을 미리 두고, 거기에 포커스를 둔 채 모달을 연다.
+      const Wrapper = ({ open }: { open: boolean }) => (
+        <>
+          <button type="button" data-testid="trigger">
+            트리거
+          </button>
+          <SongDetailModal open={open} onClose={vi.fn()} titleLabel="테스트 곡">
+            <p>본문</p>
+          </SongDetailModal>
+        </>
+      );
+
+      const { rerender } = render(<Wrapper open={false} />);
+      const trigger = screen.getByTestId("trigger");
+      trigger.focus();
+      expect(document.activeElement).toBe(trigger);
+
+      // 모달 오픈 → 초기 포커스가 닫기 버튼으로 이동할 때까지 대기.
+      rerender(<Wrapper open />);
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(closeButton);
+      });
+
+      // 모달 close (open=false) → useEffect cleanup 이 직전 포커스를 복원해야 한다.
+      rerender(<Wrapper open={false} />);
+      expect(document.activeElement).toBe(trigger);
+    });
   });
 });

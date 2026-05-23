@@ -1,10 +1,12 @@
 package com.mobruji.integration;
 
 import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,7 +84,8 @@ class RecommendationHistoryIntegrationTest {
                 .statusCode(HttpStatus.OK.value())
                 .body("recommendationHistoryResponses", hasSize(2))
                 .body("recommendationHistoryResponses[0].requestId", equalTo(secondRequestId))
-                .body("recommendationHistoryResponses[0].sessionId", equalTo(sessionId))
+                // #423 (closes): SessionAuthGuard 가 일치 검증하므로 응답 echo 제거 — 키 자체가 없어야 함
+                .body("recommendationHistoryResponses[0].sessionId", nullValue())
                 .body("recommendationHistoryResponses[0].voiceRangeLow", equalTo(50))
                 .body("recommendationHistoryResponses[0].voiceRangeHigh", equalTo(72))
                 .body("recommendationHistoryResponses[0].mood", equalTo("EMOTIONAL"))
@@ -122,7 +125,8 @@ class RecommendationHistoryIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("recommendationHistoryResponses", hasSize(1))
-                .body("recommendationHistoryResponses[0].sessionId", equalTo("session-A"))
+                // #423 (closes): sessionId echo 제거 — 격리는 path/header 인증으로 보장됨
+                .body("recommendationHistoryResponses[0].sessionId", nullValue())
                 .body("recommendationHistoryResponses[0].mood", equalTo("UPBEAT"));
     }
 
@@ -158,6 +162,25 @@ class RecommendationHistoryIntegrationTest {
                 .get("/api/v1/sessions/{sessionId}/recommendation-history", "session-A")
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
+    }
+
+    @Test
+    @DisplayName("E2E (#423): history 응답 JSON 에 sessionId 키가 존재하지 않는다 (echo 제거 회귀 가드)")
+    void e2e_history_responseHasNoSessionIdField() {
+        final String sessionId = "rec-history-no-echo";
+        postRecommendation(sessionId, 55, 75, "UPBEAT");
+
+        final String body = given()
+                .header("X-Session-Id", sessionId)
+                .when()
+                .get("/api/v1/sessions/{sessionId}/recommendation-history", sessionId)
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .extract()
+                .asString();
+
+        // JSON 키 자체가 직렬화되지 않았는지 (Jackson 은 record 미선언 필드를 노출하지 않음)
+        assertThat(body).doesNotContain("\"sessionId\"");
     }
 
     @Test

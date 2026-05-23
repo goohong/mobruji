@@ -21,6 +21,8 @@ import org.junit.jupiter.api.io.TempDir;
 import com.mobruji.song.domain.AudioAnalysisFailedException;
 import com.mobruji.song.domain.AudioAnalysisResult;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 /**
  * {@link AudioAnalysisRunner} 단위 테스트. ProcessBuilder 호출 지점({@code startProcess})을 override 해
  * fake {@link Process} 를 주입하고 stdout JSON 파싱·exit code·timeout 분기를 검증한다.
@@ -124,7 +126,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "python3", "/no/such/dir/for/audio/analysis", Duration.ofSeconds(60),
                 false, null, null);
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry());
 
         // when / then
         assertThatThrownBy(() -> runner.analyzeByMetadata("t", "a"))
@@ -140,7 +142,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "python3", toolDir.toString(), Duration.ofSeconds(60),
                 true, "/abs/path/docker-compose.audio.yml", "audio-analysis");
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry());
 
         // when
         final List<String> command = runner.buildCommand(List.of("--song-title", "Y", "--artist", "B"));
@@ -160,7 +162,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "python3", toolDir.toString(), Duration.ofSeconds(60),
                 false, null, null);
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry());
 
         // when
         final List<String> command = runner.buildCommand(List.of("--song-title", "Y"));
@@ -178,7 +180,7 @@ class AudioAnalysisRunnerTest {
                 "python3", toolDir.toString(), Duration.ofMillis(10),
                 false, null, null);
         final HangingProcess hanging = new HangingProcess();
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry()) {
             @Override
             protected Process startProcess(final List<String> command, final Path workingDir) {
                 return hanging;
@@ -212,7 +214,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "python3", toolDir.toString(), Duration.ofSeconds(60),
                 false, null, null);
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props);
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry());
 
         // when / then
         assertThatThrownBy(() -> runner.analyzeByMetadata("t", "a"))
@@ -229,7 +231,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "/no/such/python/binary", toolDir.toString(), Duration.ofSeconds(60),
                 false, null, null);
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry()) {
             @Override
             protected Process startProcess(final List<String> command, final Path workingDir) throws IOException {
                 throw new IOException("Cannot run program \"/no/such/python/binary\": "
@@ -253,7 +255,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "python3", toolDir.toString(), Duration.ofSeconds(60),
                 true, "/abs/docker-compose.audio.yml", "audio-analysis");
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry()) {
             @Override
             protected Process startProcess(final List<String> command, final Path workingDir) throws IOException {
                 throw new IOException("Cannot run program \"docker\": error=2, No such file or directory");
@@ -275,7 +277,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "/some/python", toolDir.toString(), Duration.ofSeconds(60),
                 false, null, null);
-        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props) {
+        final AudioAnalysisRunner runner = new AudioAnalysisRunner(props, new SimpleMeterRegistry()) {
             @Override
             protected Process startProcess(final List<String> command, final Path workingDir) throws IOException {
                 throw new IOException("Cannot run program \"/some/python\": error=13, Permission denied");
@@ -296,7 +298,7 @@ class AudioAnalysisRunnerTest {
         final AudioAnalysisProperties props = new AudioAnalysisProperties(
                 "python3", toolDir.toString(), Duration.ofSeconds(60),
                 false, null, null);
-        return new AudioAnalysisRunner(props) {
+        return new AudioAnalysisRunner(props, new SimpleMeterRegistry()) {
             @Override
             protected Process startProcess(final List<String> command, final Path workingDir) {
                 return new FakeProcess(exitCode, stdout, stderr);

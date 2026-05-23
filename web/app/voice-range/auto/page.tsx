@@ -51,8 +51,26 @@ type WizardStep =
   | "RESULT";
 
 /**
+ * 단계 전환 시 status live region 으로 흘려보낼 한국어 안내. (#454)
+ *
+ * 외곽 wrapper 의 aria-live 를 제거하고 이 한 줄짜리 status region 으로
+ * 단계 전환 announce 를 일원화한다. nested aria-live(외곽 polite + MeasureStep
+ * polite + 카운트다운 polite) 가 SR 마다 동작이 미정의였던 문제 해소.
+ */
+const STEP_STATUS_MESSAGES: Readonly<Record<WizardStep, string>> = {
+  PERMISSION: "마이크 권한 안내 화면입니다.",
+  MEASURE_LOW: "낮은 음 측정을 시작합니다. 5초간 발성해주세요.",
+  MEASURE_HIGH: "높은 음 측정을 시작합니다. 5초간 발성해주세요.",
+  RESULT: "측정이 완료되었습니다. 결과를 확인하세요.",
+};
+
+/**
  * 측정 의존성 주입 — 테스트에서 Web Audio API 호출 없이 흐름만 검증하기 위함.
  * 운영 코드는 `defaultAutoMeasureDeps`를 사용한다.
+ *
+ * `signal` (#404 A-1): unmount/재시도 시 page 가 abort 하면 `runMeasurementSession`
+ * 의 `setInterval` 이 즉시 종료된다. signal 전달 없이 navigate 떠나면 5초간 timer
+ * 가 잔존하며 unmounted setState 경고가 떴다.
  */
 export interface AutoMeasureDeps {
   requestMic: () => Promise<MediaStream>;
@@ -60,19 +78,21 @@ export interface AutoMeasureDeps {
     phase: MeasurementPhase,
     stream: MediaStream,
     onSample: (sample: PitchSample) => void,
+    signal?: AbortSignal,
   ) => Promise<MeasurementResult>;
 }
 
 const defaultDeps: AutoMeasureDeps = {
   requestMic: () =>
     navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
-  runPhase: async (phase, stream, onSample) => {
+  runPhase: async (phase, stream, onSample, signal) => {
     const analyser = await openMicAnalyser(stream);
     try {
       return await runMeasurementSession({
         phase,
         onSample,
         readFrame: createReadFrameFromAnalyser(analyser),
+        signal,
       });
     } finally {
       await analyser.close();
@@ -103,6 +123,10 @@ export default function AutoVoiceRangePage({
   const [highMidi, setHighMidi] = useState<number>(69);
   const streamRef = useRef<MediaStream | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #404 A-1: 측정 중 페이지 떠남 → unmount 시 abort() 로 sampler 의 setInterval
+  // 을 즉시 종료해 unmounted setState 경고를 막는다. 매 handleStart 호출에서
+  // 새 controller 로 교체해 재시도 시에도 깨끗한 signal 을 보장한다.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // 컴포넌트 언마운트 시 마이크 stream 정리(privacy / 권한 빨간 점 제거).
   useEffect(() => {
@@ -113,6 +137,9 @@ export default function AutoVoiceRangePage({
         clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = null;
       }
+      // 진행 중 측정이 있으면 sampler 의 setInterval 을 즉시 끊는다 (#404 A-1).
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
   }, []);
 
@@ -126,6 +153,16 @@ export default function AutoVoiceRangePage({
 
   const handleRetry = useCallback(() => {
     // 결과 → 재측정. 상태 초기화 후 다시 PERMISSION 단계로.
+    // 직전 시도가 권한 거부 fallback timer 를 띄워둔 상태에서 사용자가 빠르게
+    // 재측정을 시작하면, 살아있는 timer 가 1.2초 뒤 router.push("/voice-range")
+    // 를 강제로 호출해 사용자가 PERMISSION 화면 밖으로 튕긴다. retry 진입 시
+    // pending fallback timer / 진행 중 측정 controller 를 함께 정리한다.
+    if (fallbackTimerRef.current !== null) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setLowResult(null);
     setHighResult(null);
     setCurrentSample(null);
@@ -136,6 +173,10 @@ export default function AutoVoiceRangePage({
 
   const handleStart = useCallback(async () => {
     setPermissionError(null);
+    // 매 측정 시도마다 새 controller. 이전 시도가 진행 중이면 abort 로 sampler 종료.
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
       // iOS Safari §8 Q5(a): user-gesture(클릭) 안에서 getUserMedia 호출.
       const stream = await deps.requestMic();
@@ -145,21 +186,31 @@ export default function AutoVoiceRangePage({
       const lowSamples: PitchSample[] = [];
       setCurrentSample(null);
       setElapsedMs(0);
-      const lowOutcome = await deps.runPhase("low", stream, (sample) => {
-        lowSamples.push(sample);
-        setCurrentSample(sample);
-        setElapsedMs(sample.elapsedMs);
-      });
+      const lowOutcome = await deps.runPhase(
+        "low",
+        stream,
+        (sample) => {
+          lowSamples.push(sample);
+          setCurrentSample(sample);
+          setElapsedMs(sample.elapsedMs);
+        },
+        controller.signal,
+      );
       setLowResult(lowOutcome);
 
       // 측정 phase 2 (high).
       setStep("MEASURE_HIGH");
       setCurrentSample(null);
       setElapsedMs(0);
-      const highOutcome = await deps.runPhase("high", stream, (sample) => {
-        setCurrentSample(sample);
-        setElapsedMs(sample.elapsedMs);
-      });
+      const highOutcome = await deps.runPhase(
+        "high",
+        stream,
+        (sample) => {
+          setCurrentSample(sample);
+          setElapsedMs(sample.elapsedMs);
+        },
+        controller.signal,
+      );
       setHighResult(highOutcome);
 
       // 결과 화면 진입 — 측정 MIDI를 슬라이더 기본값으로 미리 채운다.
@@ -177,6 +228,13 @@ export default function AutoVoiceRangePage({
     } catch (error) {
       // 권한 거부 / 장치 미지원 → fallback 안내 후 수동 입력 페이지로.
       safeLog.error("[voice-range/auto] mic permission/measurement failed", error);
+      // #404 A-2: requestMic 성공 후 runPhase 가 throw 한 경우 stream 이 살아있어
+      // 1.2초 redirect 까지 마이크 빨간 점이 유지된다. catch 진입 즉시 stop.
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      // 진행 중 측정도 함께 끊는다 (signal 미사용 인 경우에도 무해).
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       setPermissionError(
         error instanceof Error && error.name === "NotAllowedError"
           ? "마이크 권한이 거부되었습니다. 수동 입력으로 이동합니다."
@@ -255,8 +313,23 @@ export default function AutoVoiceRangePage({
           </p>
         </header>
 
-        <section
+        {/*
+          #454: wizard wrapper 의 aria-live="polite" 를 제거하고 단계 전환
+          announce 는 아래 별도 status region (data-testid="auto-step-status") 으로
+          일원화한다. 외곽이 polite live 였을 때 children 전체 교체가 너무 큰
+          DOM 변화라 SR 별로 무시되거나 헤딩만 읽히는 케이스가 있었다.
+        */}
+        <div
+          role="status"
           aria-live="polite"
+          aria-atomic="true"
+          data-testid="auto-step-status"
+          className="sr-only"
+        >
+          {STEP_STATUS_MESSAGES[step]}
+        </div>
+        <section
+          aria-label="음역대 자동 측정"
           className="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
         >
           {step === "PERMISSION" ? (
@@ -372,10 +445,12 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         편한 모음(예: &quot;아&quot;) 으로 길게 내주세요.
       </p>
-      <div
-        className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
-        aria-live="polite"
-      >
+      {/*
+        #454: 외곽 wrapper 의 aria-live 제거에 맞춰 이 박스도 중첩 aria-live 를
+        해제. 카운트다운 <p aria-live="polite"> 와 page 상단 status region 만
+        남겨서 SR announce 채널을 단순화한다.
+      */}
+      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
         <div className="flex items-center justify-between">
           <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             현재 음

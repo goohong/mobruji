@@ -147,6 +147,7 @@ class VoiceRangeHistoryIntegrationTest {
             final String sourceMethod) {
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"sessionId":"%s","lowestNoteMidi":%d,"highestNoteMidi":%d,"sourceMethod":"%s"}
                         """.formatted(sessionId, lowMidi, highMidi, sourceMethod))
@@ -160,6 +161,7 @@ class VoiceRangeHistoryIntegrationTest {
             final String sourceMethod) {
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"lowestNoteMidi":%d,"highestNoteMidi":%d,"sourceMethod":"%s"}
                         """.formatted(lowMidi, highMidi, sourceMethod))

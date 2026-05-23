@@ -9,7 +9,13 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongCard, buildYouTubeSearchUrl } from "./SongCard";
@@ -236,6 +242,88 @@ describe("SongCard", () => {
         screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
       ).toBeInTheDocument();
     });
+
+    // 회귀 가드 (closes #449) — 키보드 사용자가 trigger button에 포커스 후
+    // Enter / Space 로 모달을 활성화할 수 있어야 한다. 향후 trigger 구조가
+    // 비표준 wrapper (`<div onClick>` 등) 로 바뀌면 키보드 활성화가 끊겨도
+    // click test 만으로는 회귀가 잡히지 않는다.
+    it("회귀 가드: trigger button에 Tab 포커스 후 Enter 로 onShowDetail 호출", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const trigger = screen.getByRole("button", { name: /테스트 곡 상세 보기/ });
+      trigger.focus();
+      expect(trigger).toHaveFocus();
+      await user.keyboard("{Enter}");
+      expect(onShowDetail).toHaveBeenCalledTimes(1);
+    });
+
+    it("회귀 가드: trigger button에 포커스 후 Space 로 onShowDetail 호출", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const trigger = screen.getByRole("button", { name: /테스트 곡 상세 보기/ });
+      trigger.focus();
+      // userEvent Space는 keydown(Space) + keyup(Space) 로 분해되며 button 의
+      // 표준 동작에 따라 click 이 발생한다.
+      await user.keyboard(" ");
+      expect(onShowDetail).toHaveBeenCalledTimes(1);
+    });
+
+    // 회귀 가드 (closes #449) — LikeButton onClick 의 stopPropagation 이 사라지거나
+    // 향후 trigger 안에 좋아요/북마크 button 을 중첩(HTML 위반)으로 옮기면 좋아요
+    // 클릭이 모달을 동시에 띄우는 회귀가 생긴다. 구조적 약속을 명문화.
+    it("회귀 가드: 좋아요 버튼 클릭이 onShowDetail 을 트리거하지 않는다 (이벤트 격리)", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const likeButton = screen.getByRole("button", {
+        name: /테스트 곡 좋아요$/,
+      });
+      await user.click(likeButton);
+      // 좋아요 mutation 은 진행되지만 모달 trigger 콜백은 호출되지 않아야 한다.
+      expect(onShowDetail).not.toHaveBeenCalled();
+    });
+  });
+
+  // 회귀 가드 (closes #449) — href mode 에서 키보드로 detail Link 활성화.
+  // next/link 의 <a> 는 Enter 표준 동작으로 navigate 한다 (Space 는 link 표준 아님).
+  // jsdom 환경에서는 실제 navigate 가 일어나지 않으므로 click 이벤트 발생을 검증한다.
+  describe("href mode 키보드 nav 회귀 가드 (closes #449)", () => {
+    it("Link 에 포커스 후 Enter 로 click 이벤트가 발생한다", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} href="/songs/1" />
+        </ul>,
+      );
+      const link = screen.getByRole("link", { name: /테스트 곡 상세 보기/ });
+      const clickHandler = vi.fn((event: Event) => {
+        // jsdom 에서 navigate 시도 막기 — 회귀 가드 목적은 click 발화 여부 확인.
+        event.preventDefault();
+      });
+      link.addEventListener("click", clickHandler);
+      link.focus();
+      expect(link).toHaveFocus();
+      await user.keyboard("{Enter}");
+      expect(clickHandler).toHaveBeenCalled();
+    });
   });
 
   // closes #141 — matchReason 다중 줄 + 펼침 토글 (Spotify "Why this song?" 영감).
@@ -296,6 +384,69 @@ describe("SongCard", () => {
       await user.click(expanded);
       const collapsed = screen.getByRole("button", { name: /자세히 보기/ });
       expect(collapsed).toHaveAttribute("aria-expanded", "false");
+    });
+
+    // closes #542 — aria-controls 값이 펼침 패널 id와 정확히 매칭되어야 한다.
+    it("토글 aria-controls가 펼침 패널 id와 일치한다 (useId 회귀 가드)", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const toggle = screen.getByRole("button", { name: /자세히 보기/ });
+      const controlsId = toggle.getAttribute("aria-controls");
+      expect(controlsId).toBeTruthy();
+      await user.click(toggle);
+      const panel = document.getElementById(controlsId as string);
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveTextContent("키 매칭");
+    });
+
+    // closes #549 — Enter/Space 키보드 활성화 회귀 가드. <button> 네이티브 동작이
+    // 향후 <div role="button"> 등으로 바뀌어도 키보드 토글이 깨지지 않도록 고정한다.
+    it("토글 focus 후 Enter/Space는 aria-expanded를 토글하고, 다른 키는 no-op", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const toggle = screen.getByRole("button", { name: /자세히 보기/ });
+      toggle.focus();
+      expect(toggle).toHaveFocus();
+
+      await user.keyboard("{Enter}");
+      expect(
+        screen.getByRole("button", { name: /접기/ }),
+      ).toHaveAttribute("aria-expanded", "true");
+
+      await user.keyboard(" ");
+      expect(
+        screen.getByRole("button", { name: /자세히 보기/ }),
+      ).toHaveAttribute("aria-expanded", "false");
+
+      await user.keyboard("a");
+      expect(
+        screen.getByRole("button", { name: /자세히 보기/ }),
+      ).toHaveAttribute("aria-expanded", "false");
+    });
+
+    // closes #542 — 카드 여러 개 렌더 시 panelId가 카드 간 충돌하지 않아야 한다.
+    it("카드 다수 렌더 시 각 토글 aria-controls가 unique하다", () => {
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={buildItem({}, { rankPosition: 1 })} />
+          <SongCard item={buildItem({}, { rankPosition: 2 })} />
+        </ul>,
+      );
+      const controlsIds = screen
+        .getAllByRole("button", { name: /자세히 보기/ })
+        .map((toggle) => toggle.getAttribute("aria-controls"));
+      expect(controlsIds).toHaveLength(2);
+      expect(new Set(controlsIds).size).toBe(controlsIds.length);
     });
   });
 
@@ -404,6 +555,26 @@ describe("SongCard", () => {
         expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       });
     });
+
+    // closes #486 — /songs, /songs/[id] 페이지의 alert 패턴과 일관성 유지.
+    // role="alert" 단독은 일부 SR 환경에서 즉시 announce 되지 않을 수 있어
+    // aria-live="assertive" 를 함께 명시한다. 회귀 가드.
+    it("실패 안내 alert에 aria-live=\"assertive\" 가 부여된다", async () => {
+      const user = userEvent.setup();
+      toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 좋아요$/ });
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveAttribute("aria-live", "assertive");
+    });
   });
 
   // closes #184 — 북마크 토글.
@@ -438,6 +609,78 @@ describe("SongCard", () => {
           songId: 1,
         });
       });
+    });
+
+    // closes #521 — 회귀 가드: 북마크 mutation 실패 시 낙관 변경 원복.
+    // 좋아요 쪽에는 같은 가드가 있었으나 북마크에는 alert aria-live 만 검증되어 있었다.
+    // onMutate/onError 양쪽이 toggle 을 짝맞춰 부르는 패턴이 깨지면 store/UI 가 잘못된 상태로 굳는다.
+    it("BE mutation 실패 시 북마크 낙관적 변경을 롤백한다", async () => {
+      const user = userEvent.setup();
+      toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", { name: /테스트 곡 북마크$/ });
+      await user.click(button);
+
+      // 실패 후 store/aria-pressed 모두 원상복귀.
+      await waitFor(() => {
+        expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([]);
+      });
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+
+    // closes #521 — 회귀 가드: 이미 bookmarked=true 상태에서 토글(해제) 실패.
+    it("이미 bookmarked=true 상태에서 토글 실패 시 다시 bookmarked=true 로 복원된다", async () => {
+      const user = userEvent.setup();
+      useBookmarksStore.setState({ bookmarkedSongIds: [1] });
+      toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", {
+        name: /테스트 곡 북마크 해제/,
+      });
+      expect(button).toHaveAttribute("aria-pressed", "true");
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([1]);
+      });
+      expect(
+        screen.getByRole("button", { name: /테스트 곡 북마크 해제/ }),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+
+    // closes #486 — BookmarkButton 실패 안내도 LikeButton 과 동일하게
+    // aria-live="assertive" 를 부여한다. 회귀 가드.
+    it("BE mutation 실패 시 alert에 aria-live=\"assertive\" 가 부여된다", async () => {
+      const user = userEvent.setup();
+      toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+
+      const button = screen.getByRole("button", {
+        name: /테스트 곡 북마크$/,
+      });
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveAttribute("aria-live", "assertive");
     });
   });
 
@@ -504,6 +747,39 @@ describe("SongCard", () => {
       const url = buildYouTubeSearchUrl("Me & You", "Artist?");
       expect(url).toContain("search_query=Me+%26+You+Artist%3F");
     });
+
+    // closes #505 — 회귀 가드: 빈 입력은 search_query 자체를 비워야 한다.
+    it("buildYouTubeSearchUrl: 빈 입력은 빈 search_query를 반환한다", () => {
+      const url = buildYouTubeSearchUrl("", "");
+      const params = new URL(url).searchParams;
+      expect(params.get("search_query")).toBe("");
+    });
+
+    // closes #505 — 회귀 가드: 파라미터 round-trip이 정확해야 한다 (# 같은 fragment 문자 포함).
+    it("buildYouTubeSearchUrl: search_query는 원본 문자열로 round-trip 디코딩된다", () => {
+      const url = buildYouTubeSearchUrl("C#", "Song/Artist");
+      const params = new URL(url).searchParams;
+      expect(params.get("search_query")).toBe("C# Song/Artist");
+    });
+
+    // closes #539 — SongDetailContent 의 PR #537 (closes #535) 짝. SongCard 의
+    // YouTubeSearchLink 도 새 탭으로 외부 사이트(youtube.com) 를 열기 때문에 reverse
+    // tabnabbing 방지를 위해 rel="noopener noreferrer" 가 target="_blank" 와 항상
+    // 함께 있어야 한다. 위 #302 케이스가 동등 검증을 포함하지만, 의도 코멘트가 있는
+    // 별도 가드 it 으로 검색/짝 추적성을 명시한다.
+    it("회귀 가드(#539): target=_blank 와 rel=noopener noreferrer 를 함께 가진다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const link = screen.getByRole("link", {
+        name: /테스트 곡 YouTube에서 듣기/,
+      });
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
   });
 
   // closes #107 — axe-core 자동 검사. serious/critical 위반이 없어야 한다.
@@ -547,6 +823,38 @@ describe("SongCard", () => {
         </ul>,
       );
       await expectNoA11yViolations(container);
+    });
+  });
+
+  // closes #502 — SongCard 가 AlbumCoverThumbnail 을 실제로 마운트하고 song.albumCoverUrl
+  // 을 pass-through 하는지 회귀 가드. Thumbnail 단독 동작은 AlbumCover.test.tsx 가
+  // 검증하지만, SongCard 내부 import/prop 배선이 끊기면 그쪽 테스트는 통과해도 카드
+  // 표면에서 thumbnail 이 사라지므로 별도 통합 가드를 둔다.
+  describe("AlbumCoverThumbnail 통합 (closes #502)", () => {
+    it("albumCoverUrl 가 string 이면 카드 안에 <img src> 가 pass-through 된다", () => {
+      const item = buildItem({ albumCoverUrl: "https://example.com/cover.jpg" });
+      renderWithQueryClient(<SongCard item={item} />);
+      const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
+      expect(img.getAttribute("src")).toBe("https://example.com/cover.jpg");
+      expect(img.getAttribute("loading")).toBe("lazy");
+    });
+
+    it("albumCoverUrl 가 null 이면 카드 안에서 placeholder 로 fallback", () => {
+      const item = buildItem({ albumCoverUrl: null });
+      renderWithQueryClient(<SongCard item={item} />);
+      expect(
+        screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+      ).toBeInTheDocument();
+    });
+
+    it("img onError → 카드 안에서 placeholder 로 fallback (#322 + #499 통합)", () => {
+      const item = buildItem({ albumCoverUrl: "https://example.com/404.jpg" });
+      renderWithQueryClient(<SongCard item={item} />);
+      const img = screen.getByAltText("테스트 곡 앨범 커버");
+      fireEvent.error(img);
+      expect(
+        screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
+      ).toBeInTheDocument();
     });
   });
 });

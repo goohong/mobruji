@@ -4,9 +4,9 @@ slug: recommendation-p95-regression-guard
 status: draft
 owner: "@goohong"
 scope: recommendation
-related_issues: [62, 253, 242]
-related_prs: []
-last_reviewed: 2026-05-22
+related_issues: [62, 253, 242, 273, 274]
+related_prs: [451]
+last_reviewed: 2026-05-23
 ---
 
 # 추천 API p95 응답시간 회귀 가드 (k6 + Micrometer 이원화)
@@ -105,12 +105,12 @@ last_reviewed: 2026-05-22
 | `http_req_duration{endpoint:recommendation}` p99 | **< 400 ms** | (k6 한정) | p95 의 2배 휴리스틱. |
 | `http_req_failed` rate | **< 1 %** | (k6 한정) | k6 워크로드 가용성. |
 | `checks` rate | **> 99 %** | (k6 한정) | k6 응답 구조 검증 (status 201, requestId 존재, recommendations array). |
-| `mobruji.recommendation.request.duration` p95 (운영) | (운영 모니터링 한정) | **>= 400 ms 5분 연속** | k6 임계 200ms × 2 = 400ms. observability-baseline §5-6 의 600ms 는 본 spec 갱신 후 동기화 필요 (오픈 질문 Q1). |
+| `mobruji.recommendation.request.duration` p95 (운영) | (운영 모니터링 한정) | **>= 400 ms 5분 연속** | k6 임계 200ms × 2 = 400ms. observability-baseline §5-6 동기화 완료 (2026-05-23, §9 결정 로그 참조). |
 
 > **임계값 결정 근거**:
 > - **200ms**: rev 사이클 6 회귀 미감지 시점의 baseline 측정값 ~80ms + 안전 마진 2.5배. v1/v2 spec 합치.
-> - **observability-baseline §5-4 의 300ms 목표값과 충돌**: 본 spec 머지 후 observability-baseline 을 200ms 로 보수적 갱신하는 것이 단일 진실 원칙에 부합. v3 알고리즘 + DB 카탈로그 1000곡 확장 시 베이스라인 갱신 절차(§6)로 200→300ms 상향 가능 — 의도된 변화 명시 필수.
-> - **운영 알림 임계 = CI 임계 × 2**: CI 임계는 합성 분포(분산 좁음), 운영은 실제 분포(분산 넓음). 알림이 너무 자주 울리면 무시되므로 ×2 마진. observability-baseline §5-6 의 600ms (= 300ms × 2) 가 본 spec 200ms 기준으로는 400ms 로 조정 필요.
+> - **observability-baseline §5-4 단일 진실 박제 (2026-05-23, closes #273)**: observability-baseline §5-4 가 본 spec §5-3 (200ms) 을 단일 진실로 cross-ref. 역참조 금지 — 추천 POST p95 변경은 본 spec 갱신 1곳에서만. v3 알고리즘 + DB 카탈로그 1000곡 확장 시 베이스라인 갱신 절차(§6)로 200→상향 가능 — 의도된 변화 명시 필수.
+> - **운영 알림 임계 = CI 임계 × 2**: CI 임계는 합성 분포(분산 좁음), 운영은 실제 분포(분산 넓음). 알림이 너무 자주 울리면 무시되므로 ×2 마진. observability-baseline §5-6 의 알림 임계 = 200ms × 2 = **400ms** 박제 완료 (2026-05-23).
 
 ### 5-4) k6 워크로드 표
 
@@ -123,10 +123,10 @@ last_reviewed: 2026-05-22
 | 입력 분포 - excludeSongIds | 0~3개, 1..30 범위 임의 | 시드 100곡 가정, 정상 다양성 후처리 트리거 |
 | 입력 분포 - sessionId | VU별 1개 사전 등록 (`k6-load-<ts>-<i>`) | 같은 VU 가 같은 session 재사용 → 운영 패턴 유사화 |
 | pacing | VU 당 sleep 0.5~1.0s | 무한 burst 방지, 실제 사용자 페이스 근사 (1~2 req/s/user) |
-| BPM 입력 (`preferredBpm`) | **미주입** | v2 tempoMatch 분기 (mood default BPM 표) 활성화 — v3 에서 직접 주입 변주 추가 검토 |
+| BPM 입력 (`preferredBpm`) | **50% 확률로 [60, 200] 임의 정수 주입, 나머지 50% 미주입** | v2 tempoMatch 두 분기 모두 회귀 가드 — 직접 주입 (사용자 BPM) + mood default BPM 표. `BPM_INJECTION_RATE` / `BPM_MIN` / `BPM_MAX` env 로 비율·범위 튜닝 (PR #451, 2026-05-23). |
 
 - 본 표는 §5-3 임계 검증 시 **함께** 갱신해야 한다. VU/duration 변경은 임계의 의미를 바꾼다 (예: VU 100 으로 늘리면 p95 가 다른 분포).
-- v0.4 후보: `preferredBpm` 입력 변주 추가 — v2 tempoMatch 활성화 후에도 워크로드는 mood default BPM 경로만 타고 있어 BPM 직접 주입 경로의 회귀 가드가 비어있다 (오픈 질문 Q4).
+- ~~v0.4 후보: `preferredBpm` 입력 변주 추가~~ → **resolved (2026-05-23, PR #451)**: 50% 변주 박제. v2 tempoMatch 직접 주입 경로 회귀 가드 활성화. 임계(§5-3) 무변경 — 워크로드만 다양화. (Q4 (a) 채택)
 
 ### 5-5) k6 ↔ Micrometer 차이 디버깅 절차
 
@@ -163,7 +163,7 @@ last_reviewed: 2026-05-22
 
 - [ ] **PR 1 (docs, 본 PR)**: 본 spec 신설 + v1/v2/observability-baseline 단일 진실 참조 정합 (각 spec §3 비기능 / §5-4 매트릭스에 "임계는 `recommendation-p95-regression-guard.md` §5-3 단일 진실 참조" 한 줄 추가).
 - [ ] **PR 2 (chore:infra)**: `observability-baseline.md` §5-6 알림 임계 600ms → 400ms 동기화 + `scripts/load/README.md` §2 표 본 spec 참조 갱신. 보호 영역 미해당 (docs only).
-- [ ] **PR 3 (chore:recommendation, 선택)**: k6 시나리오에 `preferredBpm` 입력 변주 추가 — v2 tempoMatch 직접 주입 경로 회귀 가드. `scripts/load/recommendation.k6.js` + README 갱신. 임계는 §5-3 표 그대로 (워크로드 변경이 임계 의미를 바꾸지 않는지 baseline 측정 PR 본문에 첨부).
+- [x] **PR 3 (chore:recommendation, 선택)**: k6 시나리오에 `preferredBpm` 입력 변주 추가 — v2 tempoMatch 직접 주입 경로 회귀 가드. `scripts/load/recommendation.k6.js` + README 갱신. 임계는 §5-3 표 그대로 (워크로드 변경이 임계 의미를 바꾸지 않는지 baseline 측정 PR 본문에 첨부). **완료: PR #451 (2026-05-23, closes #274)** — 50% 변주 + env 튜닝 (`BPM_INJECTION_RATE` / `BPM_MIN` / `BPM_MAX`). Q4 (a) 채택.
 - [ ] **PR 4 (chore:infra, 선택, 오픈 질문 Q3)**: k6 시드 고정 (`Math.random` seed) — 결정적 재현. 부수효과 분석 필요 (분산이 0 이 되면 통계적 임계 의미 변화).
 - [ ] **PR 5 (chore:ci, 오픈 질문 Q2)**: ArchUnit 또는 PR lint 로 magic number `p(95)<` 검출 시 본 spec 참조 주석 강제. v0.4 후보.
 
@@ -181,10 +181,10 @@ last_reviewed: 2026-05-22
 
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | observability-baseline §5-4 의 추천 endpoint 목표 p95 = 300ms 와 본 spec §5-3 의 200ms 중 어느 쪽이 단일 진실인가? | (a) 200ms — v1/v2 spec 합치 + k6 운영 중 / (b) 300ms — observability-baseline 우선 / (c) v3 진입 시 측정 후 결정 | @goohong / PR 1 머지 직후 |
+| ~~Q1~~ | ~~observability-baseline §5-4 의 추천 endpoint 목표 p95 = 300ms 와 본 spec §5-3 의 200ms 중 어느 쪽이 단일 진실인가?~~ | **resolved (2026-05-23, closes #273)**: (a) 200ms 확정. observability-baseline §5-4 가 본 spec §5-3 을 단일 진실로 cross-ref. §5-6 알림 임계도 400ms 동기화. | — |
 | Q2 | 본 spec §5-3 표와 k6 스크립트 임계 동기화를 ArchUnit/PR lint 로 자동 강제할 것인가? | (a) v0.4 후보 (현재는 PR review) / (b) v0.3 P3 안에 도입 | @goohong / v0.3 P3 회고 |
 | Q3 | k6 워크로드 `Math.random` 시드 고정으로 결정적 재현 가능하게 할 것인가? | (a) 부수효과 분석 후 v0.4 / (b) 분산 허용 유지 (현행) / (c) 옵션 env 로 둘 다 지원 | @goohong / v0.4 P1 |
-| Q4 | k6 워크로드에 `preferredBpm` 직접 주입 변주 추가 (v2 tempoMatch 회귀 가드 강화) 우선순위? | (a) PR 3 으로 본 spec 후속 / (b) v3 알고리즘 PR 과 묶기 / (c) v0.4 미루기 | @goohong / 본 spec 머지 직후 |
+| ~~Q4~~ | ~~k6 워크로드에 `preferredBpm` 직접 주입 변주 추가 (v2 tempoMatch 회귀 가드 강화) 우선순위?~~ | **resolved (2026-05-23, closes #274)**: (a) PR 3 채택. PR #451 로 50% 변주 박제 + env 튜닝. §5-4 표 갱신, 임계(§5-3) 무변경. | — |
 | Q5 | 운영 알림 임계 비례 룰 (k6 임계 × 2) 의 ×2 휴리스틱이 적정한가? | 운영 데이터 누적 후 측정 → ADR 추가 | @goohong / v0.4 운영 데이터 입수 후 |
 
 ## 9) 결정 로그
@@ -197,3 +197,5 @@ last_reviewed: 2026-05-22
   - **알림 임계 = CI 임계 × 2 비례 룰**: observability-baseline §5-6 의 600ms 는 300ms × 2 휴리스틱. 본 spec 200ms 기준으로는 400ms 로 조정 필요 (PR 2 범위).
   - **#253 의존성 없음**: 본 spec 측정 endpoint 는 추천 POST 1개. admin endpoint 비사용.
   - **baseline 갱신 절차 6단계 (§6)** 를 단일 진실 경로로 확정. 어기면 spec 간 불일치 재발.
+- **2026-05-23 (plan)**: 단일 진실 박제 (closes #273). 잠정 결정이었던 200ms p95 / 400ms p99 를 단일 진실로 확정하고 observability-baseline §5-4 (목표 p95) / §5-6 (알림 임계 = 400ms) 를 한 PR 에 동기화. §5-3 노트의 "오픈 질문 Q1" / "동기화 필요" 잔재 문구 정리, §8 Q1 resolved 표시. rev audit 누차 발견 (200ms ↔ 300ms / 400ms ↔ 600ms drift) 종결. 후속: 의도된 변화 시 §6 baseline 갱신 절차로만 변경 가능 — 다른 spec 의 직접 갱신 금지.
+- **2026-05-23 (plan, PR #451 후속)**: Q4 resolved (closes #274). k6 워크로드에 `preferredBpm` 50% 변주 박제 — v2 tempoMatch 직접 주입 경로 회귀 가드 활성화. `BPM_INJECTION_RATE` / `BPM_MIN` / `BPM_MAX` env 로 비율·범위 튜닝. §5-4 표 BPM 행 갱신, §6 PR 3 체크박스 완료 표시. 임계(§5-3 200ms p95 / 400ms p99) 무변경 — 워크로드 다양화는 임계 의미 무관 (baseline 갱신 절차 §6 미트리거). 후속: Q2 (ArchUnit 자동화) / Q3 (시드 고정) / Q5 (×2 휴리스틱) 는 v0.4 운영 데이터 누적 후.

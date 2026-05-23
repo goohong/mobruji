@@ -80,6 +80,15 @@ vi.mock("@/lib/api/recommendationHistory", () => ({
   readRecommendationHistory: readRecommendationHistoryMock,
 }));
 
+/**
+ * issue #422 후속: BE `requestId` 가 UUIDv7 문자열로 전환됨에 따라 fixture 헬퍼.
+ * 정수 시드로 결정적 UUID 문자열을 만든다 — 호출부의 의미(어떤 번호 entry 인지)를
+ * 보존하면서 string 타입 정합성을 맞춘다.
+ */
+function ridFromSeed(seed: number): string {
+  return `01933b1c-7f8a-7c2d-9b3e-${seed.toString(16).padStart(12, "0")}`;
+}
+
 function buildEntry(
   id: string,
   requestedAt: string,
@@ -89,7 +98,7 @@ function buildEntry(
   return {
     id,
     requestedAt,
-    requestId: parseInt(id.replace(/\D/g, ""), 10) || 1,
+    requestId: ridFromSeed(parseInt(id.replace(/\D/g, ""), 10) || 1),
     voiceRangeId: 42,
     excludedSongIds: [],
     songs: songIds.map((songId, idx) => ({
@@ -362,7 +371,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 9001,
+            requestId: ridFromSeed(9001),
             sessionId: "sess-be",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -414,7 +423,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 1,
+            requestId: ridFromSeed(1),
             sessionId: "sess-be",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -496,7 +505,7 @@ describe("HistoryPage", () => {
       readRecommendationHistoryMock.mockResolvedValueOnce({
         recommendationHistoryResponses: [
           {
-            requestId: 1,
+            requestId: ridFromSeed(1),
             sessionId: "sess-meta",
             voiceRangeLow: 52,
             voiceRangeHigh: 70,
@@ -534,6 +543,148 @@ describe("HistoryPage", () => {
       // "잔잔한 · 85 BPM" 형태 — 정확한 문구가 카드 부제목에 등장한다.
       expect(screen.getByText(/잔잔한.*85 BPM/)).toBeInTheDocument();
     });
+
+    it("BE source 일 때 하단 삭제 버튼 라벨이 '이 기기 캐시 비우기' 로 분기되고 confirm 문구에 서버 데이터 잔존 안내가 포함된다 (#295 항목 3)", async () => {
+      // BE entries 가 있으면 "전체 삭제" 라는 라벨이 사용자 기대치(서버 영구 삭제)와 어긋남.
+      // 라벨을 "이 기기 캐시 비우기" 로 분기하고 confirm 문구에 "다음 방문 시 다시 보입니다" 명시.
+      sessionMock.set({ sessionId: "sess-clear-label" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: ridFromSeed(7),
+            sessionId: "sess-clear-label",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: null,
+            preferredBpm: null,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 500,
+                  title: "BE곡-500",
+                  artist: "가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: null,
+                  mood: null,
+                  language: "ko",
+                  genre: "POP",
+                  tjNumber: null,
+                  kyNumber: null,
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.9,
+                matchReason: "음역 일치",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+      // 명시적으로 (message: string) => boolean 시그니처를 부여 — 그래야
+      // mock.calls 가 [string][] 로 추론되어 첫 호출의 message 를 type-safe 하게 꺼낼 수 있다.
+      const confirmMock = vi.fn<(message?: string) => boolean>(() => true);
+      vi.stubGlobal("confirm", confirmMock);
+      const user = userEvent.setup();
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE entries 로딩 완료 후 라벨이 분기되어야 한다.
+      await screen.findByText("BE곡-500");
+      const clearBtn = await screen.findByRole("button", {
+        name: "이 기기 캐시 비우기",
+      });
+      // 분기 후 기존 라벨은 더 이상 노출되지 않는다.
+      expect(
+        screen.queryByRole("button", { name: "전체 삭제" }),
+      ).not.toBeInTheDocument();
+
+      await user.click(clearBtn);
+
+      // confirm 에 "서버"/"다시 보입니다" 안내가 포함된 분기 문구가 전달되어야 한다.
+      expect(confirmMock).toHaveBeenCalledTimes(1);
+      const passedMessage = confirmMock.mock.calls[0]?.[0] ?? "";
+      expect(passedMessage).toMatch(/서버/);
+      expect(passedMessage).toMatch(/다음 방문/);
+      // clearHistory 는 localStorage 만 비우는 기존 동작 그대로 (회귀 없음).
+      expect(historyMock.state().clearHistory).toHaveBeenCalledTimes(1);
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  // closes #435 — 카운트 영역이 polite 라이브 영역으로 마킹되고 BE source 분기/
+  // localStorage entry 모두에서 메시지가 라이브 영역에 노출되어야 한다.
+  // PR #428 /recommend, PR #433 /likes /bookmarks 와 동일 패턴.
+  describe("카운트 라이브 영역 (#435)", () => {
+    it("localStorage entry 일 때 라이브 영역에 '최근 N건' 메시지가 노출된다", () => {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      historyMock.set({
+        recommendations: [
+          buildEntry("e-1", tenMinutesAgo, [1]),
+          buildEntry("e-2", tenMinutesAgo, [2]),
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      const liveRegion = screen.getByTestId("history-count-live");
+      expect(liveRegion).toHaveAttribute("role", "status");
+      expect(liveRegion).toHaveAttribute("aria-live", "polite");
+      expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+      expect(liveRegion).toHaveTextContent(/최근 2건의 추천을 기록해두었어요/);
+    });
+
+    it("BE entry 도착 시 라이브 영역에 '세션 ID 기준 N건' 메시지로 분기된다", async () => {
+      sessionMock.set({ sessionId: "sess-live" });
+      readRecommendationHistoryMock.mockResolvedValueOnce({
+        recommendationHistoryResponses: [
+          {
+            requestId: ridFromSeed(1),
+            sessionId: "sess-live",
+            voiceRangeLow: 52,
+            voiceRangeHigh: 70,
+            mood: null,
+            preferredBpm: null,
+            requestedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            recommendations: [
+              {
+                song: {
+                  id: 999,
+                  title: "BE곡-999",
+                  artist: "가수",
+                  releaseYear: 2024,
+                  keyOriginal: "C_MAJOR",
+                  bpm: null,
+                  mood: null,
+                  language: "ko",
+                  genre: "POP",
+                  tjNumber: null,
+                  kyNumber: null,
+                  metadataSource: "MANUAL_SEED",
+                },
+                score: 0.9,
+                matchReason: "음역 일치",
+                rankPosition: 1,
+              },
+            ],
+          },
+        ],
+      });
+
+      renderWithQueryClient(<HistoryPage />);
+
+      // BE entries 로딩 완료 후 라이브 영역 메시지가 BE source 문구로 바뀐다.
+      await screen.findByText("BE곡-999");
+      const liveRegion = screen.getByTestId("history-count-live");
+      expect(liveRegion).toHaveAttribute("role", "status");
+      expect(liveRegion).toHaveAttribute("aria-live", "polite");
+      expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+      expect(liveRegion).toHaveTextContent(
+        /세션 ID 기준 1건의 추천을 서버에서 불러왔어요/,
+      );
+    });
   });
 
   describe("a11y", () => {
@@ -548,7 +699,7 @@ describe("HistoryPage", () => {
       ).toISOString();
       const input: RecommendationHistoryInput = {
         voiceRangeId: 1,
-        requestId: 1,
+        requestId: ridFromSeed(1),
         songs: buildEntry("e-1", tenMinutesAgo, [1, 2, 3, 4]).songs,
         excludedSongIds: [99],
       };

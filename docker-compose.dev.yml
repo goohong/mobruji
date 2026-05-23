@@ -69,7 +69,11 @@ services:
       context: ./web
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost/api}
+        # 빈 문자열이 default — 백엔드 컨트롤러가 /api/v1/... prefix 이미 보유하므로
+        # base 는 host root. /api 로 두면 client 가 /api/api/... 로 합쳐
+        # nginx → backend 404 (voice-range → 추천받기 P0 버그).
+        # 자세한 결정은 .env.dev.example NEXT_PUBLIC_API_BASE_URL 주석 참조.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL-}
     image: mobruji/web:${GIT_SHA:-dev}
     container_name: mobruji-web-dev
     restart: unless-stopped

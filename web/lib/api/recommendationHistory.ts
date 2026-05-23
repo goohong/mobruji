@@ -34,7 +34,14 @@ import type {
  * ISO8601 LocalDateTime (예: "2026-05-21T08:00:00") — 타임존 미포함.
  */
 export type RecommendationHistoryEntryResponse = {
-  requestId: number;
+  /**
+   * BE 가 발급한 requestId — UUIDv7 문자열 (issue #422, BE PR #417 후속).
+   *
+   * AS-IS: `number`. 백엔드가 정수 PK 였을 때 그대로 노출.
+   * TO-BE: UUIDv7 문자열. URL/로그/외부 노출 시 충돌·예측 어려움 + 시간 정렬성
+   *        (v7 의 timestamp prefix) 동시에 만족.
+   */
+  requestId: string;
   sessionId: string;
   voiceRangeLow: number;
   voiceRangeHigh: number;

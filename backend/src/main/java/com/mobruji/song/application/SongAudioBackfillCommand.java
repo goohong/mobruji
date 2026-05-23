@@ -17,8 +17,15 @@ import com.mobruji.song.domain.AudioAnalysisResult;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * 시드 30곡(또는 DB 전체)의 lowMidi/highMidi 를 Python audio analysis tool 산출값으로 backfill 하는 일회성 batch.
+ *
+ * <p>곡 단위 자체 트랜잭션 (한 곡 실패가 다음 곡 막지 않는 의도된 격리). 이슈 #863 — {@code @Transactional}
+ * 부재는 의도된 설계로, 곡별 save 호출이 Spring 의 기본 트랜잭션 경계 1곡 ↔ 1 commit 로 동작한다. SongAnalysis
+ * 도입 시 트랜잭션 경계 재설계 필수 — spec {@code docs/features/audio-tooling-bootstrap.md} §10-7 cross-ref.
  *
  * <p>spec: {@code docs/features/audio-tooling-bootstrap.md} PR C — 수기 시드의 음역대 정확도를 audio 분석으로
  * 끌어올린다. 추천 알고리즘 코드는 그대로이고 입력 데이터만 정확해지므로 결정성 회귀는 없다.
@@ -66,14 +73,49 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
      */
     private static final AtomicReference<Instant> LAST_BACKFILL_COMPLETED_AT = new AtomicReference<>();
 
+    /**
+     * Micrometer metric 이름 — spec {@code docs/features/observability-baseline.md} §5-3 표 단일 진실.
+     * 본 클래스 외부에서 metric 이름을 참조하는 코드(통합 테스트, 대시보드, 알림 룰) 가 본 상수를 우선 참조한다.
+     */
+    static final String METRIC_BACKFILL_REQUESTED = "mobruji.song.audio.backfill.requested";
+
+    static final String METRIC_BACKFILL_SUCCESS = "mobruji.song.audio.backfill.success";
+
+    static final String METRIC_BACKFILL_FAILED = "mobruji.song.audio.backfill.failed";
+
+    /**
+     * 실패 사유 라벨 enum — observability-baseline §5-7 화이트리스트 ({@code reason}: python/io/parse/timeout) 와 정합.
+     * 본 구현은 catch 분기마다 고정 상수 reason 만 사용 — 동적 문자열은 카디널리티 폭발 방지를 위해 금지.
+     */
+    static final String REASON_TIMEOUT = "timeout";
+
+    static final String REASON_SPAWN_ERROR = "spawn_error";
+
+    static final String REASON_JSON_PARSE = "json_parse";
+
+    static final String REASON_SONG_APPLY = "song_apply";
+
+    static final String REASON_OTHER = "other";
+
     private final SongRepository songRepository;
     private final AudioAnalysisRunner audioAnalysisRunner;
+    private final MeterRegistry meterRegistry;
+    private final Counter backfillRequestedCounter;
+    private final Counter backfillSuccessCounter;
 
     public SongAudioBackfillCommand(
             final SongRepository songRepository,
-            final AudioAnalysisRunner audioAnalysisRunner) {
+            final AudioAnalysisRunner audioAnalysisRunner,
+            final MeterRegistry meterRegistry) {
         this.songRepository = songRepository;
         this.audioAnalysisRunner = audioAnalysisRunner;
+        this.meterRegistry = meterRegistry;
+        this.backfillRequestedCounter = Counter.builder(METRIC_BACKFILL_REQUESTED)
+                .description("audio backfill batch trigger 횟수 (수동 + 스케줄)")
+                .register(meterRegistry);
+        this.backfillSuccessCounter = Counter.builder(METRIC_BACKFILL_SUCCESS)
+                .description("audio backfill 곡 단위 성공 횟수 (DB 적용/임계 미달 무관)")
+                .register(meterRegistry);
     }
 
     @Override
@@ -98,6 +140,7 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
      * 곡을 selective 하게 결정해 호출할 수 있도록 노출한다.
      */
     BackfillSummary runBackfill(final List<Song> songs, final double confidenceThreshold) {
+        backfillRequestedCounter.increment();
         int analyzed = 0;
         int successful = 0;
         int updated = 0;
@@ -113,6 +156,7 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
                 LOG.warn(
                         "audio backfill failed songId={} title={} reason={}",
                         song.getId(), song.getTitle(), e.getMessage());
+                incrementFailed(classifyFailure(e));
                 failed++;
                 continue;
             } catch (final RuntimeException e) {
@@ -120,10 +164,12 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
                 LOG.warn(
                         "audio backfill error songId={} title={} reason={}",
                         song.getId(), song.getTitle(), e.getMessage());
+                incrementFailed(REASON_OTHER);
                 failed++;
                 continue;
             }
             successful++;
+            backfillSuccessCounter.increment();
             final boolean changed;
             try {
                 changed = song.backfillFromAudioAnalysis(result, confidenceThreshold);
@@ -132,6 +178,7 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
                 LOG.warn(
                         "audio backfill apply failed songId={} title={} reason={}",
                         song.getId(), song.getTitle(), e.getMessage());
+                incrementFailed(REASON_SONG_APPLY);
                 failed++;
                 continue;
             }
@@ -147,6 +194,31 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
                 analyzed, successful, updated, skippedLowConfidence, failed);
         LAST_BACKFILL_COMPLETED_AT.set(Instant.now());
         return new BackfillSummary(analyzed, successful, updated, skippedLowConfidence, failed);
+    }
+
+    /**
+     * {@link AudioAnalysisFailedException} 메시지를 사전 정의 reason enum 로 매핑한다. 메시지 본문은 카디널리티 폭발 우려로
+     * 라벨 직접 사용 금지 — observability-baseline §5-7 화이트리스트 정합. timeout / spawn / parse 외 메시지는 모두
+     * {@code other} 로 흡수.
+     */
+    private static String classifyFailure(final AudioAnalysisFailedException e) {
+        final String message = e.getMessage() == null ? "" : e.getMessage();
+        if (message.contains("timeout")) {
+            return REASON_TIMEOUT;
+        }
+        if (message.contains("spawn") || message.contains("Cannot run program")
+                || message.contains("not found")) {
+            return REASON_SPAWN_ERROR;
+        }
+        if (message.contains("parse") || message.contains("JSON") || message.contains("missing required field")
+                || message.contains("empty stdout")) {
+            return REASON_JSON_PARSE;
+        }
+        return REASON_OTHER;
+    }
+
+    private void incrementFailed(final String reason) {
+        meterRegistry.counter(METRIC_BACKFILL_FAILED, "reason", reason).increment();
     }
 
     /**

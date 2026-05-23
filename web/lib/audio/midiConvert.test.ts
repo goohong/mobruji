@@ -46,10 +46,21 @@ describe("frequencyToMidiInt", () => {
     expect(frequencyToMidiInt(0)).toBeNull();
     expect(frequencyToMidiInt(Number.NaN)).toBeNull();
     expect(frequencyToMidiInt(-1)).toBeNull();
+    expect(frequencyToMidiInt(Number.NEGATIVE_INFINITY)).toBeNull();
+    expect(frequencyToMidiInt(Number.POSITIVE_INFINITY)).toBeNull();
   });
 
   it("261.63Hz(C4) → 60", () => {
     expect(frequencyToMidiInt(261.63)).toBe(60);
+  });
+
+  it("정수 MIDI → Hz → frequencyToMidiInt round-trip이 idempotent하다 (octave-off 회귀 가드)", () => {
+    // 백엔드가 받는 MIDI 범위([12, 119]) 안에서 저/중/고음 표본을 검증.
+    // 변환 공식 회귀(octave-off, 12배수 누락 등)는 round-trip 한 번이면 잡힌다.
+    for (const midi of [21, 36, 48, 60, 69, 72, 84, 96, 108]) {
+      const hz = 440 * Math.pow(2, (midi - 69) / 12);
+      expect(frequencyToMidiInt(hz)).toBe(midi);
+    }
   });
 });
 

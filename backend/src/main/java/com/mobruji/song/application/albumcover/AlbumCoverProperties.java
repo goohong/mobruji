@@ -2,6 +2,7 @@ package com.mobruji.song.application.albumcover;
 
 import java.time.Duration;
 
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -39,8 +40,8 @@ public record AlbumCoverProperties(
     public record Itunes(
             @NotBlank String baseUrl,
             @NotBlank String country,
-            @NotNull Duration requestTimeout,
-            @NotNull Duration throttle,
+            @NotNull @DurationMin(millis = 1) Duration requestTimeout,
+            @NotNull @DurationMin(nanos = 0) Duration throttle,
             @NotBlank String thumbResolution
     ) {
     }

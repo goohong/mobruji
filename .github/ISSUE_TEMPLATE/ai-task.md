@@ -27,7 +27,7 @@ assignees: []
 
 ## 4) 제약
 ### 허용 scope (PR 라벨)
-<!-- user / song / recommendation / voice / infra / web 중 하나 -->
+<!-- user / song / recommendation / voice / infra / web / feedback 중 하나 -->
 - `scope:*`
 
 ### 건드려도 되는 영역

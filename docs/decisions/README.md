@@ -35,6 +35,25 @@
 
 일련번호는 순차. 삭제/재번호 금지.
 
+### 분할 패턴 (같은 번호 + 보조 슬러그)
+
+한 결정이 너무 커서 한 파일에 담기 어려우면 `NNNN-<slug>.md` + `NNNN-<slug>-<sub>.md` 형태로 분할할 수 있다. 동일 번호를 공유하되 슬러그 뒤에 보조 키워드를 붙여 역할을 구분한다.
+
+예시:
+- `0005-package-structure.md` — 최종 결정 (목표 구조 + 원칙)
+- `archive/0005-package-structure-migration.md` — 부속 가이드 (마이그레이션 단계 / 일정) — 완료 후 archive 이동
+
+분할은 예외 운용이며 기본은 단일 파일이다. 분할이 발생하면 메인 ADR의 References에 보조 문서를 명시한다.
+
+### 부속 문서 (migration 가이드 등)
+
+ADR 본문이 아닌 **부속 운영 가이드**(예: 1회성 마이그레이션 절차, 단계별 실행 체크리스트)는 다음 룰을 따른다.
+
+- **위치**: 진행 중이면 `docs/decisions/`, 완료/대체되면 `docs/decisions/archive/` 로 이동. (대안: 작업성 가이드라면 `docs/migrations/` 별도 디렉토리 사용 가능 — 일관성 위해 한 레포 내 한 가지 선택을 권장)
+- **명명**: ADR 번호 prefix 재사용 허용 (`NNNN-<slug>-<sub>.md`). 본 ADR과의 관계가 한눈에 보이도록.
+- **frontmatter**: 본문 상단에 `status: companion to NNNN` 또는 `status: companion to NNNN — completed (archived YYYY-MM-DD, see #PR)` 명시.
+- **라이프사이클**: 작업 완료 후 셀프 약속(superseded 표기 또는 archive 이동)을 즉시 이행. 본 ADR Repository 의 결정 이력 신뢰성을 위해 drift 금지.
+
 ## 라이프사이클
 
 | Status | 의미 |

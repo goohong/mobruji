@@ -9,7 +9,7 @@
 
 ## Stack
 
-- **Backend**: Spring Boot 3.5.3 / Java 21 / Gradle
+- **Backend**: Spring Boot 3.5.12 / Java 21 / Gradle
 - **Frontend**: Next.js (App Router) / TypeScript / Tailwind
 - **DB**: MySQL 8.4 (로컬 docker-compose)
 - **License**: AGPL-3.0-or-later

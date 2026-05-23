@@ -301,4 +301,100 @@ describe("VoiceRangePage a11y", () => {
 
     await expectNoA11yViolations(container);
   });
+
+  // closes #464 — validation 에러 시 SR announce 보장.
+  // role="alert" 가 부여되어 메시지가 등장하는 즉시 SR 이 읽고,
+  // select 둘 다 aria-invalid="true" + aria-describedby 로 연결되어
+  // 어떤 필드가 어떤 이유로 잘못됐는지 SR 사용자도 인지한다.
+  it("validation 에러 시 role=alert 메시지가 노출된다 (#464)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/최저음은 최고음보다 같거나 낮아야 합니다/);
+  });
+
+  it("validation 에러 시 select 둘 다 aria-invalid + aria-describedby 가 설정된다 (#464)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
+
+    expect(lowSelect).toHaveAttribute("aria-invalid", "true");
+    expect(highSelect).toHaveAttribute("aria-invalid", "true");
+    // describedby 가 가리키는 id 가 실제로 alert element 의 id 와 일치.
+    const describedById = lowSelect.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    const alert = screen.getByRole("alert");
+    expect(alert.id).toBe(describedById);
+  });
+
+  it("submit 에러 시 role=alert 메시지가 노출된다 (#464)", async () => {
+    const user = userEvent.setup();
+    createVoiceRangeMock.mockRejectedValueOnce(
+      new ApiError(500, "boom", { message: "boom" }),
+    );
+
+    renderWithQueryClient(<VoiceRangePage />);
+
+    await user.click(screen.getByRole("button", { name: /추천 받기/ }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/저장에 실패했습니다/);
+    expect(alert).toHaveTextContent(/500: boom/);
+  });
+});
+
+// closes #552 — 폼 키보드 탐색(Tab) 자연 순서 회귀 가드.
+// 폼 내부 focusable: 최저음 select → 최고음 select → "추천 받기" submit button.
+// tabIndex 미지정/끼어드는 요소 회귀를 방지한다.
+describe("VoiceRangePage 폼 Tab 키보드 탐색", () => {
+  it("최저음 → 최고음 → 추천 받기 버튼 순으로 Tab 포커스가 이동한다", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    const submitButton = screen.getByRole("button", { name: /추천 받기/ });
+
+    lowSelect.focus();
+    expect(lowSelect).toHaveFocus();
+
+    await user.tab();
+    expect(highSelect).toHaveFocus();
+
+    await user.tab();
+    expect(submitButton).toHaveFocus();
+  });
+
+  // closes #563 — PR #554 후속. forward Tab 순서만 가드되어 있어
+  // Shift+Tab 역방향에 focusable 요소가 끼어드는 회귀를 잡지 못한다.
+  // submit → 최고음 → 최저음 의 backward 순서가 자연스럽게 유지되는지 검증한다.
+  it("submit → 최고음 → 최저음 순으로 Shift+Tab 포커스가 역방향 이동한다 (#563)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    const submitButton = screen.getByRole("button", { name: /추천 받기/ });
+
+    submitButton.focus();
+    expect(submitButton).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(highSelect).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(lowSelect).toHaveFocus();
+  });
 });

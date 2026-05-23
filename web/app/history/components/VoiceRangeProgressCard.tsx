@@ -30,7 +30,11 @@
  *     컴포넌트 컨테이너의 aria-label 이 요약을 담당한다.
  */
 
-import { midiToCombinedNoteName, midiToNoteName } from "@/lib/notes";
+import {
+  INVALID_MIDI_A11Y_FALLBACK,
+  midiToCombinedNoteName,
+  midiToNoteName,
+} from "@/lib/notes";
 import { formatRelativeKorean } from "@/lib/relativeTime";
 import type {
   VoiceRangeProgressPoint,
@@ -61,6 +65,16 @@ export function VoiceRangeProgressCard({ summary }: Props) {
     lowMidiDeltaSemitones,
     highMidiDeltaSemitones,
   } = summary;
+
+  // 방어 가드 (#567): 부모(page.tsx)가 빈 데이터를 별도 분기하지만, 회귀 시 silent
+  // crash 방지 + 스크린리더 status 안내.
+  if (points.length === 0) {
+    return (
+      <p role="status" className="text-xs text-zinc-500 dark:text-zinc-400">
+        아직 표시할 측정 기록이 없어요.
+      </p>
+    );
+  }
 
   const yMin = minLowMidi - Y_AXIS_VERTICAL_PAD;
   const yMax = maxHighMidi + Y_AXIS_VERTICAL_PAD;
@@ -111,8 +125,22 @@ export function VoiceRangeProgressCard({ summary }: Props) {
           {headline}
         </h2>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          최근 측정 {midiToNoteName(latest.lowMidi)} ~{" "}
-          {midiToNoteName(latest.highMidi)} · {points.length}회 측정 기록
+          {/*
+           * #766: aria-label/스크린리더 컨텍스트의 NaN/Infinity 입력 가드.
+           * 헤더 텍스트는 스크린리더가 그대로 읽으므로 "--" 대신 의미 있는
+           * a11y fallback ("음정 정보 없음") 을 노출한다. 실제 DB 값에 NaN 이
+           * 들어올 확률은 낮으나, audio analyzer 결과를 그래프로 흘리는 경로
+           * 회귀 시에도 의미 없는 "dash dash" 낭독을 차단한다.
+           */}
+          최근 측정{" "}
+          {midiToNoteName(latest.lowMidi, {
+            a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+          })}{" "}
+          ~{" "}
+          {midiToNoteName(latest.highMidi, {
+            a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+          })}{" "}
+          · {points.length}회 측정 기록
         </p>
         {/*
          * 첫 측정 대비 lowMidi/highMidi delta — spec voice-range-progress §3.
@@ -179,10 +207,23 @@ export function VoiceRangeProgressCard({ summary }: Props) {
           const isLatest = index === points.length - 1;
           // 차트 막대 라벨은 공간이 좁아 SPN만 사용 (#318).
           // 툴팁은 한국어 (SPN) 병기로 학습 효과 + 직관성 확보.
-          const highNoteShort = midiToNoteName(point.highMidi);
-          const lowNoteShort = midiToNoteName(point.lowMidi);
-          const highNoteCombined = midiToCombinedNoteName(point.highMidi);
-          const lowNoteCombined = midiToCombinedNoteName(point.lowMidi);
+          // #766: SVG <text> 와 <title> 모두 스크린리더가 읽으므로 비유한 입력
+          // 가드를 a11y fallback 으로 명시. 차트 막대 위/아래 라벨은 공간이
+          // 좁아 fallback 텍스트가 길어도 그 자리에 표시되도록 허용한다 —
+          // raw NaN 이 들어오는 회귀는 명세상 발생하지 않아야 하지만, 가시화
+          // 되었을 때 의미 없는 "--" 표시보다 안내가 낫다.
+          const highNoteShort = midiToNoteName(point.highMidi, {
+            a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+          });
+          const lowNoteShort = midiToNoteName(point.lowMidi, {
+            a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+          });
+          const highNoteCombined = midiToCombinedNoteName(point.highMidi, {
+            a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+          });
+          const lowNoteCombined = midiToCombinedNoteName(point.lowMidi, {
+            a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+          });
 
           return (
             <g key={point.id}>
@@ -331,5 +372,9 @@ function buildAriaLabel(
       : delta < 0
         ? `${Math.abs(delta)}반음 좁아짐`
         : "변동 없음";
-  return `음역 발전 차트. 첫 측정 ${midiToNoteName(earliest.lowMidi)}~${midiToNoteName(earliest.highMidi)}, 최근 측정 ${midiToNoteName(latest.lowMidi)}~${midiToNoteName(latest.highMidi)}, ${direction}.`;
+  // #766: aria-label 은 스크린리더 전용 텍스트이므로 비유한 입력 가드에
+  // a11y fallback 을 반드시 적용. "--" 가 들어가면 "dash dash 음역" 으로
+  // 의미 없이 낭독되어 사용자 혼란.
+  const a11yOptions = { a11yFallback: INVALID_MIDI_A11Y_FALLBACK };
+  return `음역 발전 차트. 첫 측정 ${midiToNoteName(earliest.lowMidi, a11yOptions)}~${midiToNoteName(earliest.highMidi, a11yOptions)}, 최근 측정 ${midiToNoteName(latest.lowMidi, a11yOptions)}~${midiToNoteName(latest.highMidi, a11yOptions)}, ${direction}.`;
 }

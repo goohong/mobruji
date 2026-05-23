@@ -73,6 +73,7 @@ class LikeFeedbackIntegrationTest {
 
         // 1) POST → liked=true
         given()
+                .header("X-Session-Id", sessionId)
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body(requestBody)
                 .when()
@@ -104,6 +105,7 @@ class LikeFeedbackIntegrationTest {
 
         // 3) POST 다시 → liked=false (toggle off)
         given()
+                .header("X-Session-Id", sessionId)
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body(requestBody)
                 .when()
@@ -128,6 +130,7 @@ class LikeFeedbackIntegrationTest {
     @DisplayName("E2E: 존재하지 않는 songId로 POST → 404")
     void e2e_unknownSongId_returns404() {
         given()
+                .header("X-Session-Id", "e2e-like-404")
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .body("""
                         {"sessionId":"e2e-like-404","songId":999999}
@@ -203,6 +206,49 @@ class LikeFeedbackIntegrationTest {
                     .get("/api/v1/sessions/" + sessionId + "/likes")
                     .then()
                     .statusCode(HttpStatus.UNAUTHORIZED.value());
+        }
+
+        @Test
+        @DisplayName("POST /api/v1/likes: 헤더 누락 → 401 (toggle 실행 차단)")
+        void postLikes_missingHeader_returns401() {
+            final String sessionId = "e2e-post-auth-missing";
+            final String requestBody = """
+                    {"sessionId":"%s","songId":%d}
+                    """.formatted(sessionId, seededSongId);
+
+            given()
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .body(requestBody)
+                    .when()
+                    .post("/api/v1/likes")
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            // 가드가 service 전에 거부 → 좋아요가 생성되지 않아야 함
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    0, likeRepository.countBySessionId(sessionId));
+        }
+
+        @Test
+        @DisplayName("POST /api/v1/likes: body sessionId ≠ X-Session-Id 헤더 → 401")
+        void postLikes_mismatchedHeader_returns401() {
+            final String bodySessionId = "e2e-post-auth-A";
+            final String headerSessionId = "e2e-post-auth-B";
+            final String requestBody = """
+                    {"sessionId":"%s","songId":%d}
+                    """.formatted(bodySessionId, seededSongId);
+
+            given()
+                    .header("X-Session-Id", headerSessionId)
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .body(requestBody)
+                    .when()
+                    .post("/api/v1/likes")
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    0, likeRepository.countBySessionId(bodySessionId));
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    0, likeRepository.countBySessionId(headerSessionId));
         }
     }
 

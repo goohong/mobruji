@@ -289,6 +289,55 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
     ).not.toBeInTheDocument();
   });
 
+  // (#173 항목) RESULT 단계에서 '다시 측정하기' 누른 직후, 직전 측정의
+  // AbortController 가 즉시 abort 되어야 한다. retry 시작 시 정리 누락이 있으면
+  // 빠른 재측정 흐름에서 살아있던 sampler timer / fallback redirect timer 가
+  // 새 시도와 race 해 PERMISSION 화면 밖으로 사용자를 튕길 수 있다.
+  it("'다시 측정하기' 클릭 시 직전 시도의 AbortSignal 이 즉시 abort 된다 (#173)", async () => {
+    const user = userEvent.setup();
+    const capturedSignals: AbortSignal[] = [];
+    const deps = buildDeps({
+      runPhase: vi.fn().mockImplementation(async (phase, _stream, onSample, signal) => {
+        if (signal) {
+          capturedSignals.push(signal);
+        }
+        const sample: PitchSample = {
+          elapsedMs: 500,
+          frequencyHz: phase === "low" ? 130.81 : 440,
+          clarity: 0.95,
+          isStable: true,
+          midi: phase === "low" ? 48 : 69,
+        };
+        onSample(sample);
+        return {
+          midi: phase === "low" ? 48 : 69,
+          confirmed: true,
+          stableSampleCount: 5,
+          totalSampleCount: 5,
+        } as MeasurementResult;
+      }),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    // 첫 시도의 controller(low/high 두 phase 가 같은 controller 공유).
+    expect(capturedSignals.length).toBeGreaterThan(0);
+    const firstSignal = capturedSignals[0];
+    expect(firstSignal.aborted).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: /다시 측정하기/ }));
+
+    // retry 가 직전 controller 를 정리해 signal 이 abort 되어야 한다.
+    expect(firstSignal.aborted).toBe(true);
+  });
+
   it("수동 보정 슬라이더로 lowMidi 값을 조정할 수 있다", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
@@ -410,11 +459,114 @@ describe("AutoVoiceRangePage 저장", () => {
   });
 });
 
+describe("AutoVoiceRangePage cleanup (#404)", () => {
+  // #404 A-1 회귀 가드: 측정 중 unmount → runPhase 의 AbortSignal 로 sampler 가
+  // 즉시 종료되어야 한다. signal 미주입 회귀가 생기면 이 테스트가 실패한다.
+  it("측정 중 unmount 하면 runPhase 에 전달된 AbortSignal 이 abort 된다", async () => {
+    const user = userEvent.setup();
+    let capturedSignal: AbortSignal | undefined;
+    const deps = buildDeps({
+      runPhase: vi.fn().mockImplementation((_phase, _stream, onSample, signal) => {
+        capturedSignal = signal;
+        // low phase 가 진행 중인 상태로 매달려 있게 둔다 → unmount 가 가능해진다.
+        return new Promise<MeasurementResult>((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              resolve({
+                midi: null,
+                confirmed: false,
+                stableSampleCount: 0,
+                totalSampleCount: 0,
+              });
+            },
+            { once: true },
+          );
+          onSample({
+            elapsedMs: 100,
+            frequencyHz: 130.81,
+            clarity: 0.5,
+            isStable: false,
+            midi: 48,
+          });
+        });
+      }),
+    });
+
+    const { unmount } = renderWithQueryClient(
+      <AutoVoiceRangePage deps={deps} />,
+    );
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // runPhase 호출되어 signal 이 캡처될 때까지 대기.
+    await waitFor(() => {
+      expect(capturedSignal).toBeDefined();
+    });
+    expect(capturedSignal!.aborted).toBe(false);
+
+    unmount();
+
+    // unmount cleanup 에서 controller.abort() 가 호출되어야 한다.
+    expect(capturedSignal!.aborted).toBe(true);
+  });
+
+  // #404 A-2 회귀 가드: requestMic 성공 후 runPhase throw 시 catch 진입 즉시
+  // 마이크 stream.stop() 이 호출되어야 한다. 이전 구현은 unmount cleanup 까지
+  // 약 1.2 초간 마이크 활성이 유지됐다.
+  it("측정 phase 실패 시 catch 에서 stream track.stop() 이 즉시 호출된다", async () => {
+    const user = userEvent.setup();
+    const trackStop = vi.fn();
+    const stream = {
+      getTracks: () => [{ stop: trackStop } as unknown as MediaStreamTrack],
+    } as unknown as MediaStream;
+    const deps = buildDeps({
+      requestMic: vi.fn().mockResolvedValue(stream),
+      runPhase: vi.fn().mockRejectedValue(new Error("analyser boom")),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // catch 블록에서 stream.getTracks().forEach(stop) 가 호출되어야 한다.
+    // 이전 구현은 1.2초 redirect 까지 stop 미호출 — 본 테스트가 즉시 동기적으로
+    // (await catch 후) 호출됨을 검증한다.
+    await waitFor(() => {
+      expect(trackStop).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 describe("AutoVoiceRangePage a11y", () => {
   it("초기 권한 화면에 a11y 위반이 없다", async () => {
     const { container } = renderWithQueryClient(
       <AutoVoiceRangePage deps={buildDeps()} />,
     );
     await expectNoA11yViolations(container);
+  });
+
+  // #454: 단계 전환 announce 를 단일 status region 으로 일원화. 외곽 wrapper
+  // aria-live 와 nested MeasureStep aria-live 중첩 회귀를 막는다.
+  it("PERMISSION 단계에서 status region 이 권한 안내 텍스트를 노출한다", () => {
+    renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
+    expect(screen.getByTestId("auto-step-status")).toHaveTextContent(
+      "마이크 권한 안내 화면입니다.",
+    );
+  });
+
+  it("측정 흐름이 RESULT 까지 진행되면 status region 이 완료 안내로 갱신된다", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("auto-step-status")).toHaveTextContent(
+      "측정이 완료되었습니다. 결과를 확인하세요.",
+    );
   });
 });

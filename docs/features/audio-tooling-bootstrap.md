@@ -1,7 +1,7 @@
 ---
 feature: Python 오디오 분석 툴링 부트스트랩
 slug: audio-tooling-bootstrap
-status: draft
+status: shipped
 owner: @goohong
 scope: song
 related_issues: [180]
@@ -14,7 +14,7 @@ last_reviewed: 2026-05-21
 ## 1) 개요 (What / Why)
 - ADR 0006 (YouTube 기반 audio 추출) 및 ADR 0010 (Python worker 분리 결정)의 후속 구현 spec.
 - 곡 메타데이터의 `audio_url` (YouTube)에서 음원을 추출하고 보컬 stem 분리 + pitch detection을 거쳐 곡의 음역대(min/max/median pitch)와 보컬 특성을 JSON으로 산출하는 **Python 분석 파이프라인 부트스트랩**.
-- Spring Boot (Java 21) 본진은 분석 자체를 수행하지 않고 Python 워커를 호출(`ProcessBuilder` 또는 향후 HTTP)하여 결과를 수신한다.
+- Spring Boot (Java 21) maestro는 분석 자체를 수행하지 않고 Python 워커를 호출(`ProcessBuilder` 또는 향후 HTTP)하여 결과를 수신한다.
 - 대상 액터: 백엔드 (재추천 알고리즘이 사용할 곡 음역대 데이터의 공급원), 데이터 큐레이터 (시드 100곡 자동 분석).
 
 ## 2) 사용자 시나리오
@@ -24,13 +24,13 @@ last_reviewed: 2026-05-21
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] `tools/audio-analysis/requirements.txt` — `yt-dlp`, `spleeter`, `librosa`, `numpy` 핀 버전 고정
-- [ ] `tools/audio-analysis/analyze.py` CLI:
+- [x] `tools/audio-analysis/requirements.txt` — `yt-dlp`, `spleeter`, `librosa`, `numpy` 핀 버전 고정
+- [x] `tools/audio-analysis/analyze.py` CLI:
   - 입력: `--song-id <id> --youtube-url <url> --out <path.json>`
   - 단계: (1) yt-dlp로 audio (m4a/webm) 추출 → 임시 디렉터리 (2) spleeter `2stems` 로 vocals.wav 분리 (3) librosa로 pitch detection (`pyin` 또는 `piptrack`) (4) min/max/median Hz + 표준편차 + 평균 RMS → JSON 출력 (5) 임시 audio 파일 즉시 삭제
-- [ ] `tools/audio-analysis/Dockerfile` (옵션, 운영 환경 격리용) — Python 3.11 slim + ffmpeg
-- [ ] `backend/.../application/AudioAnalysisRunner.java` — `ProcessBuilder` 기반 호출, stdout JSON 파싱, exit code/타임아웃 처리
-- [ ] JSON 스키마: `{ songId, pitchMinHz, pitchMaxHz, pitchMedianHz, pitchStdHz, durationSec, analyzedAt, toolingVersion }`
+- [x] `tools/audio-analysis/Dockerfile` (옵션, 운영 환경 격리용) — Python 3.11 slim + ffmpeg
+- [x] `backend/.../application/AudioAnalysisRunner.java` — `ProcessBuilder` 기반 호출, stdout JSON 파싱, exit code/타임아웃 처리
+- [x] JSON 스키마: `{ songId, pitchMinHz, pitchMaxHz, pitchMedianHz, pitchStdHz, durationSec, analyzedAt, toolingVersion }`
 - [ ] 분석 결과는 `song_analysis` 테이블에 upsert (`song-self-analysis-pipeline.md`와 정합)
 
 ### 비기능 요구사항

@@ -90,4 +90,43 @@ class VoiceRangeTest {
         assertThatThrownBy(() -> voiceRange.updateRange(50, 72, null))
                 .isInstanceOf(NullPointerException.class);
     }
+
+    @Test
+    @DisplayName("경계값 12/119 (C0~B8 닫힌 구간) 이면 정상 생성")
+    void create_atBoundary12And119_succeeds() {
+        // given/when
+        final VoiceRange voiceRange = VoiceRange.create("s-b", 12, 119, VoiceRangeSourceMethod.OCTAVE_PICK);
+
+        // then
+        assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(12);
+        assertThat(voiceRange.getHighestNoteMidi()).isEqualTo(119);
+    }
+
+    @Test
+    @DisplayName("low == high (1음만 가능) 이어도 정상 생성")
+    void create_withEqualLowAndHigh_succeeds() {
+        final VoiceRange voiceRange = VoiceRange.create("s-eq", 60, 60, VoiceRangeSourceMethod.OCTAVE_PICK);
+        assertThat(voiceRange.getLowestNoteMidi()).isEqualTo(voiceRange.getHighestNoteMidi());
+    }
+
+    @Test
+    @DisplayName("updateRange도 low>high 가드를 동일하게 적용")
+    void updateRange_withLowGreaterThanHigh_throws() {
+        final VoiceRange voiceRange = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
+        assertThatThrownBy(() -> voiceRange.updateRange(80, 60, VoiceRangeSourceMethod.OCTAVE_PICK))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be <=");
+    }
+
+    @Test
+    @DisplayName("updateRange도 OOR 가드를 동일하게 적용")
+    void updateRange_withOutOfRangeMidi_throws() {
+        final VoiceRange voiceRange = VoiceRange.create("s", 48, 69, VoiceRangeSourceMethod.OCTAVE_PICK);
+        assertThatThrownBy(() -> voiceRange.updateRange(5, 60, VoiceRangeSourceMethod.OCTAVE_PICK))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("lowestNoteMidi out of allowed range");
+        assertThatThrownBy(() -> voiceRange.updateRange(50, 200, VoiceRangeSourceMethod.OCTAVE_PICK))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("highestNoteMidi out of allowed range");
+    }
 }

@@ -5,11 +5,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.mobruji.auth.SessionAuthGuard;
 import com.mobruji.recommendation.api.dto.RecommendationHistoryListResponse;
 import com.mobruji.recommendation.api.dto.RecommendationHistoryResponse;
 import com.mobruji.recommendation.application.RecommendationService;
 import com.mobruji.recommendation.application.RecommendationService.RecommendationHistorySnapshot;
+import com.mobruji.user.application.SessionAuthGuard;
 
 import lombok.RequiredArgsConstructor;
 

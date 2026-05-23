@@ -1,15 +1,17 @@
 ---
-feature: 운영 배포 인프라 (Hetzner CX22 + Vercel + Cloudflare 1차 스택)
+feature: 운영 배포 인프라 (Phase 5 prod — NCP 별 VM + Cloudflare, ADR-0015 재결정 반영)
 slug: deployment-infrastructure
 owner: @goohong
 scope: infra
 status: draft
 related_issues: [242, 243]
 related_prs: []
-last_reviewed: 2026-05-22
+last_reviewed: 2026-05-23
 ---
 
-# 운영 배포 인프라 (Hetzner CX22 + Vercel + Cloudflare 1차 스택)
+# 운영 배포 인프라 (Phase 5 prod — NCP 별 VM + Cloudflare)
+
+> **2026-05-23 재정렬 메모**: 본 spec 은 2026-05-22 1차안 (Hetzner CX22 + Vercel + Cloudflare) 으로 작성됐으나, 같은 날 [ADR-0015 재결정](../decisions/0015-hosting-stack.md) 으로 **NCP** 가 maestro / 백 / 프론트 1차 스택으로 채택됐다. 본 spec §10 가 ADR-0015 재결정 후 prod 진행 plan + Phase 4 NCP dev 운영 경험을 반영해 갱신한다. 본문 §1~§9 의 "Hetzner CX22" / "Vercel" 표현 중 일부는 historical context 로 유지되며, 운영 결정은 §10 단일 진실. 본 spec 의 ADR-0015 재결정 반영 후속 PR (NCP prod 토폴로지 / 백·프론트 VM 사양 / 도메인) 은 §6 PR 표 의 PR A1~A3 로 추가됐다.
 
 ## 1) 개요 (What / Why)
 
@@ -262,7 +264,7 @@ WantedBy=multi-user.target
 | (C) Rolling (2 인스턴스 + sticky session 불요) | 0 | 중 | 인스턴스 2배 (€7.58/월) | v0.4 트래픽 ≥ 10 RPS |
 | (D) Cloudflare Tunnel + ECS Fargate | 0 | 고 | 유료 | 미고려 |
 
-- 1차 (A). PR F 에서 (B) 구현 가능성 + 메모리 측정 후 ADR 추가 (별 ADR 후보 `0016-zero-downtime-deploy.md`).
+- 1차 (A). PR F 에서 (B) 구현 가능성 + 메모리 측정 후 ADR 추가 (별 ADR 후보 `0018-zero-downtime-deploy.md` — ADR-0016 은 maestro-context-percent-estimation 가 점유).
 - (A) 사용 중에도 Cloudflare proxy 의 origin retry (default 3회) + Caddy graceful reload 로 사용자 체감 최소화.
 
 ### 5-7) 백업/복구 (PR G)
@@ -354,7 +356,7 @@ rclone delete --min-age 14d r2:mobruji-backups/db/
 - [ ] **PR C** (`infra`): `.github/workflows/deploy-backend.yml` GitHub Actions CD + GHA secrets 가이드 + Vercel GitHub 연동 셋업 가이드 (`docs/runbooks/deploy-web-vercel.md` 신설). `needs-human-review` (workflow 보호 영역).
 - [ ] **PR D** (`docs`): 도메인/DNS/SSL 셋업 런북 (`docs/runbooks/domain-and-ssl.md`) — Cloudflare Registrar 등록 절차, DNS 레코드, Cloudflare Full(strict) + Origin CA, HSTS preload. 코드 변경 없음.
 - [ ] **PR E** (`infra`): Caddy reverse proxy `Caddyfile` (`tools/deploy/Caddyfile`) — `api.mobruji.app` → `127.0.0.1:8080`, `metrics.mobruji.app` → `127.0.0.1:8081` + admin token 게이트 + Cloudflare Origin CA 설치 안내.
-- [ ] **PR F** (`docs` + 후속 `infra`): 무중단 배포 ADR (`docs/decisions/0016-zero-downtime-deploy.md`) — 옵션 매트릭스 (§5-6) 평가 + 1차 결정 (A) 유지 또는 (B) 채택. 채택 시 후속 구현 PR 분리.
+- [ ] **PR F** (`docs` + 후속 `infra`): 무중단 배포 ADR (`docs/decisions/0018-zero-downtime-deploy.md`) — 옵션 매트릭스 (§5-6) 평가 + 1차 결정 (A) 유지 또는 (B) 채택. 채택 시 후속 구현 PR 분리.
 - [ ] **PR G** (`docs` + `infra`): 백업/복구 spec 부속 런북 (`docs/runbooks/backup-and-restore.md`) + `mobruji-backup.sh` 스크립트 + `cron.d` 파일 + R2 셋업 가이드.
 
 ### PR 라벨 매트릭스
@@ -406,3 +408,120 @@ rclone delete --min-age 14d r2:mobruji-backups/db/
 ## 9) 결정 로그
 
 - **2026-05-22 (plan 36)**: 초안 작성 (status=draft). v0.3 P2 마지막 묶음 = 운영 배포 인프라. ADR-0015 (Hetzner CX22 + Vercel + Cloudflare) 와 함께 spec 신설. 7개 PR 분할 (A=본 spec, B=Dockerfile/systemd, C=GHA CD, D=도메인/SSL, E=Caddy, F=무중단 ADR, G=백업/복구). Discord daemon 별 호스트 정책 유지, multi-AZ/RUM/managed DB 모두 v0.4 후보. ADR-0014 슬롯은 추천 mood/valence ADR 용 예약 유지, hosting ADR 은 0015.
+- **2026-05-22 (plan, 같은 날 재결정)**: **ADR-0015 NCP 재결정** (1차안 Hetzner CX22 → NCP maestro VM + NCP 별 VM 백/프론트 + Cloudflare 유지). 본 spec 의 §1~§9 본문은 historical context 로 유지하고, 후속 운영 결정은 §10 단일 진실로 분기. 자세한 항목은 §10 참조.
+- **2026-05-23 (plan, 본 PR)**: **§10 ADR-0015 재결정 반영 + Phase 4 NCP dev 운영 경험 반영**. Phase 4 PR B-1/B-2/B-3/C/D/E 머지로 NCP dev (`docs/features/ncp-dev-deployment.md`) 가 가동 — 그 운영 데이터로 prod 토폴로지 가드 박제. §10-1 prod 토폴로지 (NCP 별 VM 채택, Vercel 보류), §10-2 Phase 4 → Phase 5 이관 시 운영 경험 (4GB tight / swap 1GB 필수 / mysql caching_sha2_password / non-root UID 1001 / healthcheck pattern / CD 자동 롤백 150s), §10-3 PR A1~A3 진행 plan (NCP 백/프론트 VM 사양 ADR 후보 / prod compose / Cloudflare DNS), §10-4 사용자 결정 묶음 Q9~Q13 5건 신설.
+
+## 10) Phase 5 prod 진행 plan (ADR-0015 재결정 반영, 2026-05-23)
+
+### 10-1) 결정된 토폴로지 (ADR-0015 §Decision 그대로)
+
+```
+                       ┌────────────────────────────────────────┐
+                       │   Cloudflare (KR PoP)                  │
+                       │   DNS + Proxy + WAF + Origin TLS       │
+                       └─────┬──────────────┬───────────────────┘
+                             │              │
+                       mobruji.app    api.mobruji.app
+                             │              │
+   ┌─────────────────────────▼────┐   ┌─────▼──────────────────────────┐
+   │ NCP VM #2 (frontend, TBD)   │   │ NCP VM #3 (backend + MySQL,    │
+   │  • web container (Next.js)  │   │  TBD 사양 — 4GB 또는 8GB ?)    │
+   │  • 또는 Vercel Hobby (옵션) │   │  • backend container (Spring)  │
+   └─────────────────────────────┘   │  • mysql container             │
+                                     │  • nginx (TLS term + admin     │
+                                     │    token gate for actuator)    │
+                                     └─────────┬──────────────────────┘
+                                               │ remote_write
+                                     ┌─────────▼──────────────────────┐
+                                     │ Grafana Cloud Free (Prom +     │
+                                     │ Grafana + Alert)               │
+                                     └────────────────────────────────┘
+
+  NCP VM #1 (maestro, 101.79.20.94, c2-g3a, 4GB) — Phase 1~4 가동 중. prod 분리.
+  운영자 iPhone ─── Discord 알림 ◀── webhook (외부 API 에러율 / p95 초과)
+```
+
+핵심 변경 (Hetzner CX22 vs NCP):
+
+| 항목 | 1차 (Hetzner) | 재결정 (NCP) | 영향 |
+|---|---|---|---|
+| 백엔드 호스트 | Hetzner CX22 (DE FSN1, €3.79/월) | NCP 별 VM (KR 리전, 사양 TBD) | 한국 latency 240ms → 5~15ms, 가격 TBD |
+| 프론트엔드 호스트 | Vercel Hobby (무료) | NCP 별 VM **또는** Vercel Hobby | §10-4 Q9 결정 |
+| ARM/x86 | CX22 = ARM64 | NCP c2-g3a 계열 = x86_64 | Dockerfile multi-arch buildx 불요, x86 단일 빌드 |
+| DNS / CDN | Cloudflare | Cloudflare (1차 그대로) | 변경 없음 |
+| TLS termination | Caddy on CX22 | nginx on NCP (Phase 4 dev 와 동일) **또는** Caddy | §10-4 Q10 결정 |
+| maestro 동거 | 별 호스트 (macOS) | NCP maestro VM (별도) — prod VM 과 분리 | maestro 메모리 spike 격리 |
+| 비용 | €3.79/월 + ₩0 | NCP 청구 (사용자 콘솔 기준, ₩TBD/월) | §10-4 Q11 |
+
+### 10-2) Phase 4 NCP dev 운영 경험 → Phase 5 prod 가드
+
+Phase 4 가 가동 중 (`docs/features/ncp-dev-deployment.md` + `docs/runbooks/ncp-maestro-setup.md §H`) 인 결과로 다음 가드를 prod spec 에 박는다. 모두 **PR B (Dockerfile + compose) 작성 시 그대로 답습**.
+
+#### 메모리 운영 (4GB → prod 사양 결정 입력)
+
+- Phase 4 dev 1 VM (4GB) 메모리 매트릭스 (실측 컨테이너 limit 합산):
+  - mysql 512M + backend 600M + web 256M + nginx 64M = **1.43GB** (containers)
+  - maestro/Claude TUI ≈ 300MB + sub-agent spike 1GB + Discord bot 150MB + OS 800MB = **2.25GB** (host side)
+  - **합계 ≈ 3.7GB**, swap 1GB 보강 (현재 활성). spike 시 swap 침범 관찰됨.
+- prod 가 maestro VM 과 분리되므로 host overhead ≈ 800MB (OS + monitoring agent) 로 축소 → 4GB VM 도 충분 가능.
+- 단 **mysql innodb_buffer_pool_size** 를 dev 의 128M → prod 256M 또는 512M 로 키울 가능성 있음 → 메모리 매트릭스 재산정 필요. §10-4 Q11 입력.
+
+#### MySQL 8.4 `caching_sha2_password` 호환 (#379)
+
+- MySQL 8.4 default 인증 플러그인 = `caching_sha2_password`. JDBC 가 SSL 없이 접속할 때 public key 교환을 요구 → 첫 부팅 fail.
+- Phase 4 fix (`docker-compose.dev.yml` `SPRING_DATASOURCE_URL`):
+  - `jdbc:mysql://mysql:3306/${DB}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul`
+- prod 결정: (a) **container 내부 network 라서 prod 도 `allowPublicKeyRetrieval=true` 유지** (default) — dev/prod 동일 보안 모델. 또는 (b) prod 는 SSL 활성화 → `allowPublicKeyRetrieval` 불요. §10-4 Q12 결정.
+
+#### 비-root UID 1001 컨벤션 (#379)
+
+- `eclipse-temurin:21-jre-noble` base image 가 ubuntu user 로 UID 1000 점유 → `useradd --uid 1000` 충돌.
+- Phase 4 결정: backend/web 모두 **UID 1001** 사용 (`backend/Dockerfile`, `web/Dockerfile` 동일). prod Dockerfile 도 이 컨벤션 그대로.
+
+#### Healthcheck 패턴 (Phase 4 검증됨)
+
+- backend: Spring Boot `management.server.port=8081` 별 port + `/actuator/health/liveness`. Dockerfile HEALTHCHECK `--interval=15s --timeout=5s --start-period=60s --retries=4`. prod 그대로.
+- nginx: `/_nginx_health` endpoint (compose `healthcheck` 절). prod 도 같은 패턴.
+- mysql: `mysqladmin ping`. prod 그대로.
+
+#### CD 자동 롤백 150s window (PR C 검증됨)
+
+- Phase 4 `.github/workflows/cd-dev.yml` 가 `30회 × 5s polling = 150s window` 로 healthcheck → timeout 시 이전 SHA 로 자동 reset + 재빌드.
+- prod 도 동일 패턴 (별 workflow `cd-prod.yml`). 단 prod 는 `develop` 머지가 아닌 **`main` 머지 또는 manual `workflow_dispatch`** trigger — `release` 흐름 (CLAUDE.md §8 develop→main Merge commit) 과 정합.
+
+#### swap 1GB 필수 (§B-5 / §H-1 그대로)
+
+- Phase 4 `tools/deploy/ncp-bootstrap-dev.sh` 가 swap 1GB 자동 활성화 + `/etc/fstab` 등록. prod bootstrap 스크립트 (`tools/deploy/ncp-bootstrap-prod.sh`) 신설 시 그대로 답습.
+
+### 10-3) Phase 5 PR 진행 plan (ADR-0015 재결정 반영 후 새 PR 슬롯)
+
+§6 의 PR B~G 는 **Hetzner CX22 가정으로 작성**돼 있어 prod = NCP 로 갈 경우 일부 재작성 필요. NCP 재결정 반영 작업을 **PR A1~A3** 로 §6 표 앞에 추가:
+
+- [ ] **PR A1 (docs, plan)**: ADR 신설 — `docs/decisions/0017-ncp-prod-vm-sizing.md` 또는 ADR-0015 §10 확장. 백엔드 prod VM 사양 (4GB vs 8GB 결정), 프론트 호스트 (NCP VM #2 vs Vercel Hobby), 도메인 1순위 (.app vs .kr vs .com). 결정 입력은 §10-4 Q9~Q13.
+- [ ] **PR A2 (docs, plan)**: 본 spec §1~§9 의 "Hetzner CX22" / "Caddy" / "ARM64" 키워드를 **인용 문맥** 으로 명시 (NCP 1차 채택 + caddy → nginx 변경 등). §10-1 표가 단일 진실인 점 박제. §6 PR B~G 항목명 갱신 (Dockerfile = ARM64 → x86, reverse proxy = Caddy → nginx 등).
+- [ ] **PR A3 (docs, plan + infra)**: Phase 5 부트스트랩 스크립트 outline — `tools/deploy/ncp-bootstrap-prod.sh` (멱등, swap, docker 설치, .env.prod template, systemd 또는 compose 선택). Phase 4 의 `ncp-bootstrap-dev.sh` 와 1:1 대응. 보호 영역 없음 (스크립트 outline 만, 실제 스크립트는 PR B-prod).
+- [ ] (PR A1 머지 후) **PR B-prod (infra)**: `docker-compose.prod.yml` + `tools/deploy/ncp-bootstrap-prod.sh` + `.env.prod.example` + nginx prod conf. Phase 4 compose 와 차이점: (1) volumes 위치 (`/var/lib/mobruji/mysql`), (2) MySQL `innodb-buffer-pool-size` 상향, (3) backend `MOBRUJI_CORS_ALLOWED_ORIGINS` = prod 도메인, (4) GIT_SHA tag = main merge SHA. 보호 영역 → `needs-human-review`.
+- [ ] (PR A1 머지 후) **PR C-prod (infra)**: `.github/workflows/cd-prod.yml` — main 머지 또는 manual trigger → NCP prod VM SSH → docker compose up. 자동 롤백 150s. 보호 영역 → `needs-human-review`.
+- [ ] (병행) **PR D (docs, 기존 §6 그대로)**: 도메인/DNS/SSL 런북 — Cloudflare Registrar 등록 절차. ADR-0015 NCP 재결정 후에도 Cloudflare 부분은 영향 없음.
+- [ ] (병행) **PR E (infra)**: nginx prod conf (Caddy 변경) + Cloudflare Origin CA 설치 안내. Phase 4 nginx conf 와 80% 공통.
+- [ ] (병행) **PR F (docs)**: 무중단 배포 ADR — Phase 5 1차는 §5-6 표 (A) `docker compose up -d --no-deps backend` (30~60s 다운) 유지.
+- [ ] (병행) **PR G (docs + infra)**: 백업/복구 런북. NCP Object Storage (S3 호환) 또는 R2 선택은 §10-4 Q13.
+
+### 10-4) 사용자 결정 묶음 (Q9~Q13)
+
+본 spec 머지 후 사용자가 결정해 줘야 PR A1 ADR 본문을 채울 수 있다.
+
+| # | 질문 | 선택지 | 영향 |
+|---|---|---|---|
+| Q9 | 프론트엔드 prod 호스트 | (a) NCP 별 VM #2 (백/프론트 같은 사업자 통합) / (b) Vercel Hobby (Next.js SSR 최적 + 무료) / (c) NCP 백엔드 VM 안에 web container 동거 (Phase 4 dev 와 동일) | PR A1 ADR + PR B-prod compose |
+| Q10 | TLS termination 도구 | (a) **nginx** (Phase 4 dev 그대로 답습, 운영 친화) / (b) Caddy (자동 TLS, §6 PR E 1차안) | PR E |
+| Q11 | NCP 백엔드 VM 사양 | (a) c2-g3a 4GB (maestro VM 과 동일, 비용 최저, 메모리 spike 위험) / (b) c2-g3a-h 8GB (innodb buffer pool 확보, prod 안정) / (c) 별 NCP 라인업 (사용자 콘솔 가시성) | PR A1 ADR + 월 비용 |
+| Q12 | MySQL prod 인증/TLS | (a) `caching_sha2_password` + `allowPublicKeyRetrieval=true` (dev 그대로) / (b) container 간 SSL 활성화 (`require_secure_transport`) / (c) `mysql_native_password` 강제 | PR B-prod compose |
+| Q13 | 백업 저장소 (PR G) | (a) Cloudflare R2 (€0/월 < 10GB, 1차안) / (b) NCP Object Storage (한국 리전, 사용자 청구 통합) / (c) 별 사업자 (Wasabi 등) | PR G + 월 비용 |
+
+각 Q 의 default 추천 (plan 의견):
+- Q9: **(c) 한 VM 안에 web container 동거** — Phase 4 dev 가 이미 검증된 패턴 + 별 VM 운영 부담 0. 단 backend latency 가 web SSR fetch 으로 늘면 (b) Vercel 으로 분리.
+- Q10: **(a) nginx** — Phase 4 운영 경험 그대로 답습. Caddy 자동 TLS 장점은 Cloudflare Origin CA (15년) 가 흡수.
+- Q11: **(b) 8GB** — innodb buffer pool 256M~512M + JVM heap 1GB + web 256M + nginx 64M + swap 의존 최소화. 4GB 는 maestro VM 처럼 host overhead 압축이 가능한 경우만.
+- Q12: **(a) `allowPublicKeyRetrieval=true` 유지** — container internal network. SSL 도입은 v0.4 multi-VM 시.
+- Q13: **(b) NCP Object Storage** — 사용자 결제수단 검증 완료 (ADR-0015 §Context 1) + 한국 리전 latency. R2 가 무료 quota 더 크지만 결제 사업자 분산은 ADR-0015 회피 동인.

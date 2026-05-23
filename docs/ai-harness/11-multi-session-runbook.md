@@ -5,17 +5,17 @@
 
 ## 0) 운영 모드
 
-3개 세션(be/fe/rev)을 가동하는 방식은 두 가지. **기본은 maestro 오케스트레이션.**
+4개 sub-agent 워크트리(be/fe/rev/plan)를 maestro가 동시 가동하는 방식은 두 가지. **기본은 maestro 오케스트레이션** (§0-10 항시 4 워크트리 가동 룰 참고).
 
 ### 0-1) maestro 오케스트레이션 (기본 / 권장)
 
-**maestro(`mobruji` 워크트리)의 Claude 세션 하나**가 오케스트레이터 역할을 한다. be/fe/rev 작업은 maestro이 `Agent` 도구로 `claude` subagent를 `run_in_background: true`로 띄워 각 워크트리에서 실행하게 한다. 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
+**maestro(`mobruji` 워크트리)의 Claude 세션 하나**가 오케스트레이터 역할을 한다. be/fe/rev/plan 작업은 maestro가 `Agent` 도구로 `claude` subagent를 `run_in_background: true`로 띄워 각 워크트리에서 실행하게 한다. 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
 
 사이클:
-1. 백로그 정해지면 maestro이 각 워크트리에 `cd`해 `new-session-branch.sh`를 실행 → 이슈/브랜치/Draft PR 사전 스캐폴드.
-2. maestro이 `Agent` 도구로 be/fe/rev 서브에이전트를 동시 background 가동 (3개 병렬).
-3. 각 서브에이전트는 자기 워크트리에서 코드 작성 → 품질 게이트 → push → `gh pr ready`.
-4. maestro은 완료 통지를 받고 사용자에게 머지 결정 요청.
+1. 백로그 정해지면 maestro가 각 워크트리에 `cd`해 `new-session-branch.sh`를 실행 → 이슈/브랜치/Draft PR 사전 스캐폴드.
+2. maestro가 `Agent` 도구로 be/fe/rev/plan 서브에이전트를 동시 background 가동 (최대 4개 병렬, §0-10 참고).
+3. 각 서브에이전트는 자기 워크트리에서 코드/문서 작성 → 품질 게이트 → push → `gh pr ready`.
+4. maestro는 완료 통지를 받고 사용자에게 머지 결정 요청 (release는 사용자 확인, develop 머지는 자율).
 
 서브에이전트 프롬프트에 반드시 포함:
 - `cd <워크트리 절대경로>`로 시작 강제
@@ -26,19 +26,24 @@
 
 > 위 5줄 공통 룰은 매번 반복하지 말고 prompt에 다음 한 줄만 박는다:
 > `공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.`
-> 역할별 추가 룰(워크트리 경로, 작업 가능 경로, 품질 게이트)도 그 문서에 정리되어 있다.
+> §12 에는 위 5줄 외에도 다음이 박혀 있다 — 별도 prompt 박지 말 것:
+> - NCP Linux 워크트리 절대경로 (`/home/mobruji/mobruji-{be,fe,rev,plan}`)
+> - maestro 항시 가동 / 워크트리 lock / 5분 reasoning chunk 룰
+> - 역할별 추가 룰 (작업 가능 경로, 품질 게이트, fe `npm install` 1회 룰 등)
+> - sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢 + 다음 사이클 후보)
+> - 안티패턴 매트릭스 (워크트리 침범 / 도메인 boundary / 시크릿 raw / hook 우회 등)
 
 **언제 쓰나**: 사용자가 백로그를 maestro에 풀어놓고 한 자리에서 운영하고 싶을 때. 대부분의 경우.
 
 ### 0-2) 수동 터미널 (대체)
 
-사용자가 워크트리마다 별도 터미널과 Claude 인스턴스를 띄워 직접 지시한다. maestro은 develop 점유와 공유 영역 관리만 담당.
+사용자가 워크트리마다 별도 터미널과 Claude 인스턴스를 띄워 직접 지시한다. maestro는 develop 점유와 공유 영역 관리만 담당.
 
 사이클: §3 (새 작업 시작)과 §4 (rev 운영) 단계를 사용자가 직접 트리거.
 
 **언제 쓰나**:
 - 서브에이전트가 의도와 다르게 동작해 maestro에서 개입이 잦아질 때
-- maestro이 다른 큰 작업을 동시에 진행 중이라 오케스트레이션 부담이 클 때
+- maestro가 다른 큰 작업을 동시에 진행 중이라 오케스트레이션 부담이 클 때
 - 사람-루프(human-in-the-loop) 빈도를 늘리고 싶을 때
 
 ### 0-3) 모드 전환
@@ -56,7 +61,7 @@ maestro task list에서 사이클을 부를 때 **도메인별 카운트**를 �
 
 ### 0-5) idle 사이클 룰
 
-세션이 idle 상태(의존 PR 머지 대기, 머지된 PR 없음 등)일 때 maestro은 다음 백로그를 자체 진행하도록 지시한다:
+세션이 idle 상태(의존 PR 머지 대기, 머지된 PR 없음 등)일 때 maestro는 다음 백로그를 자체 진행하도록 지시한다:
 
 | 세션 | idle 조건 | 자체 백로그 |
 |---|---|---|
@@ -66,13 +71,13 @@ maestro task list에서 사이클을 부를 때 **도메인별 카운트**를 �
 | **plan** | 사이클 작업 완료 후 idle | 다음 ADR/spec 후보 발굴, 메모리 → 코드 promote 검토(반복 패턴/preference 코드화), 문서 stale 점검 |
 
 idle 룰 적용 기준:
-- be/fe가 의존성 대기로 30분+ idle이면 maestro이 위 백로그 중 하나를 launch
+- be/fe가 의존성 대기로 30분+ idle이면 maestro가 위 백로그 중 하나를 launch
 - rev는 머지 즉시 트리거가 기본이지만, 머지된 PR이 1시간+ 없으면 자체 QA 사이클 launch
 - plan은 사용자가 운영 사이클 종료를 명시할 때까지 백로그 발굴 진행
 
 ### 0-6) 사용자 결정 묶음 질문 패턴
 
-maestro이 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스위칭 비용을 줄인다.
+maestro가 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스위칭 비용을 줄인다.
 
 **즉시 묻기 (interrupt-driven)**:
 - PR 머지 / `develop → main` 릴리즈 머지
@@ -88,9 +93,9 @@ maestro이 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스
   1. ADR 0006 제목 — "추천 결정성 정책" vs "추천 결정성 + 다양성 정책"?
   2. fe 사이클 9 — 에러 boundary fallback 카피 "다시 시도" vs "재시도"?
   3. ...
-  답을 한 번에 주면 maestro이 일괄 적용.
+  답을 한 번에 주면 maestro가 일괄 적용.
   ```
-- 사용자 부재 시: 사용자가 돌아오기 전까지 maestro이 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
+- 사용자 부재 시: 사용자가 돌아오기 전까지 maestro가 합리적 가정으로 진행 + 가정 명시 + 사후 정정 허용.
 
 ### 0-6-1) maestro 닫혀있을 때 모바일 모니터링
 
@@ -111,7 +116,7 @@ maestro가 자율 사이클을 돌릴 때 — 사이클 launch / 오류 / 결정
 
 ### 0-7) 사이클 완료 후 워크트리 정리
 
-PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 maestro은 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
+PR 한 묶음(예: be+fe+rev 3건)을 머지한 후 maestro는 다음을 호출해 모든 워크트리를 develop 최신으로 detach 시키고 머지된 로컬 branch를 정리한다:
 
 ```bash
 ./scripts/post-merge-cleanup.sh
@@ -131,9 +136,9 @@ Usage: post-merge-cleanup.sh [--force]
 ```
 
 - **기본 (안전)**: 워크트리가 dirty(unstaged/staged 변경 또는 untracked 파일)면 detach를 skip + 경고. 사람이 직접 정리.
-- **`--force`**: dirty 무시하고 `git reset --hard origin/develop` + `git clean -fd`로 강제 reset. **stash되지 않은 변경은 영구 손실**. maestro이 명시적 결정 후에만 사용.
+- **`--force`**: dirty 무시하고 `git reset --hard origin/develop` + `git clean -fd`로 강제 reset. **stash되지 않은 변경은 영구 손실**. maestro가 명시적 결정 후에만 사용.
 
-maestro이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
+maestro가 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 세션이 남긴 임시 산출물)이 detach 실패의 흔한 원인이라, 기본은 보수적으로 skip하고 force가 필요할 때만 명시한다.
 
 #### fe 워크트리 `node_modules` 동기화
 
@@ -144,17 +149,75 @@ maestro이 사이클 직전에 발견하지 못한 unstaged 파일(예: 이전 �
 - web deps를 추가한 PR이 머지된 직후 (예: PR #150 `pitchy`, PR #194 PWA service-worker)
 - `package.json` / `package-lock.json`이 develop에서 갱신되었는데 fe 워크트리의 설치본은 이전 버전
 
-이 경우 fe 세션은 작업 시작 전에 다음을 1회 실행한다:
+##### 누가 install 하는가 — sub-agent는 직접 install 금지 (핵심 룰)
+
+fe sub-agent의 prompt에는 **`npm install` / `npm ci` / `pnpm install` / `yarn` 등 의존성 설치 명령을 직접 실행하지 않는다**를 명시한다. 의존성 누락(`Cannot find module 'pitchy'` 등)을 발견하면 **maestro에 보고하고 사이클을 일시 멈춘다**. maestro가 직접 install을 실행하거나 사용자 결정 후 진행한다.
+
+이유: fe 워크트리의 `web/node_modules`는 외부 데이터 디스크 symlink로 운영되는 경우가 많다(아래 §node_modules 저장 위치 참조). sub-agent가 `--no-save`/`--legacy-peer-deps` 등 옵션으로 무심코 `npm install`을 돌리면 npm이 symlink를 일반 디렉토리로 재생성하면서 외부 디스크 마운트가 끊긴다. 한 번 깨지면 모든 fe 워크트리에 영향을 주고 복구는 maestro 권한에서 swap + symlink 재생성이 필요하다 (아래 §복구 절차).
+
+maestro 권한에서 install이 필요한 경우:
 
 ```bash
-cd web && npm install
+# maestro 워크트리에서 (fe 워크트리 아님)
+cd /home/mobruji/mobruji/web && npm install
 ```
 
-maestro이 fe sub-agent를 launch할 때 prompt에 "직전 사이클에서 web deps 변경 PR(예: #N)이 머지됐다면 `cd web && npm install` 1회 실행"이라고 명시하면 자율적으로 처리한다. 변경이 없는 사이클에서는 생략해도 무방.
+`mobruji` 워크트리의 `web/node_modules`도 같은 외부 디스크 symlink (`/data/node_modules/web`)를 가리키도록 셋업되어 있으면, 한 번의 install이 모든 fe 워크트리에 즉시 반영된다.
+
+##### `node_modules` 저장 위치 (외부 디스크 운영 시)
+
+NCP maestro 등 루트 디스크가 작은 환경에서는 `node_modules`를 별도 데이터 디스크에 두고 워크트리에서 symlink로 참조한다.
+
+```bash
+# 한 번 셋업
+sudo mkdir -p /data/node_modules/web /data/node_modules/fe-web
+sudo chown -R mobruji:mobruji /data/node_modules
+
+# 각 워크트리에서 symlink 연결
+ln -snf /data/node_modules/web      ~/mobruji/web/node_modules
+ln -snf /data/node_modules/fe-web   ~/mobruji-fe/web/node_modules
+```
+
+확인:
+```bash
+ls -la ~/mobruji-fe/web/node_modules
+# lrwxrwxrwx ... web/node_modules -> /data/node_modules/fe-web
+```
+
+##### 복구 절차 — symlink가 풀렸을 때
+
+증상:
+- `ls -la web/node_modules`가 디렉토리(`drwx...`)로 보임 (symlink였어야 함)
+- 또는 외부 디스크 사용량은 그대론데 워크트리 루트 디스크가 갑자기 부풀어 오름
+- sub-agent 로그에 `npm install` 또는 `npm ci` 실행 흔적
+
+복구 (maestro 권한):
+
+```bash
+# 1. 깨진 디렉토리를 외부 디스크로 이동 (이미 install된 내용 보존)
+mv ~/mobruji-fe/web/node_modules /data/node_modules/fe-web-recovered
+rm -rf /data/node_modules/fe-web
+mv /data/node_modules/fe-web-recovered /data/node_modules/fe-web
+
+# 2. symlink 재생성
+ln -snf /data/node_modules/fe-web ~/mobruji-fe/web/node_modules
+
+# 3. 확인
+ls -la ~/mobruji-fe/web/node_modules
+# lrwxrwxrwx ... -> /data/node_modules/fe-web
+```
+
+복구 후 sub-agent prompt에 "이전 사이클에서 symlink 사고가 있었음. 의존성 누락 시 maestro 보고만"이라고 명시해 재발 방지.
+
+##### maestro가 fe sub-agent prompt에 박을 한 줄
+
+`cd web && npm install` 직접 실행 금지. 의존성 누락 시 maestro에 보고. 직전 사이클에서 web deps 변경 PR이 머지됐고 누락이 의심되면 그것도 보고.
+
+변경이 없는 사이클에서는 install 자체가 불필요하므로 sub-agent는 평소대로 `npm run lint / typecheck / test`만 돌리면 된다.
 
 ### 0-8) 통지 우선 처리
 
-maestro은 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
+maestro는 자기 작업 도중 sub-agent 완료 통지를 받으면 **자기 작업의 현재 도구 호출 단위를 마치고 통지 처리부터** 한다. wall-clock 최소화 + 다음 사이클 launch 지연 방지 목적.
 
 처리 순서:
 1. 결과 보고 — 사용자에게 한두 줄로 요약 (PR 번호 + mergeable 상태 정도)
@@ -171,7 +234,7 @@ maestro 작업은 **호흡당 1~2 도구 호출** 단위로 쪼갠다. 긴 단�
 
 ### 0-9) rev 코멘트 자동 등록
 
-rev sub-agent 완료 통지를 받으면 maestro은 발견 항목을 **GitHub 이슈로 자동 등록**한다. 사용자가 일일이 트리아지하지 않아도 다음 사이클 백로그가 자동으로 쌓이는 구조.
+rev sub-agent 완료 통지를 받으면 maestro는 발견 항목을 **GitHub 이슈로 자동 등록**한다. 사용자가 일일이 트리아지하지 않아도 다음 사이클 백로그가 자동으로 쌓이는 구조.
 
 분류 기준:
 - 🔴 **spec/비기능 위반** — 각각 **단독 이슈**로 등록. 같은 사이클에 다음 be/fe sub-agent로 즉시 fix 트리거 가능한 것은 1~2건 한정.
@@ -191,27 +254,81 @@ rev sub-agent 완료 통지를 받으면 maestro은 발견 항목을 **GitHub �
 
 누적 패턴/메타 인사이트(예: "최근 5사이클 연속 같은 final 누락 패턴")는 **별 docs PR 후보**로 따로 모은다. 이슈 등록과 docs promote는 분리.
 
+### 0-10) 항시 4 워크트리 가동 룰
+
+maestro는 **be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 항상 유지**한다. 1개 sub-agent 완료 통지가 들어오면 같은 워크트리에 **즉시** 다음 백로그를 launch한다. idle 워크트리를 두지 않는 게 default — 자체 reasoning 만 돌리면 컨텍스트 폭증 + 병렬 처리 부재 + 사용자 의도(4 워크트리 분리) 위반 (사용자 명시 2026-05-23: "4개 사이클 가동하고 유지해", "아예 launch를 까먹은거잖아 그러면 안 돼. 절대로").
+
+#### maestro 점검 의무
+
+| 시점 | 점검 항목 |
+|---|---|
+| **매 turn 시작** | 사용자 메시지 받자마자 — 백로그에 be/fe/rev/plan 가능 작업 있나? 있으면 maestro 자체 작업 전에 sub-agent launch (`run_in_background=true`). |
+| **매 turn 끝** | 응답 직전 마지막 점검 — 이 turn에 발견된 작업 중 sub-agent 가능한 것 즉시 launch. |
+| **wake fire 시** | autonomous wake (`feedback-autonomous-wake-pattern`) 발화 시 4 워크트리 모두 가동 중인지 확인. idle 있으면 즉시 launch. |
+| **완료 통지 수신** | sub-agent return 받자마자 — PR 검토/보고 정리 (maestro 메타) → 같은 워크트리 다음 백로그 즉시 launch (§0-8 통지 우선 처리와 동일 순서). |
+
+#### maestro 자체 작업 default
+
+maestro가 직접 코드/테스트를 작성하는 패턴은 **금지에 가깝게 제한**. maestro default는 메타:
+- spec / ADR / 메모리 작성·갱신
+- 핸드오프 / 사용자 보고 / orchestration
+- Discord 답변, 이슈 트리아지
+- 보호 영역(`docs/ai-harness/**`, CLAUDE.md, root 설정)의 일회성 보수 (sub-agent에 위임할 수 없는 영역)
+
+코드/테스트/문서 본문 작성은 **모두 sub-agent default**. maestro가 직접 하면 4 워크트리 중 하나가 idle.
+
+#### 백로그 고갈 시 발굴
+
+idle 워크트리가 발생하면 maestro는 다음 순서로 발굴:
+
+1. `gh issue list --state open --label "scope:<domain>"` — 미할당 이슈
+2. `docs/features/` — 미구현/얇은 spec
+3. `docs/ai-harness/` — stale/누락 룰
+4. rev QA 리포트 / 메모리 (`feedback-*`) — 코드 promote 후보
+5. TODO / FIXME 코멘트 회수
+6. 작은 리팩터 / 테스트 보강 / 회귀 가드 신설 / 보안 audit
+
+**가치 점검 필수** — 발굴된 작업이 release 가치(회귀 가드 / 보안 / 디스크 / 가시성 / 정합성 중 1개 이상)를 만족하지 못하면 launch하지 않고 메타(문서/메모리/백로그 청소)로 위임. 사이클 수 채우려고 가치 없는 작업 양산 금지.
+
+#### 워크트리 lock
+
+같은 워크트리에 동시 2 sub-agent launch 금지 (`feedback-worktree-lock`). 이전 sub-agent 머지/종료 통지를 받은 뒤 다음 launch. 따라서 동시 가동 최대치는 **4** (4 워크트리 × 1).
+
+#### 5분 룰 병행
+
+maestro turn 자체가 5분 초과(`feedback-reasoning-chunk-limit`)하면 turn을 분할. 분할된 다음 turn에서 idle 워크트리 launch를 다시 점검.
+
+#### 위반 시 자기 점검
+
+maestro가 sub-agent launch를 1회라도 까먹은 채 maestro 자체 작업을 진행했다면 즉시 사용자에게 인정 + 사과 + 룰 재확인. 메모리(`feedback-sub-agent-launch-mandatory`)와 본 §0-10이 source of truth — 충돌 시 본 문서 우선.
+
 ## 1) 셋업 (최초 1회)
 
-### 1-1) 워크트리 3개 생성
+### 1-1) 워크트리 4개 생성
 
 ```bash
-# maestro은 ~/workspace/github/mobruji 그대로
+# maestro는 ~/workspace/github/mobruji (또는 NCP 환경의 ~/mobruji) 그대로
 git worktree add --detach ../mobruji-be
 git worktree add --detach ../mobruji-fe
 git worktree add --detach ../mobruji-rev
+git worktree add --detach ../mobruji-plan
 ```
+
+총 5개 디렉토리(maestro 1 + sub-agent 워크트리 4)가 셋업된다. **plan 워크트리**는 ADR/spec/`docs/ai-harness/` 갱신 전담(§2 참조). v0.2 메타 전환 이후 maestro 부담을 덜기 위해 도입됐다 (`feedback-plan-session-option`, `project-plan-session-active`).
 
 `--detach`인 이유: git은 같은 브랜치(develop)를 여러 워크트리에서 동시에 체크아웃 못 함. detached로 만들면 각 세션에서 `new-session-branch.sh`가 `origin/develop`을 기준으로 새 브랜치를 만들어 작업한다.
 
 확인:
 ```bash
 git worktree list
-# /Users/goohong/workspace/github/mobruji      <sha> [develop]
-# /Users/goohong/workspace/github/mobruji-be   <sha> (detached HEAD)
-# /Users/goohong/workspace/github/mobruji-fe   <sha> (detached HEAD)
-# /Users/goohong/workspace/github/mobruji-rev  <sha> (detached HEAD)
+# /home/mobruji/mobruji         <sha> [develop]
+# /home/mobruji/mobruji-be      <sha> (detached HEAD)
+# /home/mobruji/mobruji-fe      <sha> (detached HEAD)
+# /home/mobruji/mobruji-rev     <sha> (detached HEAD)
+# /home/mobruji/mobruji-plan    <sha> (detached HEAD)
 ```
+
+> NCP maestro VM 기준 경로 예시. 사용자 macOS 셋업은 `/Users/<id>/workspace/github/mobruji*`. 경로만 다르고 셋업 절차는 동일.
 
 ### 1-2) 메모리 디렉토리 공유 (선택)
 
@@ -219,12 +336,14 @@ Claude는 워크트리 경로별로 별 메모리를 갖는다. maestro 메모�
 
 ```bash
 BASE=~/.claude/projects/-Users-goohong-workspace-github-mobruji/memory
-for w in be fe rev; do
+for w in be fe rev plan; do
     target=~/.claude/projects/-Users-goohong-workspace-github-mobruji-$w/memory
     mkdir -p "$(dirname "$target")"
     ln -snf "$BASE" "$target"
 done
 ```
+
+NCP maestro VM 기준 경로 prefix는 `-home-mobruji-mobruji`로 다르다. 셋업 환경별로 prefix만 맞춰 동일 루프 사용.
 
 > ⚠️ **메모리 race 주의**
 >
@@ -393,8 +512,8 @@ QA: 🟢/🟡/🔴 <STATUS> — [범주 X] <시나리오 + 결과 1줄>
 - be/fe 세션은 `origin/develop`에서 분기 (워크트리는 detached HEAD라 develop을 체크아웃하지 않는다).
 - 한 세션의 브랜치에 다른 세션이 직접 push 금지.
 - 공유 영역(`CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/`, root 설정) 변경은 maestro에서 처리.
-- maestro은 항상 `develop` 브랜치에 머물러야 한다. maestro에서 다른 세션 브랜치를 체크아웃하면 develop 점유가 해제돼 다른 세션이 stale 참조하는 사고가 생긴다. maestro에서 일회성 PR을 만들어야 할 때는 임시 브랜치 분기 후 머지 즉시 `develop`으로 복귀.
-- **자율 운영**: 사용자 부재 시에도 maestro은 sub-agent 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
+- maestro는 항상 `develop` 브랜치에 머물러야 한다. maestro에서 다른 세션 브랜치를 체크아웃하면 develop 점유가 해제돼 다른 세션이 stale 참조하는 사고가 생긴다. maestro에서 일회성 PR을 만들어야 할 때는 임시 브랜치 분기 후 머지 즉시 `develop`으로 복귀.
+- **자율 운영**: 사용자 부재 시에도 maestro는 sub-agent 완료 통지 → 백로그 정리 → 다음 사이클 launch 루프를 자체 진행. release(`develop → main`) 머지만 사용자 확인.
 
 ## 3) 새 작업 시작 (be/fe 세션)
 
@@ -450,7 +569,7 @@ gh pr ready <PR번호>   # draft → ready for review
 
 ### 자연스러운 동기화
 - 모든 세션은 GitHub state(PR/이슈/라벨)를 같은 source로 봄.
-- be/fe 워크트리는 detached HEAD 상태이므로 **`git checkout develop`을 쓰지 않는다.** develop은 maestro이 점유 중이라 다른 워크트리에서 체크아웃하면 충돌한다.
+- be/fe 워크트리는 detached HEAD 상태이므로 **`git checkout develop`을 쓰지 않는다.** develop은 maestro가 점유 중이라 다른 워크트리에서 체크아웃하면 충돌한다.
 - 작업 시작 직전: 해당 워크트리에서 `git fetch origin develop` → `new-session-branch.sh`가 `origin/develop` 기준으로 새 브랜치를 만든다.
 - 머지 후 동기화:
   - **maestro** 워크트리: `git pull --ff-only`로 develop 최신화.

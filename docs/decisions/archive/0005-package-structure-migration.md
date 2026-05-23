@@ -1,6 +1,8 @@
 # ADR 0005 패키지 마이그레이션 가이드 (be 사이클용)
 
-> 본 문서는 ADR 0005 결정에 따른 **1회성 마이그레이션 절차**다. 마이그레이션이 끝나면 본 문서는 `superseded by migration #<PR>`로 표기하거나 historical 디렉토리로 이동한다. 마이그레이션 실행 이슈: #82의 후속 이슈 참조.
+> **Status**: `companion to 0005` — completed migration (archived 2026-05-23, see #459)
+>
+> 본 문서는 ADR 0005 결정에 따른 **1회성 마이그레이션 절차**다. backend 4계층(`domain/application/infrastructure/api`) 이동은 `docs/milestones/v0.2.md` 기록대로 완료됐고, ADR 0008(ArchUnit) 가드가 본 가이드의 룰을 자동 검증 중이다. 본 문서는 결정 이력 보존을 위해 `docs/decisions/archive/` 로 이동했으며, 신규 결정은 ADR 0005 본 문서(`docs/decisions/0005-package-structure.md`)를 참조한다. 마이그레이션 실행 이슈: #82의 후속 이슈 참조.
 
 ## 1) 목표 디렉토리 트리
 

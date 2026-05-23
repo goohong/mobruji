@@ -26,20 +26,27 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
             const title = pr.title;
-            const m = title.match(/^(\w+)\(([\w-]+)\):/);
 
             const labels = new Set();
 
-            if (!m) {
-              core.warning(`PR title "${title}" does not match "type(scope): ..." pattern`);
+            // 1) 릴리즈 PR (`release: vX.Y.Z` 또는 `release: YYYY-MM-DD`) — scope 없음.
+            //    별도 분기로 처리하고 type:release 라벨만 부여한다.
+            if (/^release:/i.test(title)) {
+              labels.add('type:release');
             } else {
-              const [, type, scope] = m;
-              const allowedTypes = ['feat','fix','docs','style','refactor','test','chore','release'];
-              const allowedScopes = ['user','song','recommendation','voice','infra','web'];
-              if (allowedTypes.includes(type)) labels.add(`type:${type}`);
-              else core.warning(`Unknown type: ${type}`);
-              if (allowedScopes.includes(scope)) labels.add(`scope:${scope}`);
-              else core.warning(`Unknown scope: ${scope}`);
+              // 2) 일반 PR — `type(scope): 제목` 패턴.
+              const m = title.match(/^(\w+)\(([\w-]+)\):/);
+              if (!m) {
+                core.warning(`PR title "${title}" does not match "type(scope): ..." or "release: ..." pattern`);
+              } else {
+                const [, type, scope] = m;
+                const allowedTypes = ['feat','fix','docs','style','refactor','test','chore'];
+                const allowedScopes = ['feedback','infra','recommendation','song','user','voice','web'];
+                if (allowedTypes.includes(type)) labels.add(`type:${type}`);
+                else core.warning(`Unknown type: ${type}`);
+                if (allowedScopes.includes(scope)) labels.add(`scope:${scope}`);
+                else core.warning(`Unknown scope: ${scope}`);
+              }
             }
 
             // Detect AI authorship from commit messages

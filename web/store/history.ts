@@ -29,6 +29,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
+import { randomUuidV4FromBytes } from "@/store/session";
 
 /**
  * 히스토리 최대 보관 건수.
@@ -45,8 +46,16 @@ export type RecommendationHistoryEntry = {
   requestedAt: string;
   /** 이 추천을 만든 voiceRangeId — 같은 음역대 그룹핑에 사용 가능. */
   voiceRangeId: number | null;
-  /** BE가 발급한 requestId — 본 응답을 다시 조회할 때 유용. */
-  requestId: number;
+  /**
+   * BE가 발급한 requestId (UUIDv7 문자열) — 본 응답을 다시 조회할 때 유용.
+   *
+   * issue #422: BE `requestId` 가 number → UUIDv7 string 으로 전환됨에 따라
+   * fe 타입도 string 일관. 기존 number 값으로 영속된 entry 는 persist hydrate
+   * 시 zustand 가 그대로 통과시키므로 (TS 타입과 런타임 불일치) 호출 측은
+   * 표시 외 로직(예: BE 재조회) 에서 string 가정으로 두고, 형 변환은 React key
+   * 등 string coercion 만으로 충분하다 (history page `be-${requestId}` 패턴).
+   */
+  requestId: string;
   /** 추천된 곡 리스트(BE 응답 원본). */
   songs: RecommendedSongResponse[];
   /** 추천 요청 시 사용한 누적 제외 곡 ID 스냅샷. */
@@ -81,9 +90,31 @@ type HistoryState = {
   clearHistory: () => void;
 };
 
+/**
+ * 히스토리 entry 의 클라이언트 자체 ID 발급 (closes #422 후속, sessionId 와 일관).
+ *
+ * 우선순위 (`store/session.ts` `generateSessionId()` 와 동일 패턴):
+ *   1. `crypto.randomUUID()` — 모던 브라우저.
+ *   2. `crypto.getRandomValues()` 기반 RFC 4122 v4 UUID — 구형 브라우저.
+ *   3. 마지막 보루: `hist_` prefix + 시간/random 조합 (crypto 부재 SSR 등).
+ *
+ * AS-IS 폐기: 기존에는 1번 실패 시 곧바로 3번 fallback 으로 떨어졌는데, 이는
+ * `Math.random()` 기반이라 entropy 가 약하고 동일 ms 안에 여러 push 가 일어나면
+ * 충돌 위험이 있었다. PR #769 가 sessionId 에 동일 패턴을 적용한 것과 일관되게
+ * 2번 분기를 끼워 RFC 4122 v4 (122-bit entropy) 를 우선한다.
+ */
 function generateEntryId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
+  }
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.getRandomValues === "function"
+  ) {
+    return randomUuidV4FromBytes();
   }
   return `hist_${Date.now().toString(36)}_${Math.random()
     .toString(36)

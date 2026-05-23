@@ -68,7 +68,7 @@ class SongStatsIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E: GET /api/v1/songs/stats — X-Admin-Token 정상 → total/byMetadataSource/avgConfidence/lastBackfillAt")
+    @DisplayName("E2E: GET /api/v1/songs/stats — X-Admin-Token 정상 → total/byMetadataSource/avgConfidence/lastBackfillAt/lastAlbumCoverBackfillAt")
     void e2e_stats_returnsExpectedShape() {
         given()
                 .header("X-Admin-Token", ADMIN_TOKEN)
@@ -85,7 +85,9 @@ class SongStatsIntegrationTest {
                 // (1.0 + 1.0 + 0.8) / 3 ≈ 0.9333
                 .body("avgConfidence", greaterThanOrEqualTo(0.9f))
                 // backfill 미실행 — null
-                .body("lastBackfillAt", nullValue());
+                .body("lastBackfillAt", nullValue())
+                // album cover backfill 미실행 — null (이슈 #863)
+                .body("lastAlbumCoverBackfillAt", nullValue());
     }
 
     @Test

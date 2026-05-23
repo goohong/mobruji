@@ -1,12 +1,12 @@
 ---
 feature: 추천 알고리즘 v2 (recommendation-algorithm-v2)
 slug: recommendation-algorithm-v2
-status: draft
+status: shipped
 owner: "@goohong"
 scope: recommendation
-related_issues: [219, 222]
-related_prs: [223]
-last_reviewed: 2026-05-21
+related_issues: [219, 222, 273]
+related_prs: [223, 471]
+last_reviewed: 2026-05-23
 ---
 
 # 추천 알고리즘 v2 (recommendation-algorithm-v2)
@@ -26,16 +26,18 @@ last_reviewed: 2026-05-21
 ## 3) 요구사항
 
 ### 기능 요구사항
-- [ ] **`keyMatch` 활성화** — `RecommendationScorer`에서 `Song.musicalKey`와 사용자 컨텍스트(현재는 `null` 기반 콜드스타트, 후속 spec에서 `preferredKey` 도입 검토) 비교 신호를 0 아닌 값으로 산출. 가중치 `w1` 기본값 (§9 결정 필요, 초안 `0.15`).
-- [ ] **`tempoMatch` 신설** — `RecommendationScorer`에 신호 추가. `Song.tempoBpm`과 `request.preferredBpm`(또는 mood 매핑값) 사이 거리를 0~1로 정규화. 가중치 `w_tempo` 초안 `0.1`.
-- [ ] **API 입력 확장** — `RecommendationCreateRequest.preferredBpm: Integer?` 추가 (nullable, 60~200 검증). 미입력 시 mood 매핑 적용, mood도 없으면 신호 0.5(중립).
-- [ ] **응답 breakdown 확장** — `ScoreBreakdownResponse`에 `tempoMatch` 필드 추가. `keyMatch`는 기존 필드 재사용(이전 항상 0이었음).
-- [ ] **mood → preferredBpm 매핑** — `RecommendationProperties.moodBpm` 맵(예: `신남=130, 잔잔=80, 감성=95`). 매핑 미정 mood는 null로 fallback. (§8 Q1)
+- [x] **`keyMatch` 활성화** — `RecommendationScorer`에서 `Song.musicalKey`와 사용자 컨텍스트(현재는 `null` 기반 콜드스타트, 후속 spec에서 `preferredKey` 도입 검토) 비교 신호를 0 아닌 값으로 산출. 가중치 `w1` 기본값 (§9 결정 필요, 초안 `0.15`).
+- [x] **`tempoMatch` 신설** — `RecommendationScorer`에 신호 추가. `Song.tempoBpm`과 `request.preferredBpm`(또는 mood 매핑값) 사이 거리를 0~1로 정규화. 가중치 `w_tempo` 초안 `0.1`.
+- [x] **API 입력 확장** — `RecommendationCreateRequest.preferredBpm: Integer?` 추가 (nullable, 60~200 검증). 미입력 시 mood 매핑 적용, mood도 없으면 신호 0.5(중립).
+- [x] **응답 breakdown 확장** — `ScoreBreakdownResponse`에 `tempoMatch` 필드 추가. `keyMatch`는 기존 필드 재사용(이전 항상 0이었음).
+- [x] **mood → preferredBpm 매핑** — `RecommendationProperties.moodBpm` 맵(예: `신남=130, 잔잔=80, 감성=95`). 매핑 미정 mood는 null로 fallback. (§8 Q1)
 
 ### 비기능 요구사항
 - **결정성 보존** — `SeedDeriver.derive()` 입력에 `preferredBpm`(정규화된 int, null이면 -1)을 포함해 같은 입력 → 같은 결과. 회귀 가드 테스트로 보장.
   - **단일 진실**: 결정성 룰(seed 계약 / 비결정 호출 금지 / 테스트 단정 / 관측성 로그)의 정의는 `recommendation-algorithm-v1.md §3 비기능 결정성` 절을 참조한다. v2 입력 확장(`preferredBpm`)도 그 룰에 따라 SeedDeriver 시그니처에 포함된다.
-- **p95 200ms 유지** — 신호 2개 추가의 in-memory 계산 비용은 무시 가능. 카탈로그 수백 곡 가정. **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3**. 회귀 가드는 k6 + GH Actions.
+- **p95 200ms / p99 400ms 유지** — 신호 2개 추가(`keyMatch`/`tempoMatch`)의 in-memory 계산 비용은 무시 가능. 카탈로그 수백 곡 가정. v2 audio-features 가산 후에도 **v1과 동일 임계 박제**: p95 200ms / p99 400ms.
+  - **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3** (PR #471, closes #273 — 200ms/400ms 단일 진실 박제). 본 spec 은 참조만, 직접 숫자 갱신 금지. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차(한 PR 에 6단계 묶음)로만 변경 가능.
+  - 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
 - **하위 호환** — `preferredBpm` 미입력 v1 클라이언트는 그대로 동작 (mood 매핑 또는 중립 fallback).
 - **영속화는 본 spec 범위 밖** — `RecommendationRequestEntity`에 `preferredBpm` 컬럼 추가는 후속 PR. v2 한정 요청 시점 입력만 파이프라인·seed에 반영.
 
@@ -59,20 +61,24 @@ last_reviewed: 2026-05-21
 - 변경 없음. `ScoreBreakdown` record에 `tempoMatch` 필드 추가(기존 5신호 → 6신호). `Song.musicalKey` / `Song.tempoBpm`는 be 17에서 이미 모델링됨.
 
 ### 5-2) 설정 (`RecommendationProperties`)
+실제 `backend/src/main/resources/application.yml:57-63` 가중치와 정합. 단일 진실은 `application.yml`, 본 spec 은 미러.
+
 ```yaml
 recommendation:
   weights:
-    voiceRangeFit: 0.5     # v1 유지
-    moodMatch: 0.2         # v1 유지
-    keyMatch: 0.15         # v2 신규 (활성화)
-    tempoMatch: 0.1        # v2 신규
-    popularityPrior: 0.05  # v1에서 0.15였으나 합 1.0 맞추려 조정 (§9 Q2)
+    voice-fit: 0.5     # v1 유지 — 음역 적합 1순위
+    genre: 0.2         # v1 보존 — 입력 신호 없음(가중치만 유지)
+    mood: 0.2          # v1 유지 — 분위기 일치 가산
+    popularity: 0.1    # v1 유지 — 모든 곡 popularity=1.0 → 동일 가산
+    tempo-match: 0.1   # v2 신규 — 곡 BPM ↔ target BPM 거리 기반
   moodBpm:
     신남: 130
     잔잔: 80
     감성: 95
 ```
-- 보호 영역(`application.yml`) 변경 → PR에서 `needs-human-review` 라벨 부여.
+- 합 = **1.1** (정규화 룰 없음 — total = Σ(signal × weight) 가산만, 상대 순위에는 영향 없음).
+- `keyMatch` — **메타 신호. 가중 합산 미포함 (v1 의도 유지)**. breakdown 응답 필드는 제공하나 total score 에는 0 기여. 활성화 결정은 별 사이클 (§9 Q2 후속).
+- 보호 영역(`application.yml`) 변경은 본 spec 범위 밖. 본 spec PR 은 docs only.
 
 ### 5-3) 스코어러 변경
 - `RecommendationScorer.score(...)`는 그대로 `Scored(total, breakdown)` 반환.
@@ -114,3 +120,5 @@ recommendation:
   - v1 spec의 `breakdown.keyMatch` 항상 0 문제와 be 17 audio features backfill 완료 상황을 받아 v2 분리.
   - 가중치 합 1.0 유지 위해 `popularityPrior` 0.15 → 0.05 임시 (Q2 미해결).
   - ML 자동 가중치 조정은 v0.4+ spec으로 분리.
+- 2026-05-23 (plan): p95 단일 진실 cross-ref 강화 (PR #471 후속, closes #273 정합). v2 audio-features (`keyMatch`/`tempoMatch`) 가산 후에도 v1 과 동일 임계 (p95 200ms / p99 400ms) 박제 — 임계 단일 진실은 `recommendation-p95-regression-guard.md` §5-3 (PR #471), 본 spec §3 비기능은 참조만. v2 신호 2개 추가의 in-memory 계산 비용이 무시 가능하므로 임계 상향 사유 없음. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차로만 변경 가능 — 본 spec 직접 갱신 금지.
+- 2026-05-23 (#838): 가중치 spec vs 코드 drift 정합 — 옵션 A (코드 → spec 반영) 채택. keyMatch 활성 + popularityPrior 조정은 별 사이클 결정.

@@ -43,6 +43,10 @@ public class SongController {
         return SongResponse.from(songService.readById(id));
     }
 
+    /**
+     * 키워드 검색 — {@code keyword}가 비/공백/null이면 200 OK + 빈 배열 반환 (의도된 정책).
+     * 상세 근거는 {@link SongService#searchByKeyword(String)} Javadoc.
+     */
     @GetMapping
     public List<SongResponse> search(@RequestParam(name = "keyword", required = false) final String keyword) {
         return songService.searchByKeyword(keyword).stream()

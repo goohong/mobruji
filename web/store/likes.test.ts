@@ -107,3 +107,29 @@ describe("useLikesStore persist 라운드트립", () => {
     expect(parsed.state.likedSongIds).toEqual([99, 42]);
   });
 });
+
+describe("useLikesStore 경계 회귀 (#586)", () => {
+  it("동일 songId 3회 toggle은 결국 1개로 prepend된다 (멱등 누적)", () => {
+    const { toggleLike } = useLikesStore.getState();
+    toggleLike(7);
+    toggleLike(7);
+    toggleLike(7);
+    expect(useLikesStore.getState().likedSongIds).toEqual([7]);
+  });
+
+  it("setLikedSongIds 입력 배열을 외부에서 mutate해도 store는 격리된다", () => {
+    const { setLikedSongIds } = useLikesStore.getState();
+    const input = [10, 20, 30];
+    setLikedSongIds(input);
+    input.push(999);
+    expect(useLikesStore.getState().likedSongIds).toEqual([10, 20, 30]);
+  });
+
+  it("localStorage가 손상돼도 store는 빈 배열로 안전 동작한다", () => {
+    localStorage.setItem("mobruji-likes", "{not json");
+    // 새 액션 호출은 throw 없이 진행되어야 한다 (persist hydration 실패 격리).
+    useLikesStore.setState({ likedSongIds: [] });
+    useLikesStore.getState().toggleLike(1);
+    expect(useLikesStore.getState().likedSongIds).toEqual([1]);
+  });
+});

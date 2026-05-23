@@ -14,15 +14,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mobruji.user.application.SessionAuthGuard;
 import com.mobruji.voice.api.dto.VoiceRangeCreateRequest;
 import com.mobruji.voice.api.dto.VoiceRangeUpdateRequest;
-
 import com.mobruji.voice.application.CreateVoiceRangeCommand;
 import com.mobruji.voice.application.UpdateVoiceRangeCommand;
 import com.mobruji.voice.application.VoiceRangeService;
@@ -30,6 +30,13 @@ import com.mobruji.voice.domain.VoiceRange;
 import com.mobruji.voice.domain.VoiceRangeNotFoundException;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 
+/**
+ * {@link VoiceRangeController} MockMvc 슬라이스 가드.
+ *
+ * <p>PR 3 (#924) 부터 {@link SessionAuthGuard} 는 AnonymousSessionRepository 등 의존성이 늘었기 때문에
+ * 슬라이스 컨텍스트에서 실 빈으로 띄우기 까다롭다. {@link MockitoBean} 으로 mock 화 — verify() 는 default
+ * no-op 라 success 시나리오에 영향 없음. 401 케이스는 별 슬라이스/통합 테스트와 가드 단위 테스트에서 담당.
+ */
 @WebMvcTest(VoiceRangeController.class)
 @ActiveProfiles("test")
 class VoiceRangeControllerTest {
@@ -43,6 +50,9 @@ class VoiceRangeControllerTest {
     @MockitoBean
     private VoiceRangeService voiceRangeService;
 
+    @MockitoBean
+    private SessionAuthGuard sessionAuthGuard;
+
     @Test
     @DisplayName("POST /api/v1/voice-ranges: 201 + 응답 바디")
     void create_returns201() throws Exception {
@@ -54,6 +64,7 @@ class VoiceRangeControllerTest {
 
         // when / then
         mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -68,6 +79,33 @@ class VoiceRangeControllerTest {
                 {"sessionId":"s","lowestNoteMidi":5,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                 """;
         mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bad))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST 검증 실패(sessionId blank): 400")
+    void create_blankSessionId_returns400() throws Exception {
+        final String bad = """
+                {"sessionId":"","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
+                """;
+        mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bad))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST 검증 실패(sourceMethod null): 400")
+    void create_nullSourceMethod_returns400() throws Exception {
+        final String bad = """
+                {"sessionId":"s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":null}
+                """;
+        mockMvc.perform(post("/api/v1/voice-ranges")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(bad))
                 .andExpect(status().isBadRequest());
@@ -81,7 +119,8 @@ class VoiceRangeControllerTest {
         given(voiceRangeService.readBySessionId("s")).willReturn(voiceRange);
 
         // when / then
-        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "s"))
+        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "s")
+                .header("X-Session-Id", "s"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId", is("s")));
     }
@@ -92,7 +131,8 @@ class VoiceRangeControllerTest {
         given(voiceRangeService.readBySessionId("missing"))
                 .willThrow(new VoiceRangeNotFoundException("missing"));
 
-        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "missing"))
+        mockMvc.perform(get("/api/v1/voice-ranges/{sessionId}", "missing")
+                .header("X-Session-Id", "missing"))
                 .andExpect(status().isNotFound());
     }
 
@@ -108,10 +148,39 @@ class VoiceRangeControllerTest {
 
         // when / then
         mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "s")
+                .header("X-Session-Id", "s")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.lowestNoteMidi", is(50)))
                 .andExpect(jsonPath("$.sourceMethod", is("MIC_MEASURE")));
+    }
+
+    @Test
+    @DisplayName("PUT 검증 실패(lowestNoteMidi null): 400")
+    void update_invalidInput_returns400() throws Exception {
+        final String bad = """
+                {"lowestNoteMidi":null,"highestNoteMidi":72,"sourceMethod":"MIC_MEASURE"}
+                """;
+        mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "s")
+                .header("X-Session-Id", "s")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bad))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PUT 없는 sessionId: 404")
+    void update_notFound_returns404() throws Exception {
+        final VoiceRangeUpdateRequest request = new VoiceRangeUpdateRequest(
+                50, 72, VoiceRangeSourceMethod.MIC_MEASURE);
+        given(voiceRangeService.updateBySessionId(eq("missing"), any(UpdateVoiceRangeCommand.class)))
+                .willThrow(new VoiceRangeNotFoundException("missing"));
+
+        mockMvc.perform(put("/api/v1/voice-ranges/{sessionId}", "missing")
+                .header("X-Session-Id", "missing")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound());
     }
 }

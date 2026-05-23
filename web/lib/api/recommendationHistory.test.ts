@@ -12,6 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "./client";
 import { readRecommendationHistory } from "./recommendationHistory";
 
 const fetchMock = vi.fn();
@@ -38,7 +39,8 @@ describe("readRecommendationHistory", () => {
     const payload = {
       recommendationHistoryResponses: [
         {
-          requestId: 42,
+          // issue #422: BE UUIDv7 문자열. 형식만 모사.
+          requestId: "01933b1c-7f8a-7c2d-9b3e-000000000042",
           sessionId: "sess-abc",
           voiceRangeLow: 52,
           voiceRangeHigh: 70,
@@ -121,5 +123,42 @@ describe("readRecommendationHistory", () => {
 
     const [, calledInit] = fetchMock.mock.calls[0];
     expect(calledInit?.signal).toBe(controller.signal);
+  });
+
+  // boundary: HTTP 에러/응답 envelope 결손 가드 (이슈 #659).
+  // 페이지네이션 인자(page/size/cursor)는 API spec 상 존재하지 않으므로(세션 전체 조회)
+  // 인자 boundary 대신 HTTP/envelope 경계만 검증한다.
+
+  it("given BE 가 401 (SessionAuthGuard 헤더 불일치) 을 응답, when called, then ApiError 가 status=401 로 전파된다", async () => {
+    // assertion 두 개라 호출 2회 — 매번 401 응답이 일관되게 와야 한다 (#745).
+    fetchMock.mockResolvedValue(
+      jsonResponse({ message: "session mismatch" }, 401),
+    );
+
+    await expect(readRecommendationHistory("sess-abc")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401,
+    });
+    await expect(readRecommendationHistory("sess-abc")).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+
+  it("given BE 가 500 을 응답, when called, then ApiError 가 status=500 로 전파된다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: "boom" }, 500));
+
+    await expect(readRecommendationHistory("sess-abc")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 500,
+    });
+  });
+
+  it("given BE envelope 가 비정상(키 결손) 이어도, when called, then 응답을 그대로 통과시킨다(호출 측 책임)", async () => {
+    // envelope 결손은 클라이언트가 막지 않고 호출 측 (React Query select) 이 처리.
+    fetchMock.mockResolvedValueOnce(jsonResponse({}));
+
+    const result = await readRecommendationHistory("sess-xyz");
+
+    expect(result).toEqual({});
   });
 });

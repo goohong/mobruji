@@ -35,9 +35,19 @@
   - `0002-license-agpl-3-0.md` — AGPL-3.0 라이선스
   - `0003-test-db-strategy.md` — 테스트 DB 전략
   - `0004-frontend-state-and-fetching.md` — 프론트 상태 관리/페칭
-  - `0005-package-structure.md` — 백엔드 패키지 구조 (+ `0005-package-structure-migration.md`)
+  - `0005-package-structure.md` — 백엔드 패키지 구조 (+ `archive/0005-package-structure-migration.md` — 완료된 마이그레이션 가이드)
   - `0006-audio-source-youtube.md` — PoC 단계 audio 출처 = YouTube extract
   - `0007-vocal-difficulty-classification.md` — 곡 난이도 분류 (EASY/NORMAL/HARD)
+  - `0008-archunit-layer-verification.md` — ArchUnit 계층 검증
+  - `0009-schema-migration-tool.md` — 스키마 마이그레이션 도구
+  - `0010-self-analysis-pipeline-stack.md` — 자체 분석 파이프라인 스택
+  - `0011-session-bound-auth-policy.md` — 세션 기반 인증 정책
+  - `0012-observability-stack.md` — 관측성 스택
+  - `0013-sessionid-ttl-rotation.md` — sessionId TTL 회전
+  - `0014-multi-agent-worktree-orchestration.md` — 다중 agent worktree 오케스트레이션
+  - `0015-hosting-stack.md` — 호스팅 스택
+  - `0016-maestro-context-percent-estimation.md` — maestro context 사용률 추정
+  - `0017-spring-boot-eol-strategy.md` — Spring Boot 3.5 EOL 대응 (3.6 라인 채택, proposed)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
 - `docs/runbooks/`: 운영 런북 (로컬 환경 가동 등)
   - `local-3tier-setup.md` — MySQL + Spring Boot + Next.js 로컬 3-tier 가동 가이드 (rev QA 기본 환경)

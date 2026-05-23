@@ -12,12 +12,16 @@
  * 안전하게 동작한다. 각 테스트는 store를 `setState`로 명시 reset 해서 격리한다.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_EXCLUDED_SONG_IDS, useSessionStore } from "./session";
 
 beforeEach(() => {
   // persist middleware에 묶여 있어도 setState로 초기 상태 강제 복원 가능.
+  // localStorage도 비워야 ensureSessionId persist 테스트가 격리된다.
+  if (typeof localStorage !== "undefined") {
+    localStorage.clear();
+  }
   useSessionStore.setState({
     sessionId: null,
     voiceRangeId: null,
@@ -96,6 +100,85 @@ describe("useSessionStore.setVoiceRangeId", () => {
     appendExcluded([1, 2, 3]);
     setVoiceRangeId(7);
     expect(useSessionStore.getState().excludedSongIds).toEqual([1, 2, 3]);
+  });
+});
+
+describe("useSessionStore.ensureSessionId", () => {
+  it("최초 호출 시 sessionId를 새로 생성하고 이후 호출은 같은 값을 반환한다 (멱등)", () => {
+    const first = useSessionStore.getState().ensureSessionId();
+    expect(first).toBeTruthy();
+    expect(first.length).toBeGreaterThan(0);
+    expect(useSessionStore.getState().sessionId).toBe(first);
+
+    const second = useSessionStore.getState().ensureSessionId();
+    expect(second).toBe(first);
+  });
+
+  it("reset 호출 후 ensureSessionId는 새 값을 만든다 — 이전 ID를 끌고 가지 않는다", () => {
+    const before = useSessionStore.getState().ensureSessionId();
+    useSessionStore.getState().reset();
+    expect(useSessionStore.getState().sessionId).toBeNull();
+    const after = useSessionStore.getState().ensureSessionId();
+    expect(after).not.toBe(before);
+  });
+
+  it("persist storage key 는 'mobruji-session' 으로 sessionId를 직렬화한다", () => {
+    const id = useSessionStore.getState().ensureSessionId();
+    const raw = localStorage.getItem("mobruji-session");
+    expect(raw).not.toBeNull();
+    // zustand persist payload: { state: { sessionId, ... }, version }
+    expect(raw).toContain(id);
+  });
+});
+
+/**
+ * fallback entropy 가드 (closes #424).
+ *
+ * crypto.randomUUID 가 없는 환경(구형 브라우저)에서도 sessionId 가 RFC 4122 v4
+ * UUID 형식(`xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx`)으로 생성되는지 검증한다.
+ * AS-IS `Math.random()` 기반 41-bit entropy 폐기 회귀를 막는다.
+ */
+describe("useSessionStore.ensureSessionId fallback (no crypto.randomUUID)", () => {
+  const originalRandomUUID = globalThis.crypto?.randomUUID;
+
+  afterEach(() => {
+    // 다른 테스트로 leak 방지: spy 가 있으면 복원, 없으면 원본 재할당.
+    vi.restoreAllMocks();
+    if (originalRandomUUID && globalThis.crypto) {
+      Object.defineProperty(globalThis.crypto, "randomUUID", {
+        configurable: true,
+        value: originalRandomUUID,
+      });
+    }
+  });
+
+  it("crypto.randomUUID 가 없으면 getRandomValues 기반 v4 UUID 를 생성한다", () => {
+    // happy-dom 의 crypto.randomUUID 제거 → fallback 분기 진입.
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      configurable: true,
+      value: undefined,
+    });
+
+    const id = useSessionStore.getState().ensureSessionId();
+
+    // RFC 4122 v4: 8-4-4-4-12 hex, version=4, variant=10xx (y ∈ {8,9,a,b}).
+    const uuidV4 =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    expect(id).toMatch(uuidV4);
+  });
+
+  it("두 번 호출하면 서로 다른 v4 UUID 가 나온다 (entropy 살아 있음)", () => {
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      configurable: true,
+      value: undefined,
+    });
+
+    const first = useSessionStore.getState().ensureSessionId();
+    // 같은 store 인스턴스에서는 멱등이므로 reset 후 재생성.
+    useSessionStore.getState().reset();
+    const second = useSessionStore.getState().ensureSessionId();
+
+    expect(first).not.toBe(second);
   });
 });
 

@@ -27,14 +27,16 @@ create "type:chore"         "C5DEF5" "잡일/설정"
 create "type:docs"          "0075CA" "문서"
 create "type:test"          "BFD4F2" "테스트"
 create "type:style"         "FBCA04" "코드 스타일/포맷"
+create "type:release"       "006B75" "릴리즈 PR (develop → main)"
 
-# Scope (도메인) — mobruji 화이트리스트: user / song / recommendation / voice / infra / web
+# Scope (도메인) — mobruji 화이트리스트: user / song / recommendation / voice / infra / web / feedback
 create "scope:user"           "EDEDED" "도메인: user (회원/인증)"
 create "scope:song"           "EDEDED" "도메인: song (곡 메타데이터/카탈로그)"
 create "scope:recommendation" "EDEDED" "도메인: recommendation (추천 알고리즘)"
 create "scope:voice"          "EDEDED" "도메인: voice (음역대 진단)"
 create "scope:infra"          "EDEDED" "도메인: infra (CI/CD/배포/DB/모노레포)"
 create "scope:web"            "EDEDED" "도메인: web (Next.js 프론트엔드)"
+create "scope:feedback"       "EDEDED" "도메인: feedback (좋아요/북마크/리뷰 등 사용자 피드백)"
 
 # AI 운영
 create "ai-generated"       "8A2BE2" "AI 보조/생성으로 작성된 PR (우산 라벨)"
@@ -46,6 +48,7 @@ create "needs-human-review" "B60205" "보호 영역 변경 PR (사람 사후 리
 create "session:backend"  "1F77B4" "백엔드 구현 세션이 진행 중인 PR"
 create "session:frontend" "2CA02C" "프론트엔드 구현 세션이 진행 중인 PR"
 create "session:review"   "9467BD" "리뷰 세션의 산출물 (코멘트로 진행, 브랜치 없음)"
+create "session:plan"     "FF7F0E" "기획 세션(docs/ADR/spec)이 진행 중인 PR"
 create "reviewed:claude"  "BCBD22" "Claude 리뷰 세션이 검토 완료한 PR"
 
 echo "완료."

@@ -120,5 +120,5 @@ jobs:
                   exit 1
               fi
 
-              echo "[cd-dev] success — $(docker compose -f docker-compose.dev.yml ps --format json | jq -r '.[] | "\(.Service): \(.State)"' 2>/dev/null || docker compose -f docker-compose.dev.yml ps)"
+              echo "[cd-dev] success — $(docker compose -f docker-compose.dev.yml --env-file .env.dev ps --format json | jq -r '.[] | "\(.Service): \(.State)"' 2>/dev/null || docker compose -f docker-compose.dev.yml --env-file .env.dev ps)"
           REMOTE

@@ -124,6 +124,45 @@ describe("SongDetailPage", () => {
     );
   });
 
+  // closes #445 — 일시 오류(5xx) 분기는 role="alert" + aria-live="assertive"로
+  // 스크린리더가 즉시 안내할 수 있어야 한다. 회귀 가드.
+  it("일시 오류(5xx) 분기는 role='alert' aria-live='assertive' 컨테이너로 노출된다", async () => {
+    useParamsMock.mockReturnValue({ id: "1" });
+    // useQuery retry=1 (404 외 1회 재시도) → 두 번 모두 5xx 일관 응답이어야
+    // alert 분기에 진입한다. mockResolvedValueOnce 단일 사용 시 두번째 호출이
+    // undefined 로 resolve → query success 처리되어 alert 미노출 (#745).
+    readSongByIdMock.mockRejectedValue(
+      new ApiError(500, "internal error", { message: "internal error" }),
+    );
+
+    renderWithQueryClient(<SongDetailPage />);
+
+    // useQuery retry=1 + 기본 retryDelay(1초) → 첫 시도 + 1초 대기 + 두번째 시도 후 isError.
+    // findByRole default timeout(1초) 부족 → 3초로 확장 (#745).
+    const alert = await screen.findByRole("alert", undefined, { timeout: 3000 });
+    expect(alert).toHaveAttribute("aria-live", "assertive");
+    expect(alert).toHaveTextContent(/곡 정보를 불러오지 못했습니다/);
+    expect(alert).toHaveTextContent(/500/);
+  });
+
+  // closes #480 — SongDetailSkeleton(isPending 분기)는 SR 사용자가
+  // "로딩 중"을 인지하도록 role="status" + aria-busy="true" + aria-label 을
+  // 부여한다. /songs 검색 페이지의 loading status 가드(#472) 와 정합.
+  // 향후 skeleton 리팩터링 시 셋 중 하나라도 누락되면 이 테스트가 실패한다.
+  it("isPending 분기는 role='status' aria-busy='true' aria-label 컨테이너로 노출된다 (#480)", () => {
+    useParamsMock.mockReturnValue({ id: "1" });
+    // resolve/reject 둘 다 하지 않는 promise → query 가 isPending 상태로 고정된다.
+    // never-settling promise 라 다음 테스트로 GC 되더라도 leak 없음 (mockReset 호출됨).
+    readSongByIdMock.mockReturnValueOnce(new Promise<SongResponse>(() => {}));
+
+    renderWithQueryClient(<SongDetailPage />);
+
+    // role=status 는 SR polite live region. axe 도 status 안의 aria-busy 를 허용한다.
+    const status = screen.getByRole("status");
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(status).toHaveAttribute("aria-label", "곡 정보를 불러오는 중");
+  });
+
   it("id 파라미터가 숫자가 아니면 API를 호출하지 않고 NotFound로 떨어진다", () => {
     useParamsMock.mockReturnValue({ id: "abc" });
 

@@ -3,13 +3,20 @@ name: Auto Set Session on Project
 # PR/이슈가 보드에 등록된 뒤 Session 필드를 자동 분류한다.
 #
 # 매핑 룰 (2026-05-21 본진 일괄 분류 패턴과 동일):
-#   1) 라벨 session:backend|frontend|review 우선 → 해당 Session
+#   1) 라벨 session:backend|frontend|review|plan 우선 → 해당 Session
 #   2) 라벨 없으면 — 폴백:
 #      - PR 제목 prefix "release:" → release
 #      - 라벨 scope:web → frontend
-#      - 라벨 scope:song|voice|recommendation → backend
+#      - 라벨 scope:song|voice|recommendation|user|feedback → backend
 #      - 라벨 scope:infra → infra
 #      - 그 외 → 설정 안 함 (manual)
+#
+# Plan 세션은 docs/ADR/spec 전용 — scope:* 폴백 룰을 거치지 않으므로
+# session:plan 라벨이 반드시 명시돼야 plan Session으로 분류된다.
+#
+# Session 옵션 ID는 보드에서 옵션을 추가/삭제하면 모두 재발급되므로,
+# 변경 시 다음 쿼리로 전체 재채취해서 env 블록을 한꺼번에 갱신해야 한다.
+#   gh project field-list 5 --owner goohong --format json
 #
 # 필요한 secrets/vars:
 #   - vars.PROJECT_URL: 보드 URL (auto-add workflow와 공유)
@@ -41,11 +48,12 @@ jobs:
       #   gh project field-list 5 --owner goohong --format json
       PROJECT_ID: PVT_kwHOBRYNe84BYVlg
       SESSION_FIELD_ID: PVTSSF_lAHOBRYNe84BYVlgzhTcJwU
-      OPTION_BACKEND: aabcec2d
-      OPTION_FRONTEND: 0c6191d7
-      OPTION_REVIEW: bf8ab92d
-      OPTION_INFRA: c697cb09
-      OPTION_RELEASE: 41252f0d
+      OPTION_BACKEND: c80126b3
+      OPTION_FRONTEND: a518c9e5
+      OPTION_REVIEW: 269921f7
+      OPTION_INFRA: 5761bf5f
+      OPTION_RELEASE: 16612cf0
+      OPTION_PLAN: 5e10b1fd
 
     steps:
       - name: Guard PROJECT_TOKEN
@@ -86,6 +94,7 @@ jobs:
               review: process.env.OPTION_REVIEW,
               infra: process.env.OPTION_INFRA,
               release: process.env.OPTION_RELEASE,
+              plan: process.env.OPTION_PLAN,
             };
 
             // 1) session:* 라벨 우선
@@ -104,6 +113,11 @@ jobs:
               core.setOutput('reason', 'label session:review');
               return;
             }
+            if (labels.includes('session:plan')) {
+              core.setOutput('option_id', options.plan);
+              core.setOutput('reason', 'label session:plan');
+              return;
+            }
 
             // 2) 폴백
             if (isPR && /^release:/i.test(title)) {
@@ -116,9 +130,9 @@ jobs:
               core.setOutput('reason', 'label scope:web');
               return;
             }
-            if (labels.includes('scope:song') || labels.includes('scope:voice') || labels.includes('scope:recommendation')) {
+            if (labels.includes('scope:song') || labels.includes('scope:voice') || labels.includes('scope:recommendation') || labels.includes('scope:user') || labels.includes('scope:feedback')) {
               core.setOutput('option_id', options.backend);
-              core.setOutput('reason', 'label scope:song|voice|recommendation');
+              core.setOutput('reason', 'label scope:song|voice|recommendation|user|feedback');
               return;
             }
             if (labels.includes('scope:infra')) {

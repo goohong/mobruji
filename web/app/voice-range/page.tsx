@@ -30,6 +30,11 @@ const DEFAULT_LOW_MIDI = 48; // C3
 const DEFAULT_HIGH_MIDI = 69; // A4
 const DEFAULT_SOURCE: VoiceRangeSourceMethod = "OCTAVE_PICK";
 
+// (closes #464) aria-describedby 로 select ↔ 에러 메시지를 연결할 때 사용.
+// 페이지 단위로 유일하므로 const 로 충분 — 컴포넌트 인스턴스가 둘이 될 일 없다.
+const VALIDATION_ERROR_ID = "voice-range-validation-error";
+const SUBMIT_ERROR_ID = "voice-range-submit-error";
+
 export default function VoiceRangePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -157,22 +162,46 @@ export default function VoiceRangePage() {
               value={lowestNoteMidi}
               options={noteOptions}
               onChange={setLowestNoteMidi}
+              invalid={validationError !== null}
+              describedBy={
+                validationError !== null ? VALIDATION_ERROR_ID : undefined
+              }
             />
             <NoteSelect
               label="최고음"
               value={highestNoteMidi}
               options={noteOptions}
               onChange={setHighestNoteMidi}
+              invalid={validationError !== null}
+              describedBy={
+                validationError !== null ? VALIDATION_ERROR_ID : undefined
+              }
             />
 
+            {/*
+              (closes #464) validationError / submitError 영역에 role="alert" 를 부여해
+              SR 사용자도 에러 등장을 즉시 announce 받게 한다.
+              - validationError: 최저음 > 최고음 선택 시 즉시 등장 (assertive 의미라
+                role="alert" 가 적절). select 에는 aria-describedby 로 연결.
+              - submitError: mutation 실패 시 등장. 동일하게 role="alert".
+              시각 표시(붉은색)는 그대로 유지 — role 만 부여한다.
+            */}
             {validationError ? (
-              <p className="text-sm text-red-600 dark:text-red-400">
+              <p
+                id={VALIDATION_ERROR_ID}
+                role="alert"
+                className="text-sm text-red-600 dark:text-red-400"
+              >
                 {validationError}
               </p>
             ) : null}
 
             {submitError ? (
-              <p className="text-sm text-red-600 dark:text-red-400">
+              <p
+                id={SUBMIT_ERROR_ID}
+                role="alert"
+                className="text-sm text-red-600 dark:text-red-400"
+              >
                 저장에 실패했습니다. {submitError}
               </p>
             ) : null}
@@ -199,9 +228,20 @@ type NoteSelectProps = {
   value: number;
   options: number[];
   onChange: (next: number) => void;
+  /** 폼 validation 결과. true 면 select 에 aria-invalid="true" 를 부여한다. */
+  invalid?: boolean;
+  /** aria-describedby 로 연결할 에러 메시지 id (없으면 attribute 자체를 생략). */
+  describedBy?: string;
 };
 
-function NoteSelect({ label, value, options, onChange }: NoteSelectProps) {
+function NoteSelect({
+  label,
+  value,
+  options,
+  onChange,
+  invalid,
+  describedBy,
+}: NoteSelectProps) {
   return (
     <label className="flex flex-col gap-2 text-sm">
       <span className="font-medium text-zinc-700 dark:text-zinc-300">
@@ -210,6 +250,11 @@ function NoteSelect({ label, value, options, onChange }: NoteSelectProps) {
       <select
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
+        // (closes #464) validation 에러 시 aria-invalid + aria-describedby 부여로
+        // SR 사용자가 잘못된 필드와 사유를 함께 인지하도록 한다. describedBy 가
+        // undefined 일 때는 속성 자체를 생략한다 (빈 문자열 ≠ 미지정).
+        aria-invalid={invalid ? true : undefined}
+        aria-describedby={describedBy}
         className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
       >
         {options.map((midi) => (

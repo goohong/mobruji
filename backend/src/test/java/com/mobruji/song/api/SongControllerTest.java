@@ -2,23 +2,31 @@ package com.mobruji.song.api;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willDoNothing;
+import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.mobruji.admin.AdminTokenVerifier;
 import com.mobruji.song.application.SongService;
+import com.mobruji.song.application.SongStats;
 import com.mobruji.song.application.SongStatsService;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
@@ -89,5 +97,45 @@ class SongControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].title", is("벚꽃 엔딩")));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/songs: keyword 누락 → 200 + 빈 배열 (의도된 정책)")
+    void search_blankKeyword_returnsEmpty() throws Exception {
+        // SongService.searchByKeyword(null/blank) → emptyList 정책 검증.
+        given(songService.searchByKeyword(null)).willReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/songs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/songs/stats: 유효 토큰 → 200")
+    void stats_validToken_returns200() throws Exception {
+        willDoNothing().given(adminTokenVerifier).verify("ok-token");
+        given(songStatsService.getStats()).willReturn(new SongStats(
+                42L,
+                Map.of(MetadataSource.MANUAL_SEED, 42L),
+                0.95,
+                Instant.parse("2026-05-23T00:00:00Z"),
+                Instant.parse("2026-05-23T00:30:00Z")));
+
+        mockMvc.perform(get("/api/v1/songs/stats").header("X-Admin-Token", "ok-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total", is(42)))
+                .andExpect(jsonPath("$.avgConfidence", is(0.95)))
+                .andExpect(jsonPath("$.lastBackfillAt", is("2026-05-23T00:00:00Z")))
+                .andExpect(jsonPath("$.lastAlbumCoverBackfillAt", is("2026-05-23T00:30:00Z")));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/songs/stats: 토큰 누락/불일치 → 401, service 미호출")
+    void stats_invalidToken_returns401() throws Exception {
+        willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing admin token"))
+                .given(adminTokenVerifier).verify(any());
+
+        mockMvc.perform(get("/api/v1/songs/stats"))
+                .andExpect(status().isUnauthorized());
     }
 }

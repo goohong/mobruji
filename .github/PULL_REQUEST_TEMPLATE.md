@@ -2,7 +2,7 @@
 - 형식: `type(scope): 제목`
 - 예시: `feat(recommendation): 음역대 기반 1차 추천 알고리즘 구현`
 - `type`: `feat` `fix` `docs` `style` `refactor` `test` `chore`
-- `scope`: `user` `song` `recommendation` `voice` `infra` `web`
+- `scope`: `user` `song` `recommendation` `voice` `infra` `web` `feedback`
 
 ## AS-IS
 - 현재 상태/문제점을 간단히 작성

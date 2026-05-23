@@ -11,6 +11,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  INVALID_MIDI_A11Y_FALLBACK,
+  INVALID_MIDI_PLACEHOLDER,
   MAX_MIDI,
   MIN_MIDI,
   midiToCombinedNoteName,
@@ -129,5 +131,136 @@ describe("midiToCombinedNoteName (#318 A안 — 한국어 (SPN) 병기)", () => 
 
   it("샤프 노트 병기 (MIDI 61 → '도♯4 (C#4)')", () => {
     expect(midiToCombinedNoteName(61)).toBe("도♯4 (C#4)");
+  });
+});
+
+describe("MIDI 경계 회귀 가드 (#576)", () => {
+  // 지원 범위([12,119]) 밖이지만 SPN 절대 경계(MIDI 0=C-1, 127=G9)에서
+  // 모듈로/floor 계산이 깨지지 않는지 잠금. 음수 옥타브 처리도 명세.
+  it("MIDI 0 → C-1 / 도-1 (SPN 하한)", () => {
+    expect(midiToNoteName(0)).toBe("C-1");
+    expect(midiToKoreanNoteName(0)).toBe("도-1");
+  });
+
+  it("MIDI 127 → G9 / 솔9 (SPN 상한)", () => {
+    expect(midiToNoteName(127)).toBe("G9");
+    expect(midiToKoreanNoteName(127)).toBe("솔9");
+  });
+
+  it("음수 MIDI(-12) → C-2 (음수 옥타브 가드)", () => {
+    // ((midi % 12) + 12) % 12 가 음수 입력에서도 [0,11] 반환해야 함.
+    expect(midiToNoteName(-12)).toBe("C-2");
+    expect(midiToKoreanNoteName(-12)).toBe("도-2");
+  });
+
+  it("비유한 입력(NaN/Infinity/-Infinity)은 placeholder 를 반환한다 (#757)", () => {
+    // 이전 동작: `'undefinedNaN'` 문자열이 그대로 UI 에 노출. audio analyzer
+    // (pitchy) 가 silence/noise 시 NaN 을 흘리면 사용자 화면 깨짐. PR #745 가
+    // 기존 동작을 잠갔으나 #757 에서 가드 추가 — placeholder ("--") 반환으로
+    // 변경하고 호출자가 사전 필터링하지 않아도 안전한 표시를 보장한다.
+    expect(midiToNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+    expect(midiToNoteName(Number.POSITIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+    expect(midiToNoteName(Number.NEGATIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+    expect(midiToKoreanNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+    expect(midiToKoreanNoteName(Number.POSITIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+    expect(midiToKoreanNoteName(Number.NEGATIVE_INFINITY)).toBe(
+      INVALID_MIDI_PLACEHOLDER,
+    );
+  });
+
+  it("유효 정수 입력은 가드 영향 없이 그대로 변환한다 (#757 회귀 가드)", () => {
+    // 가드 추가가 정상 경로(유한 정수)에 영향 주지 않음을 명세.
+    expect(midiToNoteName(60)).toBe("C4");
+    expect(midiToNoteName(69)).toBe("A4");
+    expect(midiToNoteName(0)).toBe("C-1");
+    expect(midiToNoteName(127)).toBe("G9");
+    expect(midiToKoreanNoteName(60)).toBe("도4");
+    expect(midiToKoreanNoteName(69)).toBe("라4");
+  });
+
+  it("midiToCombinedNoteName 도 비유한 입력은 placeholder 병기 (#757)", () => {
+    // Combined 는 두 함수 호출 결합 — 가드가 자연 전파되어 '-- (--)' 형태.
+    expect(midiToCombinedNoteName(Number.NaN)).toBe(
+      `${INVALID_MIDI_PLACEHOLDER} (${INVALID_MIDI_PLACEHOLDER})`,
+    );
+  });
+
+  describe("a11yFallback 옵션 (#766)", () => {
+    // 스크린리더가 "--" 를 "dash dash" 로 읽어 의미를 잃는 문제를 차단하기 위해
+    // 호출자가 aria-label/스크린리더 컨텍스트에서 의미 있는 fallback 을 주입할
+    // 수 있어야 한다. 옵션 미지정 시 기존 placeholder("--") 와 100% 호환되어야
+    // 호출처 전수 마이그레이션 부담을 없앤다.
+    it("midiToNoteName: 비유한 입력 + a11yFallback 지정 시 fallback 반환", () => {
+      expect(
+        midiToNoteName(Number.NaN, { a11yFallback: "음정 정보 없음" }),
+      ).toBe("음정 정보 없음");
+      expect(
+        midiToNoteName(Number.POSITIVE_INFINITY, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe(INVALID_MIDI_A11Y_FALLBACK);
+    });
+
+    it("midiToKoreanNoteName: 비유한 입력 + a11yFallback 지정 시 fallback 반환", () => {
+      expect(
+        midiToKoreanNoteName(Number.NaN, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe(INVALID_MIDI_A11Y_FALLBACK);
+    });
+
+    it("midiToCombinedNoteName: 비유한 입력 + a11yFallback 지정 시 중복 병기 없이 fallback 단독", () => {
+      // 명세: "음정 정보 없음 (음정 정보 없음)" 같은 중복 출력 회피.
+      expect(
+        midiToCombinedNoteName(Number.NaN, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe(INVALID_MIDI_A11Y_FALLBACK);
+    });
+
+    it("옵션 미지정 시 기존 placeholder 동작 유지 (backward compat)", () => {
+      // 기존 호출처는 옵션 없이 그대로 동작해야 한다.
+      expect(midiToNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+      expect(midiToKoreanNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+      expect(midiToCombinedNoteName(Number.NaN)).toBe(
+        `${INVALID_MIDI_PLACEHOLDER} (${INVALID_MIDI_PLACEHOLDER})`,
+      );
+    });
+
+    it("유효 입력은 옵션 전달과 무관하게 정상 변환 (옵션이 정상 경로 침범 X)", () => {
+      expect(
+        midiToNoteName(60, { a11yFallback: INVALID_MIDI_A11Y_FALLBACK }),
+      ).toBe("C4");
+      expect(
+        midiToKoreanNoteName(69, { a11yFallback: INVALID_MIDI_A11Y_FALLBACK }),
+      ).toBe("라4");
+      expect(
+        midiToCombinedNoteName(60, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe("도4 (C4)");
+    });
+
+    it("INVALID_MIDI_A11Y_FALLBACK 상수는 한글 안내 문구 (스크린리더 호환)", () => {
+      // ASCII 기호 ("--") 가 아닌 한글 텍스트여야 스크린리더가 의미 있게 낭독.
+      expect(INVALID_MIDI_A11Y_FALLBACK).toBe("음정 정보 없음");
+      expect(INVALID_MIDI_A11Y_FALLBACK).not.toBe(INVALID_MIDI_PLACEHOLDER);
+    });
+  });
+
+  it("SPN-한국어 옥타브 일치 round-trip (MIDI 0~127 전수)", () => {
+    // midiToNoteName / midiToKoreanNoteName 의 octave 계산이 동일 식 사용.
+    // 한쪽만 바뀌면 UI 병기에서 옥타브 어긋남 → 즉시 fail.
+    for (let midi = 0; midi <= 127; midi += 1) {
+      const spnOctave = midiToNoteName(midi).match(/-?\d+$/)?.[0];
+      const koreanOctave = midiToKoreanNoteName(midi).match(/-?\d+$/)?.[0];
+      expect(spnOctave).toBe(koreanOctave);
+    }
   });
 });

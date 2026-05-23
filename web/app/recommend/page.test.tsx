@@ -216,10 +216,18 @@ afterEach(() => {
 
 /**
  * 추천 응답 헬퍼 — 곡 ID 리스트로 응답을 생성.
+ *
+ * issue #422: BE `requestId` 가 UUIDv7 문자열로 전환됨에 따라 헬퍼 시그니처도
+ * `string` 으로 통일. 기존 정수 seed 입력 호출처가 많아 동일 호출부를 유지하도록
+ * `ridFromSeed()` 로 결정적 UUID 문자열을 만들어 넣는다.
  */
-function buildResponseWithSongIds(requestId: number, songIds: number[]) {
+function ridFromSeed(seed: number): string {
+  return `01933b1c-7f8a-7c2d-9b3e-${seed.toString(16).padStart(12, "0")}`;
+}
+
+function buildResponseWithSongIds(seed: number, songIds: number[]) {
   return {
-    requestId,
+    requestId: ridFromSeed(seed),
     recommendations: songIds.map((id, idx) => ({
       rankPosition: idx + 1,
       score: 0.9 - idx * 0.05,
@@ -476,7 +484,7 @@ describe("RecommendPage", () => {
         updatedAt: "2026-05-21T00:00:00Z",
       });
       createRecommendationMock.mockResolvedValueOnce({
-        requestId: 999,
+        requestId: ridFromSeed(999),
         recommendations: [],
       });
 
@@ -513,7 +521,10 @@ describe("RecommendPage", () => {
 
       createRecommendationMock
         .mockResolvedValueOnce(buildResponseWithSongIds(1, [1, 2]))
-        .mockResolvedValueOnce({ requestId: 2, recommendations: [] });
+        .mockResolvedValueOnce({
+          requestId: ridFromSeed(2),
+          recommendations: [],
+        });
 
       renderWithQueryClient(<RecommendPage />);
 
@@ -573,12 +584,13 @@ describe("RecommendPage", () => {
       expect(append).toHaveBeenCalledTimes(1);
     });
     const callArg = append.mock.calls[0][0] as {
-      requestId: number;
+      requestId: string;
       voiceRangeId: number | null;
       songs: { song: { id: number } }[];
       excludedSongIds: number[];
     };
-    expect(callArg.requestId).toBe(555);
+    // issue #422: requestId 는 BE UUIDv7 문자열 그대로 전달.
+    expect(callArg.requestId).toBe(ridFromSeed(555));
     expect(callArg.voiceRangeId).toBe(77);
     expect(callArg.songs).toHaveLength(1);
     expect(callArg.songs[0].song.id).toBe(555);
@@ -621,6 +633,84 @@ describe("RecommendPage", () => {
       await expectNoA11yViolations(container);
     });
 
+    // closes #426 — 무한 스크롤로 추천 결과가 추가될 때 스크린 리더 사용자에게
+    // 알리는 라이브 영역이 페이지 마운트 직후부터 존재해야 하고, 첫 페이지/추가 페이지
+    // 도착 시점에 메시지가 업데이트되어야 한다. 시각적으로는 `sr-only` 로 숨겨지지만
+    // DOM 상에는 항상 `role="status"` + `aria-live="polite"` 로 노출된다.
+    it("첫 페이지 도착 시 라이브 영역에 '추천 N건을 불러왔습니다.' 메시지가 노출된다 (#426)", async () => {
+      sessionMock.set({ sessionId: "sess-live-first", voiceRangeId: 51 });
+
+      readVoiceRangeMock.mockResolvedValue({
+        id: 51,
+        sessionId: "sess-live-first",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-23T00:00:00Z",
+        updatedAt: "2026-05-23T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(
+        buildResponseWithSongIds(1, [11, 12, 13]),
+      );
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-11")).toBeInTheDocument();
+      });
+
+      const liveRegion = screen.getByTestId("recommend-live-region");
+      expect(liveRegion).toHaveAttribute("role", "status");
+      expect(liveRegion).toHaveAttribute("aria-live", "polite");
+      expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+      await waitFor(() => {
+        expect(liveRegion).toHaveTextContent("추천 3건을 불러왔습니다.");
+      });
+    });
+
+    it("추가 페이지 도착 시 라이브 영역이 '추천 M건이 더 추가되었습니다. (총 N건)' 으로 갱신된다 (#426)", async () => {
+      sessionMock.set({ sessionId: "sess-live-next", voiceRangeId: 52 });
+      wireAppendExcluded();
+
+      readVoiceRangeMock.mockResolvedValue({
+        id: 52,
+        sessionId: "sess-live-next",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-23T00:00:00Z",
+        updatedAt: "2026-05-23T00:00:00Z",
+      });
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [21, 22]))
+        .mockResolvedValueOnce(buildResponseWithSongIds(2, [31, 32, 33]));
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-21")).toBeInTheDocument();
+      });
+
+      const liveRegion = screen.getByTestId("recommend-live-region");
+      await waitFor(() => {
+        expect(liveRegion).toHaveTextContent("추천 2건을 불러왔습니다.");
+      });
+
+      // sentinel 진입 → 다음 페이지 페치 → 라이브 영역 메시지 갱신.
+      await act(async () => {
+        triggerIntersection();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-31")).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(liveRegion).toHaveTextContent(
+          "추천 3건이 더 추가되었습니다. (총 5건)",
+        );
+      });
+    });
+
     it("빈 응답 fallback 상태에 a11y 위반이 없다", async () => {
       sessionMock.set({ sessionId: "sess-empty-a11y", voiceRangeId: 9 });
       readVoiceRangeMock.mockResolvedValue({
@@ -633,7 +723,7 @@ describe("RecommendPage", () => {
         updatedAt: "2026-05-21T00:00:00Z",
       });
       createRecommendationMock.mockResolvedValueOnce({
-        requestId: 1,
+        requestId: ridFromSeed(1),
         recommendations: [],
       });
 

@@ -36,7 +36,7 @@ last_reviewed: 2026-05-22
 - [ ] `SpotifyAudioFeaturesBackfillJob` — 스케줄러 또는 admin 트리거. selective query (`Song.valence IS NULL AND Song.isrc IS NOT NULL`) 로 미처리 곡만 처리. 멱등.
 - [ ] Spotify rate limit 준수 — 응답 헤더 `Retry-After` 존중, 지수 backoff (1s → 2s → 4s, 최대 3회), 한도 초과 시 job skip + 다음 사이클 재시도.
 - [ ] 응답 캐싱 정책 — Spotify 약관상 audio-features 는 **장기 저장 가능 (영구 보관 OK)** 으로 약관 §IV.2.a.iv 가 명시. 캐시 영속화는 `Song.valence`/`energy` 컬럼 자체로 충분, 별도 응답 캐시 없음.
-- [ ] **추천 알고리즘 w4 활성화** — `RecommendationProperties.weights.moodMatch` 또는 `valenceEnergyMatch` 신호로 통합. 산식은 §5-7 + 결정 Q3. 가중치 변경은 별도 ADR (`0013-recommendation-mood-signal-source.md` — `v03-roadmap.md §4-1` 권장).
+- [ ] **추천 알고리즘 w4 활성화** — `RecommendationProperties.weights.moodMatch` 또는 `valenceEnergyMatch` 신호로 통합. 산식은 §5-7 + 결정 Q3. 가중치 변경은 별도 ADR (`0017-recommendation-mood-signal-source.md` — `v03-roadmap.md §4-1` 권장).
 - [ ] **결정성 회귀 가드** — `Song.valence`/`energy` backfill 전후로 같은 추천 입력 → 결과 셋 비교 가드 (v2 결정성 가드 확장).
 - [ ] 관측성 — `mobruji.external.spotify.request` counter (`outcome` 라벨), `mobruji.external.spotify.request.duration` timer (already specified in `observability-baseline.md §5-3` table).
 
@@ -77,7 +77,7 @@ last_reviewed: 2026-05-22
 - 기존 `Song` 엔티티에 추가:
   - `valence` — DOUBLE, 0.0~1.0, nullable. Spotify 정의: "musical positiveness". null → "측정 안됨" 또는 Spotify ID 없음.
   - `energy` — DOUBLE, 0.0~1.0, nullable. Spotify 정의: "perceptual measure of intensity and activity".
-  - `metadataSource` enum 에 **신규 값 없음** — `valence`/`energy` 갱신만으로는 `metadataSource` 변경 없음 (이전 source 유지). 곡의 1차 source 는 그대로 `MANUAL_SEED` / `SELF_ANALYSIS` 유지.
+  - `metadataSource` enum 에 **신규 값 없음** — `valence`/`energy` 갱신만으로는 `metadataSource` 변경 없음 (이전 source 유지). 곡의 1차 source 는 그대로 `MANUAL_SEED` / `AUDIO_ANALYSIS` 유지.
 - 도메인 모델 §4 유비쿼터스 랭귀지 추가 후보:
   - **valence (긍정성)** — Spotify 정의에 따른 0.0 (sad/depressed) ~ 1.0 (happy/cheerful) 척도. 본 spec 의 mood signal 입력.
   - **energy (격렬도)** — 0.0 (calm) ~ 1.0 (intense/loud) 척도. 본 spec 의 mood signal 입력.
@@ -195,7 +195,7 @@ moodMatch(song, request) =
     1.0 - min(distance / sqrt(2), 1.0)   // 0~1 정규화 (sqrt(2) = 최대 거리)
 ```
 
-가중치 변경 (현 `moodMatch=0.2`, `popularityPrior=0.05` 에서 — `recommendation-algorithm-v2.md §5-2`) 는 **별 ADR 신설** (`0013-recommendation-mood-signal-source.md`). 본 spec 은 산식 + 컬럼만 도입하고, 가중치 활성화는 별 PR + ADR.
+가중치 변경 (현 `moodMatch=0.2`, `popularityPrior=0.05` 에서 — `recommendation-algorithm-v2.md §5-2`) 는 **별 ADR 신설** (`0017-recommendation-mood-signal-source.md` — ADR-0013 은 sessionid-ttl-rotation 점유로 0017 슬롯 재할당). 본 spec 은 산식 + 컬럼만 도입하고, 가중치 활성화는 별 PR + ADR.
 
 ## 6) 작업 분할 (예상 PR 리스트)
 
@@ -203,7 +203,7 @@ moodMatch(song, request) =
 
 - [ ] **PR A** (be, scope:song, needs-human-review): `Song` 엔티티 `valence`/`energy` 컬럼 + V7 Flyway 마이그레이션 + `06-domain-model.md §5/§6` 갱신. 기존 데이터는 NULL 로 backfill 됨. 추천 산식 변경 없음 (NULL → 0.5 중립 — 이전 동작 유지). E2E 회귀 가드.
 - [ ] **PR B** (be, scope:song, needs-human-review): `SpotifyClient` (OAuth + audio-features + ISRC search) + `SpotifyAudioFeaturesBackfillJob` (`@Scheduled` + admin endpoint) + `application.yml` 환경변수 binding + 관측성 카운터 (`mobruji.external.spotify.*`). systemd `EnvironmentFile` 가이드 문서 (`docs/ai-harness/10-observability.md` 또는 신규 `docs/runbooks/spotify-backfill.md`).
-- [ ] **PR C** (be, scope:recommendation): `RecommendationScorer.moodMatch(song, request)` 산식을 `Song.valence`/`energy` + mood vector 거리 기반으로 갱신. 가중치 조정 + ADR-0013 (`0013-recommendation-mood-signal-source.md`) 신설. 결정성 회귀 가드 확장. `recommendation-algorithm-v2.md §3 / §5` 갱신 (또는 v3 spec 으로 분리 — §8 Q5).
+- [ ] **PR C** (be, scope:recommendation): `RecommendationScorer.moodMatch(song, request)` 산식을 `Song.valence`/`energy` + mood vector 거리 기반으로 갱신. 가중치 조정 + ADR-0017 (`0017-recommendation-mood-signal-source.md`) 신설. 결정성 회귀 가드 확장. `recommendation-algorithm-v2.md §3 / §5` 갱신 (또는 v3 spec 으로 분리 — §8 Q5).
 
 **의존성**: PR A → PR B → PR C 순서 권장. PR A 머지 없이 PR B 의 backfill 은 영속화할 컬럼이 없어 실패. PR B 머지 없이 PR C 는 영속 데이터가 없어 거의 모든 곡이 fallback 0.5 만 반환 (의미 없음).
 
@@ -228,7 +228,7 @@ moodMatch(song, request) =
 |---|---|---|---|
 | Q1 | mood → (valence, energy) vector 매핑 기본값 | (a) §5-7 표 그대로 / (b) 운영 데이터 수집 후 통계로 재조정 / (c) UI A/B 테스트로 결정 | @goohong / PR C 직전 |
 | Q2 | ISRC 매칭 정확도 검증 — Spotify search 결과가 진짜 같은 곡인지 보증 어떻게 | (a) ISRC 일치만 신뢰 / (b) artist 이름 normalized 매칭 추가 검증 / (c) 매칭 결과를 운영자가 수동 승인 | @goohong / PR B 직전 |
-| Q3 | mood signal 가중치 활성화 시점 | (a) PR C 머지 즉시 (현 `moodMatch=0.2` 유지, 산식만 변경) / (b) 별도 ADR-0013 머지 후 점진 활성화 (`0.05` → `0.2` step) / (c) feature flag 로 on/off | @goohong / PR C 직전 |
+| Q3 | mood signal 가중치 활성화 시점 | (a) PR C 머지 즉시 (현 `moodMatch=0.2` 유지, 산식만 변경) / (b) 별도 ADR-0017 머지 후 점진 활성화 (`0.05` → `0.2` step) / (c) feature flag 로 on/off | @goohong / PR C 직전 |
 | Q4 | Spotify 매칭 실패 곡 (ISRC 없음 또는 ISRC 검색 0건) 처리 | (a) `valence`/`energy` null 유지 / (b) `metadataConfidence` 감점 / (c) `metadataSource = EXTERNAL_API_FAILED` 신규 enum 값 | @goohong / PR B 직전 |
 | Q5 | 추천 알고리즘 spec 갱신 vs 분리 | (a) `recommendation-algorithm-v2.md` 본문 갱신 / (b) `recommendation-algorithm-v3.md` 신설 (v3 = audio-features 기반 mood signal 활성화) | @goohong / PR C 직전 |
 | Q6 | `valence`/`energy` 외 추가 audio feature (`danceability` 등) 도입 시점 | (a) 본 spec v1 → 두 차원만 / (b) PR C 직후 곧바로 6차원 확장 / (c) 운영 데이터 1개월 누적 후 효과 측정 | @goohong / 2026-07-01 |
@@ -238,4 +238,4 @@ moodMatch(song, request) =
 
 > 연대기 순.
 
-- **2026-05-22 (plan 29, 본 PR)**: 초안 작성 (status=draft). #69 트래커 등록. self-analysis pivot (ADR-0006/0010) 과의 정합성 명시 — Spotify 범위는 `valence`/`energy` 두 차원만, key/tempo 는 self-analysis 가 담당, vocal range 는 외부 API 제공 안 함 (변경 없음). 의존 #68 MusicBrainz ISRC backfill 선행 (`v03-roadmap.md §4-1`). 가중치 변경은 별 ADR-0013 신설 권장. observability counter 는 `observability-baseline.md §5-3` 표에 이미 등재 — 본 spec PR B 에서 코드 등록만.
+- **2026-05-22 (plan 29, 본 PR)**: 초안 작성 (status=draft). #69 트래커 등록. self-analysis pivot (ADR-0006/0010) 과의 정합성 명시 — Spotify 범위는 `valence`/`energy` 두 차원만, key/tempo 는 self-analysis 가 담당, vocal range 는 외부 API 제공 안 함 (변경 없음). 의존 #68 MusicBrainz ISRC backfill 선행 (`v03-roadmap.md §4-1`). 가중치 변경은 별 ADR (당시 0013 슬롯 예약, plan 33 이후 0017 슬롯으로 재할당) 신설 권장. observability counter 는 `observability-baseline.md §5-3` 표에 이미 등재 — 본 spec PR B 에서 코드 등록만.

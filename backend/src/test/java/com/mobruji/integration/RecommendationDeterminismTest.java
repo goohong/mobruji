@@ -29,8 +29,12 @@ import io.restassured.RestAssured;
  * 추천 결정성 회귀 테스트.
  *
  * <p>spec: {@code docs/features/recommendation-algorithm-v1.md} §3 비기능 — 결정성
- * (같은 입력 → 같은 결과). 동일 페이로드 두 번 호출 시 곡 ID 순서가 일치하는지,
- * 입력이 달라지면 entropy가 살아 있는지를 RestAssured E2E로 검증한다.
+ * (같은 입력 → 같은 결과). 동일 페이로드 두 번 호출 시 곡 ID 순서·score·breakdown 영향이
+ * 일치하는지를 RestAssured E2E로 검증한다.
+ *
+ * <p>entropy 보존(다른 입력 → 다른 seed) 단정은 단위 레이어({@link
+ * com.mobruji.recommendation.application.SeedDeriverTest})로 이동했다 (#299). E2E는
+ * 곡 시드 + 가중치 미세 변경에 flaky 하므로 결정성 회귀만 가드한다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -172,33 +176,10 @@ class RecommendationDeterminismTest {
         assertThat(fastTop).isNotEqualTo(slowTop);
     }
 
-    @Test
-    @DisplayName("entropy 보존: 다른 sessionId → 적어도 한 자리에서 순서가 달라진다")
-    void determinism_differentInput_yieldsDifferentOrder() {
-        // given: sessionId만 다르고 나머지는 동일 → jitter seed가 달라져야 함
-        final String payloadA = """
-                {
-                  "sessionId": "entropy-a",
-                  "voiceRangeLow": 55,
-                  "voiceRangeHigh": 75,
-                  "mood": "UPBEAT"
-                }
-                """;
-        final String payloadB = """
-                {
-                  "sessionId": "entropy-b",
-                  "voiceRangeLow": 55,
-                  "voiceRangeHigh": 75,
-                  "mood": "UPBEAT"
-                }
-                """;
-        // when
-        final List<Integer> orderA = postAndExtractSongIds(payloadA);
-        final List<Integer> orderB = postAndExtractSongIds(payloadB);
-        // then: 동순위 후보가 많은 시드에서 jitter가 의미 있게 흔드는지 확인.
-        // 곡 집합은 같지만(다양성 캡 통과 후보 풀이 작아 동일할 수 있음) 적어도 순서가 달라야 한다.
-        assertThat(orderA).isNotEqualTo(orderB);
-    }
+    // NOTE (#299): "다른 sessionId → 다른 곡 순서" entropy 단정은 SeedDeriverTest 로 이동.
+    // E2E 레이어는 곡 시드 8개 + 가중치 미세 변경에 flaky 했고, spec §7 테스트 전략(단위/통합/E2E
+    // 3-레이어 분리)에 따라 entropy 단정의 단일 진실 레이어는 단위 테스트로 둔다. E2E는 결정성
+    // 회귀 가드(같은 입력 4 케이스)만 책임진다.
 
     private List<Integer> postAndExtractSongIds(final String payload) {
         return given()

@@ -6,7 +6,7 @@ owner: "@goohong"
 scope: song
 related_issues: [3, 17]
 related_prs: [4, 18]
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-23
 ---
 
 # 곡 메타데이터 출처 (song-metadata-source)
@@ -27,10 +27,10 @@ last_reviewed: 2026-05-21
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [ ] 곡 메타데이터를 `Song` 엔티티 형태로 영속화한다.
-- [ ] 곡 식별자(내부 ID) + 외부 식별자(예: ISRC, Spotify ID, TJ 번호, 금영 번호)를 동시에 보관한다.
-- [ ] 곡 음역(`SongRange`)을 곡당 1쌍(최저, 최고 MIDI note)으로 보관한다.
-- [ ] 메타데이터 출처(`source`) 및 신뢰도 표기를 곡 레코드에 남긴다 (`MANUAL`, `EXTERNAL_API`, `INFERRED` 등).
+- [x] 곡 메타데이터를 `Song` 엔티티 형태로 영속화한다.
+- [x] 곡 식별자(내부 ID) + 외부 식별자(예: ISRC, Spotify ID, TJ 번호, 금영 번호)를 동시에 보관한다.
+- [x] 곡 음역(`SongRange`)을 곡당 1쌍(최저, 최고 MIDI note)으로 보관한다.
+- [x] 메타데이터 출처(`source`) 및 신뢰도 표기를 곡 레코드에 남긴다 (`MANUAL`, `EXTERNAL_API`, `INFERRED` 등).
 - [ ] PoC 단계에선 신곡 추가/보정이 **DB 직접 또는 시드 SQL/JSON** 으로 가능하면 충분 (관리자 UI는 비범위).
 - [x] (PR #96, closes #77) 곡 음역(`lowMidi`/`highMidi`)으로부터 가창 난이도(EASY/NORMAL/HARD)를 자동 분류하여 영속하고 응답으로 노출. 분류 룰은 fe `web/lib/difficulty.ts`와 1:1 일치 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
 - [x] (PR #96) 응답에 `lowestNoteName`/`highestNoteName` 음표명 표기 노출 (예: "C4", "E5"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기).
@@ -61,7 +61,7 @@ last_reviewed: 2026-05-21
 - 신규: **`Song`** (Entity) — 카탈로그의 1행.
   - 필드(잠정): `id`, `title`, `artist`, `releaseYear`, `keyOriginal`(곡 원곡 키), `lowMidi`, `highMidi`(MIDI), `bpm`, `mood`(enum, 다중), `language`, `genre`, `tjNumber`, `kyNumber`, `spotifyId`, `isrc`, `metadataSource`, `metadataConfidence`, `difficulty`, `createdAt`, `updatedAt`.
   - PR #96에서 `lowMidi`/`highMidi`/`difficulty`(enum EASY/NORMAL/HARD) 추가. `difficulty`는 `lowMidi`/`highMidi`로부터 `Song.deriveDifficulty(...)`가 자동 분류 (fe `web/lib/difficulty.ts`와 1:1 룰).
-  - **PR #204(closes #44, #203)에서 `isrc`(VARCHAR(12), nullable, UNIQUE) + `metadataConfidence`(DOUBLE, 0~1, default 1.0) 본진 컬럼으로 promote** — V3 마이그레이션. `metadataConfidence`는 `MANUAL_SEED`=1.0, `AUDIO_ANALYSIS` backfill 시 `result.confidence` 저장. 추천 알고리즘 입력 무관(결정성 회귀 없음). `spotifyId`는 외부 연동 spec까지 잠정 유지.
+  - **PR #204(closes #44, #203)에서 `isrc`(VARCHAR(12), nullable, UNIQUE) + `metadataConfidence`(DOUBLE, 0~1, default 1.0) maestro 컬럼으로 promote** — V3 마이그레이션. `metadataConfidence`는 `MANUAL_SEED`=1.0, `AUDIO_ANALYSIS` backfill 시 `result.confidence` 저장. 추천 알고리즘 입력 무관(결정성 회귀 없음). `spotifyId`는 외부 연동 spec까지 잠정 유지.
 - **`SongRange`** (별 VO) — PR #96 시점에 도입하지 않음. `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순 표현. `VoiceRange`와 동일 MIDI 표현 규약을 공유해 매칭 비용 절감 목표는 유지.
 - 도메인 모델 §4 유비쿼터스 랭귀지에 이미 등재된 용어: `Song`, `SongRange`, `Key`, `Mood`, `Difficulty`(PR #96), `NoteName`(PR #96). 추가 후보: `MetadataSource`, `KaraokeNumber` (TJ/금영의 추상화).
 
@@ -72,8 +72,25 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
 |---|---|---|---|---|---|
 | GET | /api/v1/songs/{id} | 곡 상세 조회 | 익명 가능 | - | `SongResponse` |
 | GET | /api/v1/songs?keyword=... | 키워드(제목/아티스트) 검색 | 익명 가능 | query | `List<SongResponse>` |
+| GET | /api/v1/songs/stats | PoC 한정 admin 통계 (총 곡 수 / `metadataSource` 분포 / 평균 `metadataConfidence` / 마지막 backfill 시각) | Admin (`X-Admin-Token` 헤더 필수, `AdminTokenVerifier`) | header | `SongStatsResponse` |
 
 > 추천 결과에서 호출되는 read API만 1차로 둔다. POST/PUT은 admin 분리 후 결정.
+
+#### 5-2-1) Admin 통계 endpoint (`/api/v1/songs/stats`)
+- 도입: **PR #228** (v0.3 P0, rev 14 후속 #208/#212). 운영 가시성 — `SongAudioBackfill` 진행 상황 확인.
+- 인증: `X-Admin-Token` 헤더 + `com.mobruji.admin.AdminTokenVerifier`. Spring Security 정식 도입 시 인가 필터로 이전 예정.
+- 응답(`SongStatsResponse`):
+  - `total` — 전체 곡 수
+  - `byMetadataSource` — `MetadataSource` enum 전체에 대해 0 건 source 도 0 으로 채움
+  - `avgConfidence` — 평균 `metadataConfidence` (0.0~1.0). 곡 0 건이면 0.0
+  - `lastBackfillAt` — 마지막 backfill batch 완료 시각. 미실행/재기동 후 미실행 시 `null`
+- 본 endpoint 는 PoC 한정 운영 도구. fe 노출 계획 없음.
+
+**키워드 검색 정책 (BE↔FE 계약)** — `keyword` 가 비/공백/null 이면 200 OK + 빈 배열(`[]`) 반환. 400 Bad Request 가 아니다. 이유:
+1. Repository 는 `LIKE '%keyword%'` 라 빈 키워드면 전체 풀스캔. 200 OK + 빈 배열로 풀스캔을 차단한다.
+2. fe(`web/app/songs/page.tsx`) 는 입력 전 호출도 안전하게 "검색 결과 없음"으로 fallback. 400 응답을 따로 분기하지 않아도 된다.
+
+회귀 가드: `SongServiceTest#searchByKeyword_emptyKeyword_returnsEmpty`. 정책 변경 시 fe 페이지 헤더 주석("BE 약속")과 본 표를 동시 갱신.
 
 ### 5-3) 외부 연동 후보
 | 출처 | 장점 | 단점/리스크 |
@@ -148,3 +165,4 @@ PoC 단계에선 **읽기만 노출**. 등록/수정은 시드 파일 또는 adm
   - **`Difficulty` enum (EASY/NORMAL/HARD)** — fe(`web/lib/difficulty.ts`)와 1:1 동일 룰. 분류 임계값(HARD≥76 또는 span≥17, NORMAL 71~75, EASY <71)은 `Song`의 상수에 하드코딩. ADR 0007 후보(maestro 후속).
   - **응답 노출** — `SongResponse`에 `difficulty`, `lowestNoteName`, `highestNoteName` 추가. 노트명 변환은 `song.domain.NoteName` 유틸 (sharp 표기, fe와 일치).
   - **시드 30곡 모두 `lowMidi`/`highMidi` 채움** — 합리적 추정값. 후속 큐레이션에서 정확도 향상 가능.
+- 2026-05-23: §5-2 표 + §5-2-1 admin 통계 endpoint 섹션 신설 (rev drift #463). 실 코드 (`SongController#stats`, PR #228) 가 §5-2 표에 누락돼 있던 것을 동기화. 코드 변경 없음 — docs only.

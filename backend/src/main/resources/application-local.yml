@@ -22,3 +22,14 @@ spring:
 audio:
   analysis:
     tool-dir: ${AUDIO_ANALYSIS_TOOL_DIR:../tools/audio-analysis}
+
+# local/dev 개발자 dashboard 용 metrics/prometheus 노출 (이슈 #395).
+# base application.yml 은 health,info 만 — prod 보수적 기본값.
+# dev 환경(NCP) 도 SPRING_PROFILES_ACTIVE=local 사용 중이라 본 override 가 적용됨.
+# nginx 외부 80 포트는 health/liveness, health/readiness 만 whitelist (defense in depth).
+# metrics/prometheus 는 management.server.port=8081 (internal docker network) 으로만 접근 가능.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

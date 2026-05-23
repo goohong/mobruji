@@ -1,12 +1,12 @@
 ---
 feature: 익명 sessionId 라이프사이클 (TTL 만료 + 사용자 회전 + 머지)
 slug: anonymous-session-lifecycle
-status: draft
+status: implementing
 owner: @goohong
 scope: infra
 related_issues: [209, 238, 242, 243]
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [913, 924, 925]
+last_reviewed: 2026-05-24
 ---
 
 # 익명 sessionId 라이프사이클 (TTL 만료 + 사용자 회전 + 머지)
@@ -23,6 +23,7 @@ last_reviewed: 2026-05-22
 - (S2) **사용자 트리거 회전**: 사용자 B 가 가족과 공유한 디바이스에서 본인 데이터를 분리하고 싶다 → fe 의 "고급 설정 > 세션 초기화" 클릭 → `POST /api/v1/sessions/rotate` 호출 → 새 sessionId 발급 + 기존 sessionId 의 데이터 cascade-delete (또는 anonymize 옵션 선택) → fe 가 새 sessionId 로 쿠키 갱신.
 - (S3) **v0.4 계정 머지**: 사용자 C 가 anonymous sessionId 로 like 50개 + voice-range snapshot 10개를 누적한 상태에서 v0.4 Google OAuth 로그인 → 백엔드가 해당 sessionId 의 모든 데이터를 `user_id` 로 owner 치환 + sessionId 를 revoke → fe 가 로그인 후 history 페이지에서 머지된 데이터 표시.
 - (S4) **만료 batch 운영자 관측**: 운영자가 매일 자정 cascade-delete batch 실행 후 Discord webhook 으로 "오늘 만료된 sessionId N개, 삭제된 행 M개" 알림 수신 → Grafana 대시보드에서 `mobruji.session.expired{reason="ttl"}` 카운터 추이 확인.
+- (S5) **신규 통합 클라이언트 / API 탐색자 discoverability** (rev 발견, 2026-05-23): 외부 개발자 D 가 `POST https://api.mobruji.app/api/v1/sessions` 로 "세션 생성" 호출을 시도 → 현재는 default Spring 404 (빈 body 또는 generic) → "API 가 어디서 sessionId 를 발급해 주는지" 알 수 없다. 본 spec §5-9 가 (a) discoverability 응답 + (b) README/API 문서 entry 점 + (c) 헤더 누락 401 hint 응답을 정한다. 결과: D 가 첫 호출 응답 body 만 보고 "client 가 UUIDv4 를 발급해서 `X-Session-Id` 헤더로 넣는다" 를 알 수 있다.
 
 ## 3) 요구사항
 
@@ -38,6 +39,7 @@ last_reviewed: 2026-05-22
 - [ ] **v0.4 계정 머지 endpoint** (§5-5): `POST /api/v1/sessions/merge-to-account` (v0.4 spec 에서 정식 명세). 본 spec 은 endpoint placeholder 와 머지 시 trigger 되는 데이터 이전 트랜잭션 골격만 정의.
 - [ ] **관측성 카운터** (§5-6): `mobruji.session.expired{reason}`, `mobruji.session.rotated`, `mobruji.session.merged` 신설. observability-baseline.md §5-3 표 갱신 PR 동반.
 - [ ] **만료 batch Discord 알림**: batch 1회 종료 시 `mobruji.session.expired` 증분 + 삭제된 row 합계를 `MOBRUJI_ALERT_WEBHOOK_URL` 로 통지 (sessionId 원문 미노출).
+- [ ] **sessionId discoverability** (§5-9, rev 발견 2026-05-23): (1) `POST /api/v1/sessions` 와 `GET /api/v1/sessions` 경로에 명시적 405/410 hint 핸들러 — body `{"error": "session-id is client-generated", "hint": "generate a UUIDv4 client-side and send via X-Session-Id header. session paths are nested as /api/v1/sessions/{sessionId}/<resource>"}` + 응답에 `Link: </README#sessionid>` 헤더. (2) `SessionAuthGuard` 의 헤더 누락/blank 401 응답 body 를 동일 hint 로 확장 (현재는 `"missing session id"` reason 만). (3) `README.md` "API 사용 안내" 섹션 신설 + `docs/api/sessionid-discovery.md` 1페이지 cookbook (curl 예시 + Node/Python snippet). sessionId 원문은 hint 어디에도 노출 금지 (보안 §3 비기능 그대로).
 
 ### 비기능 요구사항
 
@@ -247,15 +249,136 @@ mobruji:
 
 - `application.yml` 은 CLAUDE.md §4 의 보호 영역 — 본 spec 의 PR B 가 `needs-human-review` 라벨.
 
+### 5-9) sessionId discoverability (rev 발견 2026-05-23)
+
+**문제** (rev 사이클 발견):
+
+외부 통합 클라이언트 / API 탐색자가 `POST /api/v1/sessions` 또는 `GET /api/v1/sessions` 로 "세션 생성/조회" 를 시도하면 default Spring 404 가 돌아간다. 응답에 hint 가 없어 호출자는 다음 단서를 얻을 수 없다:
+
+1. sessionId 가 **client-side 발급** (UUIDv4) 이라는 점 — ADR-0011 §Decision + `web/store/session.ts` `generateSessionId()`.
+2. 모든 session-bound endpoint 가 **`/api/v1/sessions/{sessionId}/<resource>`** 형태로 nested 라는 점.
+3. 인증은 **`X-Session-Id` HTTP 헤더** 로 수행한다는 점 — `SessionAuthGuard`.
+4. 만료 / 회전 endpoint (`POST /api/v1/sessions/rotate`) 는 본 spec PR 5 머지 후에야 노출된다는 점.
+
+ADR-0011 §Decision 은 "sessionId 는 client 가 발급" 을 단일 진실로 박았지만, **이 규약을 외부에 공개적으로 발견 가능 (discoverable) 하게 만드는 응답/문서 entry point 가 없다**. 본 절은 그 entry point 를 박제한다.
+
+**비고**: 본 절은 ADR-0011 의 client-side 발급 정책을 **재검토하지 않는다**. server-side 발급으로 갈아탈지 여부는 §8 Q6 으로 분리 — Q6 (a) 유지 가 default 권장.
+
+#### 5-9-1) `/api/v1/sessions` 루트 hint 핸들러 (be 측)
+
+신규 컨트롤러 1개 (또는 `RestControllerAdvice` 1개) 가 `/api/v1/sessions` (path 끝, sessionId 없음) 의 GET/POST/PUT/PATCH/DELETE 5 메서드 모두 가로채서 hint body 를 반환한다.
+
+```
+GET|POST|... /api/v1/sessions
+GET|POST|... /api/v1/sessions/
+```
+
+**응답 (HTTP 405 Method Not Allowed)**:
+
+```http
+HTTP/1.1 405 Method Not Allowed
+Allow: <empty>
+Content-Type: application/json
+Link: </README.md#sessionid>; rel="help"
+
+{
+  "error": "session-id is client-generated",
+  "hint": "Generate a UUIDv4 client-side and send via the X-Session-Id HTTP header. Session-bound endpoints are nested as /api/v1/sessions/{sessionId}/<resource> (e.g., /api/v1/sessions/{sessionId}/voice-range-history).",
+  "docs": "https://github.com/goohong/mobruji/blob/main/README.md#sessionid"
+}
+```
+
+설계 메모:
+
+- 405 를 선택한 이유: 404 는 "리소스 없음" 으로 generic 검색 봇 트래픽과 섞인다. 405 는 "이 경로는 존재하지만 해당 메서드는 지원 안 함" 의미. `Allow: <empty>` 로 "여기에 메서드 호출 자체가 의미 없다" 를 명시.
+- `Link: </README.md#sessionid>; rel="help"` 헤더 — RFC 5988 표준. curl `-I` 로도 hint 발견 가능.
+- 본 spec PR 5 머지 후 `POST /api/v1/sessions/rotate` 가 정상 endpoint 가 되면, `/api/v1/sessions/rotate` 만 별 핸들러로 정상 처리하고 base path (`/api/v1/sessions`) 는 계속 405 hint.
+- sessionId 원문은 hint body / header 어디에도 들어가지 않는다 (그 자체로 client 발급이라 backend 가 아는 값이 아니지만 명시적으로 정책 박제).
+
+#### 5-9-2) `SessionAuthGuard` 401 응답 body 보강
+
+현재 (PR #244, ADR-0011 §Decision):
+
+```http
+HTTP/1.1 401 Unauthorized
+{}   # 또는 Spring default error body
+```
+
+확장 후 (본 PR 5):
+
+```http
+HTTP/1.1 401 Unauthorized
+Link: </README.md#sessionid>; rel="help"
+Content-Type: application/json
+
+{
+  "error": "session id required",
+  "hint": "Send your client-generated UUIDv4 via the X-Session-Id HTTP header. See README.md#sessionid for details."
+}
+```
+
+- 위 §5-2 의 만료/revoke 401 body (`{"error": "session expired"}` / `{"error": "session revoked"}`) 와 **error 값으로 구분** — body schema 일관.
+- header 누락/blank 외에도 path-header 불일치 케이스에 동일 hint 적용 가능 (단, 불일치는 attack signature 일 수 있으므로 hint 를 최소화 — `{"error": "session id mismatch"}` 만 반환).
+- 본 변경은 PR 3 (가드 확장) 에 합류 (별 PR 분리하면 가드 코드 두 번 수정).
+
+#### 5-9-3) `README.md` + `docs/api/sessionid-discovery.md`
+
+**README.md 신설 섹션** (`## API 사용 안내` → `### sessionId`, 약 30 줄):
+
+```md
+### sessionId
+
+mobruji 의 모든 사용자 데이터 (음역대 / 좋아요 / 북마크 / 추천 히스토리) 는
+**client-generated UUIDv4 sessionId** 로 식별된다. 서버는 sessionId 를 발급하지 않는다.
+
+```bash
+# 1. client 가 UUIDv4 발급 (예: bash + uuidgen)
+SESSION_ID=$(uuidgen)
+
+# 2. 모든 session-bound endpoint 호출 시 `X-Session-Id` 헤더로 전달
+curl -H "X-Session-Id: $SESSION_ID" \
+  https://api.mobruji.app/api/v1/sessions/$SESSION_ID/voice-range-history
+```
+
+- sessionId 는 **URL path** (`/api/v1/sessions/{sessionId}/...`) 와 **`X-Session-Id` 헤더** 둘 다 동일 값으로 보내야 한다 — `SessionAuthGuard` 가 상수시간 비교.
+- `POST /api/v1/sessions` 같은 "세션 생성" endpoint 는 **존재하지 않는다** — client 가 직접 UUIDv4 를 발급한다.
+- TTL / 만료 / 회전 정책은 `docs/features/anonymous-session-lifecycle.md` 참조.
+```
+
+**`docs/api/sessionid-discovery.md`** (1 페이지 cookbook, 신규 디렉토리 `docs/api/` 안):
+
+- 위 README 내용 확장 + Node.js (`crypto.randomUUID()`), Python (`uuid.uuid4()`), curl 예시 각 5~10 줄.
+- 만료/회전 endpoint (PR 5 머지 후) 사용 흐름.
+- 보안 룰 (sessionId 를 로그/스크린샷에 노출 금지) — `04-security-policy.md` cross-reference.
+
+#### 5-9-4) 본 spec PR 분할 영향
+
+discoverability 작업은 **2개 PR 로 쪼개진다**:
+
+- **PR 8 (be, docs)** — 신규: `/api/v1/sessions` 루트 hint 핸들러 (§5-9-1) + README.md `### sessionId` 섹션 (§5-9-3) + `docs/api/sessionid-discovery.md` 신설. 본 spec PR 3 (가드 확장) 머지 후 또는 병행. 분량 S (≤ 80 LOC + docs).
+- PR 3 (be) — `SessionAuthGuard` 401 body 보강 (§5-9-2) 을 기존 §5-2 만료 게이트 확장과 같은 PR 에 합류. 별 PR 분리하면 가드 두 번 수정.
+
+§6 작업 분할 표에 PR 8 추가, PR 3 의 acceptance 에 §5-9-2 항목 추가.
+
+#### 5-9-5) 비기능 요구사항 영향
+
+- **응답시간**: 405 hint 핸들러는 `RestControllerAdvice` 또는 dedicated controller — request 처리 < 1ms, p95 영향 무. observability-baseline.md §5-4 매트릭스 영향 없음.
+- **결정성**: hint 본문은 i18n 안 함 (영어 단일). 향후 다국어 시 별 ADR.
+- **관측성**: 405 hint 응답에 대해 별 카운터 신설 하지 않음 (Spring 의 default `http.server.requests{status="405"}` Micrometer 메트릭으로 충분, observability-baseline.md §5-3 RED 자동 수집 표).
+- **보안**: hint body 에 sessionId / admin token / DB 스키마 / 내부 path 그 어떤 PII 도 노출 금지. `04-security-policy.md` §3 그대로.
+
 ## 6) 작업 분할 (예상 PR 리스트)
 
-- [ ] **PR 1 (현 PR, plan 33)**: ADR-0013 + 본 spec(`anonymous-session-lifecycle.md`) + voice-range-progress / recommendation-history-and-feedback cross-reference 갱신. **본 PR**.
-- [ ] **PR 2 (be)**: `AnonymousSession` 엔티티 + repository + Flyway V<next> + V<next+1> (backfill) + `application.yml` 환경변수. 보호 영역 변경(`application.yml` + Flyway) → `needs-human-review` 라벨.
-- [ ] **PR 3 (be)**: `SessionAuthGuard` 만료/revoke 게이트 확장 + `SessionActivityTracker` (in-memory 캐시 + 5분 flush). 기존 ADR-0011 컴포넌트 확장.
-- [ ] **PR 4 (be)**: TTL 만료 batch (`@Scheduled` + cascade-delete 트랜잭션 + Discord 알림). 관측성 카운터 신설 + observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 같이.
-- [ ] **PR 5 (be)**: `POST /api/v1/sessions/rotate` endpoint + session bootstrap (§5-5-1 Q2 결정 따라 옵션 (a) 자동 또는 (b) endpoint).
-- [ ] **PR 6 (plan)**: v0.4 계정 시스템 spec (#243) 머지 시 본 spec 의 §5-5 placeholder 를 그 spec 으로 이관 + 본 spec `last_reviewed` 갱신.
-- [ ] **PR 7 (fe, v0.3 후반 또는 v0.4)**: "고급 설정 > 세션 초기화" UX 노출 + 만료 시 onboarding redirect 처리.
+- [x] **PR 1 (현 PR, plan 33)**: ADR-0013 + 본 spec(`anonymous-session-lifecycle.md`) + voice-range-progress / recommendation-history-and-feedback cross-reference 갱신. **본 PR**.
+- [x] **PR 2 (be)**: `AnonymousSession` 엔티티 + repository + Flyway V<next> + V<next+1> (backfill) + `application.yml` 환경변수. 보호 영역 변경(`application.yml` + Flyway) → `needs-human-review` 라벨. (#913)
+- [ ] **PR 3 (be)**: `SessionAuthGuard` 만료/revoke 게이트 확장 + `SessionActivityTracker` (in-memory 캐시 + 5분 flush). 기존 ADR-0011 컴포넌트 확장. (#924 진행 중)
+- [x] **PR 4 (be)**: TTL 만료 batch (`@Scheduled` + cascade-delete 트랜잭션 + Discord 알림). 관측성 카운터 신설 + observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 같이. (#913, `AnonymousSessionTtlCleanup` 골격)
+- [x] **PR 5 (be)**: `POST /api/v1/sessions/rotate` endpoint + session bootstrap (§5-5-1 Q2 결정 따라 옵션 (a) 자동 또는 (b) endpoint). (#913, `SessionRotationService` + Controller)
+- [ ] **PR 6 (be)**: Flyway V9 backfill 마이그레이션 — 기존 sessionId 들 (like/bookmark/voice_range/recommendation 에서 distinct) 을 `AnonymousSession` 으로 backfill (§5-7 V<next+1>).
+- [ ] **PR 7 (be, infra)**: 만료 batch Discord 알림 + observability-baseline.md §5-3/§5-6/§5-7 표 갱신 (관측성 카운터 3종 + 라벨 화이트리스트 + 알림 규칙). (#925 진행 중)
+- [ ] **PR 8 (be, docs)**: §5-9 sessionId discoverability — `/api/v1/sessions` 루트 405 hint 핸들러 + `README.md` `### sessionId` 섹션 + `docs/api/sessionid-discovery.md` 신설. 단독 PR 가능 (PR 3/5 의존 없음). rev 발견 (2026-05-23) 기반 fast-track.
+- [ ] **PR 9 (plan)**: v0.4 계정 시스템 spec (#243) 머지 시 본 spec 의 §5-5 placeholder 를 그 spec 으로 이관 + 본 spec `last_reviewed` 갱신.
+- [ ] **PR 10 (fe, v0.3 후반 또는 v0.4)**: "고급 설정 > 세션 초기화" UX 노출 + 만료 시 onboarding redirect 처리.
 
 ## 7) 테스트 전략
 
@@ -272,6 +395,11 @@ mobruji:
 - **부하**:
   - TTL batch 가 10,000 sessionId 처리 시 cascade-delete 트랜잭션 합 < 5분.
   - `SessionAuthGuard` 만료 판정 p95 < 5ms (`SimpleMeterRegistry` 측정).
+- **discoverability (PR 8)**:
+  - `/api/v1/sessions` 5 메서드 (GET/POST/PUT/PATCH/DELETE) 모두 405 + hint body + `Link` 헤더 — RestAssured E2E 1건 (status=405, body.error/hint/docs 존재, `Link` 헤더 포함).
+  - `/api/v1/sessions/` (trailing slash) 동일 405.
+  - 보안 grep: hint body / 헤더 어디에도 sessionId 원문 / admin token / 내부 path 노출 없음.
+  - 401 응답 (SessionAuthGuard) 의 body 가 §5-9-2 schema 와 일치.
 
 ## 8) 오픈 질문
 
@@ -282,7 +410,12 @@ mobruji:
 | Q3 | `lastSeenAt` 갱신 캐시 윈도우 | (a) 5분 (default) / (b) 1분 (정밀도 우선) / (c) 환경변수만 두고 default 5분 | @goohong / PR 3 |
 | Q4 | backfill 마이그레이션 V<next+1> 을 PR 2 와 분리? | (a) 같은 PR (운영 데이터 양 적으면) / (b) 분리 PR (운영 락 부담 측정 후) | @goohong / PR 2 |
 | Q5 | 회전 endpoint 의 ANONYMIZE 모드를 v0.3 에 활성화? | (a) v0.4 까지 400 (default) / (b) v0.3 후반에 별 PR 로 활성화 | @goohong / v0.4 진입 시 |
+| Q6 | sessionId 발급 주체 (rev 발견 후 재검토) | (a) **client 발급 유지** (ADR-0011 §Decision, default 권장) / (b) server 발급으로 전환 (`POST /api/v1/sessions` 정식 endpoint 추가, ADR-0011 §Decision 갱신 + ADR 신설) | @goohong / PR 8 시작 전 |
+| Q7 | 405 hint vs 404 hint vs 200 catalog | (a) **405 + Allow: empty + Link 헤더** (default 권장, §5-9-1) / (b) 404 + same body / (c) 200 + API catalog JSON (HATEOAS-lite) | @goohong / PR 8 |
+| Q8 | `docs/api/` 디렉토리 신설 적절성 | (a) `docs/api/sessionid-discovery.md` 1 페이지로 시작 (default) / (b) `docs/features/` 또는 README 단일 섹션으로 충분, `docs/api/` 신설 보류 | @goohong / PR 8 |
 
 ## 9) 결정 로그
 
 - **2026-05-22 (plan 33, 본 PR)**: 초안 작성 (status=draft). ADR-0013 의 §D-1~D-5 를 1:1 구현 항목으로 매핑. 7개 PR 로 분할 (엔티티/마이그레이션 → 가드 확장 → batch → 회전 endpoint → v0.4 spec 이관 → fe UX). 관측성 카운터 3종 신설 → observability-baseline.md §5-3 / §5-6 / §5-7 표 갱신 동반 필요. 첫 호출 시 AnonymousSession bootstrap 정책은 Q2 (PR 3 결정).
+- **2026-05-23 (plan, 본 PR)**: **§5-9 sessionId discoverability 추가** (rev 발견 — 외부 API 탐색자가 `POST /api/v1/sessions` 호출 시 default 404 라 client-side UUID 발급 규약을 알 수 없음). 해소 방안 3건: (1) `/api/v1/sessions` 루트 405 + hint body + `Link` 헤더, (2) `SessionAuthGuard` 401 응답 body 보강 (hint 추가), (3) `README.md` `### sessionId` 섹션 + `docs/api/sessionid-discovery.md` cookbook. PR 8 신설 (be + docs), PR 3 에 (2) 합류. §3 기능 요구사항 1개 추가, §5-9 신설, §6 PR 표 PR 8 추가, §8 Q6/Q7/Q8 신설. ADR-0011 §Decision (client 발급) 은 재검토하지 않음 — Q6 (a) 유지 default.
+- **2026-05-24 (be, F2)**: PR #913 머지 — PR 2 (`AnonymousSession` 엔티티 + V8 migration) + PR 4 (`AnonymousSessionTtlCleanup` 골격) + PR 5 (`SessionRotationService` + Controller) 동시 반영. spec frontmatter `status: draft` → `implementing` (docs/features/README.md §5 라이프사이클 룰), `related_prs: [913, 924, 925]` 보강, `last_reviewed: 2026-05-24`. §6 PR 표 재정렬 (V9 backfill 을 PR 6 으로 분리, Discord 알림 + 관측성 표 갱신을 PR 7 으로 분리, v0.4 spec 이관/fe UX 를 PR 9/10 으로 뒤로 이동). PR 3 (#924) / PR 7 (#925) 동시 진행 중. PR 6/8/9/10 미착수.

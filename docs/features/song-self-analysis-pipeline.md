@@ -35,7 +35,7 @@ last_reviewed: 2026-05-22
 - [ ] Spleeter로 vocal stem 분리.
 - [ ] Librosa로 vocal stem pitch detection → `songRangeLow`/`songRangeHigh`(MIDI) 추정.
 - [ ] Librosa로 key(chroma) 및 tempo(beat tracker) 자동 추출.
-- [ ] 추출 결과를 `Song` 엔티티에 update (manual override 가능, `metadataSource = SELF_ANALYSIS` 표기).
+- [ ] 추출 결과를 `Song` 엔티티에 update (manual override 가능, `metadataSource = AUDIO_ANALYSIS` 표기).
 - [ ] 분석 실패 처리 (audio 없음/접근 차단/vocal stem 미검출/pitch contour 신뢰도 미달 등) — `metadataConfidence` 필드로 표시, 실패 곡은 운영자 검토 큐로.
 - [ ] 멱등 batch — 동일 곡 재분석 시 결과 갱신 (created 아님). 시드 추가/yt-dlp 버전 변경 시 재실행.
 
@@ -73,7 +73,7 @@ last_reviewed: 2026-05-22
   - `songRangeLow`, `songRangeHigh` (MIDI) — 분석으로 채움.
   - `keyOriginal` — chroma 기반 자동 추정.
   - `bpm` — beat tracker 기반.
-  - `metadataSource` — 신규 enum 값 `SELF_ANALYSIS` 추가 (기존 `MANUAL`, `EXTERNAL_API`, `INFERRED`와 병행).
+  - `metadataSource` — enum 값 `AUDIO_ANALYSIS` 사용 (기존 `MANUAL`, `EXTERNAL_API`, `INFERRED`와 병행). 본 spec 초안의 `SELF_ANALYSIS` 표기는 §10-1 결정에 따라 `AUDIO_ANALYSIS` 로 통일 (실제 코드: `MetadataSource.AUDIO_ANALYSIS`, V3 마이그레이션).
   - `metadataConfidence` — 분석 신뢰도 표기 (수치 또는 enum). 실패 시 낮은 값.
 - 새 용어 후보: `AudioAnalysisJob`, `VocalStem`, `PitchContour`. 도입 시 `docs/ai-harness/06-domain-model.md §4 유비쿼터스 랭귀지`에 등재.
 
@@ -102,14 +102,14 @@ last_reviewed: 2026-05-22
 [vocal.wav]
         ↓ Librosa (pyin pitch / chroma key / beat tempo)
 [분석 결과: range, key, tempo, confidence]
-        ↓ Song 엔티티 update (metadataSource=SELF_ANALYSIS)
+        ↓ Song 엔티티 update (metadataSource=AUDIO_ANALYSIS)
 [DB]
         ↓ (임시 캐시 audio 즉시 삭제)
 ```
 실패 시 곡은 `metadataConfidence`=LOW로 표기하고 운영자 검토 큐로.
 
 ### 5-5) DB 마이그레이션
-- `metadata_source` enum 값에 `SELF_ANALYSIS` 추가 (Flyway).
+- `metadata_source` enum 값에 `AUDIO_ANALYSIS` 추가 (Flyway V3, PR #204 — 본 spec 초안의 `SELF_ANALYSIS` 표기는 §10-1 결정에 따라 `AUDIO_ANALYSIS` 로 통일).
 - `metadata_confidence` 필드가 없으면 신설.
 - 기존 `song` 테이블 구조 변경 영향은 작음.
 
@@ -118,8 +118,8 @@ last_reviewed: 2026-05-22
 
 ## 6) 작업 분할 (예상 PR 리스트)
 - [ ] PR A (docs): 본 spec 초안 — 본 PR #99.
-- [ ] PR B (chore:song): Python worker 부트스트랩(yt-dlp + Spleeter + Librosa 환경) + 단일 곡 end-to-end smoke 스크립트.
-- [ ] PR C (feat:song): `metadata_source = SELF_ANALYSIS` 추가 + 분석 결과 ingest API (운영자/내부용).
+- [x] PR B (chore:song): Python worker 부트스트랩(yt-dlp + Spleeter + Librosa 환경) + 단일 곡 end-to-end smoke 스크립트.
+- [x] PR C (feat:song, #204): `metadata_source = AUDIO_ANALYSIS` 추가 + 분석 결과 ingest 경로 (`Song.applyAudioAnalysisResult` + `AudioAnalysisRunner`).
 - [ ] PR D (chore:song): 시드 100곡 큐레이션 JSON + YouTube URL 매핑.
 - [ ] PR E (chore:infra): batch 실행 자동화 (cron 또는 수동 트리거).
 - [ ] PR F (test): pitch detection 회귀 테스트 (알려진 정답 곡 ~5곡으로 MIDI low/high 검증).
@@ -146,6 +146,7 @@ last_reviewed: 2026-05-22
 - 2026-05-21: 이슈 #67(외부 ingestion spec)을 본 spec으로 promote. 외부 메타 카탈로그 의존은 v0.x 한정 잔존, v0.2부터 자체 분석으로 전환. 출처: #99
 - 2026-05-21: Q2(JVM↔Python 통합 방식) 종결. ADR 0010에서 **Python worker + Spring `ProcessBuilder`**로 결정. monorepo 단일 배포 유지, microservice 분리는 v0.3 이상 재평가. 출처: #163
 - 2026-05-22: cross-ref — `song-curation-seed-100.md` Q4 (장르 분포 통일) 제기됨. 본 spec §4-1 (발라드30/댄스20/락15/트로트15/팝10/힙합10) vs curation spec §3 (발라드30/댄스20/락15/트로트15/팝20)이 다름. 결정은 curation spec Q4에서 단일화. 본 spec §4-1은 결정 후 후속 PR에서 동기화. 출처: 본 sequel PR (#71)
+- 2026-05-23 (plan, spec-drift-cleanup-pt1): **§10-1 enum 표기 정정 finalize** — §3 기능 요구사항 / §5-1 도메인 모델 / §5-4 데이터 흐름 / §5-5 마이그레이션 / §6 PR C 의 `SELF_ANALYSIS` 표기를 모두 `AUDIO_ANALYSIS` 로 통일. §11 PR E (정정 spec PR) 본 PR 로 완료 처리. 결정 로그 2026-05-22 plan 35 의 (a) 항목 spec 반영 잔여를 닫음.
 - 2026-05-22 (plan 35): **v0.2 양산 단계 spec 신설 (§10~§13)**. PoC (현행 librosa 단독 + AudioAnalysisRunner ProcessBuilder) 를 v0.2 양산으로 끌어올리기 위한 결정 묶음. (a) **enum 표기 정정** — spec의 `SELF_ANALYSIS` 가 실제 코드는 `AUDIO_ANALYSIS` (PR #204 promote, `MetadataSource.AUDIO_ANALYSIS`) — 본 spec 도 `AUDIO_ANALYSIS` 로 통일 (§10-1). (b) **vocal/instrumental 분리 도입 여부** — Spleeter (TF 의존) vs Demucs (PyTorch) vs vocal-skip 평가, ADR 후보 0015 트리거 조건 (§10-2). (c) **신뢰도 점수 공식 정형화** — 현행 `result.confidence()` 가 Python tool 내부 black-box → `f1 (pitch coverage) × f2 (vocal isolation) × f3 (duration adequacy)` 다항 공식으로 정형화, ADR 후보 0016 (§10-3). (d) **ground truth set + 회귀 가드** — 10 곡 라벨된 정답 set (low/high MIDI ± 2 semitone 허용 오차) 로 매 PR 회귀 가드 (§10-4). (e) **확장성** — 현행 cron (`AudioAnalysisScheduledBackfill`) → 큐 시스템 전환 트리거 조건 (분석 곡 ≥ 1k 또는 동시 분석 ≥ 5), 그 전까지 cron + selective query (#226 머지) 유지 (§10-5). (f) **운영 모니터링** — `mobruji.song.audio.analysis.*` 카운터/타이머 표 (observability-baseline §5-3 와 정합) + librosa CI 모니터링 spec 과의 메트릭 경계 (§10-6). (g) **결과 저장 위치** — 현행 Song 컬럼 직접 갱신 유지, 별 `SongAnalysis` 엔티티 신설은 audio-tooling-bootstrap §5-1 가 책임 (본 spec 범위 외, cross-ref 만) (§10-7). (h) **PR 분할** — A (Spleeter/Demucs 평가 spike + ADR-0015) → B (신뢰도 공식 정형화 + 메타 컬럼 + ADR-0016) → C (ground truth set + 회귀 가드 테스트) → D (운영 모니터링 — `mobruji.song.audio.analysis.*` 카운터 + Discord 알림 1 규칙) → E (조건부) 큐 시스템 전환 (§11). 출처: 본 PR
 
 ---
@@ -164,7 +165,7 @@ last_reviewed: 2026-05-22
 
 기존 spec §5-1 / §3 기능 요구사항이 `metadataSource = SELF_ANALYSIS` 로 적혀 있으나 **실제 코드는 `MetadataSource.AUDIO_ANALYSIS`** (V3 마이그레이션, PR #204 promote, `Song.applyAudioAnalysisResult` 가 사용). 본 spec 도 `AUDIO_ANALYSIS` 로 통일한다.
 
-- §5-1 / §3 기능 요구사항의 `SELF_ANALYSIS` 표기는 본 spec 의 후속 PR 에서 일괄 정정 (별 PR 불요 — 본 PR 의 §10 결정으로 충분).
+- §5-1 / §3 기능 요구사항의 `SELF_ANALYSIS` 표기는 본 PR (plan, spec-drift-cleanup-pt1) 에서 `AUDIO_ANALYSIS` 로 일괄 정정 완료.
 - `song-curation-seed-100.md` §5-7 충돌 해소 표의 `AUDIO_ANALYSIS` 와 동일 enum 값 — cross-ref 정합.
 - 신규 enum 값 추가 불요. 마이그레이션 불요.
 
@@ -361,7 +362,7 @@ where:
 기존 §6 의 PR A~F (PoC) 는 머지/진행 중. 본 절은 v0.2 양산 단계의 후속 PR 만 정의.
 
 - [ ] **PR D (chore:song, spec 묶음)** — **본 PR**: 본 spec §10~§13 신설. 라벨 `type:docs`, `scope:song`, `ai-generated`, `ai:claude`.
-- [ ] **PR E (chore:song)** — **§10-1 enum 표기 정정**: 기존 §3 / §5-1 의 `SELF_ANALYSIS` → `AUDIO_ANALYSIS` 정정 spec PR. 분량 XS. 코드 변경 없음 (코드는 이미 `AUDIO_ANALYSIS`). 본 PR 머지 직후 자동 후속.
+- [x] **PR E (chore:song)** — **§10-1 enum 표기 정정**: 기존 §3 / §5-1 의 `SELF_ANALYSIS` → `AUDIO_ANALYSIS` 정정 spec PR. 분량 XS. 코드 변경 없음 (코드는 이미 `AUDIO_ANALYSIS`). plan `docs/spec-drift-cleanup-pt1` PR 에서 완료.
 - [ ] **PR F (chore:song)** — **§10-2 vocal separation 평가 spike + ADR-0015**: Spleeter 2stems / Demucs / vocal-skip 3 후보에 대해 ground truth set (PR H 후) 의 MAE / 분석 시간 / CI 비용 측정 → ADR-0015 작성. 분량 M. **PR H 선행 (ground truth set 필요)**.
 - [ ] **PR G (feat:song)** — **§10-3 신뢰도 공식 정형화 + ADR-0016**: Python tool 의 JSON schema 에 sub-factor 4개 노출 + 합산 공식 구현 + Spring 측 `AudioAnalysisRunner` 의 schema 파싱 갱신. `Song.applyAudioAnalysisResult` 무변경 (sub-factor 는 SongAnalysis 가 받을 때 도입). 분량 M.
 - [ ] **PR H (test:song)** — **§10-4 ground truth set 신설**: `tools/audio-analysis/tests/ground_truth.json` 10 곡 라벨 + `test_ground_truth.py` 회귀 가드 테스트. curation 100곡 (#71) PR C 중 수기 검증 끝난 곡 중에서 선정. 분량 M. **PR G 와 독립 — 병렬 가능**.

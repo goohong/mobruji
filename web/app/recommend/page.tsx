@@ -319,6 +319,58 @@ function RecommendationFeed({
     return data.pages.flatMap((page) => page.recommendations);
   }, [data]);
 
+  /**
+   * (closes #426 / closes #443) 스크린 리더용 라이브 영역 메시지.
+   *
+   * 시각 사용자는 무한 스크롤로 카드가 화면에 추가되는 것을 자연스럽게 보지만,
+   * 스크린 리더 사용자에게는 "내가 스크롤한 결과로 추천이 더 로드됐는지" 가
+   * 불투명하다. `aria-live="polite"` 영역에 메시지를 갱신해 다음을 안내한다:
+   *   - 첫 페이지 도착: "추천 N건을 불러왔습니다."
+   *   - 추가 페이지 도착: "추천 M건이 더 추가되었습니다. (총 N건)"
+   *
+   * #443 리팩터: 이전에는 `useEffect` 안에서 `setLiveMessage` 를 호출해
+   * `react-hooks/set-state-in-effect` 룰을 inline-disable 로 회피했다.
+   * 이제 React 공식 권장 "Adjusting State While Rendering" 패턴
+   * (https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+   * 으로 전환한다 — 렌더 중에 ref 와 현재 값을 비교해 변화 시점에만 setState 를
+   * 호출하면 React 가 현재 렌더를 버리고 즉시 새 state 로 재렌더하므로
+   * effect 가 필요 없고 추가 paint 도 발생하지 않는다. 결과적으로 inline
+   * eslint-disable 3건을 제거할 수 있다.
+   *
+   * 동작은 종전과 동일: 페이지 수 증가 시점에만 메시지 갱신, `isFetchingNextPage`
+   * 토글이 아니라 데이터 도착 시점을 기준으로 갱신해 "로딩 중" 메시지와
+   * 중복되지 않는다.
+   *
+   * (closes #749) 이전에는 `useRef` 로 prevPageCount 를 추적했으나
+   * `react-hooks/refs` 룰이 렌더 중 ref 접근 자체를 금지한다. React 공식
+   * 권장 패턴은 ref 가 아니라 `useState` 로 prev value 를 보관하는 것이다
+   * (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+   * state 라도 렌더 중 set 호출 시 React 가 현재 렌더를 버리고 즉시
+   * 재렌더하므로 추가 paint 는 발생하지 않는다.
+   */
+  const [previousPageCount, setPreviousPageCount] = useState(0);
+  const [liveMessage, setLiveMessage] = useState("");
+
+  const pageCount = data?.pages.length ?? 0;
+  if (pageCount !== previousPageCount) {
+    setPreviousPageCount(pageCount);
+    if (pageCount === 0) {
+      // 쿼리 reset 등으로 페이지가 사라진 경우 메시지도 초기화.
+      setLiveMessage("");
+    } else {
+      const latestPage = data?.pages[pageCount - 1];
+      const addedCount = latestPage?.recommendations.length ?? 0;
+      const totalCount = allRecommendations.length;
+      if (previousPageCount === 0) {
+        setLiveMessage(`추천 ${totalCount}건을 불러왔습니다.`);
+      } else {
+        setLiveMessage(
+          `추천 ${addedCount}건이 더 추가되었습니다. (총 ${totalCount}건)`,
+        );
+      }
+    }
+  }
+
   // IntersectionObserver 로 sentinel 진입을 감지해 다음 batch 페치.
   // ref 콜백 패턴: sentinel DOM 노드가 마운트/언마운트될 때마다 observer 를
   // 다시 연결한다. 의존성에 fetchNextPage/hasNextPage/isFetchingNextPage 가 들어가서
@@ -416,6 +468,21 @@ function RecommendationFeed({
 
   return (
     <div className="flex flex-col gap-4">
+      {/*
+        (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
+        시각적으로는 `sr-only` 로 숨기지만 SR 은 polite 큐로 안내 메시지를 읽는다.
+        `aria-atomic="true"` 로 메시지 전체를 매번 새로 읽도록 강제 — 부분 갱신
+        헤더리스 announce 를 피한다.
+      */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="recommend-live-region"
+        className="sr-only"
+      >
+        {liveMessage}
+      </div>
       <ul className="flex flex-col gap-3">
         {allRecommendations.map((item) => (
           <SongCard

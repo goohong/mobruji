@@ -17,11 +17,27 @@
   ```
 - **OS**: Ubuntu 24.04, **사양**: c2-g3a (2vCPU/4GB/10GB SSD)
 
-### A-2) Anthropic API key 발급
+### A-2) Anthropic 인증 (OAuth 우선, API key 대안)
+운영 호스트는 **Claude Max OAuth credentials** 를 사용한다(현재 NCP nmae 적용). `~/.claude/.credentials.json` 한 파일에 access/refresh token 이 저장되며, Claude Code CLI 가 자동으로 갱신한다. API key 는 환경변수 평문 노출을 줄이는 백업/대안.
+
+**옵션 A (권장) — OAuth credentials**
+1. 로컬(또는 mac) 에서 `claude` 를 한 번 실행해 `Sign in with Anthropic` 로 Claude Max 계정 로그인 → `~/.claude/.credentials.json` 생성.
+2. NCP VM 으로 안전하게 복사:
+   ```bash
+   # 로컬에서
+   scp -i ~/workspace/secret/<keyname> ~/.claude/.credentials.json mobruji@101.79.20.94:/home/mobruji/.claude/.credentials.json
+   # NCP에서 권한 잠금
+   ssh mobruji@101.79.20.94 'chmod 600 /home/mobruji/.claude/.credentials.json'
+   ```
+3. NCP 에서 `claude --version` 으로 인증 확인. 별도 환경변수 불필요.
+4. 회전: 만료/취소 시 로컬에서 재로그인 후 재복사. multi-device 충돌(401) 발생하면 helper 와 nmae 중 한쪽을 별 OAuth 계정 또는 API key 로 분리 (§F-1 / discord-only-operation §6-2 참조).
+
+**옵션 B (대안) — Anthropic API key**
+OAuth multi-device 충돌이 잦거나 helper/nmae 분리가 필요할 때 사용.
 1. https://console.anthropic.com 로그인.
-2. **API Keys** → **Create Key**.
-3. 라벨: `mobruji-maestro` (회수/회전 시 식별 편의).
-4. 키 문자열은 1회만 표시됨 — 1Password / Bitwarden / Apple Keychain 등 비밀번호 매니저에 저장. 셋업 직후 `~/.bashrc`에 1회 등록 후 콘솔 history는 삭제.
+2. **API Keys** → **Create Key**. 라벨: `mobruji-maestro` (회수/회전 시 식별 편의).
+3. 키 문자열은 1회만 표시됨 — 1Password / Bitwarden / Apple Keychain 등 비밀번호 매니저에 저장.
+4. NCP 에서 §B-8(OAuth 모드는 절차 생략) 또는 §C-1 `EnvironmentFile=` 방식으로 등록.
 5. **결제수단 등록 확인**: Anthropic Console → **Billing**. 무료 한도 초과 시 자동 청구. 사용량 알람(`Usage Alerts`) 임계치 설정 권장(예: 월 $20).
 
 ### A-3) Discord bot 토큰
@@ -114,12 +130,33 @@ npm install -g @anthropic-ai/claude-code
 claude --version
 ```
 
-### B-8) Anthropic API key 등록 (mobruji)
-**옵션 B(권장) — 환경변수**. 옵션 A(`claude login` OAuth)는 headless 부적합.
+### B-8) Anthropic 인증 등록 (mobruji)
+실 운영(NCP nmae) 은 **§A-2 옵션 A 의 OAuth credentials** 를 사용한다. 본 단계는 그 복사 + 권한 잠금이 핵심이다.
+
+**옵션 A (현재 운영 모드) — OAuth credentials 복사**
+```bash
+# 디렉터리 보장
+mkdir -p ~/.claude
+chmod 700 ~/.claude
+
+# (로컬에서 scp 한 뒤 NCP 에서) 파일 권한 잠금
+ls -l ~/.claude/.credentials.json
+# -rw------- 가 아니면 chmod 600
+chmod 600 ~/.claude/.credentials.json
+
+# 인증 확인
+claude --version
+# CLI 가 OAuth 토큰을 자동 로드하면 별도 설정 불필요
+```
+
+helper 추가 셋업 시 같은 credentials 를 `~/.claude-helper/.credentials.json` 으로 복사 (`docs/runbooks/discord-only-operation.md` §3-3).
+
+**옵션 B (대안) — API key 환경변수**
+OAuth multi-device 충돌 등 별 사유가 있을 때만 사용.
 ```bash
 # 1) ~/.bashrc 에 등록 (셸 로그인마다 자동 export)
 cat >> ~/.bashrc <<'EOF'
-export ANTHROPIC_API_KEY="<여기에 §A-2에서 발급받은 키>"
+export ANTHROPIC_API_KEY="<여기에 §A-2 옵션 B 에서 발급받은 키>"
 EOF
 chmod 600 ~/.bashrc   # 다른 유저 읽기 차단
 
@@ -127,7 +164,7 @@ source ~/.bashrc
 echo "$ANTHROPIC_API_KEY" | head -c 12   # sk-ant-... 확인 (12자만)
 ```
 
-**대안 (더 안전, Phase 2 권장)**: `/etc/mobruji/maestro.env` (root:mobruji, 0640)에 두고 systemd unit `EnvironmentFile=` 로 주입. Phase 1은 `~/.bashrc` 로 단순화.
+**Phase 2 정합 (옵션 B 사용 시)**: `/etc/mobruji/maestro.env` (root:mobruji, 0640) 에 두고 systemd unit `EnvironmentFile=` 로 주입 (§C-1). Phase 1 은 `~/.bashrc` 로 단순화. OAuth credentials 를 사용하는 운영(현재 NCP) 에서는 `EnvironmentFile=` 자체가 불필요하다.
 
 ### B-9) git / gh 인증 (mobruji)
 ```bash
@@ -169,17 +206,27 @@ cd ~/mobruji/tools/discord-daemon
 cp .env.example .env
 chmod 600 .env
 
-# 편집기로 .env 열어 다음 채우기:
+# 편집기로 .env 열어 다음 채우기 (실 bot.py 가 읽는 키 — 이슈 #807 단순화본):
+#   # 필수
 #   DISCORD_BOT_TOKEN=<§A-3 토큰>
 #   ALLOWED_USER_IDS=<사용자 Discord ID, 콤마 구분>
-#   MOBRUJI_CHANNEL_ID=1506925497651560458   # #모부르지 채널
-#   GITHUB_PAT=<§A-4 PAT>
+#   MOBRUJI_CHANNEL_ID=1506925497651560458   # #모부르지 (사용자 양방향)
+#
+#   # 권장 (helper 분리 운영)
+#   TMUX_SESSION_NAME=helper          # 사용자 메시지 routing 대상 (helper or mobruji)
+#   TMUX_TARGET_PANE=helper:0.0
+#   NOTIFY_CHANNEL_ID=<digest 별 채널 ID — 미지정 시 MOBRUJI_CHANNEL_ID 와 동일>
+#
+#   # 옵션
+#   CLAUDE_BIN=claude
+#   DIGEST_ENABLED=1                  # cycle-status digest cron on/off
+#   CYCLE_STATUS_PATH=/home/mobruji/.mobruji/cycle-status.json
+#   GITHUB_PAT=<§A-4 PAT>             # repository_dispatch fallback
 #   GITHUB_REPO=goohong/mobruji
-#   # 신규 (discord-driven-mobruji spec §5-4):
-#   TMUX_BRIDGE_ENABLED=0   # Phase 1은 0(수동 검증), Phase 3에서 1로 켬
-#   TMUX_SESSION_NAME=mobruji
 nano .env
 ```
+
+> 옛 키 `TMUX_BRIDGE_ENABLED` 는 #807 단순화로 제거됐다. 본 키를 .env 에 남겨도 bot.py 가 무시한다. Phase 3 의 활성화 토글은 더 이상 없으며, helper/nmae 분리는 `TMUX_SESSION_NAME` 으로 갈음한다 (자세한 routing 모델: [`docs/runbooks/discord-only-operation.md`](./discord-only-operation.md) §4).
 
 ### B-13) Discord bot Python venv (mobruji)
 ```bash
@@ -218,20 +265,10 @@ tmux attach -t mobruji
 > 사용자 개입 없이 재부팅 후 maestro 자동 복구.
 
 ### C-1) systemd unit 파일 생성 (root)
-**참고**: `ANTHROPIC_API_KEY`를 unit 파일에 평문으로 두는 대신 `EnvironmentFile=`로 분리.
+**현재 운영(OAuth credentials 모드)** 은 환경변수가 필요 없으므로 `EnvironmentFile=` 없이 단순화한다. claude CLI 가 `~/.claude/.credentials.json` 을 자동 로드한다.
 
 ```bash
-# 시크릿 파일
-sudo mkdir -p /etc/mobruji
-sudo tee /etc/mobruji/maestro.env > /dev/null <<'EOF'
-ANTHROPIC_API_KEY=<여기에 키>
-EOF
-sudo chown root:mobruji /etc/mobruji/maestro.env
-sudo chmod 640 /etc/mobruji/maestro.env
-```
-
-```bash
-# systemd unit
+# systemd unit (실 운영 형태 — OAuth 모드)
 sudo tee /etc/systemd/system/mobruji-maestro.service > /dev/null <<'EOF'
 [Unit]
 Description=Mobruji maestro (Claude Code in tmux)
@@ -241,13 +278,13 @@ Wants=network-online.target
 [Service]
 Type=forking
 User=mobruji
-Group=mobruji
 WorkingDirectory=/home/mobruji/mobruji
-EnvironmentFile=/etc/mobruji/maestro.env
-ExecStart=/usr/bin/tmux new-session -d -s mobruji -c /home/mobruji/mobruji '/home/mobruji/.npm-global/bin/claude'
+Environment=HOME=/home/mobruji
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/tmux new-session -d -s mobruji -c /home/mobruji/mobruji "/usr/bin/claude --dangerously-skip-permissions"
 ExecStop=/usr/bin/tmux kill-session -t mobruji
 Restart=on-failure
-RestartSec=10
+RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target
@@ -256,6 +293,22 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now mobruji-maestro
 sudo systemctl status mobruji-maestro
+```
+
+**API key 모드(옵션 B) 사용 시** `EnvironmentFile=` 추가:
+
+```bash
+# 시크릿 파일
+sudo mkdir -p /etc/mobruji
+sudo tee /etc/mobruji/maestro.env > /dev/null <<'EOF'
+ANTHROPIC_API_KEY=<여기에 키>
+EOF
+sudo chown root:mobruji /etc/mobruji/maestro.env
+sudo chmod 640 /etc/mobruji/maestro.env
+
+# 그 다음 위 unit 의 [Service] 섹션에 한 줄 추가
+#   EnvironmentFile=/etc/mobruji/maestro.env
+# 후 daemon-reload + restart
 ```
 
 ### C-2) 재부팅 검증
@@ -278,13 +331,21 @@ sudo journalctl -u mobruji-maestro -n 50
 
 ## D) Phase 3 — Discord bridge
 
-> 사용자 외출 중 Discord 메시지로 maestro 양방향 소통. [`discord-driven-mobruji` spec](../features/discord-driven-mobruji.md) PR B/C 머지 후 진입.
+> 사용자 외출 중 Discord 메시지로 maestro 양방향 소통. [`discord-driven-mobruji` spec](../features/discord-driven-mobruji.md) 와 [`discord-only-operation` 런북](./discord-only-operation.md) 참조.
 
-### D-1) `.env` flag 활성화 (mobruji)
+### D-1) `.env` 점검 (mobruji)
+이슈 #807 단순화로 더 이상 별도 활성화 flag (`TMUX_BRIDGE_ENABLED`) 가 없다. bot.py 는 가동되면 즉시 Discord ↔ tmux routing 을 한다. §B-12 에서 채운 `.env` 키만 검증하면 된다.
+
 ```bash
 cd ~/mobruji/tools/discord-daemon
-nano .env
-# TMUX_BRIDGE_ENABLED=1 로 변경
+grep -E '^(DISCORD_BOT_TOKEN|ALLOWED_USER_IDS|MOBRUJI_CHANNEL_ID|TMUX_SESSION_NAME|TMUX_TARGET_PANE|NOTIFY_CHANNEL_ID)=' .env
+# 필수 3개 + 권장 3개가 모두 있어야 한다.
+
+# helper 분리 운영이면 helper session 이 먼저 떠 있어야 send-keys 가 성공한다.
+# (helper systemd unit 은 미적용 — discord-only-operation §3-4 참조)
+tmux ls
+# helper: 1 windows  ← 권장
+# mobruji: 1 windows
 ```
 
 ### D-2) Discord bridge systemd unit (root)
@@ -315,11 +376,12 @@ sudo systemctl enable --now mobruji-discord-bridge
 sudo systemctl status mobruji-discord-bridge
 ```
 
-### D-3) Discord → maestro 검증
+### D-3) Discord → maestro/helper 검증
 1. iPhone Discord 앱에서 `#모부르지` 채널에 "테스트" 입력.
 2. NCP VM `journalctl -u mobruji-discord-bridge -f` 에서 메시지 수신 + `tmux send-keys` 로그 확인.
-3. `tmux attach -t mobruji` 로 maestro console에 "테스트" 입력이 도착했는지 확인.
-4. maestro 응답이 `plugin_discord__reply` 로 Discord 채널에 도착하는지 확인.
+3. `TMUX_SESSION_NAME` 이 `helper` 면 `tmux attach -t helper`, `mobruji` 면 `tmux attach -t mobruji` 로 입력 도착 확인.
+4. 응답 채널: helper(또는 nmae) 가 `bash ~/.mobruji/discord-reply.sh "<본문>"` 을 호출해 Discord REST API 로 직접 push 한다 (`plugin_discord__reply` 또는 별도 watcher 없음 — #807 단순화). `#모부르지` 채널에 응답이 떠야 OK.
+5. bot.py 의 1초 generic auto-ack ("📥 받음 — helper 작업 중") 이 메시지 송신 직후 보이면 bridge 정상.
 
 ## E) 운영 명령
 
@@ -336,19 +398,33 @@ sudo systemctl status mobruji-discord-bridge
 
 ## F) 트러블슈팅
 
-### F-1) `claude` 시작 시 OAuth 시도 (API key 미인식)
-**증상**: `claude` 실행 시 "Sign in with Anthropic" 프롬프트.
+### F-1) `claude` 시작 시 인증 프롬프트 / 401
+**증상 A (OAuth 모드)**: `claude` 실행 시 "Sign in with Anthropic" 프롬프트 → `~/.claude/.credentials.json` 누락/만료/권한 오류.
 
-**원인**: `ANTHROPIC_API_KEY` env 미설정 또는 systemd unit이 EnvironmentFile을 못 읽음.
+**확인 (OAuth 모드)**:
+```bash
+ls -l ~/.claude/.credentials.json   # -rw------- mobruji:mobruji
+head -c 30 ~/.claude/.credentials.json
+# {"claudeAiOauth":{"accessToken":"sk-ant-oat01-..." 식이면 정상
+```
 
-**확인**:
+**회피 (OAuth 모드)**:
+1. 권한 오류면 `chmod 600 ~/.claude/.credentials.json`.
+2. 만료/취소면 로컬에서 `claude` 재로그인 후 scp 로 재복사(§A-2 옵션 A).
+3. multi-device 충돌(401) 이 잦으면 helper/nmae 중 한쪽을 별 OAuth 또는 API key 로 분리.
+
+---
+
+**증상 B (API key 모드)**: 위 프롬프트 + `ANTHROPIC_API_KEY` 누락 또는 systemd unit EnvironmentFile 부재.
+
+**확인 (API key 모드)**:
 ```bash
 echo "$ANTHROPIC_API_KEY" | head -c 12   # sk-ant-... 확인
-sudo systemctl show mobruji-maestro | grep Environment
+sudo systemctl show mobruji-maestro | grep -E '^(Environment|EnvironmentFile)='
 sudo cat /etc/mobruji/maestro.env   # root 권한
 ```
 
-**회피**: `/etc/mobruji/maestro.env` 권한(0640 root:mobruji) 확인, `systemctl daemon-reload && systemctl restart mobruji-maestro`.
+**회피 (API key 모드)**: `/etc/mobruji/maestro.env` 권한(0640 root:mobruji) 확인, systemd unit 에 `EnvironmentFile=/etc/mobruji/maestro.env` 라인이 있는지 확인 후 `systemctl daemon-reload && systemctl restart mobruji-maestro`.
 
 ### F-2) tmux session 없음
 **증상**: `tmux attach -t mobruji` → `no server running on /tmp/tmux-1000/default`.
@@ -440,22 +516,25 @@ gh auth refresh   # 또는 gh auth login 재실행
 - maestro VM에 HTTP/HTTPS inbound 노출 불필요(백/프론트는 별 VM).
 
 ### G-3) 시크릿 파일 권한
-| 파일 | 소유자 | 권한 |
-|---|---|---|
-| `/etc/mobruji/maestro.env` | root:mobruji | 0640 |
-| `~/.bashrc` (mobruji) | mobruji:mobruji | 0600 |
-| `~/mobruji/tools/discord-daemon/.env` | mobruji:mobruji | 0600 |
-| `~/.ssh/authorized_keys` | mobruji:mobruji | 0600 |
+| 파일 | 소유자 | 권한 | 비고 |
+|---|---|---|---|
+| `~/.claude/.credentials.json` | mobruji:mobruji | 0600 | OAuth 모드 (현재 운영) |
+| `~/.claude-helper/.credentials.json` | mobruji:mobruji | 0600 | helper 분리 운영 시 |
+| `/etc/mobruji/maestro.env` | root:mobruji | 0640 | API key 모드(옵션 B) 사용 시만 |
+| `~/.bashrc` (mobruji) | mobruji:mobruji | 0600 | API key bashrc export 시 |
+| `~/mobruji/tools/discord-daemon/.env` | mobruji:mobruji | 0600 | Discord/GitHub 토큰 |
+| `~/.ssh/authorized_keys` | mobruji:mobruji | 0600 | 항상 |
 
 ```bash
-# 일괄 점검
-ls -l /etc/mobruji/maestro.env ~/.bashrc ~/mobruji/tools/discord-daemon/.env ~/.ssh/authorized_keys
+# 일괄 점검 (존재 파일만)
+ls -l ~/.claude/.credentials.json ~/.claude-helper/.credentials.json \
+  /etc/mobruji/maestro.env ~/.bashrc ~/mobruji/tools/discord-daemon/.env ~/.ssh/authorized_keys 2>/dev/null
 ```
 
-### G-4) API key 회전
-- Anthropic API key는 6개월마다 회전 권장.
-- 회전 절차: 신규 키 발급 → `/etc/mobruji/maestro.env` 갱신 → `sudo systemctl restart mobruji-maestro` → 구 키 폐기.
-- Discord bot 토큰 / GitHub PAT도 동일 패턴.
+### G-4) Anthropic 인증 회전
+- **OAuth credentials (운영 모드)**: 만료/취소 시점에 재발급. 로컬에서 `claude` 재로그인 → `~/.claude/.credentials.json` 생성 → §A-2 옵션 A 절차로 NCP 재복사 → `sudo systemctl restart mobruji-maestro` (helper 도 있으면 함께 재기동). access token 자동 갱신 덕에 정기 회전 빈도는 낮다.
+- **API key (옵션 B)**: 6개월마다 회전 권장. 신규 키 발급 → `/etc/mobruji/maestro.env` 갱신 → `sudo systemctl restart mobruji-maestro` → 구 키 폐기.
+- Discord bot 토큰 / GitHub PAT 도 동일 패턴(`.env` 갱신 → bridge restart).
 
 ### G-5) 로그 민감정보
 - `journalctl -u mobruji-maestro` 에 maestro narration이 일부 노출될 수 있음. 사용자 음역대/기호 등 민감 데이터는 maestro 행동 정책(CLAUDE.md §4)에 따라 원문 노출 금지.
@@ -511,11 +590,13 @@ healthcheck 가 모두 `healthy` 되면:
 develop 머지 시 NCP 자동 배포되도록 secret 3개 등록 (사용자 1회):
 
 ```bash
-# 로컬에서 (gh CLI)
-gh secret set NCP_SSH_HOST --repo goohong/mobruji <<< "101.79.20.94"
-gh secret set NCP_SSH_USER --repo goohong/mobruji <<< "mobruji"
-gh secret set NCP_SSH_KEY  --repo goohong/mobruji < ~/workspace/secret/mobruji-key.pem
+# 로컬에서 (gh CLI). 값은 stdin 으로 흘려 history/argv 에 평문 노출 방지.
+printf '101.79.20.94' | gh secret set NCP_SSH_HOST --repo goohong/mobruji --body -
+printf 'mobruji'      | gh secret set NCP_SSH_USER --repo goohong/mobruji --body -
+gh secret set NCP_SSH_KEY --repo goohong/mobruji --body - < ~/workspace/secret/mobruji-key.pem
 ```
+
+> heredoc(`<<<` / `<<EOF`) 은 셸에 따라 trailing newline 이 붙어 secret 값이 의도와 달라질 수 있다. `printf` 와 `--body -` 조합은 newline 을 명시적으로 제어한다. SSH key 파일은 끝의 newline 이 유의미하므로 그대로 `<` 로 stream 한다.
 
 이후 흐름 (`.github/workflows/cd-dev.yml`):
 - develop push (paths 매치: `backend/**` / `web/**` / `docker-compose.dev.yml` / `nginx/**` / `tools/deploy/**`)
@@ -581,15 +662,190 @@ docker volume rm mobruji-mysql-dev  # 신중히
 #### `.env.dev` 변경했는데 반영 안 됨
 docker compose 의 환경 변수는 컨테이너 생성 시 한 번 inline. 변경 후 `up -d --force-recreate` 또는 service 별 `up -d --no-deps backend`.
 
-## I) 다음 단계
+## I) NCP 추가 블록 스토리지 attach + Docker root 이동
 
-본 런북 §B(Phase 1) ~ §H(Phase 4) 완료 후:
+### 배경 / 언제 쓰나
+Phase 4 dev 환경을 한동안 굴리면 docker image / build cache / fe node_modules 가 누적되어 root 디스크(50GB)가 차오른다. maestro 실측: dev 가동 약 1주 만에 사용률 **88%** (≈ 44GB) 도달, image pull / `npm ci` 가 `ENOSPC` 직전. NCP 의 root 볼륨 자체는 사후 확장이 번거롭고 단순 정리만으로는 다음 사이클에 다시 찬다.
+
+해법: **추가 블록 스토리지(예: 20GB)를 NCP 콘솔에서 attach 한 뒤, Docker 의 데이터 디렉토리(`/var/lib/docker`)와 fe `node_modules` 를 그 볼륨(`/data`)로 이동.** maestro 실측 결과 **88% → 63%** 로 즉시 해소, 다운타임 **약 30초**(docker 재시작 1회), 추가 비용은 NCP 가격표 기준 20GB 블록.
+
+### I-1) NCP 콘솔에서 블록 스토리지 attach (사용자 작업)
+NCP 콘솔 → Server → 해당 VM (`mobruji-maestro`) → "스토리지" 탭 → **"스토리지 생성"** (또는 "기존 스토리지 연결").
+
+- 용량: 20GB 권장 (절차 검증된 값; 사용량에 따라 ↑)
+- 디스크 종류: SSD (기본)
+- 생성 후 자동으로 VM 에 attach 됨 (서버를 끄지 않아도 hot-attach 지원)
+- 본체(VM) 와 분리된 볼륨이므로 VM 을 재생성해도 데이터 유지 가능
+
+콘솔이 attach 완료 알림을 띄우면 SSH 로 VM 에 들어가 다음 단계를 진행한다.
+
+### I-2) 디스크 인식 / 포맷 / mount (root)
+새 볼륨은 보통 `/dev/xvdb` 또는 `/dev/vdb` 로 들어온다. 이름은 환경마다 달라 `lsblk` 로 먼저 확인.
+
+```bash
+# 1) 새 디스크 식별 (MOUNTPOINT 가 비어 있고, 크기가 attach 한 용량과 같은 device 를 찾는다)
+lsblk
+
+# 2) XFS 포맷 (-f 는 새 디스크 한정으로 사용; 기존 데이터가 있는 디스크에 절대 쓰지 말 것)
+sudo mkfs.xfs /dev/xvdb
+
+# 3) 마운트 포인트 생성 + 임시 mount
+sudo mkdir -p /data
+sudo mount /dev/xvdb /data
+
+# 4) UUID 추출 (device 이름은 재부팅 시 바뀔 수 있으므로 fstab 은 반드시 UUID 사용)
+sudo blkid /dev/xvdb
+# → 예: /dev/xvdb: UUID="abcd-...." TYPE="xfs"
+
+# 5) /etc/fstab 영구 등록 (UUID + nofail 옵션)
+echo "UUID=<위 UUID>  /data  xfs  defaults,nofail  0  2" | sudo tee -a /etc/fstab
+
+# 6) fstab 검증 — mount 옵션 오타가 있으면 다음 재부팅에 boot 실패할 수 있다
+sudo mount -a
+df -h /data
+```
+
+> **회귀 가드 — `nofail` 필수**: NCP 콘솔에서 사용자가 디스크를 떼는 등 어떤 이유로든 볼륨이 보이지 않을 때, `nofail` 이 없으면 systemd `local-fs.target` 이 실패해 부팅이 멈춘다. dev 환경이라도 maestro/discord-bridge 가 같은 VM 에 있으므로 boot 실패는 곧 maestro 정지다.
+
+### I-3) Docker 정지 → data-root 이동 → 재기동 (root)
+실제 다운타임이 발생하는 구간. dev container 4개 + docker 데몬을 한 번에 멈춘다.
+
+```bash
+# 1) dev container graceful stop (compose 로 띄운 것)
+sudo -u mobruji bash -c "cd ~/mobruji && docker compose -f docker-compose.dev.yml --env-file .env.dev down"
+
+# 2) docker 데몬 + 소켓 동시 정지
+#    socket 을 같이 멈추지 않으면 다음 docker 명령이 socket activation 으로 데몬을 다시 깨운다
+sudo systemctl stop docker
+sudo systemctl stop docker.socket
+
+# 3) /etc/docker/daemon.json 작성 (data-root 지정)
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "data-root": "/data/docker"
+}
+EOF
+
+# 4) 기존 /var/lib/docker → /data/docker 로 복사 (소유권/ACL/xattr 보존)
+sudo mkdir -p /data/docker
+sudo rsync -aHAX --info=progress2 /var/lib/docker/ /data/docker/
+
+# 5) docker / socket 재기동
+sudo systemctl start docker.socket
+sudo systemctl start docker
+sudo systemctl status docker --no-pager | head -20
+```
+
+### I-4) Healthcheck — 4 container 모두 healthy 확인 후 old 삭제
+**중요**: rsync 직후 `/var/lib/docker` 를 바로 지우지 말 것. 새 data-root 로 첫 컨테이너가 정상 부팅되는지 먼저 확인한다.
+
+```bash
+# 1) dev container 재기동
+sudo -u mobruji bash -c "cd ~/mobruji && docker compose -f docker-compose.dev.yml --env-file .env.dev up -d"
+
+# 2) 모든 service 가 healthy 인지 polling (최대 5분)
+for i in {1..60}; do
+  sudo -u mobruji docker compose -f /home/mobruji/mobruji/docker-compose.dev.yml --env-file /home/mobruji/mobruji/.env.dev ps
+  unhealthy=$(sudo -u mobruji docker compose -f /home/mobruji/mobruji/docker-compose.dev.yml --env-file /home/mobruji/mobruji/.env.dev ps --format json | grep -c -v '"Health":"healthy"' || true)
+  [ "$unhealthy" = "0" ] && break
+  sleep 5
+done
+
+# 3) endpoint 검증
+curl -fsS http://localhost/_nginx_health
+curl -fsS http://localhost/actuator/health/liveness
+
+# 4) 새 data-root 가 실제로 쓰이는지 확인
+docker info | grep "Docker Root Dir"
+# → "Docker Root Dir: /data/docker" 가 나와야 한다
+
+# 5) 4개 모두 healthy + endpoint 200 인 것을 눈으로 확인한 다음에만 old 삭제
+sudo rm -rf /var/lib/docker
+```
+
+> **회귀 가드 — old 삭제는 healthy 확인 후**: 새 data-root 가 깨졌을 때 `/var/lib/docker` 가 남아 있으면 `daemon.json` 만 되돌리고 즉시 회복 가능. 미리 지우면 그 fallback 이 사라진다.
+
+### I-5) Frontend `node_modules` symlink (다운타임 0)
+fe 의 `node_modules` (수백 MB) 만 따로 옮기면 dev 디스크가 더 가벼워진다. fe dev 가 안 도는 시점(또는 무관)에 진행 가능.
+
+> **표준 target 경로 — `/data/node_modules/`**: maestro 실측(#439, #736)으로 외부 target 디렉토리 이름이 워크트리 내부 `node_modules` 와 다른 prefix(예: `/data/web-node_modules/` 또는 `/data/node_modules/fe-web/`) 를 가지면 Node.js ESM resolver 가 동일 패키지를 두 가지 realpath 로 중복 해석해 `vitest` 등 subpath exports lookup 이 깨진다(`ERR_MODULE_NOT_FOUND: '@vitest/utils'`). target 이름을 **`/data/node_modules/`** 로 단순화해 realpath 일관성을 확보한 것이 실제 해결이었다. 신규 setup 은 처음부터 본 경로로 통일한다. 진단 상세: [`docs/runbooks/web-deps-dev-env.md`](./web-deps-dev-env.md).
+
+```bash
+# 1) 옮길 대상 만들기 (표준 경로 — 다른 이름 쓰지 말 것, §I-5 가드 참조)
+sudo mkdir -p /data/node_modules
+sudo chown mobruji:mobruji /data/node_modules
+
+# 2) 기존 node_modules 가 있으면 옮기고, 없으면 (대상이 빈 상태로) 다음 install 이 채움
+sudo -u mobruji bash <<'EOF'
+cd ~/mobruji/web
+if [ -d node_modules ] && [ ! -L node_modules ]; then
+  mv node_modules/* /data/node_modules/ 2>/dev/null || true
+  mv node_modules/.[!.]* /data/node_modules/ 2>/dev/null || true
+  rmdir node_modules
+fi
+ln -s /data/node_modules node_modules
+ls -la node_modules
+EOF
+```
+
+이후 `npm ci` / `npm install` 은 자동으로 `/data` 디스크에 쌓이고 root 디스크는 영향 없다. CD 가 컨테이너 안 빌드만 쓴다면(현재 dev 흐름) 본 단계는 호스트 fe 디버깅용으로만 의미가 있고 생략 가능.
+
+> **회귀 가드 — target 이름 prefix 정렬 필수**: `/data/<something>/` 형태로 두 단계 prefix 를 두면 ESM resolver realpath 가 깨질 수 있다(#736 §3). 워크트리 여러 개를 같은 디스크에 두려면 각 워크트리의 외부 target 을 모두 `/data/<단일-디렉토리>/` 로 두되, 서로 다른 워크트리가 같은 target 을 공유하지 않도록 한 워크트리당 한 target 으로 운영한다. 현재 fe 만 본 패턴을 쓰므로 `/data/node_modules/` 하나로 충분.
+
+### I-6) 정량 결과 / 검증 체크리스트
+- [ ] `df -h /` → 사용률 **88% → 63%** 수준으로 떨어졌다 (Docker overlay 가 옮겨졌으므로)
+- [ ] `df -h /data` → 새 볼륨이 실제로 쓰이고 있다 (사용량 > 0)
+- [ ] `docker info | grep "Docker Root Dir"` → `/data/docker`
+- [ ] `docker compose ps` → 4 container 모두 `(healthy)`
+- [ ] `curl http://localhost/_nginx_health` → `ok`
+- [ ] `curl http://localhost/actuator/health/liveness` → `{"status":"UP"}`
+- [ ] 다운타임 측정: docker stop → up healthy 까지 **약 30초** (rsync 시간 + 컨테이너 부팅) 수준
+- [ ] (재부팅 회귀 테스트) `sudo reboot` 후 `df -h /data` 가 그대로 mount 되어 있다 — fstab UUID + nofail 검증
+
+### I-7) 트러블슈팅 — Phase 4 보강
+
+#### `docker info` 가 여전히 `/var/lib/docker` 로 보임
+원인: `daemon.json` 작성 후 `systemctl restart docker` 만 하고 `docker.socket` 은 재시작 안 함. socket activation 으로 데몬이 이전 설정으로 깨어났다.
+대응: `sudo systemctl stop docker docker.socket` 후 socket → docker 순으로 다시 start.
+
+#### 재부팅 후 `/data` 가 비어 보임
+원인: fstab UUID 오타 또는 device 이름(`/dev/xvdb`) 으로 직접 등록 후 디스크 순서가 바뀜.
+대응:
+1. `sudo blkid` 로 현재 UUID 재확인.
+2. `/etc/fstab` 의 UUID 라인 수정.
+3. `sudo mount -a` → 에러 없으면 정상.
+4. `nofail` 옵션이 있어서 부팅 자체는 정상 진행됐을 것.
+
+#### rsync 중 `/var/lib/docker` 가 너무 크다
+원인: 그동안 쌓인 image / build cache.
+대응 (rsync 전 1회):
+```bash
+sudo -u mobruji docker system prune -af --volumes
+```
+주의: `--volumes` 는 unnamed volume 까지 지운다. dev MySQL 은 named volume(`mobruji-mysql-dev`) 이므로 영향 없으나, 다른 named 가 있으면 먼저 확인.
+
+#### 옮긴 직후 컨테이너 부팅 실패
+원인: 권한/SELinux/ACL 손상.
+대응:
+1. `sudo journalctl -u docker -n 100 --no-pager` 로 데몬 로그 확인.
+2. rsync 가 `-aHAX` 였는지 (소유권/링크/ACL/xattr 모두 보존) 확인.
+3. 회복: `daemon.json` 의 `data-root` 라인을 지우거나 원래 경로로 되돌린 뒤 `systemctl restart docker docker.socket`. `/var/lib/docker` 가 살아 있으면 즉시 회복.
+
+### I-8) 운영 메모
+- **언제 또 attach 하나**: `/data` 사용률이 80% 를 넘으면 또 한 번 NCP 콘솔에서 볼륨을 키우거나(online resize 가능) 새 볼륨 추가.
+- **백업**: dev 환경은 휘발성 허용. `/data/docker` 자체는 image cache 이므로 백업 가치 낮음. 단 `mobruji-mysql-dev` volume 은 dev DB 본체 → 별도 dump 정책은 상위 spec(`docs/features/ncp-maestro-resilience.md`) 참고.
+- **prod 환경 확장 시**: 같은 절차를 그대로 쓰되 다운타임을 사전 공지하고, healthcheck polling 임계값을 길게(예: 10분) 잡는다.
+
+## J) 다음 단계
+
+본 런북 §B(Phase 1) ~ §H(Phase 4) 완료 후 (필요 시 §I 디스크 확장 포함):
 - Phase 4 dev 환경 사용성 1주 운영 데이터 보고 — `docs/features/deployment-infrastructure.md` (Hetzner CX22 prod) 진행 결정.
 - rev sub-agent 가 dev URL 을 통합 시나리오 QA 에 사용 — `docs/features/rev-qa-protocol.md` §5-4 갱신 (별 PR).
 - (선택) maestro transcript 무게 모니터 → 자동 `/compact` 트리거.
 - (선택) Grafana Cloud remote_write — CPU/RAM/swap/container memory.
 
-## J) 관련 문서
+## K) 관련 문서
 
 - [`docs/decisions/0015-hosting-stack.md`](../decisions/0015-hosting-stack.md) — 본 런북의 결정 ADR
 - [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) — Discord-driven maestro spec (#338)

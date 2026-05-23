@@ -14,6 +14,8 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.DefaultApplicationArguments;
+import org.springframework.context.annotation.Profile;
 
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.MusicalKey;
@@ -129,5 +131,100 @@ class AlbumCoverBackfillCommandTest {
 
         assertThat(summary.analyzed()).isEqualTo(1);
         verify(repository).findMissingAlbumCover();
+    }
+
+    // ───────────────────── 메타데이터 / 운영 명령 회귀 가드 ─────────────────────
+    // @Profile/OPTION_KEY/run() 옵션 파싱 분기가 실수로 바뀌면 운영 명령이 깨지거나 통합 테스트 환경에서 외부 API 가
+    // 호출될 수 있다.
+
+    @Test
+    @DisplayName("@Profile 는 !test 로 고정되어야 한다 (통합 테스트 영향 회귀 가드)")
+    void classProfile_excludesTest() {
+        final Profile profile = AlbumCoverBackfillCommand.class.getAnnotation(Profile.class);
+        assertThat(profile).as("@Profile 어노테이션이 존재해야 한다").isNotNull();
+        assertThat(profile.value()).containsExactly("!test");
+    }
+
+    @Test
+    @DisplayName("OPTION_KEY 는 mobruji.backfill-album-cover 로 고정 (운영 명령 정합 회귀 가드)")
+    void optionKey_isStable() {
+        assertThat(AlbumCoverBackfillCommand.OPTION_KEY).isEqualTo("mobruji.backfill-album-cover");
+    }
+
+    @Test
+    @DisplayName("run: 옵션 부재 시 no-op (평시 부팅 회귀 가드)")
+    void run_noOption_isNoOp() {
+        final SongRepository repository = mock(SongRepository.class);
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        command.run(new DefaultApplicationArguments());
+
+        verify(repository, never()).findMissingAlbumCover();
+        verify(lookup, never()).lookupAlbumCoverUrl(any(), any());
+    }
+
+    @Test
+    @DisplayName("run: --mobruji.backfill-album-cover (값 없음) → backfill 트리거")
+    void run_optionWithoutValue_triggersBackfill() {
+        final SongRepository repository = mock(SongRepository.class);
+        when(repository.findMissingAlbumCover()).thenReturn(List.of());
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        command.run(new DefaultApplicationArguments("--mobruji.backfill-album-cover"));
+
+        verify(repository).findMissingAlbumCover();
+    }
+
+    @Test
+    @DisplayName("run: --mobruji.backfill-album-cover=true → backfill 트리거")
+    void run_optionTrue_triggersBackfill() {
+        final SongRepository repository = mock(SongRepository.class);
+        when(repository.findMissingAlbumCover()).thenReturn(List.of());
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        command.run(new DefaultApplicationArguments("--mobruji.backfill-album-cover=true"));
+
+        verify(repository).findMissingAlbumCover();
+    }
+
+    @Test
+    @DisplayName("run: --mobruji.backfill-album-cover=TRUE → backfill 트리거 (대소문자 무시 회귀 가드)")
+    void run_optionTrueCaseInsensitive_triggersBackfill() {
+        final SongRepository repository = mock(SongRepository.class);
+        when(repository.findMissingAlbumCover()).thenReturn(List.of());
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        command.run(new DefaultApplicationArguments("--mobruji.backfill-album-cover=TRUE"));
+
+        verify(repository).findMissingAlbumCover();
+    }
+
+    @Test
+    @DisplayName("run: --mobruji.backfill-album-cover=false → no-op (옵션 끄기 회귀 가드)")
+    void run_optionFalse_isNoOp() {
+        final SongRepository repository = mock(SongRepository.class);
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        command.run(new DefaultApplicationArguments("--mobruji.backfill-album-cover=false"));
+
+        verify(repository, never()).findMissingAlbumCover();
+        verify(lookup, never()).lookupAlbumCoverUrl(any(), any());
+    }
+
+    @Test
+    @DisplayName("run: null args 면 no-op (방어 회귀 가드)")
+    void run_nullArgs_isNoOp() {
+        final SongRepository repository = mock(SongRepository.class);
+        final AlbumCoverLookupClient lookup = mock(AlbumCoverLookupClient.class);
+        final AlbumCoverBackfillCommand command = new AlbumCoverBackfillCommand(repository, lookup, PROPERTIES);
+
+        command.run(null);
+
+        verify(repository, never()).findMissingAlbumCover();
     }
 }

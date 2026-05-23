@@ -34,6 +34,20 @@ const WARMUP = __ENV.WARMUP || '10s';
 
 const MOODS = ['UPBEAT', 'CALM', 'EMOTIONAL', 'POWERFUL', 'GROOVY', 'NOSTALGIC', null];
 
+// preferredBpm 변주 — v2(#218) tempoMatch 회귀 가드(#274).
+// 일정 확률(BPM_INJECTION_RATE)로 [BPM_MIN, BPM_MAX] 임의 정수 주입, 나머지는 미주입(mood default BPM 경로 유지).
+// 범위 60~200은 RecommendationCreateRequest @Min(30) @Max(300) 안쪽이며 일반 가요 템포 분포에 정렬.
+const BPM_INJECTION_RATE = parseFloat(__ENV.BPM_INJECTION_RATE || '0.5');
+const BPM_MIN = parseInt(__ENV.BPM_MIN || '60', 10);
+const BPM_MAX = parseInt(__ENV.BPM_MAX || '200', 10);
+
+function randomPreferredBpm() {
+    if (Math.random() >= BPM_INJECTION_RATE) {
+        return null;
+    }
+    return Math.floor(Math.random() * (BPM_MAX - BPM_MIN + 1)) + BPM_MIN;
+}
+
 // 음역대 변주 — MIDI 12~119 범위 내에서 일반적인 가창 음역(C3~C5 부근) 중심.
 // 폭 12~24 반음, low 48~64에서 추첨.
 const VOICE_RANGE_VARIANTS = new SharedArray('voiceRangeVariants', function () {
@@ -124,6 +138,10 @@ export function recommendationFlow(data) {
     };
     if (mood !== null) {
         payload.mood = mood;
+    }
+    const preferredBpm = randomPreferredBpm();
+    if (preferredBpm !== null) {
+        payload.preferredBpm = preferredBpm;
     }
 
     const res = http.post(`${BASE_URL}/api/v1/recommendations`, JSON.stringify(payload), {

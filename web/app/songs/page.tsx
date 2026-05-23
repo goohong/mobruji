@@ -375,8 +375,14 @@ function SearchResult({
   }
 
   if (error) {
+    // closes #470 — 검색 에러는 SR이 즉시 announce 해야 한다.
+    // role="alert" + aria-live="assertive"로 polite 영역과 분리. 시각적 표현은 유지.
     return (
-      <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
+      <div
+        role="alert"
+        aria-live="assertive"
+        className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+      >
         <p className="text-sm text-red-700 dark:text-red-200">
           검색에 실패했습니다.{" "}
           {error instanceof ApiError

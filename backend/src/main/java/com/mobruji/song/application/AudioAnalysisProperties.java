@@ -2,6 +2,7 @@ package com.mobruji.song.application;
 
 import java.time.Duration;
 
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -31,7 +32,7 @@ import jakarta.validation.constraints.NotNull;
 public record AudioAnalysisProperties(
         @NotBlank String pythonCmd,
         @NotBlank String toolDir,
-        @NotNull Duration timeout,
+        @NotNull @DurationMin(seconds = 1) Duration timeout,
         boolean useDocker,
         String dockerComposeFile,
         String dockerComposeService

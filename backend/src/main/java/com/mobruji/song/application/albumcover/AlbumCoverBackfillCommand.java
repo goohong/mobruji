@@ -21,6 +21,10 @@ import com.mobruji.song.infrastructure.SongRepository;
 /**
  * 곡 albumCoverUrl backfill batch — 이슈 #322 PR B.
  *
+ * <p>곡 단위 자체 트랜잭션 (한 곡 실패가 다음 곡 막지 않는 의도된 격리). 이슈 #863 — {@code @Transactional}
+ * 부재는 의도된 설계로, 곡별 save 호출이 Spring 의 기본 트랜잭션 경계 1곡 ↔ 1 commit 로 동작한다. SongAnalysis
+ * 도입 시 트랜잭션 경계 재설계 필수 — spec {@code docs/features/audio-tooling-bootstrap.md} §10-7 cross-ref.
+ *
  * <p>출처는 {@link AlbumCoverLookupClient} 추상으로 분리되어 있다. 본 PR 에서는 {@link ItunesAlbumCoverClient}
  * 가 1차 출처. 후속 사이클 (MusicBrainz/Spotify) 에서는 lookup 우선순위 chain 으로 확장한다.
  *

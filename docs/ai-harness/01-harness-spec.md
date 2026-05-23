@@ -8,7 +8,7 @@
 
 - 기본 단위: 이슈 1건 = 브랜치 1개 = PR 1개
 - 브랜치 이름 형식: `<type>/<요약>-#<이슈번호>` (예: `feature/voice-range-input-#12`)
-- 파생 브랜치 타입: `feature`, `refactor`, `chore`, `fix` (base: `develop`)
+- 파생 브랜치 타입(type 화이트리스트, 8종): `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `release` (base: `develop`. `release`는 `release-prompt-template`로 자동 생성되는 develop→main 머지 PR 전용)
 
 ## 3) 입력 계약 (AI 작업 요청 시)
 
@@ -36,12 +36,14 @@
 - 아래 경로를 AI가 변경한 PR은 사람이 1줄 이상 코멘트로 검토 의견을 남긴 뒤에만 머지한다.
 - DB 마이그레이션: `**/db/migration/**`, `**/resources/db/**`
 - 시크릿/환경 설정: `**/application*.yml`, `**/application*.properties`, `.env*`
-- CI/CD 워크플로우: `.github/workflows/**`
+- CI/CD 워크플로우: `.github/workflows/**`, `.github/CODEOWNERS`
 - Backend 빌드 스크립트: `backend/build.gradle*`, `backend/settings.gradle*`, `backend/gradle/**`
-- Web 빌드/설정: `web/next.config.*`, `web/package.json`, `web/*-lock.*`
+- Web 빌드/설정: `web/next.config.*`, `web/package.json`, `web/pnpm-lock.yaml`, `web/package-lock.json`
 - 인프라: `Dockerfile`, `docker-compose*.yml`
 - 라이선스: `LICENSE`
 - AI 단독으로 위 파일을 신규 생성/삭제하는 PR은 원칙적으로 분할하거나 사람이 직접 작성한다.
+
+> **결정 근거 (영속)**: 보호 영역 목록과 "사람 검토 필수" 원칙은 다중 AI 운영 모델의 일부다. 5 워크트리 + maestro 오케스트레이션 default 와 함께 `docs/decisions/0014-multi-agent-worktree-orchestration.md` (ADR-0014) 에서 항시 가동 룰·sub-agent 위임 패턴을 결정한다. CLAUDE.md §4 "운영 원칙"(권장 수준 + `needs-human-review` 라벨 가시화)도 같은 ADR 맥락. 본 §6 변경 시 ADR-0014 와 정합성 확인.
 
 ## 7) 비목표
 

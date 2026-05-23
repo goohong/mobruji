@@ -8,6 +8,8 @@
  * - SSR safe — 초기 렌더는 system 모드 + light 가정, mount 후 useTheme 가 보정.
  *   THEME_INIT_SCRIPT 가 hydration 전에 이미 `<html.dark>` 결정 → 시각적 flash 없음.
  * - a11y: `aria-label` 에 현재 모드와 다음 액션을 함께 명시. 키보드 focus ring 유지.
+ *   `aria-pressed` 는 실제 다크 활성 여부(`isDark`) 와 동기화 — 사용자가 system 모드여도
+ *   OS 가 dark 면 true. 스크린 리더가 "다크 활성 여부" 의 진실값을 듣게 한다 (이슈 #622).
  * - 의존성 0 (lucide-react 미사용, fe 25/33/34 외부 lib 회피 패턴).
  */
 
@@ -26,13 +28,14 @@ const CURRENT_MODE_LABEL: Record<ReturnType<typeof useTheme>["mode"], string> = 
 };
 
 export function ThemeToggle() {
-  const { mode, toggleMode } = useTheme();
+  const { mode, isDark, toggleMode } = useTheme();
 
   return (
     <button
       type="button"
       onClick={toggleMode}
       aria-label={`${CURRENT_MODE_LABEL[mode]} — ${NEXT_MODE_LABEL[mode]}`}
+      aria-pressed={isDark}
       title={CURRENT_MODE_LABEL[mode]}
       data-theme-mode={mode}
       className={[

@@ -1,10 +1,14 @@
-"""Phase 3 bridge 단위 테스트 (#340 #341).
+"""Discord daemon 단순화본 단위 테스트 (이슈 #807).
 
 표준 라이브러리 unittest + unittest.mock 만 사용. 외부 인증/네트워크 불필요.
+
+폐기된 기능 (uniform watcher / context auto-clear / formal generator 등) 의
+테스트는 삭제되었습니다. 본 파일은 단순화본 보존 함수만 검증합니다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import sys
@@ -17,13 +21,17 @@ from unittest import mock
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 
-# discord / dotenv / requests 가 venv 에 없어도 import 가능하도록 stub.
-for missing in ("discord", "requests", "dotenv"):
-    if missing not in sys.modules:
-        stub = mock.MagicMock()
-        if missing == "dotenv":
-            stub.load_dotenv = lambda *a, **kw: None
-        sys.modules[missing] = stub
+# discord 는 가능한 한 실제 모듈을 사용 — embed 검증과 일관성 (#840).
+try:
+    import discord as _real_discord  # noqa: F401
+except ImportError:
+    sys.modules["discord"] = mock.MagicMock()
+
+# dotenv 는 단순 stub.
+if "dotenv" not in sys.modules:
+    stub = mock.MagicMock()
+    stub.load_dotenv = lambda *a, **kw: None
+    sys.modules["dotenv"] = stub
 
 import bot  # noqa: E402
 
@@ -61,18 +69,6 @@ class DedupLedgerTests(unittest.TestCase):
         self.assertFalse(self.ledger.is_processed("old"))
         self.assertTrue(self.ledger.is_processed("fresh"))
 
-    def test_count_since_empty(self) -> None:
-        self.assertEqual(self.ledger.count_since(300), 0)
-
-    def test_count_since_window(self) -> None:
-        now = int(time.time())
-        self.ledger.mark_processed("recent1", now_epoch=now - 60)
-        self.ledger.mark_processed("recent2", now_epoch=now - 200)
-        self.ledger.mark_processed("old", now_epoch=now - 1000)
-        self.assertEqual(self.ledger.count_since(300), 2)
-        self.assertEqual(self.ledger.count_since(100), 1)
-        self.assertEqual(self.ledger.count_since(2000), 3)
-
 
 class SentinelTests(unittest.TestCase):
     def test_ctrl_c(self) -> None:
@@ -88,7 +84,7 @@ class SentinelTests(unittest.TestCase):
         self.assertIsNone(bot.resolve_sentinel("hello"))
 
     def test_slash_command_not_sentinel(self) -> None:
-        # /exit 같은 일반 슬래시 명령은 maestro TUI 로 그대로 전달 (Q5 답 c).
+        # /exit 같은 일반 슬래시 명령은 helper TUI 로 그대로 전달.
         self.assertIsNone(bot.resolve_sentinel("/exit"))
 
     def test_unknown_sentinel_returns_none(self) -> None:
@@ -104,22 +100,22 @@ class TmuxSendPayloadTests(unittest.TestCase):
 
     def test_sends_literal_then_enter(self) -> None:
         with mock.patch.object(bot.subprocess, "run", return_value=self._completed()) as run:
-            ok = bot.tmux_send_payload("mobruji:0.0", "hello")
+            ok = bot.tmux_send_payload("helper:0.0", "hello")
         self.assertTrue(ok)
         self.assertEqual(run.call_count, 2)
         first_args = run.call_args_list[0].args[0]
         second_args = run.call_args_list[1].args[0]
-        self.assertEqual(first_args, ["tmux", "send-keys", "-t", "mobruji:0.0", "-l", "hello"])
-        self.assertEqual(second_args, ["tmux", "send-keys", "-t", "mobruji:0.0", "Enter"])
+        self.assertEqual(first_args, ["tmux", "send-keys", "-t", "helper:0.0", "-l", "hello"])
+        self.assertEqual(second_args, ["tmux", "send-keys", "-t", "helper:0.0", "Enter"])
 
     def test_sentinel_uses_control_key(self) -> None:
         with mock.patch.object(bot.subprocess, "run", return_value=self._completed()) as run:
-            ok = bot.tmux_send_payload("mobruji:0.0", "/system:ctrl-c")
+            ok = bot.tmux_send_payload("helper:0.0", "/system:ctrl-c")
         self.assertTrue(ok)
         self.assertEqual(run.call_count, 1)
         self.assertEqual(
             run.call_args_list[0].args[0],
-            ["tmux", "send-keys", "-t", "mobruji:0.0", "C-c"],
+            ["tmux", "send-keys", "-t", "helper:0.0", "C-c"],
         )
 
     def test_multiline_sends_each_line(self) -> None:
@@ -146,211 +142,241 @@ class TmuxSessionTests(unittest.TestCase):
             return result
 
         with mock.patch.object(bot.subprocess, "run", side_effect=fake_run):
-            ok = bot.ensure_tmux_session("mobruji", "/usr/local/bin/claude")
+            ok = bot.ensure_tmux_session("helper", "/usr/local/bin/claude")
         self.assertTrue(ok)
-        # has-session 한 번 + new-session 한 번.
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][:2], ["tmux", "new-session"])
         self.assertIn("/usr/local/bin/claude", calls[1])
 
 
-class PayloadDispatchPathTests(unittest.TestCase):
-    """on_message dispatch 분기 로직 검증.
+class MentionSanitizeTests(unittest.TestCase):
+    """digest 안 PR title @everyone 등이 실제 mention 으로 발화되지 않는지 확인."""
 
-    실제 discord.Message 객체 대신 ducktyped Mock 사용.
-    """
+    def test_everyone_blocked(self) -> None:
+        out = bot.sanitize_mentions("@everyone hello")
+        self.assertNotEqual(out, "@everyone hello")
+        self.assertIn("everyone", out)
 
-    def _make_message(self, *, content: str, channel_id: int, author_id: int, message_id: int, is_bot: bool = False) -> mock.MagicMock:
-        message = mock.MagicMock()
-        message.content = content
-        message.channel.id = channel_id
-        message.author.id = author_id
-        message.author.bot = is_bot
-        message.author.name = "tester"
-        message.id = message_id
-        from datetime import datetime, timezone
-        message.created_at = datetime(2026, 5, 22, 12, 0, tzinfo=timezone.utc)
-        return message
+    def test_here_blocked(self) -> None:
+        out = bot.sanitize_mentions("@here ping")
+        self.assertNotEqual(out, "@here ping")
 
-    def test_disallowed_user_dropped(self) -> None:
-        # 화이트리스트 외 사용자는 dedup 에 기록되지 않는다 = 다음에 동일 id 와도 진입 가능.
-        ledger = bot.DedupLedger(":memory:")
-        env = {
-            "DISCORD_BOT_TOKEN": "t",
-            "ALLOWED_USER_IDS": "111",
-            "MOBRUJI_CHANNEL_ID": "999",
-            "GITHUB_PAT": "p",
-            "GITHUB_REPO": "x/y",
-            "TMUX_BRIDGE_ENABLED": "1",
-            "TMUX_SESSION_NAME": "mobruji",
-            "TMUX_TARGET_PANE": "mobruji:0.0",
-            "CLAUDE_BIN": "claude",
-        }
-        with mock.patch.object(bot, "ensure_tmux_session") as ensure, \
-             mock.patch.object(bot, "tmux_send_payload") as send, \
-             mock.patch.object(bot, "append_inbox"):
-            client = bot.build_client(env, ledger)
-            handler = client.on_message  # discord.py 가 바인딩한 콜백을 재참조.
-            # 실제로는 @client.event 데코레이터로 등록되므로 build_client 안 클로저 직접 못 잡음.
-            # 대신 build_client 가 동작에 부수효과 없는지 + ledger 가 비어있는지만 확인.
-        self.assertFalse(ledger.is_processed("123"))
-        ensure.assert_not_called()
-        send.assert_not_called()
+    def test_user_mention_blocked(self) -> None:
+        out = bot.sanitize_mentions("<@123456> hi")
+        self.assertNotEqual(out, "<@123456> hi")
+        self.assertIn("123456", out)
+
+    def test_plain_text_preserved(self) -> None:
+        self.assertEqual(bot.sanitize_mentions("hello world"), "hello world")
 
 
-class StatusReportTests(unittest.TestCase):
-    """/status 핸들러 결정성 응답 검증 (#354)."""
+class LoadEnvTests(unittest.TestCase):
+    """단순화본 load_env — GITHUB_PAT/REPO 폐기, helper 가 기본 세션 이름."""
 
-    def _completed(self, *, rc: int = 0, stdout: str = "", stderr: str = "") -> mock.MagicMock:
-        result = mock.MagicMock()
-        result.returncode = rc
-        result.stdout = stdout
-        result.stderr = stderr
-        return result
+    BASE = {
+        "DISCORD_BOT_TOKEN": "t",
+        "ALLOWED_USER_IDS": "111",
+        "MOBRUJI_CHANNEL_ID": "999",
+    }
 
-    def test_truncate_title_short(self) -> None:
-        self.assertEqual(bot._truncate_title("hello"), "hello")
+    def test_minimal_required_only(self) -> None:
+        with mock.patch.dict(os.environ, self.BASE, clear=True):
+            env = bot.load_env()
+        self.assertEqual(env["DISCORD_BOT_TOKEN"], "t")
+        self.assertEqual(env["ALLOWED_USER_IDS"], "111")
+        self.assertEqual(env["MOBRUJI_CHANNEL_ID"], "999")
+        # 기본 helper 세션.
+        self.assertEqual(env["TMUX_SESSION_NAME"], "helper")
+        self.assertEqual(env["TMUX_TARGET_PANE"], "helper:0.0")
+        # NOTIFY 미설정 → MOBRUJI fallback.
+        self.assertEqual(env["NOTIFY_CHANNEL_ID"], "999")
+        # digest 기본 ON.
+        self.assertEqual(env["DIGEST_ENABLED"], "1")
 
-    def test_truncate_title_long(self) -> None:
-        title = "x" * 80
-        out = bot._truncate_title(title, limit=20)
-        self.assertEqual(len(out), 20)
-        self.assertTrue(out.endswith("…"))
+    def test_notify_channel_explicit(self) -> None:
+        with mock.patch.dict(os.environ, {**self.BASE, "NOTIFY_CHANNEL_ID": "222"}, clear=True):
+            env = bot.load_env()
+        self.assertEqual(env["NOTIFY_CHANNEL_ID"], "222")
 
-    def test_run_gh_json_success(self) -> None:
-        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(stdout='[{"number":1}]')):
-            out = bot._run_gh_json(["pr", "list"], "pat")
-        self.assertEqual(out, [{"number": 1}])
-
-    def test_run_gh_json_nonzero_returns_none(self) -> None:
-        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(rc=1, stderr="boom")):
-            out = bot._run_gh_json(["pr", "list"], "pat")
-        self.assertIsNone(out)
-
-    def test_run_gh_json_decode_error_returns_none(self) -> None:
-        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(stdout="not json")):
-            out = bot._run_gh_json(["pr", "list"], "pat")
-        self.assertIsNone(out)
-
-    def test_run_gh_json_timeout_returns_none(self) -> None:
-        def boom(*a, **kw):
-            raise bot.subprocess.TimeoutExpired(cmd=["gh"], timeout=1)
-        with mock.patch.object(bot.subprocess, "run", side_effect=boom):
-            self.assertIsNone(bot._run_gh_json(["pr", "list"], "pat"))
-
-    def test_run_gh_json_injects_gh_token(self) -> None:
-        captured: dict = {}
-
-        def fake(cmd, **kwargs):
-            captured["env"] = kwargs.get("env", {})
-            return self._completed(stdout="[]")
-
-        with mock.patch.object(bot.subprocess, "run", side_effect=fake):
-            bot._run_gh_json(["pr", "list"], "secret-pat")
-        self.assertEqual(captured["env"].get("GH_TOKEN"), "secret-pat")
-
-    def test_systemd_is_active_returns_stripped(self) -> None:
-        with mock.patch.object(bot.subprocess, "run", return_value=self._completed(stdout="active\n")):
-            self.assertEqual(bot._systemd_is_active("unit"), "active")
-
-    def test_systemd_is_active_unknown_on_missing(self) -> None:
-        with mock.patch.object(bot.subprocess, "run", side_effect=FileNotFoundError):
-            self.assertEqual(bot._systemd_is_active("unit"), "unknown")
-
-    def test_build_status_report_full(self) -> None:
-        from datetime import datetime as _dt, timezone as _tz
-        fake_now = _dt(2026, 5, 23, 4, 30, tzinfo=_tz.utc)
-        with mock.patch.object(bot, "_run_gh_json") as gh, \
-             mock.patch.object(bot, "_systemd_is_active", side_effect=["active", "active"]):
-            gh.side_effect = [
-                [{"number": 351, "title": "feat(infra): systemd unit", "isDraft": False, "labels": []}],
-                [{"number": 350, "title": "feat(infra): bot.py 확장", "mergedAt": "2026-05-22T15:09:00Z"}],
-                [],
-            ]
-            out = bot.build_status_report("goohong/mobruji", "pat", now=fake_now)
-        self.assertIn("mobruji status", out)
-        self.assertIn("maestro: `active`", out)
-        self.assertIn("#351", out)
-        self.assertIn("#350", out)
-        self.assertIn("알려진 오류: (없음)", out)
-        # KST = UTC + 9, 04:30 UTC → 13:30 KST.
-        self.assertIn("2026-05-23 13:30 KST", out)
-
-    def test_build_status_report_gh_failure_degrades(self) -> None:
-        with mock.patch.object(bot, "_run_gh_json", return_value=None), \
-             mock.patch.object(bot, "_systemd_is_active", return_value="active"):
-            out = bot.build_status_report("goohong/mobruji", "pat")
-        self.assertIn("진행 중 PR: (조회 실패)", out)
-        self.assertIn("최근 머지: (조회 실패)", out)
-        self.assertIn("알려진 오류: (조회 실패)", out)
-
-    def test_build_status_report_truncates_to_discord_limit(self) -> None:
-        long_pr = {"number": 999, "title": "X" * 200, "isDraft": False, "labels": []}
-        with mock.patch.object(bot, "_run_gh_json") as gh, \
-             mock.patch.object(bot, "_systemd_is_active", return_value="active"):
-            gh.side_effect = [[long_pr] * 8, [long_pr] * 5, [long_pr] * 5]
-            out = bot.build_status_report("goohong/mobruji", "pat")
-        self.assertLessEqual(len(out), bot.STATUS_DISCORD_MAX_LEN)
+    def test_missing_required_exits(self) -> None:
+        incomplete = {"DISCORD_BOT_TOKEN": "t"}
+        with mock.patch.dict(os.environ, incomplete, clear=True):
+            with self.assertRaises(SystemExit):
+                bot.load_env()
 
 
-class DigestTests(unittest.TestCase):
-    """5분 cron digest 단위 검증 (#362)."""
+class MessagePrefixTests(unittest.TestCase):
+    """단순화본은 digest 만 사용 — 나머지 6종 #819 에서 dead branch 제거."""
 
-    def test_build_digest_line_full(self) -> None:
-        from datetime import datetime as _dt, timezone as _tz
-        fake_now = _dt(2026, 5, 23, 4, 42, tzinfo=_tz.utc)  # 13:42 KST
-        with mock.patch.object(bot, "_run_gh_json") as gh:
-            gh.side_effect = [
-                [{"number": 1}, {"number": 2}],  # open PRs: 2
-                [{"number": 3}, {"number": 4}, {"number": 5}],  # merged 24h: 3
-                [],  # bug issues: 0
-            ]
-            line = bot.build_digest_line("goohong/mobruji", "pat", now=fake_now)
+    def test_only_digest_present(self) -> None:
+        self.assertEqual(set(bot.MESSAGE_PREFIX.keys()), {"digest"})
+
+    def test_digest_emoji(self) -> None:
+        self.assertEqual(bot.MESSAGE_PREFIX["digest"], "📊")
+
+
+class ResolveDigestIntervalTests(unittest.TestCase):
+    def test_default_when_none(self) -> None:
+        self.assertEqual(bot.resolve_digest_interval(None), bot.DEFAULT_DIGEST_INTERVAL_SECONDS)
+
+    def test_uses_explicit(self) -> None:
+        self.assertEqual(bot.resolve_digest_interval("1200"), 1200)
+
+    def test_falls_back_on_garbage(self) -> None:
         self.assertEqual(
-            line,
-            "📊 PR open:2 / 머지 24h:3 / type:bug:0 — 13:42 KST",
+            bot.resolve_digest_interval("not-a-number"),
+            bot.DEFAULT_DIGEST_INTERVAL_SECONDS,
         )
 
-    def test_build_digest_line_gh_failure_shows_question_mark(self) -> None:
-        with mock.patch.object(bot, "_run_gh_json", return_value=None):
-            line = bot.build_digest_line("goohong/mobruji", "pat")
-        self.assertIn("PR open:?", line)
-        self.assertIn("머지 24h:?", line)
-        self.assertIn("type:bug:?", line)
+    def test_rejects_non_positive(self) -> None:
+        self.assertEqual(bot.resolve_digest_interval("0"), bot.DEFAULT_DIGEST_INTERVAL_SECONDS)
+        self.assertEqual(bot.resolve_digest_interval("-30"), bot.DEFAULT_DIGEST_INTERVAL_SECONDS)
 
-    def test_digest_loop_sends_then_sleeps(self) -> None:
+
+class DigestLoopTests(unittest.TestCase):
+    """digest_loop — initial push + delta + heartbeat 분기 검증.
+
+    단순화본 시그니처: digest_loop(client, channel_id, *, interval, ...).
+    legacy github_repo / github_pat 인자 제거.
+    """
+
+    def _run_loop(
+        self,
+        signatures: list[tuple[str, str]],
+        *,
+        interval: int = 900,
+        heartbeat_seconds: int = 3600,
+        clock_per_iter: int = 900,
+    ) -> tuple[list[str], list[int]]:
         sent: list[str] = []
         sleeps: list[int] = []
 
         class FakeChannel:
-            async def send(self, text):
-                sent.append(text)
+            async def send(self_inner, content=None, *, embed=None):  # noqa: ANN001
+                # 단순화본 #840: digest 는 embed 로 push. content 는 사용 안 함.
+                sent.append(embed if embed is not None else content)
 
         class FakeClient:
-            def get_channel(self, channel_id):
+            def get_channel(self_inner, channel_id):  # noqa: ANN001
                 return FakeChannel()
+
+        target_sleeps = 1 + len(signatures)
 
         async def fake_sleep(seconds):
             sleeps.append(seconds)
-            if len(sleeps) >= 2:  # initial + 1 iteration
+            if len(sleeps) >= target_sleeps:
                 raise asyncio.CancelledError
 
-        import asyncio
-        with mock.patch.object(bot, "build_digest_line", return_value="📊 test"), \
+        sig_iter = iter(signatures)
+
+        # `interval_seconds` keyword 를 받는 새 시그니처 (#840).
+        def fake_format(_status, *_, **_kwargs):
+            line, sig = next(sig_iter)
+            return line, sig
+
+        # read_cycle_status 는 반환값 무시되므로 dummy 만.
+        clock = {"t": 0}
+
+        def fake_clock() -> float:
+            clock["t"] += clock_per_iter
+            return float(clock["t"])
+
+        with mock.patch.object(bot, "read_cycle_status", return_value={}), \
+             mock.patch.object(bot, "format_cycle_digest", side_effect=fake_format), \
              mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
             with self.assertRaises(asyncio.CancelledError):
                 asyncio.run(
                     bot.digest_loop(
                         FakeClient(),
                         channel_id=999,
-                        github_repo="x/y",
-                        github_pat="",
-                        interval=300,
+                        interval=interval,
                         initial_delay=60,
+                        heartbeat_seconds=heartbeat_seconds,
+                        time_source=fake_clock,
                     )
                 )
-        self.assertEqual(sent, ["📊 test"])
-        self.assertEqual(sleeps, [60, 300])  # initial_delay, interval
+        return sent, sleeps
+
+    def test_initial_always_pushes(self) -> None:
+        sent, sleeps = self._run_loop(
+            [("📊 A", "be=x|fe=y")],
+            interval=60,
+            heartbeat_seconds=3600,
+            clock_per_iter=60,
+        )
+        self.assertEqual(sent, ["📊 A"])
+        self.assertEqual(sleeps, [60, 60])  # initial_delay, interval
+
+    def test_skips_when_signature_unchanged(self) -> None:
+        sent, _ = self._run_loop(
+            [
+                ("📊 A", "be=x"),
+                ("📊 A", "be=x"),
+                ("📊 A", "be=x"),
+            ],
+            interval=60,
+            heartbeat_seconds=3600,
+            clock_per_iter=60,
+        )
+        # 첫 iter 만 push, 나머지 skip.
+        self.assertEqual(sent, ["📊 A"])
+
+    def test_delta_pushes_on_signature_change(self) -> None:
+        sent, _ = self._run_loop(
+            [
+                ("📊 A", "be=x"),
+                ("📊 B", "be=y"),
+                ("📊 B", "be=y"),
+                ("📊 C", "be=z"),
+            ],
+            interval=60,
+            heartbeat_seconds=3600,
+            clock_per_iter=60,
+        )
+        self.assertEqual(sent, ["📊 A", "📊 B", "📊 C"])
+
+    def test_heartbeat_pushes_after_silence(self) -> None:
+        sent, _ = self._run_loop(
+            [
+                ("📊 A", "be=x"),  # initial
+                ("📊 A", "be=x"),  # within heartbeat → skip
+                ("📊 A", "be=x"),  # heartbeat 경과 → push
+            ],
+            interval=900,
+            heartbeat_seconds=1800,
+            clock_per_iter=1000,
+        )
+        self.assertEqual(sent, ["📊 A", "📊 A"])
+
+
+class OnMessageRoutingTests(unittest.TestCase):
+    """단순화본 핵심: 사용자 메시지 = tmux send-keys 로 단순 routing.
+
+    discord.Client 가 stub 이라 @client.event 콜백을 직접 호출하기 어려우므로
+    build_client 가 정상 셋업 되는지 (예외 없이 client 반환) + 분기 의존 함수가
+    각각 callable 한지를 확인합니다.
+    """
+
+    BASE_ENV = {
+        "DISCORD_BOT_TOKEN": "t",
+        "ALLOWED_USER_IDS": "111",
+        "MOBRUJI_CHANNEL_ID": "999",
+        "TMUX_SESSION_NAME": "helper",
+        "TMUX_TARGET_PANE": "helper:0.0",
+        "CLAUDE_BIN": "claude",
+        "DEDUP_LEDGER_PATH": "/tmp/test-dedup.sqlite",
+        "NOTIFY_CHANNEL_ID": "999",
+        "DIGEST_ENABLED": "0",
+    }
+
+    def test_build_client_smoke(self) -> None:
+        client = bot.build_client(self.BASE_ENV, ledger=None)
+        self.assertIsNotNone(client)
+
+    def test_build_client_with_invalid_notify_falls_back(self) -> None:
+        env = {**self.BASE_ENV, "NOTIFY_CHANNEL_ID": "not-an-int"}
+        client = bot.build_client(env, ledger=None)
+        self.assertIsNotNone(client)
 
 
 if __name__ == "__main__":

@@ -106,6 +106,46 @@ describe("useTheme", () => {
     expect(result.current.mode).toBe("system");
     expect(result.current.isDark).toBe(true);
   });
+
+  it("system 모드 + OS prefers=light → isDark=false (resolveIsDark 분기 명시 가드)", () => {
+    setOsPrefersDark(false);
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.mode).toBe("system");
+    expect(result.current.isDark).toBe(false);
+  });
+
+  it("system 모드 중 matchMedia 'change' 이벤트 발화 시 isDark 가 재계산된다", () => {
+    // 'change' listener 를 capture 해 prefers=light→dark 전환을 시뮬레이션.
+    let changeListener: ((event: MediaQueryListEvent) => void) | null = null;
+    const mqlStub = {
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      onchange: null,
+      addEventListener: vi.fn(
+        (_evt: string, listener: (event: MediaQueryListEvent) => void) => {
+          changeListener = listener;
+        },
+      ),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    };
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: vi.fn(() => mqlStub),
+    });
+
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.isDark).toBe(false);
+
+    act(() => {
+      mqlStub.matches = true;
+      changeListener?.({ matches: true } as MediaQueryListEvent);
+    });
+    expect(result.current.isDark).toBe(true);
+  });
 });
 
 describe("THEME_INIT_SCRIPT", () => {
@@ -118,5 +158,40 @@ describe("THEME_INIT_SCRIPT", () => {
     expect(THEME_INIT_SCRIPT).toContain("prefers-color-scheme: dark");
     expect(THEME_INIT_SCRIPT).toContain("try {");
     expect(THEME_INIT_SCRIPT).toContain("} catch");
+  });
+});
+
+describe("THEME_INIT_SCRIPT (eval)", () => {
+  // JSDOM 에서 스크립트 문자열을 실행해 stored/system/prefers 분기 결과로
+  // documentElement.classList 가 올바르게 토글되는지 검증 — 분기 로직 회귀 가드.
+  const runInit = (
+    stored: string | null,
+    prefersDark: boolean,
+  ): boolean => {
+    window.localStorage.clear();
+    if (stored !== null) {
+      window.localStorage.setItem(THEME_STORAGE_KEY, stored);
+    }
+    document.documentElement.classList.remove(THEME_DARK_CLASS);
+    setOsPrefersDark(prefersDark);
+    new Function(THEME_INIT_SCRIPT)();
+    return document.documentElement.classList.contains(THEME_DARK_CLASS);
+  };
+
+  it("stored='dark' → <html.dark> 적용", () => {
+    expect(runInit("dark", false)).toBe(true);
+  });
+
+  it("stored='light' → <html.dark> 제거", () => {
+    document.documentElement.classList.add(THEME_DARK_CLASS);
+    expect(runInit("light", true)).toBe(false);
+  });
+
+  it("stored=null + prefers=dark → <html.dark> 적용 (system 기본)", () => {
+    expect(runInit(null, true)).toBe(true);
+  });
+
+  it("stored='system' + prefers=light → <html.dark> 제거", () => {
+    expect(runInit("system", false)).toBe(false);
   });
 });
