@@ -115,6 +115,9 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 | `mobruji.job.audio_backfill.scheduled` | counter | — | 스케줄러 시작 시점 | 기존 |
 | `mobruji.cache.hits` | counter | `cache` (song_meta 등) | 캐시 적중 | 기존 (현 룰 문서) |
 | `mobruji.cache.misses` | counter | `cache` | 캐시 미스 | 기존 |
+| `mobruji.session.expired` | counter | `reason` (`ttl`/`user_rotate`/`account_merge`) | TTL 만료/회전/머지로 sessionId 만료 처리 (ADR-0013 §D-5, spec `anonymous-session-lifecycle.md`) | 신설 (#886, ADR-0013 트리거) |
+| `mobruji.session.rotated` | counter | — | `POST /api/v1/sessions/rotate` 호출로 sessionId 회전 1건 (ADR-0013 §D-5, spec `anonymous-session-lifecycle.md`) | 신설 (#886, ADR-0013 트리거) |
+| `mobruji.session.merged` | counter | — | 익명 sessionId → 회원 계정 머지 성공 1건 (v0.4 — ADR-0013 §D-5, spec `anonymous-session-lifecycle.md`) | 신설 (#886, ADR-0013 트리거) |
 
 자동 노출(Micrometer 기본): `http.server.requests`, `jvm.*`, `hikaricp.*`, `system.*` — 본 표 외.
 
@@ -333,3 +336,4 @@ mobruji:
 - **2026-05-23 (plan)**: 추천 POST p95 단일 진실 박제 (closes #273). §5-4 추천 endpoint 목표 p95 = "300ms → 200ms 예정" 표현을 **200ms 확정**으로 박제하고, 단일 진실을 `recommendation-p95-regression-guard.md` §5-3 으로 명시 (역참조 금지). §5-6 알림 임계 600ms → **400ms** 로 동기화 (단일 진실 §5-3 = 200ms × 2 휴리스틱). 두 spec 의 cross-ref 결정 로그에 동시 박제. 후속: be PR 2 의 percentiles 설정 갱신 시 본 표 참조.
 - **2026-05-23 (plan, #864 PR I)**: `mobruji.song.audio.backfill.{requested,success,failed}` counter + `mobruji.song.audio.analysis.duration` timer 4 metric 을 backend 실제 구현 (`SongAudioBackfillCommand` + `AudioAnalysisRunner`) 으로 발행. §5-6-1 audio backfill 실패 알림 임계 "1시간 sum >= 10" → "24시간 sum >= 5" 재산정 — backfill 자체가 §5-1 주 1회 cron 이라 1시간 윈도우 안에 10건 누적이 영구 불가능했던 정합 미스를 해소. `failed` 카운터의 `reason` 라벨 enum (`timeout`/`spawn_error`/`json_parse`/`song_apply`/`other`) 을 §5-7 화이트리스트와 정합하도록 코드 상수화 (cardinality 폭발 방지). 후속: §5-8 percentiles-histogram 활성화는 be 측에서 `application.yml` 갱신 시 처리 (별 PR, 보호 영역).
 - **2026-05-23 (plan, 본 PR)**: §5-6 알림 규칙을 **§5-6-1 애플리케이션 메트릭 (기존 4 규칙)** + **§5-6-2 인프라 헬스 (신규 4 규칙)** 으로 분리. 인프라 4 규칙 (디스크 85/90/95%, heap 80/90/95%, 컨테이너 exit/unhealthy/restart, bridge 30초/5분) 의 트리거 임계·cooldown·회복 임계·멘션 정책·메시지 템플릿·dedup 규칙을 본 spec 단일 진실로 박제. 작업 분할 PR 4 를 **PR 4-A (Grafana alert)** + **PR 4-B (호스트 측 cron/systemd timer + Discord webhook 직접 push)** 으로 분리. Grafana scrape 실패 시에도 알림이 떠야 한다는 운영 즉시성 요구 반영. 후속: infra 사이클이 PR 4-B (`tools/ops/alerts/`) 구현.
+- **2026-05-23 (be, #886)**: ADR-0013 §D-5 셀프 약속 이행 — §5-3 카운터 표에 `mobruji.session.expired` (라벨 `reason=ttl|user_rotate|account_merge`) / `mobruji.session.rotated` / `mobruji.session.merged` 3 entry 신설. cross-ref: ADR-0013 §D-5 + spec `anonymous-session-lifecycle.md`. `reason` 라벨 enum 은 §5-7 PII 화이트리스트 정합 (사전 정의 enum). 실제 코드 구현(entity / scheduler / `/sessions/rotate` endpoint / 머지 트랜잭션) 은 이슈 #887 (ADR-0013 backend launch P1) 의 별 사이클로 분리 — 본 PR 은 spec 갱신만.
