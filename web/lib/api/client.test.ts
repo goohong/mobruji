@@ -538,3 +538,44 @@ describe("apiFetch URL path 한글/유니코드 가드 (#713)", () => {
     expect(fetchMock).toHaveBeenCalledWith(expected, expect.objectContaining({ method: "GET" }));
   });
 });
+
+describe("apiFetch headers=Headers 인스턴스 spread 가드 (#723)", () => {
+  // 현 동작 lock: `...(headers ?? {})` spread → Headers 인스턴스는 enumerable own property 가
+  // 없어 빈 객체로 spread → 추가 키 없음, 기본 Accept 만 남는다. (Record<string, string> 과 비호환.)
+  it("Headers 인스턴스 전달 → spread 시 무시되어 기본 Accept 만 남는다", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const native = new Headers({ "X-Session-Id": "abc" });
+    await apiFetch("/api/v1/probe", { headers: native as unknown as Record<string, string> });
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers).toEqual({ Accept: "application/json" });
+    expect(headers["X-Session-Id"]).toBeUndefined();
+  });
+});
+
+describe("apiFetch Content-Length:0 + non-204 분기 가드 (#723)", () => {
+  // 현 동작 lock: status 200 + 빈 body + JSON content-type → response.json() SyntaxError 발생 →
+  // .catch(() => null) 로 payload=null 반환. 204 와 달리 undefined 가 아님.
+  it("status=200, Content-Length:0, application/json → payload=null 반환", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("", { status: 200, headers: { "Content-Type": "application/json", "Content-Length": "0" } }),
+    );
+    await expect(apiFetch("/api/v1/probe")).resolves.toBeNull();
+  });
+});
+
+describe("ApiError(status, message, undefined) body 가드 (#723)", () => {
+  // 현 동작 lock: body=undefined 는 인스턴스 속성으로 보존되지만 JSON.stringify round-trip 에서
+  // undefined 값 키는 omit → 직렬화 결과에 body 키 누락. 호출자는 null vs undefined 구분 필요 시 주의.
+  it("인스턴스에는 body 키가 존재하지만 값은 undefined", () => {
+    const error = new ApiError(500, "boom", undefined);
+    expect("body" in error).toBe(true);
+    expect(error.body).toBeUndefined();
+  });
+
+  it("JSON.stringify round-trip → body 키 누락", () => {
+    const error = new ApiError(500, "boom", undefined);
+    const serialized = JSON.stringify({ status: error.status, body: error.body });
+    expect(serialized).toBe('{"status":500}');
+    expect(JSON.parse(serialized)).not.toHaveProperty("body");
+  });
+});
