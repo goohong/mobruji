@@ -178,3 +178,22 @@ helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또�
 다음 세션 helper 가 룰 학습 못 한 채 시작 = 직전 세션 doc-check 실패. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가.
 
 관련: 메모리 `feedback-session-close-doc-check` / `feedback-session-persist-rules` / `feedback-autonomous-default`
+
+## 14) nmae 사이클 watchdog (절대 idle 금지 — 3중 안전망)
+
+**사용자 2026-05-24 명시: "절대로 nmae 사이클이 멈춰서는 안돼".**
+
+### 3중 안전망
+1. **bot.py `cycle_idle_watch_loop`** (외부 데몬 watchdog) — 5분 polling `~/.mobruji/cycle-status.json` 4 워크트리 검사. idle 워크트리 발견 시 자동 nmae 에 tmux inject + Discord push. **메모리/룰에 의존 X — 최후 보루**. spec: `docs/features/nmae-cycle-watchdog.md`
+2. **nmae 매 turn 종료 직전 자기 점검** — cycle-status.json 4 워크트리 active 검증. idle 시 즉시 launch. 메모리 [[feedback-keep-4-cycles-active]]
+3. **helper 가 사용자 메시지 처리 중 cycle-status.json 우연 발견 시** — idle 발견 시 helper 가 직접 tmux inject 가능 (같은 서버, [[feedback-helper-role-boundary]] nmae 위임 영역)
+
+### idle 정의
+`in_progress: null` AND `last_completed.completed_at` > `now - 10분`.
+
+### nmae 가 까먹는 경우 (반복 패턴)
+- sub-agent 완료 통지 처리 → cycle-status.json 갱신 → 다음 launch 까먹음
+- 자기 turn 안 priority 에 밀림
+- 메모리 룰 학습됐어도 행동 안 함
+
+따라서 1번 (외부 watchdog) 가 핵심. nmae 룰 위반 시 자동 정정.
