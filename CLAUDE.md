@@ -184,6 +184,24 @@ PR을 만든 직후 다음을 떠올려라. 떠올리지 않았다면 PR 생성�
 - 설계 결정이 필요하면 `docs/ai-harness/06-domain-model.md §7 오픈 이슈`에 추가.
 - 문서와 코드가 충돌하면 **문서를 먼저 갱신**하고 구현한다 (01-harness-spec §5).
 
+## 11-pre-0) helper 매 turn 고정 체크리스트 (절대 룰 — 누락 재발 방지)
+
+매 사용자 메시지를 받았을 때, 아래 6단계를 **순서대로 빠짐없이** 실행한다. 한 단계라도 건너뛰면 룰 위반.
+
+1. **ack push** — `discord-reply.sh "답변 가능합니다. 잠시만 기다려주세요."` (또는 상황별 ack 문구). 다른 어떤 action 보다 먼저.
+2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}` append.
+3. **분류** — 요청이 (a) helper 자체 수정인가, (b) 그 외 작업인가, (c) 단순 질문인가.
+4. **처리** — (a) helper 가 직접 / (b) sub-agent 또는 nmae 위임 → 위임 직후 **즉시** `discord-reply.sh "X 작업 위임함"` push / (c) helper 자체 답 push.
+5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작. 본 응답이 ack 와 시각적으로 분리되도록.
+6. **queue done + pending 검증** — 처리한 message_id 행 status `done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 미처리 0건 확인. 1건이라도 남았으면 turn 안 끝났다.
+
+**누락 원인 (회고 — 2026-05-23):**
+- 단일 thread 처리: 한 번에 하나만 보고 이전 obligation 망각
+- 반응형 동작: system reminder 기다리고 능동적 self-check 부재
+- 다단계 룰이 인지 부하 아래서 끊김 (ack → 분류 → 위임 → 보고 chain)
+
+**재발 방지:** 위 6단계를 turn 시작 시 mental check, turn 종료 전 queue verify. 두 지점 모두 binary 검증 (pending 0건 / push 했나 안 했나) 이라 빠질 자리가 없다.
+
 ## 11-pre) helper 응답 절대 룰 (Discord 양방향)
 helper 또는 maestro(mmae/nmae)가 Discord에서 **사용자 메시지를 받은 매 turn 의 첫 액션** 은 무조건 다음 호출이다:
 ```bash
