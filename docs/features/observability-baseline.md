@@ -145,18 +145,109 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 - **결정: (B) Grafana Cloud Free 1차 채택**. ADR-0012 참조. 운영 인스턴스 1개 + 트래픽 미미한 상황에 self-host 운영 부담이 더 크고, 무료 한도 안.
 - 후속 ADR 옵션 명시: 무료 한도 초과 또는 latency 민감해지면 (A) self-host 로 이관 검토.
 
-### 5-6) 알림 규칙 (1차)
+### 5-6) 알림 규칙
+
+알림 규칙은 두 그룹으로 나눈다:
+- **§5-6-1 애플리케이션 메트릭** (Micrometer/Grafana scrape 기반) — 추천 p95, 외부 API 에러율, audio backfill 실패, JVM heap (메트릭 관점).
+- **§5-6-2 인프라 헬스** (호스트/컨테이너/bridge 직접 감시 기반) — 디스크, heap (인프라 관점), 컨테이너 상태, bridge inactive. 본진 운영 즉시성 위해 메트릭 scrape 의존성 없이 호스트에서 직접 push.
+
+#### 5-6-1) 애플리케이션 메트릭 알림 (1차)
 
 | 규칙 | 트리거 | 채널 | 우선순위 |
 |---|---|---|---|
 | 외부 API 에러율 | `mobruji.external.*{outcome="error"}` 1분 sum >= 5 | Discord webhook (#모부르지) | P1 |
 | 추천 p95 임계 초과 | `mobruji.recommendation.request.duration` p95 5분 >= 400ms (단일 진실 §5-3 = 200ms × 2 휴리스틱, recommendation-p95-regression-guard §5-3 참조) | Discord webhook | P1 |
 | audio backfill 연속 실패 | `mobruji.song.audio.backfill.failed` 1시간 sum >= 10 | Discord webhook | P2 |
-| JVM heap 압박 | `jvm.memory.used / jvm.memory.max` > 0.85 5분 연속 | Discord webhook | P2 |
+| JVM heap 압박 (메트릭) | `jvm.memory.used / jvm.memory.max` > 0.85 5분 연속 | Discord webhook | P2 |
 
 - webhook URL: 환경변수 `MOBRUJI_ALERT_WEBHOOK_URL`. dev/local 은 미설정 시 noop. 운영에서 미설정이면 부트 fail-fast.
 - 알림 본문: rule name + 현재 값 + 직전 5분 추이 + Grafana 대시보드 링크 (자동 생성).
 - 알림 자체에 PII 금지 — sessionId/userId 등 §5-7 화이트리스트 라벨만.
+
+#### 5-6-2) 인프라 헬스 알림 (4 규칙 — Discord webhook 직접 push)
+
+> Grafana scrape 경로가 죽어도 알림은 떠야 하므로, 본 그룹은 **호스트(NCP maestro) 측 cron/systemd timer + Discord webhook 직접 호출**로 구현한다. 구현 위치는 후속 infra PR (`tools/ops/alerts/` 또는 systemd timer + 짧은 bash/python). 본 spec 은 임계/메시지/멘션/dedup 만 결정.
+
+**공통 규약**
+
+- **webhook URL**: §5-6-1 과 동일 환경변수(`MOBRUJI_ALERT_WEBHOOK_URL`) 재사용. 호스트 환경변수에 export. dev 미설정 시 noop, 운영 미설정 시 cron job 자체가 fail (run 시 stderr).
+- **멘션 정책**:
+  - P0 (서비스 다운 직결) → `@everyone` 또는 운영 담당자 user ID (`@goohong`, Discord user ID `MOBRUJI_OPS_USER_ID` 환경변수).
+  - P1 (긴급 대응 필요) → 운영 담당자 user ID 만 멘션.
+  - P2 (관찰만) → 멘션 없음.
+- **메시지 템플릿 공통 구조** (한국어):
+  ```
+  [<우선순위>] <규칙 이름>
+  위치: <host=mobruji-prod / container=backend / path=/data 등>
+  원인: <측정값 = <현재값> (임계 <임계값>, <측정 윈도우>)>
+  시도 액션: <runbook 링크 또는 권장 액션 한 줄>
+  ```
+- **회복 시 dedup**:
+  - 한 번 트리거된 알림은 `cooldown` 동안 같은 규칙이 재트리거되어도 추가 알림을 보내지 않는다 (상태 파일: `/var/lib/mobruji-alerts/<rule>.state`).
+  - 측정값이 회복 임계(`recovery_threshold`) 이하로 떨어지면 **회복 알림 1회만** 발송하고 state 파일 초기화. 회복 알림이 연속 발송되지 않도록 state 에 `last_state=ok` 기록.
+  - 회복 임계는 트리거 임계보다 항상 낮게(히스테리시스) 설정해 chattering 방지.
+
+**규칙 매트릭스 (4 규칙)**
+
+| # | 규칙 | 트리거 임계 | cooldown | 회복 임계 | 우선순위 / 멘션 |
+|---|---|---|---|---|---|
+| R1 | **디스크 사용률** | 85% / 90% / 95% (단계별) | 30분 (단계별 별도 state) | 80% | 85%=P2 (멘션 없음) / 90%=P1 (담당자) / 95%=P0 (everyone) |
+| R2 | **JVM heap 사용률 (인프라 관점)** | 80% / 90% / 95% (단계별, JMX 또는 `/actuator/metrics/jvm.memory.used` polling) | 15분 (단계별 별도 state) | 75% | 80%=P2 / 90%=P1 / 95%=P0 |
+| R3 | **컨테이너 비정상** | (a) exit 1회 발생 / (b) `unhealthy` 헬스체크 1회 / (c) restart 5분 내 3회 이상 반복 | 10분 (사유별 별도 state) | 5분 연속 `running` + healthy | exit=P0 (everyone) / unhealthy=P1 / restart 반복=P1 |
+| R4 | **bridge inactive** (Discord bot heartbeat) | 30초 미응답 → 1차 / 5분 미응답 → 2차 | 1차 후 5분(2차까지), 2차 후 30분 | bot heartbeat 정상 복귀 1회 | 30초=P1 / 5분=P0 (everyone) |
+
+**규칙별 메시지 템플릿**
+
+R1 (디스크 — 90% 단계 예시):
+
+```
+[P1] 디스크 사용률 임계 도달 (90%)
+위치: host=mobruji-prod, path=/data
+원인: 사용률 91.4% (임계 90%, 직전 5분 평균)
+시도 액션: docker system prune -af 또는 로그 로테이션 확인 → runbook §H-디스크
+```
+
+R2 (heap — 95% 단계 예시):
+
+```
+[P0] JVM heap 사용률 임계 도달 (95%) @everyone
+위치: container=backend (mobruji-prod)
+원인: heap used/max = 96.2% (임계 95%, 5분 연속)
+시도 액션: 즉시 heap dump 확보 후 컨테이너 재기동 → runbook §H-heap
+```
+
+R3 (container — restart 반복 예시):
+
+```
+[P1] 컨테이너 restart 반복
+위치: container=backend (mobruji-prod)
+원인: 5분 내 restart 3회 (임계 3회)
+시도 액션: `docker logs --tail 200 backend` 확인 → runbook §H-컨테이너
+```
+
+R4 (bridge inactive — 5분 단계 예시):
+
+```
+[P0] Discord bridge inactive 5분 초과 @everyone
+위치: host=mobruji-prod, service=discord-daemon
+원인: bot heartbeat 마지막 응답 5분 12초 전 (임계 5분)
+시도 액션: `systemctl status mobruji-discord` 확인 후 재기동 → runbook §H-bridge
+```
+
+회복 메시지 공통 (R1~R4):
+
+```
+[복구] <규칙 이름>
+위치: <위치>
+현재값: <회복값> (회복 임계 <회복 임계값>)
+지속시간: 트리거 → 회복까지 <m분 s초>
+```
+
+**비기능**
+
+- **결정성**: 임계/cooldown/회복 임계는 본 표가 단일 진실. 구현 PR 의 설정파일이 본 표를 그대로 참조.
+- **PII 금지**: 본 알림 그룹도 §5-7 화이트리스트 준수. `host`/`container`/`path`/`service` 는 라벨이 아닌 메시지 본문이므로 허용.
+- **fail-safe**: 알림 스크립트 자체 실패는 호스트 syslog 로만 남기고 (webhook 실패가 다시 webhook 알림으로 무한 루프되지 않도록) 별도 메타 알림 없음. 운영 점검은 cron 실행 이력 (`journalctl -u mobruji-alerts*`) 으로 확인.
 
 ### 5-7) PII 마스킹 룰 (라벨 화이트리스트)
 
@@ -214,7 +305,8 @@ mobruji:
 - [ ] **PR 1 (현 PR, plan 28)**: spec(`docs/features/observability-baseline.md`) + ADR(`docs/decisions/0012-observability-stack.md`) + 룰 문서(`docs/ai-harness/10-observability.md`) Phase 1 갱신. **본 PR**.
 - [ ] **PR 2 (be)**: `application.yml` percentiles 설정 + `MeterRegistry` 도메인 카운터 통일. 표 §5-3 의 기존 카운터들을 본 spec 네이밍으로 정리, 신설(`recommendation.request.duration`, `recommendation.result.size`, `voice.range.history.requested`) 추가. 보호 영역(`application.yml`) 변경이므로 `needs-human-review` 라벨.
 - [ ] **PR 3 (infra)**: Grafana Cloud 계정 셋업 (수동) + Prometheus remote_write 설정 + 단순 대시보드 1개 (recommendation/voice/song + p95). ADR-0012 의 step-by-step 런북 참조.
-- [ ] **PR 4 (infra)**: Discord webhook 알림 4개 규칙 등록 (§5-6). dev/local noop, 운영 fail-fast.
+- [ ] **PR 4-A (infra)**: §5-6-1 애플리케이션 메트릭 알림 4 규칙 등록 (Grafana alert rule). dev/local noop, 운영 fail-fast.
+- [ ] **PR 4-B (infra)**: §5-6-2 인프라 헬스 알림 4 규칙 구현 (`tools/ops/alerts/` + systemd timer 또는 cron + Discord webhook 직접 push + state 파일 dedup). 호스트(NCP maestro) 측 배포.
 - [ ] **PR 5 (be, #62 동기화)**: p95 회귀 가드 테스트 — `recommendation.request.duration` 키 검증. PR 2 머지 후.
 
 ## 7) 테스트 전략
@@ -238,3 +330,4 @@ mobruji:
 
 - **2026-05-22 (plan 28)**: 초안 작성 (status=draft). v0.3 P2 베이스라인 범위 확정 — 메트릭 + p95 + Grafana Cloud Free + Discord webhook 알림. 분산 트레이싱/SaaS 유료/SLO/로그 집계/web RUM 모두 v0.4 이후로 분리. 수집 스택은 ADR-0012 분리.
 - **2026-05-23 (plan)**: 추천 POST p95 단일 진실 박제 (closes #273). §5-4 추천 endpoint 목표 p95 = "300ms → 200ms 예정" 표현을 **200ms 확정**으로 박제하고, 단일 진실을 `recommendation-p95-regression-guard.md` §5-3 으로 명시 (역참조 금지). §5-6 알림 임계 600ms → **400ms** 로 동기화 (단일 진실 §5-3 = 200ms × 2 휴리스틱). 두 spec 의 cross-ref 결정 로그에 동시 박제. 후속: be PR 2 의 percentiles 설정 갱신 시 본 표 참조.
+- **2026-05-23 (plan, 본 PR)**: §5-6 알림 규칙을 **§5-6-1 애플리케이션 메트릭 (기존 4 규칙)** + **§5-6-2 인프라 헬스 (신규 4 규칙)** 으로 분리. 인프라 4 규칙 (디스크 85/90/95%, heap 80/90/95%, 컨테이너 exit/unhealthy/restart, bridge 30초/5분) 의 트리거 임계·cooldown·회복 임계·멘션 정책·메시지 템플릿·dedup 규칙을 본 spec 단일 진실로 박제. 작업 분할 PR 4 를 **PR 4-A (Grafana alert)** + **PR 4-B (호스트 측 cron/systemd timer + Discord webhook 직접 push)** 으로 분리. Grafana scrape 실패 시에도 알림이 떠야 한다는 운영 즉시성 요구 반영. 후속: infra 사이클이 PR 4-B (`tools/ops/alerts/`) 구현.
