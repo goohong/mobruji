@@ -4,9 +4,9 @@ slug: recommendation-algorithm-v2
 status: draft
 owner: "@goohong"
 scope: recommendation
-related_issues: [219, 222]
-related_prs: [223]
-last_reviewed: 2026-05-21
+related_issues: [219, 222, 273]
+related_prs: [223, 471]
+last_reviewed: 2026-05-23
 ---
 
 # 추천 알고리즘 v2 (recommendation-algorithm-v2)
@@ -35,7 +35,9 @@ last_reviewed: 2026-05-21
 ### 비기능 요구사항
 - **결정성 보존** — `SeedDeriver.derive()` 입력에 `preferredBpm`(정규화된 int, null이면 -1)을 포함해 같은 입력 → 같은 결과. 회귀 가드 테스트로 보장.
   - **단일 진실**: 결정성 룰(seed 계약 / 비결정 호출 금지 / 테스트 단정 / 관측성 로그)의 정의는 `recommendation-algorithm-v1.md §3 비기능 결정성` 절을 참조한다. v2 입력 확장(`preferredBpm`)도 그 룰에 따라 SeedDeriver 시그니처에 포함된다.
-- **p95 200ms 유지** — 신호 2개 추가의 in-memory 계산 비용은 무시 가능. 카탈로그 수백 곡 가정. **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3**. 회귀 가드는 k6 + GH Actions.
+- **p95 200ms / p99 400ms 유지** — 신호 2개 추가(`keyMatch`/`tempoMatch`)의 in-memory 계산 비용은 무시 가능. 카탈로그 수백 곡 가정. v2 audio-features 가산 후에도 **v1과 동일 임계 박제**: p95 200ms / p99 400ms.
+  - **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3** (PR #471, closes #273 — 200ms/400ms 단일 진실 박제). 본 spec 은 참조만, 직접 숫자 갱신 금지. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차(한 PR 에 6단계 묶음)로만 변경 가능.
+  - 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
 - **하위 호환** — `preferredBpm` 미입력 v1 클라이언트는 그대로 동작 (mood 매핑 또는 중립 fallback).
 - **영속화는 본 spec 범위 밖** — `RecommendationRequestEntity`에 `preferredBpm` 컬럼 추가는 후속 PR. v2 한정 요청 시점 입력만 파이프라인·seed에 반영.
 
@@ -114,3 +116,4 @@ recommendation:
   - v1 spec의 `breakdown.keyMatch` 항상 0 문제와 be 17 audio features backfill 완료 상황을 받아 v2 분리.
   - 가중치 합 1.0 유지 위해 `popularityPrior` 0.15 → 0.05 임시 (Q2 미해결).
   - ML 자동 가중치 조정은 v0.4+ spec으로 분리.
+- 2026-05-23 (plan): p95 단일 진실 cross-ref 강화 (PR #471 후속, closes #273 정합). v2 audio-features (`keyMatch`/`tempoMatch`) 가산 후에도 v1 과 동일 임계 (p95 200ms / p99 400ms) 박제 — 임계 단일 진실은 `recommendation-p95-regression-guard.md` §5-3 (PR #471), 본 spec §3 비기능은 참조만. v2 신호 2개 추가의 in-memory 계산 비용이 무시 가능하므로 임계 상향 사유 없음. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차로만 변경 가능 — 본 spec 직접 갱신 금지.

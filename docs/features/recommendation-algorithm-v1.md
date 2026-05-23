@@ -32,7 +32,7 @@ last_reviewed: 2026-05-23
 - [x] `RecommendationRequest`와 결과는 영속화한다(이력/분석). `excludeSongIds`는 별 join table `recommendation_request_exclude_song`에 영속(PR #74, closes #72/#73).
 
 ### 비기능 요구사항
-- p95 응답 200ms 이내 (DB 100~수백곡 카탈로그 가정). **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3**. 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
+- p95 응답 200ms / p99 400ms 이내 (DB 100~수백곡 카탈로그 가정). **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3** (PR #471, closes #273 — 200ms/400ms 단일 진실 박제). 본 spec 은 참조만, 직접 숫자 갱신 금지. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차로만 변경 가능. 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
 - **결정성 (단일 진실)** — 같은 입력 → 같은 결과 (추천 후보 ID 순서 + top score 동일). 디버깅·이슈 재현용. 단 "재추천" 흐름은 `excludeSongIds`가 입력에 포함되므로 같은 입력으로 간주되지 않는다.
   - **seed 계약**: `SeedDeriver.derive(sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds)` 입력에 결정성에 영향을 주는 **모든** 요청 필드가 포함되어야 한다 (PR #48 / #64 / #74 / #223). 새 입력 필드 추가 시 SeedDeriver 입력 시그니처도 같은 PR에서 확장한다. 누락 = "다시 버튼이 같은 결과 반환" 회귀.
   - **비결정 호출 금지**: 추천 파이프라인(`com.mobruji.recommendation.application.*`) 내부에서 `new Random()`(seed 없음), `Instant.now()`, `UUID.randomUUID()` 직접 호출 금지. 자세한 룰은 `08-code-conventions.md §A-8 결정성 패턴` 참조. 자동 강제는 ArchUnit으로 추진(이슈 #61).
