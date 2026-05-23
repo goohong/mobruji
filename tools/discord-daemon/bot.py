@@ -205,8 +205,14 @@ AUTO_ACK_TEMPLATE: Final[str] = (
 )
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분 cron digest 주기 (env override 가능)
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
-DIGEST_MERGED_WINDOW_HOURS: Final[int] = 24  # "최근 머지" 24h 윈도우
+DIGEST_MERGED_WINDOW_HOURS: Final[int] = 24  # "최근 머지" 24h 윈도우 (legacy /status 만 사용)
 DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 push (생존 신호)
+# cycle-status digest (사용자 룰 2026-05-23): 4 워크트리(be/fe/rev/plan) 진행/최근 한 줄씩.
+# nmae 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는 JSON 을 cron 으로 push.
+# 스키마: {workspace: {in_progress: str|null, last_completed: {pr, title, merged_at}|null}}
+DEFAULT_CYCLE_STATUS_PATH: Final[str] = "/home/mobruji/.mobruji/cycle-status.json"
+CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
+CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200  # 한 워크트리 라인 최대 길이 (Discord 가독성)
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -746,9 +752,113 @@ def build_digest_line(
     형식: 📊 PR open:N / 머지 24h:N / bug:N — HH:MM KST
     (`type:bug:` 표기는 Discord 가 :bug: 를 🐛 emoji 로 변환하므로 prefix 제거.)
     조회 실패는 '?' 로 표시. LLM 호출 없음.
+
+    NOTE: 사용자 룰 (2026-05-23 #모부르지) 에 따라 cron digest 본 경로는
+    cycle-status.json 기반 `format_cycle_digest` 로 교체되었습니다. 본 함수는
+    legacy `/status` 명령 등 디버그 진입점에서만 사용됩니다.
     """
     line, _signature = build_digest_payload(github_repo, github_pat, now=now)
     return line
+
+
+def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
+    """`~/.mobruji/cycle-status.json` 을 읽어 dict 로 반환합니다.
+
+    nmae(maestro 본진) 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는
+    상태 파일입니다. 파일이 없거나 JSON 파싱이 실패하면 None 을 반환하고,
+    호출부 (`format_cycle_digest`) 가 graceful fallback 합니다.
+
+    스키마 (메모리 박제: [[feedback-cycle-status-json]]):
+        {
+            "be":  {"in_progress": str|null, "last_completed": {...}|null},
+            "fe":  {...},
+            "rev": {...},
+            "plan": {...}
+        }
+        last_completed = {"pr": "#NNN"|null, "title": str, "merged_at": ISO8601}
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        logger.warning("cycle-status.json 없음: path=%s", path)
+        return None
+    except json.JSONDecodeError as exc:
+        logger.warning("cycle-status.json JSON 파싱 실패: path=%s err=%s", path, exc)
+        return None
+    except OSError as exc:
+        logger.warning("cycle-status.json 읽기 실패: path=%s err=%s", path, exc)
+        return None
+
+
+def format_cycle_digest(status: dict | None) -> tuple[str, str]:
+    """4 워크트리(be/fe/rev/plan) 의 진행/최근 한 줄씩 digest 본문을 만듭니다.
+
+    Args:
+        status: `read_cycle_status()` 반환 dict, 또는 None (파일 없음/깨짐).
+
+    Returns:
+        (rendered, signature) 튜플.
+          - rendered: Discord 에 push 할 multiline 메시지.
+          - signature: delta 비교용 (시간 무관). 동일 signature 면 heartbeat 만 push.
+
+    한 줄 형식:
+        [be] 진행: <in_progress 또는 "idle"> / 최근: <pr> (<title>)
+        [be] 진행: idle / 최근: 없음   ← last_completed 가 null 인 경우
+
+    스키마 누락/타입 이상 시 해당 필드만 "idle" / "없음" 으로 대체합니다.
+    """
+    prefix = MESSAGE_PREFIX["digest"]
+    lines: list[str] = [f"{prefix} **cycle digest**"]
+    sig_parts: list[str] = []
+
+    if status is None or not isinstance(status, dict):
+        lines.append("(cycle-status.json 읽기 실패 — 본진 갱신 대기)")
+        return "\n".join(lines), "unavailable"
+
+    for ws in CYCLE_DIGEST_WORKSPACES:
+        entry = status.get(ws)
+        if not isinstance(entry, dict):
+            in_progress_text = "idle"
+            recent_text = "없음"
+            sig_parts.append(f"{ws}=missing")
+        else:
+            raw_in_progress = entry.get("in_progress")
+            if isinstance(raw_in_progress, str) and raw_in_progress.strip():
+                in_progress_text = raw_in_progress.strip()
+            else:
+                in_progress_text = "idle"
+
+            last_completed = entry.get("last_completed")
+            if isinstance(last_completed, dict):
+                pr_raw = last_completed.get("pr")
+                title_raw = last_completed.get("title")
+                title_text = (
+                    title_raw.strip()
+                    if isinstance(title_raw, str) and title_raw.strip()
+                    else "제목 없음"
+                )
+                if isinstance(pr_raw, str) and pr_raw.strip():
+                    recent_text = f"{pr_raw.strip()} ({title_text})"
+                else:
+                    # pr 이 null 이어도 title 만 있으면 표시 (rev 처럼 PR 없는 항목).
+                    recent_text = title_text
+            else:
+                recent_text = "없음"
+            sig_parts.append(f"{ws}={in_progress_text}|{recent_text}")
+
+        # mention sanitize — title 에 `@everyone` 등이 들어가면 Discord 알림 폭주.
+        in_progress_text = sanitize_mentions(in_progress_text)
+        recent_text = sanitize_mentions(recent_text)
+
+        line = f"[{ws}] 진행: {in_progress_text} / 최근: {recent_text}"
+        if len(line) > CYCLE_DIGEST_MAX_LINE_LEN:
+            line = line[: CYCLE_DIGEST_MAX_LINE_LEN - 1] + "…"
+        lines.append(line)
+
+    rendered = "\n".join(lines)
+    signature = "||".join(sig_parts)
+    return rendered, signature
 
 
 def build_digest_payload(
@@ -873,16 +983,25 @@ async def digest_loop(
     initial_delay: int = DIGEST_INITIAL_DELAY_SECONDS,
     heartbeat_seconds: int = DIGEST_HEARTBEAT_SECONDS,
     time_source=time.monotonic,
+    cycle_status_path: str = DEFAULT_CYCLE_STATUS_PATH,
 ) -> None:
-    """on_ready 직후 launch. interval 초 마다 digest 1줄 push (delta + heartbeat).
+    """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push.
 
-    - 직전 push 와 signature(시간 제외 counts) 가 동일하면 noise 라고 보고 skip.
+    사용자 룰 (2026-05-23 #모부르지): 기존 PR open/머지 24h 카운트 기반 digest 는
+    폐기하고, nmae 가 실시간 갱신하는 `~/.mobruji/cycle-status.json` 의 4 워크트리
+    (be/fe/rev/plan) 진행/최근 한 줄씩을 push.
+
+    - 직전 push 와 signature(시간 제외) 가 동일하면 noise 라고 보고 skip.
     - signature 가 바뀌면 즉시 push (= delta push).
     - 동일해도 마지막 push 로부터 heartbeat_seconds 경과 시 한 번 push (생존 신호).
     - 첫 iter 는 last signature 가 없으므로 무조건 push (초기 baseline).
 
+    `github_repo` / `github_pat` 인자는 호환성 유지를 위해 시그니처에 남겨두지만,
+    cycle-status digest 본 경로에서는 사용하지 않습니다 (call site 안정성 보존).
+
     bot 종료 시 cancel 됨. asyncio.CancelledError 는 외부로 전파.
     """
+    del github_repo, github_pat  # unused — legacy 호환 인자
     await asyncio.sleep(initial_delay)
     last_signature: str | None = None
     last_pushed_at: float | None = None
@@ -892,7 +1011,8 @@ async def digest_loop(
             if channel is None:
                 logger.warning("digest: channel_id=%s 찾을 수 없음 — skip 후 재시도", channel_id)
             else:
-                line, signature = build_digest_payload(github_repo, github_pat)
+                status = read_cycle_status(cycle_status_path)
+                line, signature = format_cycle_digest(status)
                 now_ts = time_source()
                 should_push = False
                 reason = ""
