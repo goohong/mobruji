@@ -11,7 +11,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "./client";
 import {
+  readBookmarksBySessionId,
   readLikesBySessionId,
   toggleBookmark,
   toggleLike,
@@ -105,5 +107,53 @@ describe("toggleBookmark", () => {
       JSON.stringify({ sessionId: "sess-x", songId: 99 }),
     );
     expect(result).toEqual({ bookmarked: true, songId: 99 });
+  });
+
+  // 멱등 — toggleLike 와 동일 약속(BookmarkService.toggle).
+  it("같은 (sessionId, songId)로 두 번 호출하면 두 번째 응답 bookmarked=false", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ bookmarked: true, songId: 3 }))
+      .mockResolvedValueOnce(jsonResponse({ bookmarked: false, songId: 3 }));
+
+    const first = await toggleBookmark({ sessionId: "sess-2", songId: 3 });
+    const second = await toggleBookmark({ sessionId: "sess-2", songId: 3 });
+
+    expect(first.bookmarked).toBe(true);
+    expect(second.bookmarked).toBe(false);
+  });
+});
+
+// BE 4xx/5xx → 도메인 함수가 ApiError(status/body 보존)를 그대로 전파해야 한다
+// (호출 측 store/UI 가 status로 분기). client.ts 가드를 우회하지 않음을 회귀 보장.
+describe("feedback 도메인 함수 오류 전파", () => {
+  it("toggleLike: BE 4xx 응답 시 ApiError(status/body 보존) 전파", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "x" }, 404));
+    const e = (await toggleLike({ sessionId: "s", songId: 1 }).catch(
+      (c: unknown) => c,
+    )) as ApiError;
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.status).toBe(404);
+    expect(e.body).toEqual({ message: "x" });
+  });
+
+  it("toggleBookmark: BE 5xx 응답 시 ApiError 전파", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "x" }, 500));
+    const e = (await toggleBookmark({ sessionId: "s", songId: 2 }).catch(
+      (c: unknown) => c,
+    )) as ApiError;
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.status).toBe(500);
+  });
+});
+
+describe("readBookmarksBySessionId", () => {
+  // 슬래시·비ASCII 모두 인코딩 + 빈 배열 응답을 그대로 반환.
+  it("path 인코딩 + 빈 배열 응답을 그대로 반환", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    const result = await readBookmarksBySessionId("sess/한글");
+    expect(fetchMock.mock.calls[0][0]).toMatch(
+      /\/api\/v1\/sessions\/sess%2F%ED%95%9C%EA%B8%80\/bookmarks$/,
+    );
+    expect(result).toEqual([]);
   });
 });
