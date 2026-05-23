@@ -56,7 +56,24 @@ STATUS_MERGED_PR_LIMIT: Final[int] = 5
 STATUS_BUG_ISSUE_LIMIT: Final[int] = 5
 STATUS_DISCORD_MAX_LEN: Final[int] = 1900  # Discord 메시지 한도 2000, 여유 100
 AUTO_ACK_QUEUE_WINDOW_SECONDS: Final[int] = 300  # 5분 안 dedup mark 수 = queue 표시
-AUTO_ACK_TEMPLATE: Final[str] = "📥 받음, maestro 처리 중 (queue: {queue})"
+
+# 7 카테고리 emoji prefix — spec: docs/features/discord-message-style.md §3.
+# 한 메시지 = 한 카테고리. 첫 줄 emoji 만 보고 사용자가 종류 즉시 식별 (시나리오 S1).
+MESSAGE_PREFIX: Final[dict[str, str]] = {
+    "reply": "💬",        # 사용자 메시지에 maestro 답 (메인 채널)
+    "cycle-start": "🚀",  # 사이클 시작 (알림 채널)
+    "cycle-end": "✅",    # 사이클 정상 종료 (알림 채널)
+    "digest": "📊",       # cron 상태 1줄 (알림 채널)
+    "alert": "🚨",        # 위험 발생 (P1+ 메인 동시)
+    "recovery": "🟢",     # 위험 회복 1회 (알림 채널)
+    "decision": "📌",     # 사용자 결정 묶음 질문 (메인 채널)
+}
+
+# auto-ack 은 reply 카테고리 — 사용자 메시지에 즉시 응답하는 maestro 답이므로 spec §3 reply 분류.
+# template §4-1 에 따라 첫 줄 `💬 reply: {요약}` 형식.
+AUTO_ACK_TEMPLATE: Final[str] = (
+    f"{MESSAGE_PREFIX['reply']} reply: 받음, maestro 처리 중 (queue: {{queue}})"
+)
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분 cron digest 주기 (env override 가능)
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup 후 첫 발화
 DIGEST_MERGED_WINDOW_HOURS: Final[int] = 24  # "최근 머지" 24h 윈도우
@@ -98,6 +115,12 @@ def load_env() -> dict[str, str]:
         "TMUX_PIPE_PANE_MAX_BYTES", str(DEFAULT_PIPE_PANE_MAX_BYTES)
     )
     env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "0")
+    # NOTIFY_CHANNEL_ID — 알림 카테고리(cycle/digest/alert/recovery) 발사 채널.
+    # 미설정 시 MOBRUJI_CHANNEL_ID 로 fallback (현재 동작 유지, 채널 분리 전 단계).
+    # spec: docs/features/discord-message-style.md §5-2.
+    env["NOTIFY_CHANNEL_ID"] = os.environ.get(
+        "NOTIFY_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"]
+    )
     return env
 
 
@@ -710,6 +733,19 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         )
         sys.exit(1)
 
+    # NOTIFY_CHANNEL_ID 파싱 — 알림 카테고리 발사 채널. 값 이상 시 메인 채널로 fallback
+    # (운영 끊김 회피). spec: docs/features/discord-message-style.md §5-2.
+    notify_raw = env.get("NOTIFY_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"])
+    try:
+        notify_channel_id = int(notify_raw)
+    except ValueError:
+        logger.warning(
+            "NOTIFY_CHANNEL_ID 가 정수 아님(%r) — 메인 채널(%d)로 fallback",
+            notify_raw,
+            target_channel_id,
+        )
+        notify_channel_id = target_channel_id
+
     tmux_enabled = env["TMUX_BRIDGE_ENABLED"] == "1"
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
@@ -721,9 +757,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s allowed=%d tmux_bridge=%s digest=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s notify=%s allowed=%d tmux_bridge=%s digest=%s",
             client.user,
             target_channel_id,
+            notify_channel_id,
             len(allowed_user_ids),
             tmux_enabled,
             digest_enabled,
@@ -734,14 +771,15 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(
                 digest_loop(
                     client,
-                    target_channel_id,
+                    notify_channel_id,
                     env["GITHUB_REPO"],
                     env.get("GITHUB_PAT", ""),
                     interval=digest_interval,
                 )
             )
             logger.info(
-                "digest_loop launched: interval=%ds heartbeat=%ds",
+                "digest_loop launched: channel=%d interval=%ds heartbeat=%ds",
+                notify_channel_id,
                 digest_interval,
                 DIGEST_HEARTBEAT_SECONDS,
             )
