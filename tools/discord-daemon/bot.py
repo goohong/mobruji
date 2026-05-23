@@ -201,13 +201,14 @@ CYCLE_IDLE_WATCH_STRICT_TEMPLATE: Final[str] = (
 CYCLE_REASON_REQUIRED_DEFAULT: Final[str] = "1"
 # future timestamp ERROR push debounce (#971) — 동일 워크트리 1시간 1회.
 CYCLE_FUTURE_TS_PUSH_DEBOUNCE_SECONDS: Final[int] = 60 * 60  # 1h
-# escalation (#972) — 같은 워크트리 inject N회 연속 후에도 in_progress NULL 이면
-# MOBRUJI_CHANNEL_ID (사용자 채널) 에 직접 push. nmae 무응답 신호.
+# escalation (#972, #981) — 같은 워크트리 inject N회 연속 후에도 in_progress NULL 이면
+# MOBRUJI_CHANNEL_ID (사용자 채널) 에 직접 push. nmae 무응답 가시화 알림 (사용자 조치
+# 무관, 자율 처리 진행 중 가시화 목적 — sub-agent-no-user-wait 룰).
 CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT: Final[int] = 3
 CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT: Final[int] = 60 * 60  # 1h
 CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE: Final[str] = (
-    "🚨 nmae 무응답 — {workspaces} 워크트리 watchdog inject {count}회 연속 후 "
-    "in_progress 여전히 NULL. nmae 룰 위반 — 사용자 확인 필요"
+    "🚨 nmae 무응답 가시화 — {workspaces} 워크트리 watchdog inject {count}회 연속 후 "
+    "in_progress 여전히 NULL. 자율 처리 진행 중 (조치 무관)"
 )
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)

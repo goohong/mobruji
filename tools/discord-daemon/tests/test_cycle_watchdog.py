@@ -995,9 +995,10 @@ class CycleEscalationTest(unittest.IsolatedAsyncioTestCase):
             # escalation 채널 push 적어도 1회 + 메시지 형식 검증.
             self.assertGreaterEqual(len(escalation_channel.sent), 1)
             escalate_msg = escalation_channel.sent[0]
-            self.assertIn("🚨 nmae 무응답", escalate_msg)
+            self.assertIn("🚨 nmae 무응답 가시화", escalate_msg)
             self.assertIn("be", escalate_msg)
             self.assertIn("3회 연속", escalate_msg)
+            self.assertIn("자율 처리 진행 중", escalate_msg)
 
     async def test_escalation_debounced_after_first_push(self) -> None:
         """첫 escalation 후 debounce 1h 내 추가 escalation 안 함."""
