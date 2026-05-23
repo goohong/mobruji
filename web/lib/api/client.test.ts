@@ -239,6 +239,26 @@ describe("apiFetch signal pass-through 가드 (#692)", () => {
   });
 });
 
+type RequestOptionsForTest = Parameters<typeof apiFetch>[1];
+
+describe("apiFetch body=null vs undefined 분기 가드 (#695)", () => {
+  // 현 동작 lock: client.ts는 `body !== undefined`만 체크.
+  // → body=null은 JSON.stringify(null) = "null" 전송 + Content-Type 부여.
+  // → body 미지정은 init.body 없음 + Content-Type 없음.
+  it.each([
+    { label: "body 미지정 → init.body undefined, Content-Type 헤더 없음", options: {}, expectedBody: undefined, expectedHasContentType: false },
+    { label: "body=null → init.body === 'null' 문자열, Content-Type=application/json", options: { method: "POST" as const, body: null }, expectedBody: "null", expectedHasContentType: true },
+    { label: "body={} → init.body === '{}', Content-Type=application/json", options: { method: "POST" as const, body: {} }, expectedBody: "{}", expectedHasContentType: true },
+  ])("$label", async ({ options, expectedBody, expectedHasContentType }: { options: RequestOptionsForTest; expectedBody: string | undefined; expectedHasContentType: boolean }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", options);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe(expectedBody);
+    const headers = init.headers as Record<string, string>;
+    expect("Content-Type" in headers).toBe(expectedHasContentType);
+  });
+});
+
 describe("apiFetch path query string 가드 (#683)", () => {
   // 현 동작 lock: client.ts는 URL/URLSearchParams 변환 없이 path를 raw concat한다.
   // → query string은 호출자가 미리 조립·인코딩한 형태 그대로 fetch URL에 전달된다.
