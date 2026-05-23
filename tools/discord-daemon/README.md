@@ -122,6 +122,20 @@ cd ~ && git clone https://github.com/goohong/mobruji.git \
   && cd mobruji/tools/discord-daemon && bash setup-gcp-systemd.sh
 ```
 
+> **User 계정 주의 (#909 F-2)**: `mobruji-discord-daemon.service` 와
+> `mobruji-discord-bridge.service` 두 unit 의 `User=` 는 모두 **`mobruji`** 로
+> 통일되어 있습니다 (이전: `daemon=ubuntu` / `bridge=mobruji` 비대칭).
+> 운영 계정이 다른 호스트(예: 옛 GCP `ubuntu`) 에서는 두 가지 옵션:
+>
+> 1. `mobruji` 계정을 새로 만들고 그 홈에 레포 clone (권장 — unit 수정 0).
+> 2. `sudo systemctl edit mobruji-discord-daemon` drop-in 으로 `User=` 와
+>    `WorkingDirectory=` / `EnvironmentFile=` / `ExecStart=` 경로를 호스트
+>    계정에 맞게 override (unit 파일 직접 수정은 git diff 방해).
+>
+> `setup-gcp-systemd.sh` 는 `/var/log` 로그 파일 owner 를 `SUDO_USER` (없으면
+> `USER`) 로 자동 chown 하므로, sudo 호출 계정과 unit `User=` 가 일치하면
+> 자동으로 정합됩니다.
+
 1차 실행은 venv 설치 + `.env` 템플릿 복사 후 종료합니다. 안내 따라
 `.env` 토큰을 채운 뒤 다시 실행하면 systemd 등록 + 즉시 기동까지 진행됩니다.
 
