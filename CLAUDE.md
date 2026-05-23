@@ -54,6 +54,7 @@
 - **Backend**: `cd backend && ./gradlew checkstyleMain spotlessCheck test` (포맷 수정: `./gradlew spotlessApply`)
 - **Frontend**: `cd web && npm run lint && npm run typecheck && npm test`
 - CI 실패 상태로 머지 금지.
+- **rev 3단계 e2e (`reviewed:claude` 라벨 머지 게이트)** — 모든 `type:fix` / `type:feat` PR 은 rev 가 머지 전/사후/release 후 3단계 e2e 수행, 통과 시 `reviewed:claude` 라벨 부여. 라벨 없는 PR 자율 머지 금지. 상세: `docs/features/rev-e2e-3-stages.md`
 
 ### 기능 기획
 - 중간 규모 이상 (신규 도메인/외부 연동/다중 PR) 은 `docs/features/<slug>.md` Feature Spec **먼저 작성·합의** 후 구현.
@@ -118,6 +119,9 @@ cd web && npm run dev                                                   # FE 실
 - 구현 전 **가정값 명시하고** 사용자 확인.
 - 설계 결정은 `06-domain-model.md §7 오픈 이슈` 추가.
 - 문서 ↔ 코드 충돌 시 **문서 먼저 갱신** 후 구현 (01-harness-spec §5).
+- **자율 default** (메모리 `feedback-autonomous-default`): 사용자 부재 (`~/.mobruji/user-presence.json` status:absent) 또는 작은 결정은 묻지 말고 자율 진행. release/secret/보호 영역 등 high-stakes 만 확인. redo 비용 self-check 후 진행.
+- **약속 = binding** (메모리 `feedback-keep-promises`): "~하겠습니다" 발언은 다음 turn 부터가 아니라 **이번 turn 부터** 적용. 미적용 시 약속 위반.
+- **세션 룰 영속** (메모리 `feedback-session-persist-rules`): CLAUDE.md 본문 + 메모리 두 채널로 영속. `/clear` 후에도 동일 적용. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가. 세션 종료 전 §13 doc-check 의무.
 
 ## 11) helper / maestro Discord 양방향 절대 룰
 
