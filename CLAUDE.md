@@ -127,21 +127,16 @@ cd web && npm run dev                                                   # FE 실
 
 **채널**: `MOBRUJI_CHANNEL_ID` (#모부르지) 전용. `NOTIFY_CHANNEL_ID` 는 digest cron 만.
 
+**ack 는 bot.py 가 처리 (helper 본체는 ack push 안 함, #963, 2026-05-24)**: bot.py `on_message` 가 사용자 메시지 받자마자 1초 generic auto-ack (`BOT_AUTO_ACK_TEXT`) 를 자동 push. helper 본체는 ack 단계 생략하고 바로 본답으로 직행 — 채널에 messages 2건 (auto-ack 1 + 본답 1) 만 남아 가독성 ↑. 사용자 깜깜이 우려는 bot auto-ack 1초 + (선택) thread stream 으로 해소. 이전엔 helper 가 별도 ack 를 push 해 3건 메시지가 섞여 가독성이 떨어졌음.
+
 **매 사용자 메시지마다 순서대로 (한 단계라도 건너뛰면 룰 위반)**:
-1. **ack push** — `bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack-thread "<ack 문구>"`. 다른 어떤 action 보다 먼저. **turn 중간에 system-reminder 로 새 사용자 메시지가 도착해도 진행 중 작업 멈추고 즉시 ack push 먼저**. "작업 끝나고 일괄 처리" 금지 — 사용자 입장에선 깜깜이.
-1b. **thread 자동 생성** — `--auto-ack-thread` 가 ack push 와 동시에 thread 생성 + thread_id 를 `~/.mobruji/helper-current-thread.txt` 에 저장 (#947). 이후 tool call milestone 마다 `bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "<진행 1줄>"` 호출해 사용자 가시화. milestone 단위 (sub-task 끝 / 위임 결정 / 발견 사항) — 매 grep/cat 단위는 아님 (noise).
-2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}`.
-3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문.
+1. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}`.
+2. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문.
+3. **(선택) thread 생성** — 장시간 작업 (위임/조사/PR) 일 때만 `bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack-thread "🔍 작업 시작 — <한 줄 요약>"` 호출해 진행 thread 생성 + thread_id 를 `~/.mobruji/helper-current-thread.txt` 에 저장 (#947). 이후 milestone (sub-task 끝 / 위임 결정 / 발견 사항) 마다 `--auto-thread "<진행 1줄>"` 으로 stream. 단순 즉답이면 skip — bot auto-ack 만으로 충분.
 4. **처리** — (a) 직접 / (b) sub-agent·nmae 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push.
-5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작 (ack 와 시각적 분리). **본답 push 는 자동 Discord reply (사용자 메시지에 답장 형태)**: bot.py 가 `~/.mobruji/last-user-msg-id.txt` 에 message_id 캐시 + `discord-reply.sh` bare body 모드가 자동으로 `message_reference` payload 빌드 (#946). 명시적 disable 필요 시 `--no-reply`.
-6. **queue done + 검증** — message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. 1건이라도 남으면 turn 안 끝남. thread 마지막 줄로 `--auto-thread "[done]"` push 후 종료.
+5. **본답 push + queue done + 검증** — 본답은 `━━━━━━━━━━━━━━━` 구분선으로 시작 (auto-ack 와 시각적 분리). **본답은 자동 Discord reply (사용자 메시지에 답장 형태)**: bot.py 가 `~/.mobruji/last-user-msg-id.txt` 에 message_id 캐시 + `discord-reply.sh` bare body 모드가 자동으로 `message_reference` payload 빌드 (#946). 명시적 disable 필요 시 `--no-reply`. push 후 message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. 1건이라도 남으면 turn 안 끝남. thread 생성했다면 마지막 줄로 `--auto-thread "[done]"` push 후 종료.
 
-**ack 문구 3종 (확정 — 부가 설명/사과/계획 금지, 한 줄만)**:
-- 즉답 가능 → "답변 가능합니다. 잠시만 기다려주세요."
-- 대기 필요 → "nmae가 X 작업 중이라 ~분 걸립니다"
-- 재배치 필요 → "nmae가 X 작업 중입니다. 중단시키고 작업 전달할까요?"
-
-**금지**: 분석/조사/tool call 을 먼저 하고 ack 를 뒤로. bot.py auto-ack 는 #807 에서 제거됐기 때문에 helper ack 없으면 사용자 입장에선 깜깜이.
+**금지**: helper 본체가 ack push 를 추가로 호출 (auto-ack 와 중복 → 가독성 ↓). `discord-reply.sh --ack` mode 는 `--auto-ack-thread` 의 thread 생성 용도로만 잔존. ack 문구 단독 push 는 deprecated (#963).
 
 **helper launch 표현 룰**: helper 본체는 sub-agent launch 안 함 (Agent 도구는 helper sub-agent 가 nmae 동일 권한으로 launch). helper 가 사용자 응답에서 "launch 하겠습니다" 표현 사용 시 주체 혼동 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다" / "nmae 에 알리겠습니다" 로 표현. 메모리 [[feedback-helper-role-boundary]] 참조.
 

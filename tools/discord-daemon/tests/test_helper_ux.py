@@ -847,5 +847,162 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         self.assertIn("stream-line", payload["content"])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# #963: discord-reply.sh --ack mode deprecation warning
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DiscordReplyAckDeprecationTests(unittest.TestCase):
+    """`--ack` mode 는 helper 본체 ack push 폐지 (#963) 로 deprecated.
+
+    호출 자체는 운영 호환성으로 유지하되 stderr 에 deprecation warning 을 emit 한다.
+    `--auto-ack-thread` 는 thread 시작 용도로 redefine 됐기에 warning 없음.
+    """
+
+    SCRIPT_PATH = (
+        Path(__file__).resolve().parent.parent / "discord-reply.sh"
+    )
+
+    def _make_fake_curl(self, tmpdir: str, capture_path: str) -> Path:
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  if [[ \"$1\" == \"-d\" ]]; then\n"
+            "    shift\n"
+            "    PAYLOAD=\"$1\"\n"
+            "  fi\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$PAYLOAD\" >> {capture_path}\n"
+            "printf '{\"id\": \"99999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+        return fake_curl
+
+    def _run_ack(self, flag: str) -> subprocess.CompletedProcess:
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        capture_path = str(Path(tmpdir) / "payloads.txt")
+        self._make_fake_curl(tmpdir, capture_path)
+
+        env_path = Path(tmpdir) / "test.env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=stub\n"
+            "MOBRUJI_CHANNEL_ID=42\n"
+            "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n",
+            encoding="utf-8",
+        )
+
+        # last-user-msg-id 파일 없음 → standalone path (warning 검증에 충분).
+        new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+        run_env = os.environ.copy()
+        run_env.update({
+            "DISCORD_DAEMON_ENV_PATH": str(env_path),
+            "PATH": new_path,
+            # 깨끗한 환경 — 실제 운영 파일 영향 차단.
+            "LAST_USER_MSG_ID_FILE": str(Path(tmpdir) / "nonexistent.txt"),
+            "HELPER_THREAD_FILE": str(Path(tmpdir) / "helper-current-thread.txt"),
+        })
+        return subprocess.run(
+            ["bash", str(self.SCRIPT_PATH), flag, "ack-text"],
+            capture_output=True,
+            text=True,
+            env=run_env,
+            timeout=5,
+        )
+
+    def test_bare_ack_emits_deprecation_warning(self) -> None:
+        """--ack 직접 호출 시 stderr 에 deprecation 메시지 + #963 참조 포함."""
+        result = self._run_ack("--ack")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("deprecated", result.stderr.lower())
+        self.assertIn("#963", result.stderr)
+
+    def test_auto_ack_thread_no_deprecation_warning(self) -> None:
+        """--auto-ack-thread 는 thread 시작 용도라 warning 없음 (회귀 가드)."""
+        result = self._run_ack("--auto-ack-thread")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("deprecated", result.stderr.lower())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #963: 본답 (bare body) mode 가 main message 정상 push (auto-ack 대체)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DiscordReplyBareBodyTests(unittest.TestCase):
+    """#963: helper 본체 ack push 제거 후 본답 (bare body) 만으로도 정상 push.
+
+    가독성 목적 — 채널에 messages 2건 (bot auto-ack + helper 본답) 만.
+    fake curl 로 payload 캡처 후 본답이 main channel POST 로 가는지 검증.
+    """
+
+    SCRIPT_PATH = (
+        Path(__file__).resolve().parent.parent / "discord-reply.sh"
+    )
+
+    def test_bare_body_pushes_single_main_message(self) -> None:
+        """본답 모드는 ack/thread 생성 없이 main channel POST 1건만 발생."""
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        capture_path = str(Path(tmpdir) / "payloads.txt")
+        url_capture_path = str(Path(tmpdir) / "urls.txt")
+        # url 도 같이 캡처 — main channel POST 단 1건임을 검증하기 위해.
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "URL=\"\"\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  case \"$1\" in\n"
+            "    -d) shift; PAYLOAD=\"$1\";;\n"
+            "    http*) URL=\"$1\";;\n"
+            "  esac\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$URL\" >> {url_capture_path}\n"
+            f"printf '%s\\n' \"$PAYLOAD\" >> {capture_path}\n"
+            "printf '{\"id\": \"99999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+
+        env_path = Path(tmpdir) / "test.env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=stub\n"
+            "MOBRUJI_CHANNEL_ID=42\n"
+            "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n",
+            encoding="utf-8",
+        )
+
+        new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+        run_env = os.environ.copy()
+        run_env.update({
+            "DISCORD_DAEMON_ENV_PATH": str(env_path),
+            "PATH": new_path,
+            "LAST_USER_MSG_ID_FILE": str(Path(tmpdir) / "nonexistent.txt"),
+        })
+        result = subprocess.run(
+            ["bash", str(self.SCRIPT_PATH), "본답 메시지"],
+            capture_output=True,
+            text=True,
+            env=run_env,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        urls = Path(url_capture_path).read_text().splitlines()
+        payloads = Path(capture_path).read_text().splitlines()
+        # 본답 모드 = main channel POST 1건만 (ack/thread 생성 호출 없음).
+        self.assertEqual(len(urls), 1, f"호출 1건 이상 발생: {urls}")
+        self.assertIn("/channels/42/messages", urls[0])
+        self.assertNotIn("/threads", urls[0])
+        # payload content 가 본답 메시지 포함.
+        import json
+        payload = json.loads(payloads[0])
+        self.assertIn("본답 메시지", payload["content"])
+
+
 if __name__ == "__main__":
     unittest.main()
