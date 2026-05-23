@@ -404,6 +404,36 @@ describe("SongCard", () => {
       expect(panel).toHaveTextContent("키 매칭");
     });
 
+    // closes #549 — Enter/Space 키보드 활성화 회귀 가드. <button> 네이티브 동작이
+    // 향후 <div role="button"> 등으로 바뀌어도 키보드 토글이 깨지지 않도록 고정한다.
+    it("토글 focus 후 Enter/Space는 aria-expanded를 토글하고, 다른 키는 no-op", async () => {
+      const user = userEvent.setup();
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const toggle = screen.getByRole("button", { name: /자세히 보기/ });
+      toggle.focus();
+      expect(toggle).toHaveFocus();
+
+      await user.keyboard("{Enter}");
+      expect(
+        screen.getByRole("button", { name: /접기/ }),
+      ).toHaveAttribute("aria-expanded", "true");
+
+      await user.keyboard(" ");
+      expect(
+        screen.getByRole("button", { name: /자세히 보기/ }),
+      ).toHaveAttribute("aria-expanded", "false");
+
+      await user.keyboard("a");
+      expect(
+        screen.getByRole("button", { name: /자세히 보기/ }),
+      ).toHaveAttribute("aria-expanded", "false");
+    });
+
     // closes #542 — 카드 여러 개 렌더 시 panelId가 카드 간 충돌하지 않아야 한다.
     it("카드 다수 렌더 시 각 토글 aria-controls가 unique하다", () => {
       renderWithQueryClient(
