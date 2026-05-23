@@ -27,6 +27,7 @@ create "type:chore"         "C5DEF5" "잡일/설정"
 create "type:docs"          "0075CA" "문서"
 create "type:test"          "BFD4F2" "테스트"
 create "type:style"         "FBCA04" "코드 스타일/포맷"
+create "type:release"       "006B75" "릴리즈 PR (develop → main)"
 
 # Scope (도메인) — mobruji 화이트리스트: user / song / recommendation / voice / infra / web / feedback
 create "scope:user"           "EDEDED" "도메인: user (회원/인증)"
