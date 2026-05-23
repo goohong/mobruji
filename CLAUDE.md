@@ -30,6 +30,8 @@
 - `docs/decisions/` — ADR
 - `docs/features/` — Feature Spec
 - `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션 (4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary)
+- `tools/cycle-status/` — nmae 가 cycle-status.json 갱신 시 호출하는 헬퍼 (`update.sh` / `validate.sh`). 수동 JSON 편집 금지 (§14 + 11-runbook §0-11)
+- `tools/rev-queue/` — rev sub-agent 매 사이클 첫 액션 `rev-queue.sh all` (§4 rev 3단계 e2e 게이트 + 11-runbook §0-12)
 
 ## 4) 비협상 룰
 
@@ -122,6 +124,8 @@ cd web && npm run dev                                                   # FE 실
 - **자율 default** (메모리 `feedback-autonomous-default`): 사용자 부재 (`~/.mobruji/user-presence.json` status:absent) 또는 작은 결정은 묻지 말고 자율 진행. release/secret/보호 영역 등 high-stakes 만 확인. redo 비용 self-check 후 진행.
 - **약속 = binding** (메모리 `feedback-keep-promises`): "~하겠습니다" 발언은 다음 turn 부터가 아니라 **이번 turn 부터** 적용. 미적용 시 약속 위반.
 - **세션 룰 영속** (메모리 `feedback-session-persist-rules`): CLAUDE.md 본문 + 메모리 두 채널로 영속. `/clear` 후에도 동일 적용. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가. 세션 종료 전 §13 doc-check 의무.
+- **워크트리 lock** (메모리 `feedback-worktree-lock`): 한 워크트리 = 동시 sub-agent 1. 같은 도메인 백로그 2건 동시 launch 금지 (브랜치/working tree 공유 불가). 상세: `docs/ai-harness/12-sub-agent-prompt-template.md §1 워크트리 lock`, `11-runbook §0-10`.
+- **PR base develop 강제** (메모리 `feedback-pr-base-develop`): `gh pr create` 호출 시 항상 `--base develop` 명시. release PR (`develop → main`) 만 예외. 누락 시 GitHub default(`main`) base 로 생성되어 `main` 직접 변경 사고 + rev-gate.yml skip + 라벨 자동 부착 오작동. 상세: `docs/ai-harness/12-sub-agent-prompt-template.md §1 PR 생성 표준 명령`.
 
 ## 11) helper / maestro Discord 양방향 절대 룰
 
@@ -139,6 +143,8 @@ cd web && npm run dev                                                   # FE 실
 **금지**: helper 본체가 ack push 를 추가로 호출 (auto-ack 와 중복 → 가독성 ↓). `discord-reply.sh --ack` mode 는 `--auto-ack-thread` 의 thread 생성 용도로만 잔존. ack 문구 단독 push 는 deprecated (#963).
 
 **helper launch 표현 룰**: helper 본체는 sub-agent launch 안 함 (Agent 도구는 helper sub-agent 가 nmae 동일 권한으로 launch). helper 가 사용자 응답에서 "launch 하겠습니다" 표현 사용 시 주체 혼동 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다" / "nmae 에 알리겠습니다" 로 표현. 메모리 [[feedback-helper-role-boundary]] 참조.
+
+**Discord 발송 약속 표현 룰** (2026-05-24 사용자 정정): helper / nmae 가 미래 Discord 발송 약속 시 영어 동사 `push` / `post` / `send` 금지. 한국어 정중체 사용 — "메시지 드리겠습니다" / "알려드리겠습니다" / "보고 드리겠습니다". 예: ❌ "1회 push 합니다" / ❌ "결과 push 합니다" → ✅ "1회 알려드리겠습니다" / ✅ "결과 알려드리겠습니다". 메모리 [[feedback-discord-tone-formal]] 참조.
 
 ## 12) maestro/helper context% 자기 emit
 mmae(tmux `mobruji:0.0`) + nmae(NCP 호스트 tmux `mobruji:0.0`) + helper(tmux `helper:0.0`) 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 pane 별 독립으로 95% 도달 시 자율 정리 트리거 (PR #865 multi-pane 확장).
@@ -199,7 +205,15 @@ helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또�
 - `in_progress: null` 진입 시 cycle-status.json `note` 필드 의무 (사유 또는 다음 launch 후보).
 - 미명시 시 watchdog `cycle_idle_watch_loop` 가 **STRICT relaunch prompt** 즉시 inject.
 - 갱신: `tools/cycle-status/update.sh <ws> set-idle --note "..."` (수동 JSON 편집 금지).
-- 검증: `tools/cycle-status/validate.sh` — idle note 누락 detect.
+- 검증: `tools/cycle-status/validate.sh` — idle note 누락 + timestamp sanity 동시 detect.
 - env: `CYCLE_REASON_REQUIRED=1` default. 후방호환 off (=0) 가능.
 
 Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리별 `idle_since` / reason 한 줄.
+
+### 수동 cycle-status.json 편집 절대 금지 (#971 회귀 방지)
+**사용자 2026-05-24 정정: PR #970 회귀 사고 ("KST 시각을 Z suffix 로 hand-edit → future timestamp → detect 차단").**
+
+- nmae / helper / mmae 모두 `tools/cycle-status/update.sh` 만 사용. `vim` / `cat <<EOF >` / `jq` 직접 편집 금지.
+- 위반 시 timestamp 가 잘못된 timezone (예: KST 시각을 Z suffix 로) 들어가면 watchdog detect 차단 — 핵심 회귀 사례.
+- `validate.sh` 가 매 update 후 sanity 검증 — fail 시 (a) 절차 위반 또는 (b) 시스템 시각 문제. 둘 중 어떤 경우든 즉시 root cause 조사.
+- bot.py `detect_idle_worktrees` 도 future timestamp 발견 시 ERROR 로그 + Discord push (#971) — 사용자 즉시 가시화.

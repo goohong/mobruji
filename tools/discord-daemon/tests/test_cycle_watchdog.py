@@ -1,15 +1,19 @@
-"""cycle_idle_watch_loop 단위 테스트 (#941).
+"""cycle_idle_watch_loop 단위 테스트 (#941 / #956 / #971 / #972).
 
 spec: docs/features/nmae-cycle-watchdog.md.
 
 검증 범위:
 1. `resolve_cycle_targets` — CSV / None / 공백 / 중복 (4건).
 2. `parse_cycle_status` — 정상 / null 본문 / 파일 부재 / malformed JSON (4건).
-3. `detect_idle_worktrees` — 모두 idle / 일부 idle / 모두 active / in_progress dict (4건).
+3. `detect_idle_worktrees` — 모두 idle / 일부 idle / 모두 active / in_progress dict
+   / future timestamp (5건).
 4. `cycle_idle_watch_loop` (asyncio mock) — idle → inject+push / debounce /
    tmux 부재 graceful / parse fail graceful / threshold 0 disabled (5건).
-
-총 17건.
+5. `detect_idle_worktrees` note 전파 — 3건 (#956).
+6. STRICT relaunch trigger — 2건 (#956).
+7. Discord push reason 표시 — 2건 (#956).
+8. future timestamp ERROR + Discord push — 3건 (#971).
+9. Escalation — 4건 (#972).
 """
 
 from __future__ import annotations
@@ -726,7 +730,181 @@ class CycleDiscordReasonPushTest(unittest.IsolatedAsyncioTestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8) Escalation — 4건 (#972)
+# 8) future timestamp ERROR + Discord push — 3건 (#971)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CycleFutureTimestampErrorTest(unittest.TestCase):
+    """detect_idle_worktrees 가 future timestamp 발견 시 ERROR log + is_future flag."""
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _entry_with_future_completed_at(self) -> dict:
+        future_ts = (self.now + timedelta(hours=9)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        return {
+            "in_progress": None,
+            "last_completed": {
+                "pr": "#000",
+                "title": "kst as z hand-edit",
+                "completed_at": future_ts,
+            },
+        }
+
+    def test_future_completed_at_flags_is_future(self) -> None:
+        status = {"be": self._entry_with_future_completed_at()}
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now, workspaces=["be"]
+        )
+        self.assertEqual(len(idle), 1)
+        self.assertTrue(idle[0]["is_future"])
+
+    def test_normal_past_completed_at_is_future_false(self) -> None:
+        old_ts = (self.now - timedelta(minutes=30)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        status = {
+            "be": {
+                "in_progress": None,
+                "last_completed": {
+                    "pr": "#000",
+                    "title": "old",
+                    "completed_at": old_ts,
+                },
+            }
+        }
+        idle = bot.detect_idle_worktrees(
+            status, threshold_minutes=10, now=self.now, workspaces=["be"]
+        )
+        self.assertEqual(len(idle), 1)
+        self.assertFalse(idle[0]["is_future"])
+
+    def test_future_completed_at_emits_error_log(self) -> None:
+        status = {"be": self._entry_with_future_completed_at()}
+        with self.assertLogs("mobruji-discord-daemon", level="ERROR") as cm:
+            bot.detect_idle_worktrees(
+                status,
+                threshold_minutes=10,
+                now=self.now,
+                workspaces=["be"],
+            )
+        # ERROR level log 안에 "미래 completed_at 감지" 메시지 + #971 마커.
+        joined = "\n".join(cm.output)
+        self.assertIn("미래 completed_at", joined)
+        self.assertIn("#971", joined)
+        self.assertIn("ERROR", joined)
+
+
+class CycleFutureTimestampDiscordPushTest(unittest.IsolatedAsyncioTestCase):
+
+    def _write_status(self, dir_path: Path, payload: dict) -> Path:
+        path = dir_path / "cycle.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    async def test_future_timestamp_triggers_discord_error_push(self) -> None:
+        """future timestamp 발견 시 별 🚨 ERROR Discord push 발사."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            future_ts = (now + timedelta(hours=9)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "kst as z",
+                        "completed_at": future_ts,
+                    },
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    future_ts_debounce_seconds=3600,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=5)
+
+            # 메시지 중 ERROR push 한 줄 + 일반 idle push 한 줄 (총 2건).
+            error_pushes = [m for m in channel.sent if "🚨 ERROR" in m]
+            self.assertEqual(len(error_pushes), 1)
+            push_text = error_pushes[0]
+            self.assertIn("future timestamp", push_text)
+            self.assertIn("be", push_text)
+            self.assertIn("update.sh", push_text)
+            self.assertIn("#971", push_text)
+
+    async def test_future_timestamp_push_debounced(self) -> None:
+        """동일 워크트리 1h 내 future ts ERROR push 는 1회만 발사."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            future_ts = (now + timedelta(hours=9)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "future",
+                        "completed_at": future_ts,
+                    },
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            status_path = self._write_status(Path(tmp_dir), status_payload)
+            channel = FakeChannel()
+            client = FakeClient(channel)
+            # monotonic 시각 진행 안 함 → 첫 push 후 영구 debounce 활성.
+            # 초기값이 debounce 한도보다 커야 last_alert_at.get(..., 0.0) 와 비교 시
+            # 첫 push 가 통과.
+            fake_mono = [10000.0]
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=222,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=900,
+                    future_ts_debounce_seconds=3600,
+                    time_source=lambda: fake_mono[0],
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=15)
+
+            error_pushes = [m for m in channel.sent if "🚨 ERROR" in m]
+            # debounce 활성 → 정확히 1회.
+            self.assertEqual(len(error_pushes), 1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9) Escalation — 4건 (#972)
 # ─────────────────────────────────────────────────────────────────────────────
 
 

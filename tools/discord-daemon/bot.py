@@ -199,6 +199,8 @@ CYCLE_IDLE_WATCH_STRICT_TEMPLATE: Final[str] = (
 )
 # CYCLE_REASON_REQUIRED env default — note 미명시 idle 을 strict 로 처리할지.
 CYCLE_REASON_REQUIRED_DEFAULT: Final[str] = "1"
+# future timestamp ERROR push debounce (#971) — 동일 워크트리 1시간 1회.
+CYCLE_FUTURE_TS_PUSH_DEBOUNCE_SECONDS: Final[int] = 60 * 60  # 1h
 # escalation (#972) — 같은 워크트리 inject N회 연속 후에도 in_progress NULL 이면
 # MOBRUJI_CHANNEL_ID (사용자 채널) 에 직접 push. nmae 무응답 신호.
 CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT: Final[int] = 3
@@ -1444,6 +1446,7 @@ def detect_idle_worktrees(
                 "last_completed_at": None,
                 "note": None,
                 "idle_since": None,
+                "is_future": False,
             })
             continue
         in_progress_raw = entry.get("in_progress")
@@ -1482,6 +1485,7 @@ def detect_idle_worktrees(
                 "last_completed_at": None,
                 "note": note_text,
                 "idle_since": idle_since_text,
+                "is_future": False,
             })
             continue
 
@@ -1489,9 +1493,12 @@ def detect_idle_worktrees(
         # 미래 timestamp (negative elapsed) — clock skew 또는 작성자 timestamp
         # 형식 오류 (예: KST 시각을 Z suffix 로 적음) 방어. 보수적으로 idle 간주.
         # #969 root cause — detect 가 silently pass 해서 watchdog 침묵.
+        # #971: warning → ERROR 격상 + idle entry 에 `is_future=True` flag.
+        # 호출부 (`cycle_idle_watch_loop`) 가 별 Discord push 로 가시화.
         if elapsed < 0:
-            logger.warning(
-                "detect_idle_worktrees: 미래 completed_at 감지 ws=%s completed_at=%s now=%s — idle 로 간주",
+            logger.error(
+                "detect_idle_worktrees: 미래 completed_at 감지 ws=%s completed_at=%s now=%s "
+                "— hand-edit 의심 (KST 시각을 Z suffix 로?). update.sh 만 사용 (#971)",
                 ws,
                 completed_at.isoformat(),
                 now.isoformat(),
@@ -1502,6 +1509,7 @@ def detect_idle_worktrees(
                 "last_completed_at": completed_at,
                 "note": note_text,
                 "idle_since": idle_since_text,
+                "is_future": True,
             })
             continue
         if elapsed > cutoff_seconds:
@@ -1511,6 +1519,7 @@ def detect_idle_worktrees(
                 "last_completed_at": completed_at,
                 "note": note_text,
                 "idle_since": idle_since_text,
+                "is_future": False,
             })
     return idle
 
@@ -1570,6 +1579,7 @@ async def cycle_idle_watch_loop(
     escalation_threshold: int = CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT,
     escalation_debounce_seconds: int = CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT,
     escalation_channel_id: int | None = None,
+    future_ts_debounce_seconds: int = CYCLE_FUTURE_TS_PUSH_DEBOUNCE_SECONDS,
     time_source=time.monotonic,
     now_provider=lambda: datetime.now(timezone.utc),
 ) -> None:
@@ -1614,6 +1624,8 @@ async def cycle_idle_watch_loop(
     # escalation (#972) 상태 — 워크트리 별 누적 inject 횟수 + 마지막 escalate 시각.
     inject_count: dict[str, int] = {}
     last_escalate_at: dict[str, float] = {}
+    # #971: future timestamp ERROR push debounce — 동일 워크트리 1h 1회.
+    last_future_ts_push_at: dict[str, float] = {}
     missing_session_warned = False
     missing_channel_warned = False
     missing_status_warned = False
@@ -1652,6 +1664,51 @@ async def cycle_idle_watch_loop(
             for ws_name in list(inject_count.keys()):
                 if ws_name not in idle_workspaces_now:
                     inject_count[ws_name] = 0
+
+            # #971 — future timestamp 발견 시 별 ERROR Discord push.
+            # idle alert 와 독립 debounce (1h) — KST as Z hand-edit 사고 즉시
+            # 사용자 가시화. tmux session 부재 / channel 부재 시 graceful skip.
+            future_entries = [e for e in idle_all if e.get("is_future")]
+            if future_entries:
+                mono_now_future = time_source()
+                fresh_future = [
+                    e
+                    for e in future_entries
+                    if (
+                        mono_now_future
+                        - last_future_ts_push_at.get(e["workspace"], 0.0)
+                    )
+                    >= future_ts_debounce_seconds
+                ]
+                if fresh_future:
+                    channel = client.get_channel(notify_channel_id)
+                    if channel is not None:
+                        ws_label = ", ".join(
+                            e["workspace"] for e in fresh_future
+                        )
+                        details = []
+                        for e in fresh_future:
+                            ts_iso = (
+                                e["last_completed_at"].isoformat()
+                                if e.get("last_completed_at") is not None
+                                else "?"
+                            )
+                            details.append(f"  - {e['workspace']}: completed_at={ts_iso}")
+                        push_text = (
+                            "🚨 ERROR cycle-status.json future timestamp 감지 "
+                            f"({len(fresh_future)} 워크트리: {ws_label}). "
+                            "원인: nmae hand-edit (KST 시각을 Z suffix 로?) 의심. "
+                            "수동 JSON 편집 금지 — `tools/cycle-status/update.sh` 만 사용. (#971)\n"
+                            + "\n".join(details)
+                        )
+                        await send_with_retry(channel, content=push_text)
+                        for e in fresh_future:
+                            last_future_ts_push_at[e["workspace"]] = mono_now_future
+                        logger.error(
+                            "cycle_idle_watch_loop: future timestamp Discord push workspaces=%s",
+                            ws_label,
+                        )
+
             if not idle_all:
                 continue
 

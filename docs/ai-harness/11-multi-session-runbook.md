@@ -302,6 +302,66 @@ maestro turn 자체가 5분 초과(`feedback-reasoning-chunk-limit`)하면 turn�
 
 maestro가 sub-agent launch를 1회라도 까먹은 채 maestro 자체 작업을 진행했다면 즉시 사용자에게 인정 + 사과 + 룰 재확인. 메모리(`feedback-sub-agent-launch-mandatory`)와 본 §0-10이 source of truth — 충돌 시 본 문서 우선.
 
+### 0-11) cycle-status tooling — nmae 의무 (2026-05-24 박제)
+
+§0-10 의 4 워크트리 가동 룰을 실제 enforce 하는 외부 안전망. **메모리/룰 위반 시도 정정**. nmae 가 본 절차 모르면 watchdog inject 무한 loop 발생 (실 사고 #970).
+
+#### bot.py `cycle_idle_watch_loop` (외부 watchdog)
+- **5분 polling** `~/.mobruji/cycle-status.json` → 4 워크트리(be/fe/rev/plan) `in_progress` 검사
+- idle 발견 시 nmae tmux pane (`mobruji:0.0`) 에 `[watchdog ...] cycle-status.json idle 발견 — <ws>. ...` inject + Discord `NOTIFY_CHANNEL_ID` push
+- **escalation**: 같은 워크트리 inject 3회 연속 + `in_progress` 여전히 NULL → `MOBRUJI_CHANNEL_ID` (사용자 채널) 에 `🚨 nmae 무응답` 직접 push (debounce 1h)
+- spec: `docs/features/nmae-cycle-watchdog.md`, CLAUDE.md §14
+
+#### nmae inject 대응 의무 (4단계 — 한 단계라도 누락 시 무한 loop)
+nmae 가 watchdog inject 받으면 **다음 turn 시작 즉시**:
+
+1. 백로그 후보 1개 선정 (이슈 / PR follow-up / docs drift)
+2. `bash /home/mobruji/mobruji/tools/cycle-status/update.sh <ws> set-active --title "<후보 한 줄>"`
+3. `Agent` tool 로 sub-agent launch (`/home/mobruji/mobruji-<ws>`)
+4. `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <후보>"`
+
+상세: `docs/ai-harness/12-sub-agent-prompt-template.md §1 nmae watchdog inject 대응`.
+
+#### cycle-status.json 갱신 의무 (수동 편집 금지)
+nmae 가 매 sub-agent launch / 완료 / idle 진입 시 **반드시 헬퍼 스크립트 경유**:
+
+```bash
+# active 갱신 (in_progress 채움, idle_since clear)
+bash tools/cycle-status/update.sh <ws> set-active --title "<후보>" [--task "<상세>"]
+
+# idle 갱신 (in_progress null, note 의무)
+bash tools/cycle-status/update.sh <ws> set-idle --note "<사유 또는 다음 launch 후보>"
+
+# 완료 기록
+bash tools/cycle-status/update.sh <ws> set-completed --pr "#NNN" --title "<요약>"
+```
+
+- 수동 JSON 편집 금지 (timezone bug / atomic write race / 스키마 drift 위험)
+- idle 시 `note` 필드 의무 — 빈 string → watchdog STRICT relaunch prompt 즉시 inject
+- 검증: `bash tools/cycle-status/validate.sh` — idle 워크트리 note 누락 detect (nmae self-check 용)
+- 스키마: `tools/cycle-status/README.md`
+
+#### 3중 안전망 (CLAUDE.md §14 와 정합)
+1. **bot.py watchdog** — 외부 데몬, 최후 보루
+2. **nmae 매 turn 종료 직전 자기 점검** — cycle-status.json 4 워크트리 active 검증
+3. **helper 우연 발견 시 직접 inject** — 같은 서버라 `tmux send-keys` 가능 ([[feedback-helper-role-boundary]] 위임 영역)
+
+### 0-12) rev 큐 스크립트 — rev sub-agent 매 사이클 첫 액션 (2026-05-24 박제)
+
+rev sub-agent 가 매 사이클 시작 시 `bash tools/rev-queue/rev-queue.sh all` **첫 액션 의무**. 메모리/룰 학습 의존 X — **GitHub 라벨 + 본 스크립트 = single source of truth**.
+
+| Stage | 의미 | 후보 필터 |
+|---|---|---|
+| stage1 | PR 머지 전 (단계 1 e2e) | `reviewed:claude` 라벨 없는 open PR |
+| stage2 | develop 머지 1h+ 후 (단계 2 사후) | `rev-post-merge-pass` 라벨 없는 merged PR |
+| stage3 | 최근 release tag PR (단계 3 production) | `rev-prod-pass` 라벨 없는 release PR |
+
+처리 절차 (§E-2 / §E-3): rev sub-agent prompt `docs/ai-harness/12-sub-agent-prompt-template.md §2 rev / §E-3` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
+
+**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `needs-human-review` / `type:release`.
+
+상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-3-stages.md`, CLAUDE.md §4 품질 게이트.
+
 ## 1) 셋업 (최초 1회)
 
 ### 1-1) 워크트리 4개 생성
