@@ -149,4 +149,25 @@ describe("/bookmarks 페이지", () => {
     // zustand store가 BE 응답과 동기화돼야 함.
     expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([42, 99]);
   });
+
+  // closes #431 — 카운트 영역이 polite 라이브 영역으로 마킹되고 BE 응답 도착 시
+  // 메시지가 업데이트되어야 한다. /likes 와 대칭 패턴.
+  it("BE 응답이 도착하면 라이브 영역에 '총 N곡을 북마크했어요.' 메시지가 노출된다 (#431)", async () => {
+    readBookmarksMock.mockResolvedValue([buildBookmark(7), buildBookmark(8)]);
+    readSongByIdMock.mockImplementation(async (id) => buildSong(id));
+
+    renderWithQueryClient(<BookmarksPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("북마크-곡-7")).toBeInTheDocument();
+    });
+
+    const liveRegion = screen.getByTestId("bookmarks-count-live");
+    expect(liveRegion).toHaveAttribute("role", "status");
+    expect(liveRegion).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+    await waitFor(() => {
+      expect(liveRegion).toHaveTextContent("총 2곡을 북마크했어요.");
+    });
+  });
 });
