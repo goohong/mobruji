@@ -3,7 +3,7 @@ feature: 추천 히스토리 백엔드 동기화 & 좋아요/북마크 피드백
 slug: recommendation-history-and-feedback
 status: draft
 owner: @goohong
-scope: recommendation
+scope: recommendation, feedback
 related_issues: [160, 238, 261]
 related_prs: [161, 237, 244]
 last_reviewed: 2026-05-22
