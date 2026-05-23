@@ -378,11 +378,18 @@ def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
 
     스키마:
         {
-            "be":  {"in_progress": str|null, "last_completed": {...}|null},
+            "be":  {"in_progress": str|dict|null, "last_completed": {...}|null},
             "fe":  {...},
             "rev": {...},
             "plan": {...}
         }
+        in_progress (dict 형식, nmae 현행):
+            be/fe/plan:
+                {"issue": "#NNN", "pr": "#MMM"|null,
+                 "title": str, "started_at": ISO8601}
+            rev:
+                {"target": str, "title": str, "started_at": ISO8601}
+            str 형식(legacy)도 계속 지원합니다 — trim 후 그대로 노출.
         last_completed = {"pr": "#NNN"|null, "title": str, "merged_at": ISO8601}
     """
     try:
@@ -397,6 +404,49 @@ def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
     except OSError as exc:
         logger.warning("cycle-status.json 읽기 실패: path=%s err=%s", path, exc)
         return None
+
+
+def _format_in_progress(raw: object) -> str:
+    """`in_progress` 필드를 한 줄 label 로 변환합니다.
+
+    수용 형식:
+        - None / 누락 / 빈 문자열 / 미지원 타입 → ``"idle"``
+        - ``str`` (legacy) → trim 후 그대로 반환
+        - ``dict`` → 우선순위:
+            1. ``issue`` 또는 ``pr`` 있으면 ``"<id> <title>"``
+               (둘 다 있으면 ``issue`` 우선 — nmae 가 issue 를 1차 식별자로 씀)
+            2. ``target`` 있으면 ``"<target>: <title>"`` (rev 워크트리)
+            3. ``title`` 만 있으면 ``"<title>"``
+            4. 셋 다 없으면 ``"진행 중(스키마 미상)"`` — 이론상 도달 안 함.
+
+    title 누락이거나 str 이 아니면 ``"제목 없음"`` 으로 대체.
+    """
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        return stripped if stripped else "idle"
+    if isinstance(raw, dict):
+        title_raw = raw.get("title")
+        title_text = (
+            title_raw.strip()
+            if isinstance(title_raw, str) and title_raw.strip()
+            else "제목 없음"
+        )
+
+        def _str_or_none(value: object) -> str | None:
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            return None
+
+        issue_id = _str_or_none(raw.get("issue")) or _str_or_none(raw.get("pr"))
+        if issue_id is not None:
+            return f"{issue_id} {title_text}"
+        target = _str_or_none(raw.get("target"))
+        if target is not None:
+            return f"{target}: {title_text}"
+        if isinstance(title_raw, str) and title_raw.strip():
+            return title_text
+        return "진행 중(스키마 미상)"
+    return "idle"
 
 
 def format_cycle_digest(
@@ -445,11 +495,7 @@ def format_cycle_digest(
             recent_text = "없음"
             sig_parts.append(f"{ws}=missing")
         else:
-            raw_in_progress = entry.get("in_progress")
-            if isinstance(raw_in_progress, str) and raw_in_progress.strip():
-                in_progress_text = raw_in_progress.strip()
-            else:
-                in_progress_text = "idle"
+            in_progress_text = _format_in_progress(entry.get("in_progress"))
 
             last_completed = entry.get("last_completed")
             if isinstance(last_completed, dict):

@@ -193,8 +193,9 @@ class FormatCycleDigestTest(unittest.TestCase):
         # signature: 모든 워크트리 missing.
         self.assertEqual(signature.count("missing"), 4)
 
-    def test_in_progress_non_string_falls_back_to_idle(self) -> None:
-        # in_progress 가 dict / int / list 등 잘못된 타입이면 idle 로 fallback.
+    def test_in_progress_non_string_non_dict_falls_back_to_idle(self) -> None:
+        # in_progress 가 int / list 등 미지원 타입이면 idle 로 fallback.
+        # 빈 dict 는 "진행 중(스키마 미상)" — 이론상 nmae 가 갱신할 일 없음(가드용).
         status = {
             "be": {"in_progress": 12345, "last_completed": None},
             "fe": {"in_progress": [], "last_completed": None},
@@ -203,8 +204,120 @@ class FormatCycleDigestTest(unittest.TestCase):
         }
         rendered, _signature = bot.format_cycle_digest(status)
         # 헤더(0) + timestamp(1) 를 건너뛰고 워크트리 4줄(2..5) 검증.
+        ws_lines = rendered.split("\n")[2:]
+        self.assertIn("진행: idle", ws_lines[0])  # int → idle
+        self.assertIn("진행: idle", ws_lines[1])  # [] → idle
+        self.assertIn("진행 중(스키마 미상)", ws_lines[2])  # 빈 dict
+        self.assertIn("진행: idle", ws_lines[3])  # '  ' → idle
+
+    # ─────────────────────────────────────────────────────────────────────
+    # in_progress dict 형식 (nmae 현행 schema, #821)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def test_in_progress_dict_with_issue_and_pr_uses_issue(self) -> None:
+        # issue 와 pr 둘 다 있으면 issue 가 1차 식별자 (nmae 관례).
+        status = {
+            "be": {
+                "in_progress": {
+                    "issue": "#809",
+                    "pr": "#810",
+                    "title": "context_auto_clear_loop 복구",
+                    "started_at": "2026-05-23T13:00:00Z",
+                },
+                "last_completed": None,
+            },
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status)
+        be_line = rendered.split("\n")[2]
+        self.assertIn("[be]", be_line)
+        self.assertIn("#809", be_line)
+        self.assertIn("context_auto_clear_loop 복구", be_line)
+        # pr 단독 노출은 X (issue 우선).
+        in_progress_section = be_line.split("진행: ")[1].split(" / ")[0]
+        self.assertNotIn("#810", in_progress_section)
+
+    def test_in_progress_dict_with_only_pr(self) -> None:
+        status = {
+            "be": {
+                "in_progress": {"pr": "#810", "title": "bar"},
+                "last_completed": None,
+            },
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status)
+        be_line = rendered.split("\n")[2]
+        self.assertIn("진행: #810 bar", be_line)
+
+    def test_in_progress_dict_with_target_uses_colon_format(self) -> None:
+        # rev 워크트리: target + title.
+        status = {
+            "be": {"in_progress": None, "last_completed": None},
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {
+                "in_progress": {
+                    "target": "docs/features/ spec 셀프 약속 audit",
+                    "title": "rev audit — spec drift 점검",
+                    "started_at": "2026-05-23T14:30:00Z",
+                },
+                "last_completed": None,
+            },
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status)
+        rev_line = rendered.split("\n")[4]
+        self.assertIn("[rev]", rev_line)
+        self.assertIn(
+            "docs/features/ spec 셀프 약속 audit: rev audit", rev_line
+        )
+
+    def test_in_progress_dict_with_only_title(self) -> None:
+        status = {
+            "be": {
+                "in_progress": {"title": "only-title"},
+                "last_completed": None,
+            },
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status)
+        be_line = rendered.split("\n")[2]
+        self.assertIn("진행: only-title", be_line)
+        # id prefix 없어야 함.
+        in_progress_section = be_line.split("진행: ")[1].split(" / ")[0]
+        self.assertNotIn("#", in_progress_section)
+
+    def test_in_progress_dict_none_renders_idle(self) -> None:
+        # 명시적 None — 다른 테스트에서도 cover 되지만 #821 회귀 가드용.
+        status = {
+            "be": {"in_progress": None, "last_completed": None},
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status)
         for ws_line in rendered.split("\n")[2:]:
             self.assertIn("진행: idle", ws_line)
+
+    def test_in_progress_dict_missing_title_uses_fallback(self) -> None:
+        # title 누락 — issue 만 있어도 라벨 노출 + "제목 없음".
+        status = {
+            "be": {
+                "in_progress": {"issue": "#999"},
+                "last_completed": None,
+            },
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        rendered, _signature = bot.format_cycle_digest(status)
+        be_line = rendered.split("\n")[2]
+        self.assertIn("진행: #999 제목 없음", be_line)
 
     def test_last_completed_missing_title_uses_fallback(self) -> None:
         # title 누락 → "제목 없음".
