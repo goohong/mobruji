@@ -4,7 +4,7 @@ slug: observability-baseline
 status: draft
 owner: @goohong
 scope: infra
-related_issues: [242, 62, 68, 69, 71, 209, 273]
+related_issues: [242, 62, 68, 69, 71, 209, 273, 864]
 related_prs: []
 last_reviewed: 2026-05-23
 ---
@@ -157,12 +157,13 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 |---|---|---|---|
 | 외부 API 에러율 | `mobruji.external.*{outcome="error"}` 1분 sum >= 5 | Discord webhook (#모부르지) | P1 |
 | 추천 p95 임계 초과 | `mobruji.recommendation.request.duration` p95 5분 >= 400ms (단일 진실 §5-3 = 200ms × 2 휴리스틱, recommendation-p95-regression-guard §5-3 참조) | Discord webhook | P1 |
-| audio backfill 연속 실패 | `mobruji.song.audio.backfill.failed` 1시간 sum >= 10 | Discord webhook | P2 |
+| audio backfill 실패 누적 | `mobruji.song.audio.backfill.failed` 24시간 sum >= 5 | Discord webhook | P2 |
 | JVM heap 압박 (메트릭) | `jvm.memory.used / jvm.memory.max` > 0.85 5분 연속 | Discord webhook | P2 |
 
 - webhook URL: 환경변수 `MOBRUJI_ALERT_WEBHOOK_URL`. dev/local 은 미설정 시 noop. 운영에서 미설정이면 부트 fail-fast.
 - 알림 본문: rule name + 현재 값 + 직전 5분 추이 + Grafana 대시보드 링크 (자동 생성).
 - 알림 자체에 PII 금지 — sessionId/userId 등 §5-7 화이트리스트 라벨만.
+- **audio backfill 실패 임계 재산정 근거** (이슈 #864 후속): `mobruji.song.audio.backfill.requested` 자체가 §5-1 cron `0 0 4 * * SUN` (주 1회) 트리거인데 기존 임계는 "1시간 sum >= 10" — backfill 1회 분량이 30곡 미만이면 1시간 윈도우 안에 10건이 누적될 수 없어 알림이 영구 0건. 따라서 윈도우를 24시간으로 늘려 주 1회 batch 1회분 전체를 cover 하고 임계를 5건으로 낮춤 — "한 batch 의 16% 이상 실패" 가 트리거. 향후 batch 주기를 일 1회 또는 그 이상으로 단축하면 본 임계를 재산정.
 
 #### 5-6-2) 인프라 헬스 알림 (4 규칙 — Discord webhook 직접 push)
 
@@ -330,4 +331,5 @@ mobruji:
 
 - **2026-05-22 (plan 28)**: 초안 작성 (status=draft). v0.3 P2 베이스라인 범위 확정 — 메트릭 + p95 + Grafana Cloud Free + Discord webhook 알림. 분산 트레이싱/SaaS 유료/SLO/로그 집계/web RUM 모두 v0.4 이후로 분리. 수집 스택은 ADR-0012 분리.
 - **2026-05-23 (plan)**: 추천 POST p95 단일 진실 박제 (closes #273). §5-4 추천 endpoint 목표 p95 = "300ms → 200ms 예정" 표현을 **200ms 확정**으로 박제하고, 단일 진실을 `recommendation-p95-regression-guard.md` §5-3 으로 명시 (역참조 금지). §5-6 알림 임계 600ms → **400ms** 로 동기화 (단일 진실 §5-3 = 200ms × 2 휴리스틱). 두 spec 의 cross-ref 결정 로그에 동시 박제. 후속: be PR 2 의 percentiles 설정 갱신 시 본 표 참조.
+- **2026-05-23 (plan, #864 PR I)**: `mobruji.song.audio.backfill.{requested,success,failed}` counter + `mobruji.song.audio.analysis.duration` timer 4 metric 을 backend 실제 구현 (`SongAudioBackfillCommand` + `AudioAnalysisRunner`) 으로 발행. §5-6-1 audio backfill 실패 알림 임계 "1시간 sum >= 10" → "24시간 sum >= 5" 재산정 — backfill 자체가 §5-1 주 1회 cron 이라 1시간 윈도우 안에 10건 누적이 영구 불가능했던 정합 미스를 해소. `failed` 카운터의 `reason` 라벨 enum (`timeout`/`spawn_error`/`json_parse`/`song_apply`/`other`) 을 §5-7 화이트리스트와 정합하도록 코드 상수화 (cardinality 폭발 방지). 후속: §5-8 percentiles-histogram 활성화는 be 측에서 `application.yml` 갱신 시 처리 (별 PR, 보호 영역).
 - **2026-05-23 (plan, 본 PR)**: §5-6 알림 규칙을 **§5-6-1 애플리케이션 메트릭 (기존 4 규칙)** + **§5-6-2 인프라 헬스 (신규 4 규칙)** 으로 분리. 인프라 4 규칙 (디스크 85/90/95%, heap 80/90/95%, 컨테이너 exit/unhealthy/restart, bridge 30초/5분) 의 트리거 임계·cooldown·회복 임계·멘션 정책·메시지 템플릿·dedup 규칙을 본 spec 단일 진실로 박제. 작업 분할 PR 4 를 **PR 4-A (Grafana alert)** + **PR 4-B (호스트 측 cron/systemd timer + Discord webhook 직접 push)** 으로 분리. Grafana scrape 실패 시에도 알림이 떠야 한다는 운영 즉시성 요구 반영. 후속: infra 사이클이 PR 4-B (`tools/ops/alerts/`) 구현.

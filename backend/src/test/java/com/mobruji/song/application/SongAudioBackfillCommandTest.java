@@ -23,6 +23,8 @@ import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 /**
  * {@link SongAudioBackfillCommand} 단위 테스트. {@link AudioAnalysisRunner} 와 {@link SongRepository} 를
  * Mockito 로 주입해 confidence 임계 / 실패 격리 / 요약 카운트를 검증한다.
@@ -61,7 +63,7 @@ class SongAudioBackfillCommandTest {
         when(runner.analyzeByMetadata("high2", "artist-high2"))
                 .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.75, "v"));
 
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         // when
         final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBackfill(0.6);
@@ -101,7 +103,7 @@ class SongAudioBackfillCommandTest {
         when(runner.analyzeByMetadata("ok2", "artist-ok2"))
                 .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.85, "v"));
 
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBackfill(0.6);
 
@@ -124,7 +126,7 @@ class SongAudioBackfillCommandTest {
         when(repo.findAll()).thenReturn(List.of());
         final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
 
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
 
         final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBackfill(0.6);
 
