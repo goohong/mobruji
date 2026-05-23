@@ -35,7 +35,7 @@ jobs:
             } else {
               const [, type, scope] = m;
               const allowedTypes = ['feat','fix','docs','style','refactor','test','chore','release'];
-              const allowedScopes = ['user','song','recommendation','voice','infra','web'];
+              const allowedScopes = ['feedback','infra','recommendation','song','user','voice','web'];
               if (allowedTypes.includes(type)) labels.add(`type:${type}`);
               else core.warning(`Unknown type: ${type}`);
               if (allowedScopes.includes(scope)) labels.add(`scope:${scope}`);
