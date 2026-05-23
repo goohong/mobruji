@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # discord-reply.sh — helper 가 직접 bot REST API 로 응답 push.
 #
-# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장):
+# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화):
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
@@ -16,8 +16,14 @@
 #           (cron digest 등) 은 graceful standalone fallback.
 #           --no-reply 플래그 또는 LAST_USER_MSG_ID_FILE=/dev/null 로 disable.
 #
-#   2) ack + 새 thread 생성 (#880 thread stream + #960 ack reply):
+#   2) [DEPRECATED #963] ack + 새 thread 생성 (#880 thread stream + #960 ack reply):
 #       THREAD_ID=$(discord-reply.sh --ack "<ack 문구>")
+#         → helper 본체 ack push 는 폐지됐다 (bot.py auto-ack 가 1초 ack 역할).
+#           본 mode 호출 시 stderr 에 deprecation warning 을 출력하되 동작 자체는
+#           유지 (운영 호환성). 신규 helper 흐름은 ack 없이 본답으로 직행 — 채널에
+#           messages 가 2건 (auto-ack 1 + 본답 1) 만 남아 가독성 ↑.
+#           장시간 작업 thread 가 필요하면 `--auto-ack-thread` 사용 (의미가 ack 가
+#           아니라 "작업 시작 메시지 + thread" 로 redefine — #963).
 #         → 메인 채널에 ack 메시지 push + 그 메시지에 thread 생성.
 #         → stdout 으로 thread_id 만 출력 (캐치하기 쉽게).
 #         → thread 이름 = ack 문구 첫 30자 + ISO timestamp 짧은 형식.
@@ -34,9 +40,12 @@
 #         → thread 자체는 사용자 메시지에 붙은 컨텍스트 안에서 흐르므로
 #           message_reference 미적용 (회귀 가드 테스트 존재).
 #
-#   4) auto-ack + thread (#947 helper 자동 활용 + #960 ack reply):
-#       discord-reply.sh --auto-ack-thread "<ack 문구>"
-#         → 동작은 --ack 와 동일하나 helper 본체 룰 (CLAUDE.md §11) 직설 명명.
+#   4) auto-ack + thread (#947 helper 자동 활용 + #960 ack reply + #963 thread 시작 용도):
+#       discord-reply.sh --auto-ack-thread "<작업 시작 문구>"
+#         → 동작은 --ack 와 동일. helper 본체 룰 (CLAUDE.md §11) 직설 명명.
+#         → #963 이후 본 mode 는 ack 가 아니라 **작업 thread 시작** 의미.
+#           장시간 작업 (위임/조사/PR) 일 때만 호출해 진행 thread 를 만든다.
+#           단순 즉답 turn 에선 호출 금지 — bot auto-ack 만으로 충분.
 #         → ack push + thread 생성 + thread_id 를 ~/.mobruji/helper-current-thread.txt
 #           에 atomic 저장 + stdout 으로 thread_id 출력.
 #         → helper 가 stdout 캡쳐를 잊어도 다음 --auto-thread 호출이 파일에서 복구.
@@ -156,9 +165,14 @@ fi
 case "$1" in
   --ack|--auto-ack-thread)
     # --auto-ack-thread 는 --ack 와 동일 동작 — helper 본체 룰 가독성용 alias (#947).
+    # #963: helper 본체 ack push 폐지. `--ack` (bare) 호출은 deprecated — stderr warning.
+    #       `--auto-ack-thread` 는 thread 시작 용도로 redefine 됐기에 warning 없음.
+    if [[ "$1" == "--ack" ]]; then
+      echo "discord-reply.sh: --ack mode 는 deprecated (#963) — helper 본체 ack push 폐지. bot.py auto-ack 가 1초 ack 역할. 작업 thread 가 필요하면 --auto-ack-thread 사용." >&2
+    fi
     MODE="ack"
     if [[ $# -lt 2 ]]; then
-      echo "discord-reply.sh: $1 뒤에 ack 문구가 필요합니다" >&2
+      echo "discord-reply.sh: $1 뒤에 문구가 필요합니다" >&2
       exit 1
     fi
     MSG="$2"

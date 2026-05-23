@@ -82,7 +82,8 @@ class AutoAckThreadModeDispatchTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("--auto-ack-thread", result.stderr)
-            self.assertIn("ack 문구", result.stderr)
+            # #963: error message 가 "ack 문구" → "문구" 로 단순화됨 (ack 의미 분리).
+            self.assertIn("문구가 필요합니다", result.stderr)
 
     def test_usage_lists_both_auto_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
