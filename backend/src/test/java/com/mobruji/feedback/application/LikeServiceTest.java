@@ -8,10 +8,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -19,6 +19,8 @@ import com.mobruji.feedback.domain.Like;
 import com.mobruji.feedback.infrastructure.LikeRepository;
 import com.mobruji.song.domain.SongNotFoundException;
 import com.mobruji.song.infrastructure.SongRepository;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
  * LikeService#toggle 분기 회귀 가드. 4개 시나리오: 미존재 song / 신규 / 기존 / 멱등 round-trip.
@@ -35,8 +37,14 @@ class LikeServiceTest {
     @Mock
     private SongRepository songRepository;
 
-    @InjectMocks
+    private SimpleMeterRegistry meterRegistry;
     private LikeService likeService;
+
+    @BeforeEach
+    void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        likeService = new LikeService(likeRepository, songRepository, meterRegistry);
+    }
 
     @Test
     @DisplayName("toggle: 미존재 songId면 SongNotFoundException + save/delete 미호출")
