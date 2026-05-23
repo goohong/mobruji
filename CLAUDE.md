@@ -30,6 +30,8 @@
 - `docs/decisions/` — ADR
 - `docs/features/` — Feature Spec
 - `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션 (4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary)
+- `tools/cycle-status/` — nmae 가 cycle-status.json 갱신 시 호출하는 헬퍼 (`update.sh` / `validate.sh`). 수동 JSON 편집 금지 (§14 + 11-runbook §0-11)
+- `tools/rev-queue/` — rev sub-agent 매 사이클 첫 액션 `rev-queue.sh all` (§4 rev 3단계 e2e 게이트 + 11-runbook §0-12)
 
 ## 4) 비협상 룰
 
@@ -122,6 +124,8 @@ cd web && npm run dev                                                   # FE 실
 - **자율 default** (메모리 `feedback-autonomous-default`): 사용자 부재 (`~/.mobruji/user-presence.json` status:absent) 또는 작은 결정은 묻지 말고 자율 진행. release/secret/보호 영역 등 high-stakes 만 확인. redo 비용 self-check 후 진행.
 - **약속 = binding** (메모리 `feedback-keep-promises`): "~하겠습니다" 발언은 다음 turn 부터가 아니라 **이번 turn 부터** 적용. 미적용 시 약속 위반.
 - **세션 룰 영속** (메모리 `feedback-session-persist-rules`): CLAUDE.md 본문 + 메모리 두 채널로 영속. `/clear` 후에도 동일 적용. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가. 세션 종료 전 §13 doc-check 의무.
+- **워크트리 lock** (메모리 `feedback-worktree-lock`): 한 워크트리 = 동시 sub-agent 1. 같은 도메인 백로그 2건 동시 launch 금지 (브랜치/working tree 공유 불가). 상세: `docs/ai-harness/12-sub-agent-prompt-template.md §1 워크트리 lock`, `11-runbook §0-10`.
+- **PR base develop 강제** (메모리 `feedback-pr-base-develop`): `gh pr create` 호출 시 항상 `--base develop` 명시. release PR (`develop → main`) 만 예외. 누락 시 GitHub default(`main`) base 로 생성되어 `main` 직접 변경 사고 + rev-gate.yml skip + 라벨 자동 부착 오작동. 상세: `docs/ai-harness/12-sub-agent-prompt-template.md §1 PR 생성 표준 명령`.
 
 ## 11) helper / maestro Discord 양방향 절대 룰
 
