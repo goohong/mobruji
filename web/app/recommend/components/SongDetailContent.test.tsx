@@ -7,7 +7,7 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongDetailContent } from "./SongDetailContent";
@@ -98,5 +98,35 @@ describe("SongDetailContent", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/북마크 처리에 실패했어요/);
     expect(alert).toHaveAttribute("aria-live", "assertive");
+  });
+
+  // closes #525 — SongCard 의 PR #524 와 같은 회귀 가드.
+  // onError 에서 store 토글 재호출이 누락되면 낙관값이 그대로 굳어 사용자에게 가짜 성공이
+  // 노출된다. alert aria-live 가드만으로는 잡히지 않는 사일런트 회귀라 store + 버튼
+  // aria-pressed 양쪽을 검증한다.
+  it("DetailLikeButton: mutation 실패 시 낙관적 변경을 롤백한다 (store + aria-pressed)", async () => {
+    const user = userEvent.setup();
+    toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
+    renderWithQueryClient(<SongDetailContent song={SONG} />);
+    await user.click(screen.getByRole("button", { name: /테스트 곡 좋아요$/ }));
+    await waitFor(() => {
+      expect(useLikesStore.getState().likedSongIds).toEqual([]);
+    });
+    expect(
+      screen.getByRole("button", { name: /테스트 곡 좋아요$/ }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("DetailBookmarkButton: mutation 실패 시 낙관적 변경을 롤백한다 (store + aria-pressed)", async () => {
+    const user = userEvent.setup();
+    toggleBookmarkMock.mockRejectedValueOnce(new Error("network down"));
+    renderWithQueryClient(<SongDetailContent song={SONG} />);
+    await user.click(screen.getByRole("button", { name: /테스트 곡 북마크$/ }));
+    await waitFor(() => {
+      expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([]);
+    });
+    expect(
+      screen.getByRole("button", { name: /테스트 곡 북마크$/ }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 });
