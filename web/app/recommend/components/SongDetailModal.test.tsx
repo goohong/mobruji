@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { SongDetailModal } from "./SongDetailModal";
@@ -306,6 +306,48 @@ describe("SongDetailModal", () => {
       screen.getByRole("button", { name: /상세 닫기/ }).focus();
       await user.tab({ shift: true });
       expect(document.activeElement).toBe(screen.getByRole("button", { name: "D" }));
+    });
+
+    // 외부 element focus 상태 분기 가드 (closes #xxxx): handleKeyDown line 148/153 의
+    // `!dialog.contains(active)` 분기. 모달이 떠 있지만 어떤 이유로 외부 element 가
+    // 포커스를 가진 상태(예: 화면 리더가 외부로 점프, 프로그램 포커스 이동)에서 Tab/
+    // Shift+Tab 이 모달로 입력되면, 양끝 wrap 과 무관하게 첫/마지막 요소로 강제 복귀해야 한다.
+    it("외부 element focus + Tab 시 모달 첫 요소로 강제 복귀한다", () => {
+      render(
+        <>
+          <button type="button" data-testid="outside">외부</button>
+          <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+            <button type="button">본문 버튼</button>
+          </SongDetailModal>
+        </>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      const outside = screen.getByTestId("outside");
+      outside.focus();
+      expect(document.activeElement).toBe(outside);
+
+      // dialog 자체에 keydown 을 dispatch — userEvent.tab 은 activeElement(outside)에서
+      // 시작해 모달 핸들러를 거치지 않으므로 fireEvent 로 직접 라우팅한다.
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+      expect(document.activeElement).toBe(closeButton);
+    });
+
+    it("외부 element focus + Shift+Tab 시 모달 마지막 요소로 강제 복귀한다", () => {
+      render(
+        <>
+          <button type="button" data-testid="outside">외부</button>
+          <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+            <button type="button">본문 버튼</button>
+          </SongDetailModal>
+        </>,
+      );
+      const bodyButton = screen.getByRole("button", { name: /본문 버튼/ });
+      const outside = screen.getByTestId("outside");
+      outside.focus();
+      expect(document.activeElement).toBe(outside);
+
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(bodyButton);
     });
 
     it("모달 unmount 시 직전 포커스 요소(open trigger)로 포커스가 복원된다", async () => {
