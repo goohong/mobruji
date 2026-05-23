@@ -33,6 +33,15 @@ mobruji:
     token: ${MOBRUJI_ADMIN_TOKEN:}
   cors:
     allowed-origins: ${MOBRUJI_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  # 익명 sessionId 라이프사이클 (ADR-0013, spec anonymous-session-lifecycle §5-8).
+  # - ttl-days: sliding TTL (default 180 — ADR-0013 §D-1). 운영 측정 후 조정 시 본 값만 변경.
+  # - cleanup-cron: 만료 batch cron (Spring 6-field). Asia/Seoul timezone.
+  # - cleanup-max-per-run: batch 1회 최대 처리 sessionId 수 (부하 분산).
+  # 모두 미지정 시 코드 default fallback — fail-fast 적용 안 함 (운영 안전 default 보장).
+  session:
+    ttl-days: ${MOBRUJI_SESSION_TTL_DAYS:180}
+    cleanup-cron: ${MOBRUJI_SESSION_CLEANUP_CRON:0 0 4 * * *}
+    cleanup-max-per-run: ${MOBRUJI_SESSION_CLEANUP_MAX:10000}
 
 server:
   port: ${SERVER_PORT:8080}
