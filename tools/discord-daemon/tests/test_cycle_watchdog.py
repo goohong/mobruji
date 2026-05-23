@@ -725,5 +725,259 @@ class CycleDiscordReasonPushTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("reason 없음", discord_text)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 8) Escalation — 4건 (#972)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class FakeMultiChannelClient:
+    """get_channel(id) 분기 — notify vs escalation 채널 시뮬레이션."""
+
+    def __init__(self, channels: dict[int, "FakeChannel"]) -> None:
+        self._channels = channels
+
+    def get_channel(self, channel_id: int):
+        return self._channels.get(channel_id)
+
+
+class CycleEscalationTest(unittest.IsolatedAsyncioTestCase):
+    """같은 워크트리 inject N회 연속 → MOBRUJI_CHANNEL_ID 직접 push (#972).
+
+    fresh_idle 발사 시 inject_count += 1, threshold 도달 시 escalation push +
+    debounce 적용 + active 복귀 시 counter 리셋.
+    """
+
+    def _write_status(self, dir_path: Path, payload: dict) -> Path:
+        path = dir_path / "cycle.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def _idle_be_payload(self, now: datetime) -> dict:
+        old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        return {
+            "be": {
+                "in_progress": None,
+                "last_completed": {
+                    "pr": "#100",
+                    "title": "old",
+                    "completed_at": old_ts,
+                },
+                "note": "다음 launch 후보: PR #857",
+            },
+            "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+            "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+            "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+        }
+
+    async def test_escalation_fires_after_threshold_reached(self) -> None:
+        """같은 워크트리 inject 3회 누적 → MOBRUJI_CHANNEL_ID 에 escalation push."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            status_path = self._write_status(
+                Path(tmp_dir), self._idle_be_payload(now)
+            )
+            notify_channel = FakeChannel()
+            escalation_channel = FakeChannel()
+            client = FakeMultiChannelClient({
+                111: notify_channel,
+                222: escalation_channel,
+            })
+            # debounce 우회 — monotonic 시각을 매 iter 1000s 씩 진행.
+            mono_state = [1000.0]
+
+            def advancing_time() -> float:
+                mono_state[0] += 1000.0
+                return mono_state[0]
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=111,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=1,  # debounce 우회 — fresh idle 매번.
+                    reason_required=True,
+                    escalation_threshold=3,
+                    escalation_debounce_seconds=3600,
+                    escalation_channel_id=222,
+                    time_source=advancing_time,
+                    now_provider=lambda: now,
+                )
+                # iter 3회면 3번 inject — escalation 3회 도달.
+                await _run_loop_iters(coro, iterations=20)
+
+            # notify 채널은 매 iter 받음 (>=3).
+            self.assertGreaterEqual(len(notify_channel.sent), 3)
+            # escalation 채널 push 적어도 1회 + 메시지 형식 검증.
+            self.assertGreaterEqual(len(escalation_channel.sent), 1)
+            escalate_msg = escalation_channel.sent[0]
+            self.assertIn("🚨 nmae 무응답", escalate_msg)
+            self.assertIn("be", escalate_msg)
+            self.assertIn("3회 연속", escalate_msg)
+
+    async def test_escalation_debounced_after_first_push(self) -> None:
+        """첫 escalation 후 debounce 1h 내 추가 escalation 안 함."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            status_path = self._write_status(
+                Path(tmp_dir), self._idle_be_payload(now)
+            )
+            notify_channel = FakeChannel()
+            escalation_channel = FakeChannel()
+            client = FakeMultiChannelClient({
+                111: notify_channel,
+                222: escalation_channel,
+            })
+            mono_state = [1000.0]
+
+            def advancing_time() -> float:
+                # +60s per iter — inject debounce(1) 통과 + escalation debounce(3600) 안에서 cap.
+                mono_state[0] += 60.0
+                return mono_state[0]
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=111,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=1,
+                    reason_required=True,
+                    escalation_threshold=3,
+                    escalation_debounce_seconds=3600,
+                    escalation_channel_id=222,
+                    time_source=advancing_time,
+                    now_provider=lambda: now,
+                )
+                # 10 iter — inject 매번 + escalation 첫 1회만 (debounce 활성).
+                await _run_loop_iters(coro, iterations=30)
+
+            # escalation 정확히 1회 (debounce 1h, mono 진행 +60s/iter 누적 ~600s).
+            self.assertEqual(len(escalation_channel.sent), 1)
+
+    async def test_escalation_counter_resets_when_workspace_active(self) -> None:
+        """워크트리가 active 로 돌아오면 counter 0 reset — 다음 idle 발생 시 처음부터."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            old_ts = (now - timedelta(minutes=30)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            status_path = Path(tmp_dir) / "cycle.json"
+            # state 1: be idle.
+            idle_payload = {
+                "be": {
+                    "in_progress": None,
+                    "last_completed": {
+                        "pr": "#100",
+                        "title": "old",
+                        "completed_at": old_ts,
+                    },
+                    "note": "x",
+                },
+                "fe": {"in_progress": {"issue": "#1", "title": "x"}, "last_completed": None},
+                "rev": {"in_progress": {"target": "X", "title": "y"}, "last_completed": None},
+                "plan": {"in_progress": {"issue": "#2", "title": "d"}, "last_completed": None},
+            }
+            # state 2: be active.
+            active_payload = dict(idle_payload)
+            active_payload["be"] = {
+                "in_progress": {"issue": "#5", "title": "back-on"},
+                "last_completed": idle_payload["be"]["last_completed"],
+            }
+
+            status_path.write_text(json.dumps(idle_payload), encoding="utf-8")
+            notify_channel = FakeChannel()
+            escalation_channel = FakeChannel()
+            client = FakeMultiChannelClient({
+                111: notify_channel,
+                222: escalation_channel,
+            })
+            mono_state = [1000.0]
+            iter_count = [0]
+
+            def advancing_time() -> float:
+                mono_state[0] += 1000.0
+                return mono_state[0]
+
+            # iter 3 에서 active 로 전환.
+            def status_swap_now_provider() -> datetime:
+                iter_count[0] += 1
+                if iter_count[0] == 3:
+                    status_path.write_text(json.dumps(active_payload), encoding="utf-8")
+                return now
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=111,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=1,
+                    reason_required=True,
+                    escalation_threshold=3,
+                    escalation_debounce_seconds=3600,
+                    escalation_channel_id=222,
+                    time_source=advancing_time,
+                    now_provider=status_swap_now_provider,
+                )
+                # iter 1,2 = be idle (counter 1,2). iter 3+ = be active (reset).
+                # escalation 절대 발사 안 함 (threshold=3 도달 전 reset).
+                await _run_loop_iters(coro, iterations=20)
+
+            self.assertEqual(len(escalation_channel.sent), 0)
+
+    async def test_escalation_channel_none_disables_escalation(self) -> None:
+        """escalation_channel_id=None → escalation 완전 비활성 (graceful)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            now = datetime(2026, 5, 24, 12, 0, 0, tzinfo=timezone.utc)
+            status_path = self._write_status(
+                Path(tmp_dir), self._idle_be_payload(now)
+            )
+            notify_channel = FakeChannel()
+            client = FakeMultiChannelClient({111: notify_channel})
+            mono_state = [1000.0]
+
+            def advancing_time() -> float:
+                mono_state[0] += 1000.0
+                return mono_state[0]
+
+            with mock.patch.object(bot, "tmux_has_session", return_value=True), \
+                 mock.patch.object(bot, "tmux_inject_text", return_value=True):
+                coro = bot.cycle_idle_watch_loop(
+                    client,
+                    notify_channel_id=111,
+                    cycle_status_path=str(status_path),
+                    inject_target="mobruji:0.0",
+                    threshold_minutes=10,
+                    poll_interval=0,
+                    workspaces=["be", "fe", "rev", "plan"],
+                    debounce_seconds=1,
+                    reason_required=True,
+                    escalation_threshold=3,
+                    escalation_debounce_seconds=3600,
+                    escalation_channel_id=None,  # 비활성.
+                    time_source=advancing_time,
+                    now_provider=lambda: now,
+                )
+                await _run_loop_iters(coro, iterations=20)
+
+            # notify 는 매 iter 받음.
+            self.assertGreaterEqual(len(notify_channel.sent), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

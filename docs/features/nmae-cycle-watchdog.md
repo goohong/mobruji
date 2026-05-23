@@ -1,10 +1,10 @@
 ---
-feature: nmae 사이클 watchdog (3중 안전망 + STRICT mode)
+feature: nmae 사이클 watchdog (4중 안전망 + STRICT mode + escalation)
 slug: nmae-cycle-watchdog
 status: draft
 owner: @mobruji-maestro
 scope: infra
-related_issues: [941, 956]
+related_issues: [941, 956, 972]
 related_prs: []
 last_reviewed: 2026-05-24
 ---
@@ -31,6 +31,9 @@ last_reviewed: 2026-05-24
 - [x] (#956) **idle 시 `note` 필드 의무** — 미명시 시 STRICT relaunch prompt.
 - [x] (#956) env toggle: `CYCLE_REASON_REQUIRED=1` default. `0` 으로 strict mode off.
 - [x] (#956) Discord push 에 reason / idle_since 노출 — STRICT 라벨 분리.
+- [x] (#972) **escalation**: 같은 워크트리 inject 3회 연속 후 in_progress 여전히 NULL → MOBRUJI_CHANNEL_ID 직접 사용자 push (debounce 1h, env `CYCLE_INJECT_ESCALATION_THRESHOLD=3` default).
+- [x] (#972) nmae 가 inject 받았을 때 in_progress 갱신하면 escalation counter 자동 리셋.
+- [x] (#972) sub-agent prompt template (`docs/ai-harness/12-sub-agent-prompt-template.md` §1) 에 watchdog inject 대응 4단계 의무 절차 명문화.
 
 ### 비기능 요구사항
 - 알림 spam 방지: 워크트리 별 last_alert_at 캐시 + 15분 debounce.
@@ -82,12 +85,13 @@ N/A (Discord webhook + tmux 만 사용).
 ### 5-6) 프론트엔드 화면
 없음 (백그라운드 데몬).
 
-### 5-7) 3중 안전망 (핵심)
+### 5-7) 4중 안전망 (핵심)
 1. **bot.py `cycle_idle_watch_loop`** (외부 데몬 watchdog) — 본 spec. **최후 보루**. 메모리/룰 위반 시도 자동 정정.
 2. **nmae 매 turn 종료 직전 자기 점검** — 기존 메모리 [[feedback-keep-4-cycles-active]] 룰. cycle-status.json 4 워크트리 active 검증, idle 시 즉시 launch.
 3. **helper 우연 발견 시 직접 inject** — helper 가 사용자 메시지 처리 중 cycle-status.json 발견 시 같은 서버라 직접 `tmux send-keys -t mobruji:0.0` 가능. [[feedback-helper-role-boundary]] 위임 영역 (helper 가 nmae 권한 침범 X — 알림만).
+4. **escalation 사용자 직접 push (#972)** — 1번 watchdog 가 같은 워크트리 inject **3회 연속** 후에도 in_progress 가 여전히 NULL 이면 MOBRUJI_CHANNEL_ID (사용자 채널) 에 `🚨 nmae 무응답` 직접 push. nmae 자체가 룰 위반 중이라는 신호 — 사용자 개입 트리거.
 
-세 layer 각각이 단독으로도 동작. 1번이 안전망의 핵심 — nmae 룰에 의존하지 않음.
+네 layer 각각이 단독으로도 동작. 1번이 안전망의 핵심 — nmae 룰에 의존하지 않음. 4번은 1번이 효과 없을 때의 최종 escalation — 사용자 가시성 확보.
 
 ### 5-8) STRICT mode + reason 의무 (#956)
 
@@ -153,9 +157,34 @@ STRICT relaunch (1): fe
 - nmae 가 set-idle 자주 호출해야 함 → wrapper 명령 정착 부담. 보상: idle 디버깅 용이성 (사이클 멈춤 원인 즉시 파악).
 - false STRICT 위험: nmae 가 transition 중 (active → completed → 다음 launch 직전) note 갱신 안 한 5분 polling 에 걸림. 보상: 5분 + 15분 debounce 로 실제로는 안전.
 
+## 5-9) Escalation (#972)
+
+사용자 2026-05-24 정정: "watchdog detect + inject 정상이나 nmae 가 inject 받고 행동 안 함 → cycle-status in_progress NULL 유지 → 무한 idle inject loop. 진짜 사이클 멈춤".
+
+### 동작
+- `cycle_idle_watch_loop` 가 워크트리 별 **escalation counter** 유지 (`inject_count_at_idle: dict[str, int]`).
+- 같은 워크트리에 idle inject 1회 발사할 때마다 counter += 1.
+- counter 가 `CYCLE_INJECT_ESCALATION_THRESHOLD` (default 3) 도달 시 MOBRUJI_CHANNEL_ID 에 다음 메시지 push:
+  ```
+  🚨 nmae 무응답 — <ws> 워크트리 watchdog inject 3회 연속 후 in_progress 여전히 NULL. nmae 룰 위반 — 사용자 확인 필요
+  ```
+- escalation push 자체도 debounce 1h (`CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS`).
+- 워크트리가 active 로 돌아오면 (in_progress dict 보유) counter 자동 0 리셋.
+
+### env
+| 변수 | default | 의미 |
+|---|---|---|
+| `CYCLE_INJECT_ESCALATION_THRESHOLD` | 3 | 같은 워크트리 inject 연속 N회 후 escalate |
+| `CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS` | 3600 | 같은 워크트리 escalate push 사이 최소 간격 |
+
+### push 채널 분리
+- watchdog inject 알림 → `CYCLE_NOTIFY_CHANNEL_ID` (#모부르지-알림, 운영 진단용)
+- escalation push → `MOBRUJI_CHANNEL_ID` (#모부르지, 사용자 직접 채널) — 깜깜이 방지.
+
 ## 6) 작업 분할 (예상 PR 리스트)
 - [x] PR 1 (#941, #950): bot.py `cycle_idle_watch_loop` + pytest 17건 + 메모리 + CLAUDE.md §14.
 - [x] PR 2 (#956): STRICT mode + reason 의무 + `tools/cycle-status/` (update.sh / validate.sh / README) + pytest +7 (총 24) + CLAUDE.md §14 보강.
+- [x] PR 3 (#972): escalation 카운터 + MOBRUJI_CHANNEL_ID 직접 push + sub-agent prompt §1 nmae watchdog inject 대응 4단계 절차 명문화 + pytest +4.
 
 ## 7) 테스트 전략
 - 단위 테스트 (pytest, asyncio mock):
