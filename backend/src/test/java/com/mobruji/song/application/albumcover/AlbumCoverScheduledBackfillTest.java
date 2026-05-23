@@ -7,10 +7,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Method;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.Profile;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.MusicalKey;
@@ -74,5 +77,28 @@ class AlbumCoverScheduledBackfillTest {
         final List<Song> targets = scheduler.selectTargets();
         assertThat(targets).containsExactly(s1);
         verify(repository).findMissingAlbumCover();
+    }
+
+    // ───────────────────── 메타데이터 회귀 가드 ─────────────────────
+    // 운영 안전(@Profile)/결정성(cron+zone) 메타데이터가 실수로 바뀌면 외부 API 호출 폭주 또는 audio batch 충돌이
+    // 발생하므로 reflection 으로 고정한다.
+
+    @Test
+    @DisplayName("@Profile 가 prod 로 고정되어야 한다 (local/test 활성화 회귀 가드)")
+    void classProfile_isProdOnly() {
+        final Profile profile = AlbumCoverScheduledBackfill.class.getAnnotation(Profile.class);
+        assertThat(profile).as("@Profile 어노테이션이 존재해야 한다").isNotNull();
+        assertThat(profile.value()).containsExactly("prod");
+    }
+
+    @Test
+    @DisplayName("runScheduledBackfill: @Scheduled cron/zone 가 audio batch 30분 후 SUN/KST 로 고정 (회귀 가드)")
+    void runScheduledBackfill_scheduledCronAndZoneFixed() throws NoSuchMethodException {
+        final Method method = AlbumCoverScheduledBackfill.class.getDeclaredMethod("runScheduledBackfill");
+        final Scheduled scheduled = method.getAnnotation(Scheduled.class);
+        assertThat(scheduled).as("@Scheduled 어노테이션이 존재해야 한다").isNotNull();
+        // audio analysis batch 가 04:00 KST 에 도는 것과 30분 간격을 유지해야 외부 API 부하 분산이 깨지지 않는다.
+        assertThat(scheduled.cron()).isEqualTo("0 30 4 * * SUN");
+        assertThat(scheduled.zone()).isEqualTo("Asia/Seoul");
     }
 }
