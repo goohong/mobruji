@@ -20,6 +20,10 @@ import com.mobruji.song.domain.Mood;
  *
  * <p>v2(#218)에서 preferredBpm 입력이 seed에 포함되어, 같은 voiceRange/sessionId라도
  * 사용자 선호 BPM이 다르면 다른 결과를 보장한다.
+ *
+ * <p>#299: entropy 단정의 단일 진실 레이어를 본 단위 테스트로 둔다 (RestAssured E2E
+ * {@code RecommendationDeterminismTest}는 결정성 회귀만 책임진다). 곡 시드/가중치
+ * 변경에 flaky 했던 E2E entropy 단정이 본 레이어로 이동했다.
  */
 class SeedDeriverTest {
 
