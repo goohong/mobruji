@@ -336,8 +336,11 @@ class DigestTests(unittest.TestCase):
                 raise asyncio.CancelledError
 
         import asyncio
-        with mock.patch.object(bot, "build_digest_line", return_value="📊 test"), \
-             mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
+        with mock.patch.object(
+            bot,
+            "build_digest_payload",
+            return_value=("📊 test", "open=1|merged24=0|bug=0"),
+        ), mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
             with self.assertRaises(asyncio.CancelledError):
                 asyncio.run(
                     bot.digest_loop(
@@ -351,6 +354,168 @@ class DigestTests(unittest.TestCase):
                 )
         self.assertEqual(sent, ["📊 test"])
         self.assertEqual(sleeps, [60, 300])  # initial_delay, interval
+
+
+class DigestDeltaTests(unittest.TestCase):
+    """digest_loop delta / heartbeat 동작 검증 (5분 noise 수정)."""
+
+    def _run_loop(
+        self,
+        payloads: list[tuple[str, str]],
+        *,
+        interval: int = 900,
+        heartbeat_seconds: int = 3600,
+        clock_per_iter: int = 900,
+    ) -> tuple[list[str], list[int]]:
+        """payloads 만큼 iter 돈 뒤 CancelledError 로 종료. (sent, sleeps) 반환."""
+        sent: list[str] = []
+        sleeps: list[int] = []
+
+        class FakeChannel:
+            async def send(self, text):
+                sent.append(text)
+
+        class FakeClient:
+            def get_channel(self, channel_id):
+                return FakeChannel()
+
+        # initial sleep + N iter sleeps. payloads N개 처리 후 CancelledError.
+        target_sleeps = 1 + len(payloads)
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) >= target_sleeps:
+                raise asyncio.CancelledError
+
+        # build_digest_payload 가 iter 마다 다른 payload 를 돌려주도록 side_effect.
+        payload_iter = iter(payloads)
+
+        def fake_payload(*_a, **_kw):
+            return next(payload_iter)
+
+        # time_source 는 호출마다 단조 증가 (iter 당 clock_per_iter 초씩 흐름).
+        clock = {"t": 0}
+
+        def fake_clock() -> float:
+            clock["t"] += clock_per_iter
+            return float(clock["t"])
+
+        import asyncio
+        with mock.patch.object(bot, "build_digest_payload", side_effect=fake_payload), \
+             mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(
+                    bot.digest_loop(
+                        FakeClient(),
+                        channel_id=999,
+                        github_repo="x/y",
+                        github_pat="",
+                        interval=interval,
+                        initial_delay=60,
+                        heartbeat_seconds=heartbeat_seconds,
+                        time_source=fake_clock,
+                    )
+                )
+        return sent, sleeps
+
+    def test_skips_when_signature_unchanged(self) -> None:
+        # 3 iter 같은 signature, heartbeat 안 닿게 interval 짧게 + clock 짧게.
+        payloads = [
+            ("📊 A", "open=1|merged24=0|bug=0"),
+            ("📊 A", "open=1|merged24=0|bug=0"),
+            ("📊 A", "open=1|merged24=0|bug=0"),
+        ]
+        sent, _ = self._run_loop(
+            payloads,
+            interval=60,
+            heartbeat_seconds=3600,
+            clock_per_iter=60,
+        )
+        # 첫 iter 는 initial 로 push, 나머지 2 iter 는 signature 동일 → skip.
+        self.assertEqual(sent, ["📊 A"])
+
+    def test_delta_push_when_signature_changes(self) -> None:
+        payloads = [
+            ("📊 A", "open=1|merged24=0|bug=0"),
+            ("📊 B", "open=2|merged24=0|bug=0"),  # delta
+            ("📊 B", "open=2|merged24=0|bug=0"),  # same → skip
+            ("📊 C", "open=2|merged24=1|bug=0"),  # delta
+        ]
+        sent, _ = self._run_loop(
+            payloads,
+            interval=60,
+            heartbeat_seconds=3600,
+            clock_per_iter=60,
+        )
+        self.assertEqual(sent, ["📊 A", "📊 B", "📊 C"])
+
+    def test_heartbeat_push_after_silence(self) -> None:
+        # signature 변화 없지만 heartbeat 임계 넘어가면 push.
+        payloads = [
+            ("📊 A", "open=1|merged24=0|bug=0"),  # initial
+            ("📊 A", "open=1|merged24=0|bug=0"),  # within heartbeat → skip
+            ("📊 A", "open=1|merged24=0|bug=0"),  # heartbeat 경과 → push
+        ]
+        sent, _ = self._run_loop(
+            payloads,
+            interval=900,
+            heartbeat_seconds=1800,  # 1800s = 30분
+            clock_per_iter=1000,     # 누적: 1000, 2000, 3000 → 3번째에서 last_push 로부터 ≥1800
+        )
+        self.assertEqual(sent, ["📊 A", "📊 A"])
+
+    def test_default_interval_is_fifteen_minutes(self) -> None:
+        self.assertEqual(bot.DEFAULT_DIGEST_INTERVAL_SECONDS, 900)
+
+    def test_resolve_digest_interval_uses_env(self) -> None:
+        self.assertEqual(bot.resolve_digest_interval("1200"), 1200)
+
+    def test_resolve_digest_interval_default_when_none(self) -> None:
+        self.assertEqual(
+            bot.resolve_digest_interval(None),
+            bot.DEFAULT_DIGEST_INTERVAL_SECONDS,
+        )
+
+    def test_resolve_digest_interval_falls_back_on_garbage(self) -> None:
+        self.assertEqual(
+            bot.resolve_digest_interval("not-a-number"),
+            bot.DEFAULT_DIGEST_INTERVAL_SECONDS,
+        )
+
+    def test_resolve_digest_interval_rejects_non_positive(self) -> None:
+        self.assertEqual(
+            bot.resolve_digest_interval("0"),
+            bot.DEFAULT_DIGEST_INTERVAL_SECONDS,
+        )
+        self.assertEqual(
+            bot.resolve_digest_interval("-30"),
+            bot.DEFAULT_DIGEST_INTERVAL_SECONDS,
+        )
+
+    def test_build_digest_payload_signature_excludes_time(self) -> None:
+        from datetime import datetime as _dt, timezone as _tz
+        with mock.patch.object(bot, "_run_gh_json") as gh:
+            gh.side_effect = [
+                [{"number": 1}],
+                [{"number": 2}, {"number": 3}],
+                [],
+            ]
+            line_a, sig_a = bot.build_digest_payload(
+                "x/y", "pat", now=_dt(2026, 5, 23, 4, 0, tzinfo=_tz.utc),
+            )
+        with mock.patch.object(bot, "_run_gh_json") as gh:
+            gh.side_effect = [
+                [{"number": 1}],
+                [{"number": 2}, {"number": 3}],
+                [],
+            ]
+            line_b, sig_b = bot.build_digest_payload(
+                "x/y", "pat", now=_dt(2026, 5, 23, 5, 30, tzinfo=_tz.utc),
+            )
+        # 시간 다르므로 line 은 다르고, signature 는 동일해야 한다.
+        self.assertNotEqual(line_a, line_b)
+        self.assertEqual(sig_a, sig_b)
+        self.assertEqual(sig_a, "open=1|merged24=2|bug=0")
 
 
 if __name__ == "__main__":
