@@ -54,7 +54,7 @@
 - **Backend**: `cd backend && ./gradlew checkstyleMain spotlessCheck test` (포맷 수정: `./gradlew spotlessApply`)
 - **Frontend**: `cd web && npm run lint && npm run typecheck && npm test`
 - CI 실패 상태로 머지 금지.
-- **rev 3단계 e2e (`reviewed:claude` 라벨 머지 게이트)** — 모든 `type:fix` / `type:feat` PR 은 rev 가 머지 전/사후/release 후 3단계 e2e 수행, 통과 시 `reviewed:claude` 라벨 부여. 라벨 없는 PR 자율 머지 금지. 상세: `docs/features/rev-e2e-3-stages.md`
+- **rev 3단계 e2e (`reviewed:claude` 라벨 머지 게이트)** — **모든 type:* PR** 은 rev 사이클을 거쳐야 머지 가능 (2026-05-24 확장). e2e 가능 (web/backend) 은 단계 1/2/3 실제 수행, e2e 불가능 (docs/refactor/chore 등) 은 단계 1 에서 **no-op pass 판정** + `reviewed:claude` 라벨 부여. 라벨 없는 PR 자율 머지 금지. 상세: `docs/features/rev-e2e-3-stages.md`. 메모리: [[feedback-rev-e2e-always]]
 
 ### 기능 기획
 - 중간 규모 이상 (신규 도메인/외부 연동/다중 PR) 은 `docs/features/<slug>.md` Feature Spec **먼저 작성·합의** 후 구현.

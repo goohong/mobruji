@@ -377,6 +377,114 @@ class DiscordReplyScriptModeDispatchTests(unittest.TestCase):
         finally:
             Path(env_path).unlink(missing_ok=True)
 
+    def _make_fake_curl(self, tmpdir: str, capture_path: str) -> Path:
+        """payload 캡처용 fake curl 생성 — #921 본답 ZWSP+\\n 검증용.
+
+        - 매 호출마다 ``-d`` 다음 인자(payload) 를 capture_path 에 1줄 append.
+        - discord_curl_with_retry (PR #911 G-6) 는 ``-w '\\n%{http_code}'`` 로
+          마지막 줄에 status code 를 기대 → fake curl 도 ``{"id":"99999"}\\n200``
+          형태로 응답 (status 200 = success path).
+        """
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "# fake curl — -d 다음 인자(payload) 만 capture file 에 append.\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  if [[ \"$1\" == \"-d\" ]]; then\n"
+            "    shift\n"
+            "    PAYLOAD=\"$1\"\n"
+            "  fi\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$PAYLOAD\" >> {capture_path}\n"
+            "# JSON body + newline + http_code (discord_curl_with_retry 기대 포맷).\n"
+            "printf '{\"id\": \"99999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+        return fake_curl
+
+    def test_reply_mode_prepends_zwsp_newline(self) -> None:
+        """본답 모드는 자동 leading ZWSP(U+200B) + \\n prepend (#921, 2026-05-24).
+
+        ack 메시지와 본답 메시지가 Discord 채널에서 시각적으로 붙어 보이는
+        문제 영구 해결 — jq escape 가 leading newline strip 해도 ZWSP 가
+        invisible padding 으로 빈 줄 효과 보장.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            capture_path = str(Path(tmpdir) / "payloads.txt")
+            self._make_fake_curl(tmpdir, capture_path)
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".env", delete=False
+            ) as fp:
+                fp.write(
+                    "DISCORD_BOT_TOKEN=stub\nMOBRUJI_CHANNEL_ID=1\n"
+                    "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n"
+                )
+                env_path = fp.name
+            try:
+                new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+                result = self._run(
+                    "hello body",
+                    env={
+                        "DISCORD_DAEMON_ENV_PATH": env_path,
+                        "PATH": new_path,
+                    },
+                )
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                captured = Path(capture_path).read_text()
+                # jq -nc 는 비 ASCII (ZWSP) 를 literal UTF-8 byte 그대로
+                # 통과. payload JSON: {"content":"​\nhello body"}
+                # → raw U+200B 가 직접 포함.
+                self.assertIn("​", captured)
+                # \n 은 JSON escape → "\\n" 으로 직렬화됨.
+                self.assertIn("\\n", captured)
+                self.assertIn("hello body", captured)
+                # ZWSP 가 hello 보다 앞에 있어야 함.
+                zwsp_pos = captured.find("​")
+                hello_pos = captured.find("hello body")
+                self.assertGreater(hello_pos, zwsp_pos)
+            finally:
+                Path(env_path).unlink(missing_ok=True)
+
+    def test_ack_mode_does_not_prepend_zwsp(self) -> None:
+        """ack 모드는 ZWSP prepend 미적용 — 짧은 한 줄 보장 (#921)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            capture_path = str(Path(tmpdir) / "payloads.txt")
+            self._make_fake_curl(tmpdir, capture_path)
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".env", delete=False
+            ) as fp:
+                fp.write(
+                    "DISCORD_BOT_TOKEN=stub\nMOBRUJI_CHANNEL_ID=1\n"
+                    "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n"
+                )
+                env_path = fp.name
+            try:
+                new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+                result = self._run(
+                    "--ack",
+                    "ack-text",
+                    env={
+                        "DISCORD_DAEMON_ENV_PATH": env_path,
+                        "PATH": new_path,
+                    },
+                )
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                # 첫 줄 = ack push payload (두번째 줄은 thread 생성 payload).
+                captured_lines = Path(capture_path).read_text().splitlines()
+                self.assertGreaterEqual(len(captured_lines), 1)
+                ack_payload = captured_lines[0]
+                # ack payload 에는 ZWSP 없어야 함.
+                self.assertNotIn("​", ack_payload)
+                self.assertIn("ack-text", ack_payload)
+            finally:
+                Path(env_path).unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()
