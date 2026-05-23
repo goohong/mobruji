@@ -41,7 +41,6 @@
 
 import Link from "next/link";
 import {
-  useEffect,
   useId,
   useState,
   type MouseEvent,
@@ -54,6 +53,7 @@ import {
   toggleLike as toggleLikeApi,
 } from "@/lib/api/feedback";
 import { safeLog } from "@/lib/logging";
+import { useAutoDismissMessage } from "@/lib/useAutoDismissMessage";
 import type {
   RecommendedSongResponse,
   SongResponse,
@@ -338,21 +338,13 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
   const queryClient = useQueryClient();
   // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257). safeLog만으로는 사용자가
   // 토글 버튼이 원상복귀된 이유를 알 수 없어 가시 피드백을 더한다.
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // 3초 뒤 자동 dismiss. 다음 클릭 시 즉시 클리어되므로 사용자가 새 시도를 해도
-  // 이전 메시지가 남아 혼란을 주지 않는다.
-  useEffect(() => {
-    if (!errorMessage) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      setErrorMessage(null);
-    }, INTERACTION_FEEDBACK_DURATION_MS);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [errorMessage]);
+  // 3초 뒤 자동 dismiss 패턴은 BookmarkButton 과 공유 — `useAutoDismissMessage` hook 으로
+  // 추출 (rev 19 / #295 항목 1 후속).
+  const {
+    message: errorMessage,
+    setMessage: setErrorMessage,
+    clear: clearErrorMessage,
+  } = useAutoDismissMessage(INTERACTION_FEEDBACK_DURATION_MS);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -390,7 +382,7 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
       return;
     }
     // 새 시도 시작 시 이전 에러 안내 즉시 제거 — alert 잔존으로 인한 혼란 방지.
-    setErrorMessage(null);
+    clearErrorMessage();
     const sessionId = ensureSessionId();
     mutation.mutate({ sessionId });
   }
@@ -446,20 +438,13 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
   const toggleBookmark = useBookmarksStore((state) => state.toggleBookmark);
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
   const queryClient = useQueryClient();
-  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257).
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!errorMessage) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      setErrorMessage(null);
-    }, INTERACTION_FEEDBACK_DURATION_MS);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [errorMessage]);
+  // 인터랙션 실패 시 카드 내 인라인 안내 (closes #257). 3초 자동 dismiss 패턴은
+  // LikeButton 과 공유 — `useAutoDismissMessage` hook 으로 추출.
+  const {
+    message: errorMessage,
+    setMessage: setErrorMessage,
+    clear: clearErrorMessage,
+  } = useAutoDismissMessage(INTERACTION_FEEDBACK_DURATION_MS);
 
   const mutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
@@ -491,7 +476,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
     if (mutation.isPending) {
       return;
     }
-    setErrorMessage(null);
+    clearErrorMessage();
     const sessionId = ensureSessionId();
     mutation.mutate({ sessionId });
   }
