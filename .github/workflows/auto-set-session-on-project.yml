@@ -14,6 +14,10 @@ name: Auto Set Session on Project
 # Plan 세션은 docs/ADR/spec 전용 — scope:* 폴백 룰을 거치지 않으므로
 # session:plan 라벨이 반드시 명시돼야 plan Session으로 분류된다.
 #
+# Session 옵션 ID는 보드에서 옵션을 추가/삭제하면 모두 재발급되므로,
+# 변경 시 다음 쿼리로 전체 재채취해서 env 블록을 한꺼번에 갱신해야 한다.
+#   gh project field-list 5 --owner goohong --format json
+#
 # 필요한 secrets/vars:
 #   - vars.PROJECT_URL: 보드 URL (auto-add workflow와 공유)
 #   - secrets.PROJECT_TOKEN: repo + project scope의 Classic PAT (user-owned project 필수)
@@ -44,15 +48,12 @@ jobs:
       #   gh project field-list 5 --owner goohong --format json
       PROJECT_ID: PVT_kwHOBRYNe84BYVlg
       SESSION_FIELD_ID: PVTSSF_lAHOBRYNe84BYVlgzhTcJwU
-      OPTION_BACKEND: aabcec2d
-      OPTION_FRONTEND: 0c6191d7
-      OPTION_REVIEW: bf8ab92d
-      OPTION_INFRA: c697cb09
-      OPTION_RELEASE: 41252f0d
-      # plan 옵션 ID는 보드에서 신규 생성 후 채워야 함.
-      # 조회: gh project field-list 5 --owner goohong --format json
-      # 비어 있으면 session:plan 라벨 매칭이 graceful skip 된다.
-      OPTION_PLAN: ''
+      OPTION_BACKEND: c80126b3
+      OPTION_FRONTEND: a518c9e5
+      OPTION_REVIEW: 269921f7
+      OPTION_INFRA: 5761bf5f
+      OPTION_RELEASE: 16612cf0
+      OPTION_PLAN: 5e10b1fd
 
     steps:
       - name: Guard PROJECT_TOKEN
@@ -113,11 +114,6 @@ jobs:
               return;
             }
             if (labels.includes('session:plan')) {
-              if (!options.plan) {
-                core.info('session:plan 라벨이 있으나 OPTION_PLAN 미설정. 보드에 plan 옵션 추가 후 워크플로우 env 갱신 필요. skip.');
-                core.setOutput('option_id', '');
-                return;
-              }
               core.setOutput('option_id', options.plan);
               core.setOutput('reason', 'label session:plan');
               return;
