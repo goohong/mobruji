@@ -33,22 +33,40 @@
 
 set -euo pipefail
 
+# 종속 도구 가드 — bot 호스트 외 환경(예: 신규 NCP 인스턴스)에서 조용히 실패하지
+# 않도록 명시적으로 점검. set -e 와 별개로 사람 친화 메시지 제공.
+command -v curl >/dev/null 2>&1 || { echo "discord-reply.sh: curl 미설치" >&2; exit 1; }
+command -v jq   >/dev/null 2>&1 || { echo "discord-reply.sh: jq 미설치"   >&2; exit 1; }
+
 ENV_PATH="${DISCORD_DAEMON_ENV_PATH:-/home/mobruji/mobruji/tools/discord-daemon/.env}"
 if [[ ! -f "$ENV_PATH" ]]; then
   echo "discord-reply.sh: .env 파일 없음: $ENV_PATH" >&2
   exit 1
 fi
 
-TOKEN=$(grep -E '^DISCORD_BOT_TOKEN=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'")
+# env 값 추출 헬퍼 — KEY 받아 값 1줄 echo. 따옴표 / CRLF 모두 strip 해서
+# Windows 에서 편집된 .env (CRLF) 도 안전하게 받는다. head -1 로 같은 키
+# 중복 정의 시 첫 줄만.
+read_env_value() {
+  local key="$1"
+  grep -E "^${key}=" "$ENV_PATH" \
+    | head -1 \
+    | cut -d= -f2- \
+    | tr -d '\r' \
+    | tr -d '"' \
+    | tr -d "'"
+}
+
+TOKEN=$(read_env_value DISCORD_BOT_TOKEN)
 if [[ -z "$TOKEN" ]]; then
   echo "discord-reply.sh: DISCORD_BOT_TOKEN 비어 있음" >&2
   exit 1
 fi
 
 # MOBRUJI_CHANNEL_ID 우선 (helper raw 응답 = 메인 #모부르지), NOTIFY_CHANNEL_ID 는 digest 전용 fallback.
-CHANNEL=$(grep -E '^MOBRUJI_CHANNEL_ID=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)
+CHANNEL=$(read_env_value MOBRUJI_CHANNEL_ID)
 if [[ -z "$CHANNEL" ]]; then
-  CHANNEL=$(grep -E '^NOTIFY_CHANNEL_ID=' "$ENV_PATH" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)
+  CHANNEL=$(read_env_value NOTIFY_CHANNEL_ID)
 fi
 if [[ -z "$CHANNEL" ]]; then
   echo "discord-reply.sh: NOTIFY_CHANNEL_ID / MOBRUJI_CHANNEL_ID 둘 다 비어 있음" >&2

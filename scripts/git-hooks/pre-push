@@ -12,7 +12,7 @@
 #      코드 변경 후 push 하는 사고를 hook 단에서 차단한다.
 #      `docs/ai-harness/11-multi-session-runbook.md §2` 참고.
 
-set -e
+set -euo pipefail
 
 toplevel="$(git rev-parse --show-toplevel)"
 basename="$(basename "$toplevel")"
