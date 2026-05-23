@@ -44,7 +44,7 @@ DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
 DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 push
-DEFAULT_CYCLE_STATUS_PATH: Final[str] = "/home/mobruji/.mobruji/cycle-status.json"
+DEFAULT_CYCLE_STATUS_PATH: Final[str] = os.path.expanduser("~/.mobruji/cycle-status.json")
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
 CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
 # digest 본문 timestamp — 사용자 요청 #811. Discord 가 보여주는 시각이 클라이언트
@@ -161,6 +161,9 @@ def load_env() -> dict[str, str]:
     )
     env["TMUX_PANE_TARGET"] = os.environ.get(
         "TMUX_PANE_TARGET", CONTEXT_AUTO_CLEAR_DEFAULT_PANE
+    )
+    env["CYCLE_STATUS_PATH"] = os.path.expanduser(
+        os.environ.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
     )
     return env
 
@@ -840,6 +843,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
 
     digest_enabled = env.get("DIGEST_ENABLED", "1") == "1"
     digest_interval = resolve_digest_interval(env.get("DIGEST_INTERVAL_SECONDS"))
+    cycle_status_path = env.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
 
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
@@ -870,13 +874,15 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     client,
                     notify_channel_id,
                     interval=digest_interval,
+                    cycle_status_path=cycle_status_path,
                 )
             )
             logger.info(
-                "digest_loop launched: channel=%d interval=%ds heartbeat=%ds",
+                "digest_loop launched: channel=%d interval=%ds heartbeat=%ds path=%s",
                 notify_channel_id,
                 digest_interval,
                 DIGEST_HEARTBEAT_SECONDS,
+                cycle_status_path,
             )
 
         # context auto-clear loop (spec §5-2, #809). opt-in 이고 pane 존재할 때만 launch.
