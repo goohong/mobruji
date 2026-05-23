@@ -578,7 +578,8 @@ def build_digest_line(
 ) -> str:
     """cron digest 1줄. /status 보다 압축.
 
-    형식: 📊 PR open:N / 머지 24h:N / type:bug:N — HH:MM KST
+    형식: 📊 PR open:N / 머지 24h:N / bug:N — HH:MM KST
+    (`type:bug:` 표기는 Discord 가 :bug: 를 🐛 emoji 로 변환하므로 prefix 제거.)
     조회 실패는 '?' 로 표시. LLM 호출 없음.
     """
     line, _signature = build_digest_payload(github_repo, github_pat, now=now)
@@ -625,7 +626,7 @@ def build_digest_payload(
     kst = now.astimezone(timezone(timedelta(hours=9), name="KST"))
     line = (
         f"📊 PR open:{open_count} / 머지 {DIGEST_MERGED_WINDOW_HOURS}h:{merged_count} / "
-        f"type:bug:{bug_count} — {kst.strftime('%H:%M')} KST"
+        f"bug:{bug_count} — {kst.strftime('%H:%M')} KST"
     )
     signature = f"open={open_count}|merged{DIGEST_MERGED_WINDOW_HOURS}={merged_count}|bug={bug_count}"
     return line, signature
