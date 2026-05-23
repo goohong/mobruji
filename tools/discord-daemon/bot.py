@@ -62,6 +62,30 @@ MAESTRO_WATCHER_DEDUP_PREFIX: Final[str] = "maestro:"
 ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
     r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-_])"
 )
+# Secret masking — maestro tmux pane 에 PAT/토큰/패스워드가 echo 될 수 있으므로
+# Discord push 직전에 패턴 매칭으로 마스킹 (#742). 새 시크릿 형태 발견 시 패턴 추가.
+# 순서 중요: 더 구체적인 패턴(github_pat, discord token)이 일반 패턴(*_TOKEN=) 보다 먼저 매칭되도록 배치.
+SECRET_MASK_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
+    # GitHub fine-grained PAT — `github_pat_` + 82자 (실측 prefix 11 + body)
+    (re.compile(r"github_pat_[A-Za-z0-9_]{50,}"), "github_pat_***"),
+    # GitHub classic PAT — `ghp_` + 36자 영숫자
+    (re.compile(r"ghp_[A-Za-z0-9]{36,}"), "ghp_***"),
+    # Discord bot token — `[MN][A-Za-z0-9-_]{23}.[A-Za-z0-9-_]{6}.[A-Za-z0-9-_]{27+}`
+    (
+        re.compile(
+            r"[MN][A-Za-z0-9_-]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}"
+        ),
+        "discord_token_***",
+    ),
+    # 일반 env-style `*_TOKEN=value` / `*_SECRET=value` / `*_KEY=value` — value 의 공백 전까지 마스킹.
+    # group 1 (key 이름)은 보존.
+    (
+        re.compile(r"([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD))=\S+"),
+        r"\1=***",
+    ),
+    # MySQL/DB password 패턴 — `password=value` (case-insensitive). 위 env-style 보다 뒤.
+    (re.compile(r"(?i)\bpassword=\S+"), "password=***"),
+)
 SENTINEL_PREFIX: Final[str] = "/system:"
 STATUS_COMMAND_PREFIX: Final[str] = "/status"
 STATUS_GH_TIMEOUT_SECONDS: Final[int] = 8
@@ -811,6 +835,18 @@ def strip_ansi(text: str) -> str:
     return ANSI_ESCAPE_RE.sub("", text)
 
 
+def mask_secrets(text: str) -> str:
+    """tmux pane buffer 의 PAT/토큰/패스워드 마스킹 (#742).
+
+    maestro Claude TUI 가 gh/curl/env 명령 echo 시 PAT 가 raw 노출될 수 있으므로
+    Discord push 전 SECRET_MASK_PATTERNS 순서대로 치환한다. 패턴 미매칭이면 원문 반환.
+    """
+    masked = text
+    for pattern, replacement in SECRET_MASK_PATTERNS:
+        masked = pattern.sub(replacement, masked)
+    return masked
+
+
 def sanitize_chunk(text: str) -> str | None:
     """raw tmux pane buffer 를 Discord push 후보로 정리.
 
@@ -820,8 +856,10 @@ def sanitize_chunk(text: str) -> str | None:
     - 최대 길이 초과 시 잘라낸 뒤 `…(truncated)` 표시
 
     Discord 한도 2000자. 너무 길면 잘라야 send 가 성공.
+    시크릿 마스킹은 ANSI 제거 후 / 라인 압축 전에 수행 — chunk 가 잘리거나 dedup
+    되더라도 원문 시크릿이 절대 send 되지 않도록 보장 (#742).
     """
-    cleaned = strip_ansi(text)
+    cleaned = mask_secrets(strip_ansi(text))
     # 라인별 rstrip + 빈 라인 합치기
     lines: list[str] = []
     blank_run = 0
