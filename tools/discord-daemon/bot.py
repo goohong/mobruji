@@ -58,6 +58,19 @@ MAESTRO_WATCHER_MIN_CHUNK_LEN: Final[int] = 100  # 이보다 짧은 chunk 는 �
 MAESTRO_WATCHER_MAX_CHUNK_LEN: Final[int] = 1800  # Discord 한도 2000 여유 200
 MAESTRO_WATCHER_DEDUP_PREFIX: Final[str] = "maestro:"
 MAESTRO_WATCHER_SEND_MAX_RETRIES: Final[int] = 3  # transient send 실패 시 최대 재시도 횟수
+# context_auto_clear_loop 튜닝값. maestro 가 매 turn 끝에 emit 하는 `===CTX:NN%===` 마커를
+# pipe-pane capture 파일에서 tail 하여 95% 도달 시 정리 prompt inject, ===CLEAR_READY===
+# 마커 감지 시 /clear 전송. spec: docs/features/context-auto-clear.md §5-6 옵션 A.
+CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS: Final[float] = 5.0
+CONTEXT_DEFAULT_TRIGGER_PCT: Final[int] = 95
+CONTEXT_DEFAULT_HYSTERESIS_PCT: Final[int] = 80
+CONTEXT_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"===CTX:(\d{1,3})%===")
+CONTEXT_CLEAR_READY_MARKER: Final[str] = "===CLEAR_READY==="
+CONTEXT_CLEANUP_PROMPT: Final[str] = (
+    ":memory: 95% 도달. 진행 중 sub-agent 완료 대기 + 핸드오프 메모리 갱신 + "
+    "===CLEAR_READY=== 출력 후 정지"
+)
+CONTEXT_AUTO_CLEAR_TAIL_BYTES: Final[int] = 64 * 1024  # 최근 64KB 만 스캔 (큰 로그 회피)
 # ANSI escape sequence: CSI (`ESC [ ... letter`) + OSC (`ESC ] ... BEL/ST`) + 단일 ESC.
 # claude TUI 가 컬러/커서/타이틀 코드 다수 출력 — Discord 에 raw 노출 방지.
 ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
@@ -195,6 +208,18 @@ def load_env() -> dict[str, str]:
     # TMUX_PIPE_PANE_ENABLED=1 + 동일 capture 파일 사용 전제.
     env["MAESTRO_RESPONSE_WATCHER_ENABLED"] = os.environ.get(
         "MAESTRO_RESPONSE_WATCHER_ENABLED", "0"
+    )
+    # context auto-clear loop (spec PR C). opt-in — default off.
+    # `===CTX:NN%===` 마커 polling → 95% 도달 시 inject + /clear.
+    # TMUX_BRIDGE_ENABLED=1 + TMUX_PIPE_PANE_ENABLED=1 전제.
+    env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
+        "CONTEXT_AUTO_CLEAR_ENABLED", "0"
+    )
+    env["CONTEXT_CLEAR_TRIGGER_PCT"] = os.environ.get(
+        "CONTEXT_CLEAR_TRIGGER_PCT", str(CONTEXT_DEFAULT_TRIGGER_PCT)
+    )
+    env["CONTEXT_CLEAR_HYSTERESIS_PCT"] = os.environ.get(
+        "CONTEXT_CLEAR_HYSTERESIS_PCT", str(CONTEXT_DEFAULT_HYSTERESIS_PCT)
     )
     # NOTIFY_CHANNEL_ID — 알림 카테고리(cycle/digest/alert/recovery) 발사 채널.
     # 미설정 시 MOBRUJI_CHANNEL_ID 로 fallback (현재 동작 유지, 채널 분리 전 단계).
@@ -949,6 +974,163 @@ def sanitize_chunk(text: str) -> str | None:
     return compact
 
 
+def parse_context_pct(pane_text: str) -> int | None:
+    """`===CTX:NN%===` 마커의 마지막 occurrence 를 정수로 반환. 없으면 None.
+
+    spec §5-6 옵션 A — maestro 가 매 turn 끝에 self-emit. footer scrape 안 함.
+    NN 은 0~100 이외 (예: 105) 일 수 있으나 호출부에서 임계값과 비교 시 자연 통과.
+    """
+    matches = CONTEXT_MARKER_RE.findall(pane_text)
+    if not matches:
+        return None
+    try:
+        return int(matches[-1])
+    except ValueError:
+        return None
+
+
+def read_tail_text(path: Path, max_bytes: int) -> str:
+    """파일 끝 max_bytes 만 utf-8 로 디코딩하여 반환. 파일 없으면 빈 문자열.
+
+    pipe-pane log 가 100MB 까지 성장 가능 — 매 polling 마다 전부 읽지 않도록 tail.
+    UTF-8 경계가 잘릴 수 있어 errors='replace'.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    size = stat.st_size
+    start = max(0, size - max_bytes)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start)
+            data = handle.read(size - start)
+    except OSError as exc:
+        logger.debug("context auto-clear: tail read 실패 %s", exc)
+        return ""
+    return strip_ansi(data.decode("utf-8", errors="replace"))
+
+
+def inject_cleanup_prompt(target_pane: str) -> bool:
+    """tmux send-keys 로 정리 prompt 한 줄 inject + Enter. 성공 시 True.
+
+    tmux_send_payload 와 동일 동작 — 코드 재사용. sentinel 우회 (`/system:` prefix 없음)
+    이므로 일반 literal path.
+    """
+    return tmux_send_payload(target_pane, CONTEXT_CLEANUP_PROMPT)
+
+
+def send_clear_command(target_pane: str) -> bool:
+    """tmux send-keys '/clear' Enter. Claude TUI 의 /clear slash 명령 트리거."""
+    return tmux_send_payload(target_pane, "/clear")
+
+
+async def context_auto_clear_loop(
+    client: "discord.Client",
+    channel_id: int,
+    pipe_pane_path: str,
+    target_pane: str,
+    *,
+    trigger_pct: int = CONTEXT_DEFAULT_TRIGGER_PCT,
+    hysteresis_pct: int = CONTEXT_DEFAULT_HYSTERESIS_PCT,
+    poll_interval: float = CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS,
+    tail_bytes: int = CONTEXT_AUTO_CLEAR_TAIL_BYTES,
+    sleep=asyncio.sleep,
+    inject_fn=None,
+    clear_fn=None,
+) -> None:
+    """`===CTX:NN%===` 마커 polling — trigger_pct 도달 시 정리 prompt inject,
+    `===CLEAR_READY===` 마커 감지 시 /clear 전송.
+
+    State machine (3 상태):
+      ARMED: 트리거 대기 상태. pct >= trigger_pct 시 inject → AWAITING_MARKER.
+      AWAITING_MARKER: 정리 prompt inject 후 maestro 의 정리 완료 marker 대기.
+        marker 감지 시 /clear 송신 → DEBOUNCED.
+      DEBOUNCED: /clear 완료. pct <= hysteresis_pct 떨어져야 ARMED 복귀.
+        그동안 추가 trigger 안 됨.
+
+    dedup: 같은 NN% 가 연속 polling 에 보여도 (state 가 ARMED 가 아니면) 추가 발화 없음.
+    inject_fn / clear_fn 주입 가능 — 테스트에서 tmux 호출 mock.
+
+    bot 종료 시 cancel. asyncio.CancelledError 는 외부로 전파.
+    """
+    path = Path(pipe_pane_path)
+    inject = inject_fn if inject_fn is not None else (lambda: inject_cleanup_prompt(target_pane))
+    clear = clear_fn if clear_fn is not None else (lambda: send_clear_command(target_pane))
+    state = "ARMED"
+    logger.info(
+        "context_auto_clear_loop 시작: path=%s pane=%s trigger=%d%% hysteresis=%d%% poll=%.1fs",
+        pipe_pane_path,
+        target_pane,
+        trigger_pct,
+        hysteresis_pct,
+        poll_interval,
+    )
+    while True:
+        try:
+            tail = read_tail_text(path, tail_bytes)
+            pct = parse_context_pct(tail)
+            marker_seen = CONTEXT_CLEAR_READY_MARKER in tail
+
+            if state == "AWAITING_MARKER" and marker_seen:
+                # 정리 완료 — /clear 전송. pct 는 marker 와 함께 emit 안 됐을 수도
+                # 있으므로 None 허용.
+                pct_label = f"{pct}%" if pct is not None else "?"
+                logger.info(
+                    "context auto-clear: CLEAR_READY 감지 (pct=%s) → /clear 송신",
+                    pct_label,
+                )
+                channel = client.get_channel(channel_id)
+                if channel is not None:
+                    try:
+                        await channel.send(
+                            f"🧹 정리 완료 → /clear 전송 (마지막 context {pct_label})"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("context auto-clear push 실패: %s", exc)
+                if clear():
+                    state = "DEBOUNCED"
+                else:
+                    # /clear 송신 실패 — AWAITING_MARKER 유지하고 다음 iter 에 재시도.
+                    logger.warning("context auto-clear: /clear 송신 실패 — 다음 iter 재시도")
+            elif state == "DEBOUNCED":
+                # hysteresis 해제 — pct 가 임계 이하로 떨어졌을 때만 ARMED 복귀.
+                if pct is not None and pct <= hysteresis_pct:
+                    logger.info(
+                        "context auto-clear: hysteresis 해제 (pct=%d%% <= %d%%) → ARMED",
+                        pct,
+                        hysteresis_pct,
+                    )
+                    state = "ARMED"
+            elif state == "ARMED":
+                if pct is not None and pct >= trigger_pct:
+                    logger.info(
+                        "context auto-clear: 트리거 (pct=%d%% >= %d%%) → cleanup prompt inject",
+                        pct,
+                        trigger_pct,
+                    )
+                    channel = client.get_channel(channel_id)
+                    if channel is not None:
+                        try:
+                            await channel.send(
+                                f"🧠 context {pct}% → 자율 정리 시작"
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("context auto-clear push 실패: %s", exc)
+                    if inject():
+                        state = "AWAITING_MARKER"
+                    else:
+                        logger.warning(
+                            "context auto-clear: inject 실패 — ARMED 유지하고 다음 iter 재시도"
+                        )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("context auto-clear loop 예외: %s", exc)
+
+        await sleep(poll_interval)
+
+
 def chunk_signature(text: str) -> str:
     """chunk content 의 안정적 해시. dedup ledger message_id 로 사용.
 
@@ -1168,6 +1350,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     maestro_watcher_enabled = env.get("MAESTRO_RESPONSE_WATCHER_ENABLED", "0") == "1"
     maestro_watcher_path = env.get("TMUX_PIPE_PANE_PATH", "")
 
+    context_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
+    try:
+        context_trigger_pct = int(env.get("CONTEXT_CLEAR_TRIGGER_PCT",
+                                          str(CONTEXT_DEFAULT_TRIGGER_PCT)))
+    except ValueError:
+        logger.warning(
+            "CONTEXT_CLEAR_TRIGGER_PCT 정수 아님 — 기본값 %d 사용",
+            CONTEXT_DEFAULT_TRIGGER_PCT,
+        )
+        context_trigger_pct = CONTEXT_DEFAULT_TRIGGER_PCT
+    try:
+        context_hysteresis_pct = int(env.get("CONTEXT_CLEAR_HYSTERESIS_PCT",
+                                             str(CONTEXT_DEFAULT_HYSTERESIS_PCT)))
+    except ValueError:
+        logger.warning(
+            "CONTEXT_CLEAR_HYSTERESIS_PCT 정수 아님 — 기본값 %d 사용",
+            CONTEXT_DEFAULT_HYSTERESIS_PCT,
+        )
+        context_hysteresis_pct = CONTEXT_DEFAULT_HYSTERESIS_PCT
+
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
@@ -1216,6 +1418,31 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 "maestro_response_watcher_loop launched: channel=%d path=%s",
                 target_channel_id,
                 maestro_watcher_path,
+            )
+
+        if (
+            context_clear_enabled
+            and maestro_watcher_path
+            and not hasattr(client, "_context_clear_task_started")
+        ):
+            client._context_clear_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                context_auto_clear_loop(
+                    client,
+                    notify_channel_id,
+                    maestro_watcher_path,
+                    target_pane,
+                    trigger_pct=context_trigger_pct,
+                    hysteresis_pct=context_hysteresis_pct,
+                )
+            )
+            logger.info(
+                "context_auto_clear_loop launched: channel=%d path=%s pane=%s trigger=%d hysteresis=%d",
+                notify_channel_id,
+                maestro_watcher_path,
+                target_pane,
+                context_trigger_pct,
+                context_hysteresis_pct,
             )
 
     @client.event
