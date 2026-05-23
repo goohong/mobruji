@@ -176,3 +176,28 @@ describe("onError fallback 회귀 가드 (PR #500 후속, closes #529)", () => {
     ).toBeInTheDocument();
   });
 });
+
+/*
+ * Placeholder 접근성 회귀 가드 (closes #531):
+ *  - placeholder 외부 컨테이너에 role="img" + aria-label 이 있으므로 내부 음표 SVG 는
+ *    스크린리더 이중 읽기 방지를 위해 aria-hidden="true" 여야 한다.
+ *  - large / thumbnail 양쪽 모두 동일 규칙 적용.
+ */
+describe("AlbumCoverPlaceholder MusicNoteIcon aria-hidden 회귀 가드 (closes #531)", () => {
+  it("thumbnail placeholder 내부 SVG 는 aria-hidden='true'", () => {
+    const song = buildSong({ albumCoverUrl: null });
+    const { container } = render(<AlbumCoverThumbnail song={song} />);
+    const svg = container.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("large placeholder 내부 SVG 는 aria-hidden='true'", () => {
+    const song = buildSong({ albumCoverUrl: null });
+    renderWithQueryClient(<SongDetailContent song={song} />);
+    const placeholder = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
+    const svg = placeholder.querySelector("svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+  });
+});
