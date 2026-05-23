@@ -103,6 +103,19 @@ class CorsPropertiesValidationTest {
                 });
     }
 
+    @Test
+    @DisplayName("origin list 중간에 빈 문자열 element (a,,b) 면 @NotBlank 위반으로 startup fail (#653)")
+    void blankOriginElement_failsStartup() {
+        // 회귀 가드: 쉼표 누락 오타 등으로 element 가 "" 가 되면 보안상 의미가 무너진다. 빈 origin 은 명시적으로 거부.
+        contextRunner
+                .withPropertyValues("mobruji.cors.allowed-origins=http://a.test,,http://b.test")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
     @EnableConfigurationProperties(CorsProperties.class)
     static class TestConfig {
     }

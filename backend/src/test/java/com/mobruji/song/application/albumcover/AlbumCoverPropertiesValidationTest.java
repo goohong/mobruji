@@ -114,29 +114,50 @@ class AlbumCoverPropertiesValidationTest {
     }
 
     @Test
-    @DisplayName("itunes.requestTimeout=0s 도 @NotNull 통과 — Duration 자체가 non-null 이면 binding 성공")
-    void zeroDurationRequestTimeout_succeeds() {
-        // 회귀 가드: @NotNull 은 null 만 막는다. 0 초 timeout 이 의도되지 않더라도 boot 단계에서는 통과하며,
-        // 추후 의미론적 검증 (@DurationMin 등) 을 추가하면 본 테스트가 fail 하면서 새 가드를 강제하게 된다.
+    @DisplayName("itunes.requestTimeout=0s 면 @DurationMin(1ms) 위반으로 startup fail (#653)")
+    void zeroDurationRequestTimeout_failsStartup() {
+        // 회귀 가드: 0 timeout 은 모든 호출이 즉시 실패. #653 에서 의미론 가드 도입.
         contextRunner
                 .withPropertyValues(propsWithOverrides("album-cover.itunes.request-timeout=0s"))
                 .run(context -> {
-                    assertThat(context).hasNotFailed();
-                    final AlbumCoverProperties properties = context.getBean(AlbumCoverProperties.class);
-                    assertThat(properties.itunes().requestTimeout()).isEqualTo(Duration.ZERO);
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
                 });
     }
 
     @Test
-    @DisplayName("itunes.throttle=0s 도 @NotNull 통과 — 0 throttle 도 binding 단계에서는 정상")
+    @DisplayName("itunes.requestTimeout=-1s 음수면 @DurationMin 위반으로 startup fail (#653)")
+    void negativeDurationRequestTimeout_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("album-cover.itunes.request-timeout=-1s"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("itunes.throttle=0s 는 정상 기동 — 0 throttle 은 rate limit 무시지만 허용 (#653)")
     void zeroDurationThrottle_succeeds() {
-        // 회귀 가드: 0 throttle 은 운영상 위험하지만 boot fail 대상은 아니다. 의미론적 검증 추가 시 본 테스트 fail.
+        // 회귀 가드: throttle 은 0 허용(즉시 다음 호출), 음수만 차단. @DurationMin(0) 으로 음수만 거른다.
         contextRunner
                 .withPropertyValues(propsWithOverrides("album-cover.itunes.throttle=0s"))
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     final AlbumCoverProperties properties = context.getBean(AlbumCoverProperties.class);
                     assertThat(properties.itunes().throttle()).isEqualTo(Duration.ZERO);
+                });
+    }
+
+    @Test
+    @DisplayName("itunes.throttle=-1s 음수면 @DurationMin(0ms) 위반으로 startup fail (#653)")
+    void negativeDurationThrottle_failsStartup() {
+        // 회귀 가드: 음수 throttle 은 Thread.sleep 에 음수 전달 → IllegalArgumentException 또는 무의미.
+        contextRunner
+                .withPropertyValues(propsWithOverrides("album-cover.itunes.throttle=-1s"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
                 });
     }
 
