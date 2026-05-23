@@ -442,6 +442,46 @@ describe("apiFetch method case 가드 (#716)", () => {
   });
 });
 
+describe("apiFetch headers value 타입 가드 (#719)", () => {
+  // 현 동작 lock: RequestOptions.headers 는 Record<string, string> 으로 타입 선언되어 있으나,
+  // runtime 검증/변환 없음. 호출자가 cast 로 숫자/boolean 을 강제 전달하면 init.headers 에
+  // 그대로 spread 된다 (정규화는 fetch 구현체 책임).
+  it.each([
+    { label: "숫자 value cast → init.headers 에 그대로 전달", headerValue: 42 as unknown as string, expected: 42 },
+    { label: "boolean value cast → init.headers 에 그대로 전달", headerValue: true as unknown as string, expected: true },
+  ])("$label", async ({ headerValue, expected }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { headers: { "X-Custom": headerValue } });
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, unknown>;
+    expect(headers["X-Custom"]).toBe(expected);
+  });
+});
+
+describe("apiFetch AbortController 타이밍 분기 가드 (#719)", () => {
+  // #692 는 signal pass-through 만 lock → timing 분기 (pre-abort / in-flight abort) 보강.
+  it("pre-abort: controller.abort() 후 호출 → fetch reject(AbortError) 전파", async () => {
+    const abortError = new DOMException("aborted", "AbortError");
+    fetchMock.mockRejectedValueOnce(abortError);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(apiFetch("/api/v1/songs", { signal: controller.signal })).rejects.toBe(abortError);
+  });
+
+  it("in-flight abort: fetch pending 중 abort → reject 전파", async () => {
+    const abortError = new DOMException("aborted", "AbortError");
+    const controller = new AbortController();
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          controller.signal.addEventListener("abort", () => reject(abortError));
+        }),
+    );
+    const promise = apiFetch("/api/v1/songs", { signal: controller.signal });
+    controller.abort();
+    await expect(promise).rejects.toBe(abortError);
+  });
+});
+
 describe("apiFetch URL path 한글/유니코드 가드 (#713)", () => {
   // 현 동작 lock: client.ts 는 path 를 raw concat 하며 encodeURI/encodeURIComponent 를 수행하지 않는다.
   // 미인코딩 한글 path 는 그대로 fetch URL 에 전달 → 인코딩은 호출자 책임 (encodeURIComponent 권장).
