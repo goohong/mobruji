@@ -68,7 +68,10 @@ RAW_LOG=$(git log --oneline "origin/main..origin/develop")
 format_section() {
   local label="$1" type="$2" scope_filter="$3"
   local lines
-  lines=$(echo "$RAW_LOG" | grep -E "^[a-f0-9]+ ${type}\(${scope_filter}\)" || true)
+  # NOTE: alternation 그룹은 반드시 한 번 더 () 로 감싸야 한다.
+  # `feat\(web|recommendation\)` 처럼 쓰면 precedence 가
+  # `feat\(web` OR `recommendation` 으로 갈라져 무관 커밋도 매칭됨.
+  lines=$(echo "$RAW_LOG" | grep -E "^[a-f0-9]+ ${type}\((${scope_filter})\)" || true)
   [ -z "$lines" ] && return
   echo "### ${label}"
   echo "$lines" | sed -E 's|^[a-f0-9]+ |- |'
@@ -159,36 +162,40 @@ REPO=/home/mobruji/mobruji bash -c "$(awk '/^```bash$/,/^```$/' docs/ai-harness/
 
 > 운영 단계에서는 별도 `scripts/release-prompt.sh` 로 추출 권장 (별도 PR).
 
-## 5) 검증 결과 (v0.4.0 실측)
+## 5) 검증 결과 (v0.4.0 실측 — rev dry-run 2026-05-23)
 
-본 PR 작성 시점(2026-05-23, develop=`b04b13e`, main=`v0.3.3`) snippet 실행 가정 dry-run.
+rev sub-agent 가 PR #781 머지 후 실제 snippet 을 dry-run 실행한 결과 (`develop=ebef296`, main=`v0.3.3`).
 
 ### 5-1) 입력
 ```
 $ git rev-list --count origin/main..origin/develop
-31
+38
 
-$ git log --oneline origin/main..origin/develop | grep -oE '(feat|fix|docs|test|cleanup)\(' | sort | uniq -c
+$ git log --oneline origin/main..origin/develop | grep -oE '^[a-f0-9]+ [a-z]+\(' | grep -oE '[a-z]+\(' | sort | uniq -c
       1 cleanup(
-      8 docs(
-      4 feat(
-     11 fix(
+     12 docs(
+      5 feat(
+     12 fix(
       7 test(
 ```
 
 ### 5-2) version 산정
-- `feat` 4건 = `feat(infra)` × 3 (#733 #735 #737) + `feat(infra)` 외 0건
-- 사용자 facing feat 0건 → **patch** 후보
-- 단, ahead 31 + fix 11 → 의미 있는 batch → minor 수동 승격 가능 (사용자 결정)
-- snippet 기본 출력: **v0.3.4** (patch)
-- 실 release: 사용자가 minor 승격 시 v0.4.0 으로 override (PR 제목 수정 1줄)
+- `feat(web)` 1건 (#784 requestId UUID) = 사용자 facing feat → **minor 자동 승격**
+- 나머지 feat 4건 = `feat(infra)` (#733 #735 #737 #776) → 운영 영향
+- breaking 0건
+- snippet 기본 출력: **v0.4.0** (자동 minor)
 
-> 자동 산정은 보수적(patch). 사용자 facing scope 가 있어야만 minor 자동 승격.
+> 사용자 facing scope (web/recommendation/song/user/voice) 의 feat 1건만 있어도 자동 minor 승격된다.
 
-### 5-3) body 길이
-- 사용자 영향 섹션: 약 12 줄 (fix/web 7건 + test/web 6건 + cleanup/web 1건)
-- 운영 영향 섹션: 약 18 줄 (feat/infra 3건 + fix/infra 5건 + docs/infra 7건 + test/infra 1건)
-- 총: 약 60 줄 (header + checklist 포함). 사용자가 1분 내 훑기 가능.
+### 5-3) body 길이 (실측)
+- 사용자 영향 섹션: feat 1 + fix 6 + test 6 + cleanup 1 = 14 줄
+- 운영 영향 섹션: feat 4 + fix 6 + docs 9 + test 1 = 20 줄
+- 총: 약 49 줄 (header 포함, checklist 별도). 사용자가 1분 내 훑기 가능.
+
+### 5-4) PR #781 머지 후 발견된 버그 (rev dry-run 적발 → 본 PR 동시 fix)
+- **`format_section()` grep alternation precedence 버그**: `grep -E "^[a-f0-9]+ feat\(web|recommendation|song|user|voice\)"` 패턴이 alternation precedence 때문에 `feat\(web` OR `recommendation` OR ... 로 갈라져 무관 커밋 (예: `docs(recommendation): …`) 까지 매번 모든 type 섹션에 중복 매칭됨.
+- 수정: scope_filter 를 `\((${scope_filter})\)` 로 한 번 더 group 으로 감싸 precedence 고정.
+- FEAT_USER 카운트는 원래부터 `feat\((web|...)\)` 로 group 되어 있어 v0.4.0 산정은 정상 동작.
 
 ### 5-4) 본진 인지 비용 비교
 | 항목 | Before (수동) | After (template) |
