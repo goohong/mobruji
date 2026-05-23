@@ -124,6 +124,22 @@ describe("SongDetailPage", () => {
     );
   });
 
+  // closes #445 — 일시 오류(5xx) 분기는 role="alert" + aria-live="assertive"로
+  // 스크린리더가 즉시 안내할 수 있어야 한다. 회귀 가드.
+  it("일시 오류(5xx) 분기는 role='alert' aria-live='assertive' 컨테이너로 노출된다", async () => {
+    useParamsMock.mockReturnValue({ id: "1" });
+    readSongByIdMock.mockRejectedValueOnce(
+      new ApiError(500, "internal error", { message: "internal error" }),
+    );
+
+    renderWithQueryClient(<SongDetailPage />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("aria-live", "assertive");
+    expect(alert).toHaveTextContent(/곡 정보를 불러오지 못했습니다/);
+    expect(alert).toHaveTextContent(/500/);
+  });
+
   it("id 파라미터가 숫자가 아니면 API를 호출하지 않고 NotFound로 떨어진다", () => {
     useParamsMock.mockReturnValue({ id: "abc" });
 
