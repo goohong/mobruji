@@ -275,6 +275,39 @@ describe("SongDetailModal", () => {
       expect(document.activeElement).toBe(trigger);
     });
 
+    // 추가 가드 (closes #556): 5 focusable 환경에서 양끝 wrap + 모달 외부 포커스
+    // 강제 복귀 분기 (handleKeyDown line 148/153 `!dialog.contains(active)`).
+    it("5 focusable 환경에서 마지막(D) → Tab 시 첫(닫기)으로 wrap", async () => {
+      const user = userEvent.setup();
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">A</button>
+          <button type="button">B</button>
+          <button type="button">C</button>
+          <button type="button">D</button>
+        </SongDetailModal>,
+      );
+      const closeButton = screen.getByRole("button", { name: /상세 닫기/ });
+      screen.getByRole("button", { name: "D" }).focus();
+      await user.tab();
+      expect(document.activeElement).toBe(closeButton);
+    });
+
+    it("5 focusable 환경에서 첫(닫기) → Shift+Tab 시 마지막(D)으로 wrap", async () => {
+      const user = userEvent.setup();
+      render(
+        <SongDetailModal open onClose={vi.fn()} titleLabel="테스트 곡">
+          <button type="button">A</button>
+          <button type="button">B</button>
+          <button type="button">C</button>
+          <button type="button">D</button>
+        </SongDetailModal>,
+      );
+      screen.getByRole("button", { name: /상세 닫기/ }).focus();
+      await user.tab({ shift: true });
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "D" }));
+    });
+
     it("모달 unmount 시 직전 포커스 요소(open trigger)로 포커스가 복원된다", async () => {
       // 모달 외부 trigger 버튼을 미리 두고, 거기에 포커스를 둔 채 모달을 연다.
       const Wrapper = ({ open }: { open: boolean }) => (
