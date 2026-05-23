@@ -289,6 +289,55 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
     ).not.toBeInTheDocument();
   });
 
+  // (#173 항목) RESULT 단계에서 '다시 측정하기' 누른 직후, 직전 측정의
+  // AbortController 가 즉시 abort 되어야 한다. retry 시작 시 정리 누락이 있으면
+  // 빠른 재측정 흐름에서 살아있던 sampler timer / fallback redirect timer 가
+  // 새 시도와 race 해 PERMISSION 화면 밖으로 사용자를 튕길 수 있다.
+  it("'다시 측정하기' 클릭 시 직전 시도의 AbortSignal 이 즉시 abort 된다 (#173)", async () => {
+    const user = userEvent.setup();
+    const capturedSignals: AbortSignal[] = [];
+    const deps = buildDeps({
+      runPhase: vi.fn().mockImplementation(async (phase, _stream, onSample, signal) => {
+        if (signal) {
+          capturedSignals.push(signal);
+        }
+        const sample: PitchSample = {
+          elapsedMs: 500,
+          frequencyHz: phase === "low" ? 130.81 : 440,
+          clarity: 0.95,
+          isStable: true,
+          midi: phase === "low" ? 48 : 69,
+        };
+        onSample(sample);
+        return {
+          midi: phase === "low" ? 48 : 69,
+          confirmed: true,
+          stableSampleCount: 5,
+          totalSampleCount: 5,
+        } as MeasurementResult;
+      }),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    // 첫 시도의 controller(low/high 두 phase 가 같은 controller 공유).
+    expect(capturedSignals.length).toBeGreaterThan(0);
+    const firstSignal = capturedSignals[0];
+    expect(firstSignal.aborted).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: /다시 측정하기/ }));
+
+    // retry 가 직전 controller 를 정리해 signal 이 abort 되어야 한다.
+    expect(firstSignal.aborted).toBe(true);
+  });
+
   it("수동 보정 슬라이더로 lowMidi 값을 조정할 수 있다", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<AutoVoiceRangePage deps={buildDeps()} />);

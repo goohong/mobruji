@@ -153,6 +153,16 @@ export default function AutoVoiceRangePage({
 
   const handleRetry = useCallback(() => {
     // 결과 → 재측정. 상태 초기화 후 다시 PERMISSION 단계로.
+    // 직전 시도가 권한 거부 fallback timer 를 띄워둔 상태에서 사용자가 빠르게
+    // 재측정을 시작하면, 살아있는 timer 가 1.2초 뒤 router.push("/voice-range")
+    // 를 강제로 호출해 사용자가 PERMISSION 화면 밖으로 튕긴다. retry 진입 시
+    // pending fallback timer / 진행 중 측정 controller 를 함께 정리한다.
+    if (fallbackTimerRef.current !== null) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setLowResult(null);
     setHighResult(null);
     setCurrentSample(null);
