@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "./client";
 import {
   createRecommendation,
   readRecommendation,
@@ -77,5 +78,45 @@ describe("readRecommendation", () => {
     expect(url).toMatch(/\/api\/v1\/recommendations\/42$/);
     expect((init as RequestInit).method ?? "GET").toBe("GET");
     expect(result).toEqual(sampleResponse);
+  });
+});
+
+/**
+ * 경계 가드 (closes #646): ApiError 전파 + 옵셔널 필드 직렬화.
+ *
+ * 도메인 함수가 apiFetch wrapper의 ApiError를 swallow하지 않는지,
+ * `mood`/`excludeSongIds` 직렬화가 BE 계약(nullable enum, 키 생략 시
+ * SeedDeriver default seed)과 일치하는지를 가둔다.
+ */
+describe("recommendation API 경계 가드", () => {
+  const base = {
+    sessionId: "sess-1",
+    voiceRangeLow: 48,
+    voiceRangeHigh: 72,
+  } as const;
+
+  it("create/read 모두 ApiError를 swallow 하지 않고 그대로 전파한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "bad" }, 400));
+    await expect(createRecommendation({ ...base })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+    });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "nope" }, 404));
+    await expect(readRecommendation(99999)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("excludeSongIds 생략 시 body 에서 키 자체가 빠진다 (BE SeedDeriver default seed 경로)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
+    await createRecommendation({ ...base, mood: "CALM" });
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
+    expect(JSON.parse(body)).toEqual({ ...base, mood: "CALM" });
+    expect(body).not.toContain("excludeSongIds");
+  });
+
+  it("mood: null 명시는 body 에 \"mood\":null 로 직렬화된다 (BE nullable enum 호환)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
+    await createRecommendation({ ...base, mood: null });
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
+    expect(body).toContain('"mood":null');
   });
 });
