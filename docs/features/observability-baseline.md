@@ -4,9 +4,9 @@ slug: observability-baseline
 status: draft
 owner: @goohong
 scope: infra
-related_issues: [242, 62, 68, 69, 71, 209, 273, 864]
+related_issues: [242, 62, 68, 69, 71, 209, 273, 864, 925]
 related_prs: []
-last_reviewed: 2026-05-23
+last_reviewed: 2026-05-24
 ---
 
 # 운영 관측성 베이스라인 (핵심 카운터 + p95 + 수집 스택)
@@ -162,6 +162,9 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 | 추천 p95 임계 초과 | `mobruji.recommendation.request.duration` p95 5분 >= 400ms (단일 진실 §5-3 = 200ms × 2 휴리스틱, recommendation-p95-regression-guard §5-3 참조) | Discord webhook | P1 |
 | audio backfill 실패 누적 | `mobruji.song.audio.backfill.failed` 24시간 sum >= 5 | Discord webhook | P2 |
 | JVM heap 압박 (메트릭) | `jvm.memory.used / jvm.memory.max` > 0.85 5분 연속 | Discord webhook | P2 |
+| session rotate p95 임계 초과 | `http.server.requests{uri="/api/v1/sessions/rotate"}` p95 5분 >= 200ms (운영 측정 후 임계 재조정 — 첫 1주 baseline 측정 후 ADR-0013 §D-2 follow-up 으로 확정) | Discord webhook | P2 |
+| session.expired ttl 정상 범위 검증 | `mobruji.session.expired{reason="ttl"}` 1주 sum 이 [10, 100000] 범위 밖 (lower=0 이면 cron 미작동 의심 / upper 초과면 TTL 설정 오류 또는 트래픽 급증) | Discord webhook | P2 |
+| session rotate 폭주 | `mobruji.session.rotated` 5분 rate >= 50/min (정상 사용 패턴 초과 — 봇 또는 클라이언트 버그 의심) | Discord webhook | P2 |
 
 - webhook URL: 환경변수 `MOBRUJI_ALERT_WEBHOOK_URL`. dev/local 은 미설정 시 noop. 운영에서 미설정이면 부트 fail-fast.
 - 알림 본문: rule name + 현재 값 + 직전 5분 추이 + Grafana 대시보드 링크 (자동 생성).
@@ -261,7 +264,7 @@ R4 (bridge inactive — 5분 단계 예시):
 - 결과 분류: `outcome` (`success`/`error`/`empty`/`ratelimited`/`unauthorized`)
 - 외부 vendor: `vendor` (`musicbrainz`/`spotify`/`youtube`)
 - 잡 이름: `jobName`
-- 실패 사유: `reason` (사전 정의 enum — `python`/`io`/`parse`/`timeout`)
+- 실패 사유 / 세션 만료 사유: `reason` (사전 정의 enum — backfill: `python`/`io`/`parse`/`timeout` / session.expired: `ttl`/`user_rotate`/`account_merge` — ADR-0013 §D-5 + spec `anonymous-session-lifecycle.md`)
 
 **금지 라벨**:
 
@@ -337,3 +340,4 @@ mobruji:
 - **2026-05-23 (plan, #864 PR I)**: `mobruji.song.audio.backfill.{requested,success,failed}` counter + `mobruji.song.audio.analysis.duration` timer 4 metric 을 backend 실제 구현 (`SongAudioBackfillCommand` + `AudioAnalysisRunner`) 으로 발행. §5-6-1 audio backfill 실패 알림 임계 "1시간 sum >= 10" → "24시간 sum >= 5" 재산정 — backfill 자체가 §5-1 주 1회 cron 이라 1시간 윈도우 안에 10건 누적이 영구 불가능했던 정합 미스를 해소. `failed` 카운터의 `reason` 라벨 enum (`timeout`/`spawn_error`/`json_parse`/`song_apply`/`other`) 을 §5-7 화이트리스트와 정합하도록 코드 상수화 (cardinality 폭발 방지). 후속: §5-8 percentiles-histogram 활성화는 be 측에서 `application.yml` 갱신 시 처리 (별 PR, 보호 영역).
 - **2026-05-23 (plan, 본 PR)**: §5-6 알림 규칙을 **§5-6-1 애플리케이션 메트릭 (기존 4 규칙)** + **§5-6-2 인프라 헬스 (신규 4 규칙)** 으로 분리. 인프라 4 규칙 (디스크 85/90/95%, heap 80/90/95%, 컨테이너 exit/unhealthy/restart, bridge 30초/5분) 의 트리거 임계·cooldown·회복 임계·멘션 정책·메시지 템플릿·dedup 규칙을 본 spec 단일 진실로 박제. 작업 분할 PR 4 를 **PR 4-A (Grafana alert)** + **PR 4-B (호스트 측 cron/systemd timer + Discord webhook 직접 push)** 으로 분리. Grafana scrape 실패 시에도 알림이 떠야 한다는 운영 즉시성 요구 반영. 후속: infra 사이클이 PR 4-B (`tools/ops/alerts/`) 구현.
 - **2026-05-23 (be, #886)**: ADR-0013 §D-5 셀프 약속 이행 — §5-3 카운터 표에 `mobruji.session.expired` (라벨 `reason=ttl|user_rotate|account_merge`) / `mobruji.session.rotated` / `mobruji.session.merged` 3 entry 신설. cross-ref: ADR-0013 §D-5 + spec `anonymous-session-lifecycle.md`. `reason` 라벨 enum 은 §5-7 PII 화이트리스트 정합 (사전 정의 enum). 실제 코드 구현(entity / scheduler / `/sessions/rotate` endpoint / 머지 트랜잭션) 은 이슈 #887 (ADR-0013 backend launch P1) 의 별 사이클로 분리 — 본 PR 은 spec 갱신만.
+- **2026-05-24 (plan, #925, PR #913 PR 4 잔여)**: rev PR #913 QA 의 🟡 MED 발견 — 단일 진실 동기화 보강. §5-6-1 애플리케이션 메트릭 알림 표에 3 규칙 신설: (a) `session rotate p95 임계 초과` (200ms, 첫 1주 baseline 측정 후 ADR-0013 §D-2 follow-up 으로 재조정), (b) `session.expired ttl 정상 범위 검증` (1주 sum [10, 100000] 밖이면 cron 미작동 또는 TTL 오설정 의심), (c) `session rotate 폭주` (5분 rate >= 50/min — 봇/클라이언트 버그). §5-7 라벨 화이트리스트의 `reason` enum 항목에 session.expired 의 `ttl`/`user_rotate`/`account_merge` 를 backfill enum 과 병기 명시 (cross-ref: ADR-0013 §D-5). §5-3 표는 #886 (PR #898) 에서 이미 세 entry 가 갱신되어 본 PR 은 §5-6 / §5-7 만 보강. 후속: 첫 1주 운영 baseline 측정 후 rotate p95 200ms 임계 재조정 (별 PR).
