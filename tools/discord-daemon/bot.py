@@ -78,6 +78,23 @@ CONTEXT_CLEANUP_PROMPT: Final[str] = (
     "===CLEAR_READY=== 출력 후 정지"
 )
 CONTEXT_AUTO_CLEAR_TAIL_BYTES: Final[int] = 64 * 1024  # 최근 64KB 만 스캔 (큰 로그 회피)
+# context_refresh_loop 튜닝값 (ADR-0016 옵션 D). 5분 간격으로 maestro tmux pane 에 `/context`
+# slash 명령을 inject 한 뒤 응답 화면을 pipe-pane log 에서 tail 하여 token 사용량 % 를
+# 메모리 cache 로 갱신한다. context_auto_clear_loop 가 cache 우선 사용하면 maestro 가 marker
+# emit 못한 turn 에서도 임계 판정 가능. opt-in (CONTEXT_REFRESH_ENABLED=1).
+CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
+# `/context` 응답 line 예: "Total tokens used: 73,481 / 1,000,000" (실측 형식 — 변경 시 spec 갱신).
+# 콤마/공백 가변. NN / DD 두 그룹 캡처 후 ÷ × 100 로 % 산출.
+CONTEXT_RESPONSE_RE: Final[re.Pattern[str]] = re.compile(
+    r"Total tokens used:\s*([\d,]+)\s*/\s*([\d,]+)"
+)
+# in-memory cache. 단일 maestro pane 전제 (mobruji:0.0). 다중 pane 시 key 화 필요.
+# - pct: 마지막 파싱 % (int) 또는 None
+# - updated_at: monotonic seconds (stale 판정용)
+context_pct_cache: dict[str, float | int | None] = {
+    "pct": None,
+    "updated_at": 0.0,
+}
 # ANSI escape sequence: CSI (`ESC [ ... letter`) + OSC (`ESC ] ... BEL/ST`) + 단일 ESC.
 # claude TUI 가 컬러/커서/타이틀 코드 다수 출력 — Discord 에 raw 노출 방지.
 ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
@@ -1138,6 +1155,108 @@ async def context_auto_clear_loop(
         await sleep(poll_interval)
 
 
+def inject_context_slash(target_pane: str) -> bool:
+    """tmux send-keys 로 `/context` slash 명령 한 줄 inject + Enter.
+
+    Claude TUI 의 `/context` 명령은 현재 token 사용량을 별도 화면에 출력한다.
+    응답은 pipe-pane log 에 기록되므로 context_refresh_loop 가 다음 iter 에서 tail 한다.
+    """
+    return tmux_send_payload(target_pane, "/context")
+
+
+def parse_context_response(text: str) -> int | None:
+    """`/context` 응답 line (`Total tokens used: NN / DD`) 의 마지막 occurrence 파싱 → %.
+
+    response 형식이 다를 수 있어 (Claude Code 버전 변동) 부정합 시 None 반환 — 호출부에서
+    cache 미갱신. 0/None 분모 가드. 정수 % (소수 반올림).
+    """
+    matches = CONTEXT_RESPONSE_RE.findall(text)
+    if not matches:
+        return None
+    used_raw, total_raw = matches[-1]
+    try:
+        used = int(used_raw.replace(",", ""))
+        total = int(total_raw.replace(",", ""))
+    except ValueError:
+        return None
+    if total <= 0:
+        return None
+    return round(used * 100 / total)
+
+
+def get_cached_context_pct(max_age_seconds: float = 600.0) -> int | None:
+    """cache 가 신선 (max_age_seconds 이내) 이면 pct, stale 이면 None.
+
+    context_auto_clear_loop 가 cache 우선 사용할 때 호출. default max_age 는 refresh
+    interval (300s) 의 2배 — 1회 inject 실패 허용.
+    """
+    pct = context_pct_cache.get("pct")
+    updated_at = context_pct_cache.get("updated_at") or 0.0
+    if pct is None:
+        return None
+    age = time.monotonic() - float(updated_at)
+    if age > max_age_seconds:
+        return None
+    return int(pct)
+
+
+async def context_refresh_loop(
+    client: "discord.Client",
+    target_pane: str,
+    pipe_pane_path: str,
+    *,
+    interval_seconds: float = float(CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS),
+    tail_bytes: int = CONTEXT_AUTO_CLEAR_TAIL_BYTES,
+    sleep=asyncio.sleep,
+    inject_fn=None,
+    cache: dict[str, float | int | None] | None = None,
+    monotonic=time.monotonic,
+) -> None:
+    """ADR-0016 옵션 D — 5분 간격 `/context` inject + 응답 scrape → cache 갱신.
+
+    동작:
+      1. sleep(interval_seconds)
+      2. inject `/context` (tmux send-keys)
+      3. 짧은 grace (1s) 후 pipe-pane log tail → parse_context_response
+      4. 매칭되면 cache["pct"], cache["updated_at"] 갱신. 안 되면 cache 미갱신 (graceful).
+
+    bot 종료 시 cancel. asyncio.CancelledError 외부 전파.
+    inject_fn / cache / monotonic 주입 가능 — 테스트 격리.
+    """
+    path = Path(pipe_pane_path)
+    inject = inject_fn if inject_fn is not None else (lambda: inject_context_slash(target_pane))
+    store = cache if cache is not None else context_pct_cache
+    logger.info(
+        "context_refresh_loop 시작: pane=%s path=%s interval=%.0fs",
+        target_pane,
+        pipe_pane_path,
+        interval_seconds,
+    )
+    # client 인자는 후속 확장(예: 실패 N회 시 Discord 알림) 대비. 현재 미사용.
+    _ = client
+    while True:
+        try:
+            await sleep(interval_seconds)
+            if not inject():
+                logger.warning("context refresh: /context inject 실패 — 다음 iter 재시도")
+                continue
+            # /context 응답이 pane 에 출력될 시간 확보. 너무 길면 다음 inject 와 충돌.
+            await sleep(1.0)
+            tail = read_tail_text(path, tail_bytes)
+            pct = parse_context_response(tail)
+            if pct is None:
+                # 응답 형식 변동 또는 inject 직후 응답 미수신. 다음 iter 에 재시도.
+                logger.debug("context refresh: 응답 파싱 실패 (regex 부정합) — cache 미갱신")
+                continue
+            store["pct"] = pct
+            store["updated_at"] = monotonic()
+            logger.info("context refresh: cache 갱신 pct=%d%%", pct)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("context refresh loop 예외: %s", exc)
+
+
 def chunk_signature(text: str) -> str:
     """chunk content 의 안정적 해시. dedup ledger message_id 로 사용.
 
@@ -1415,6 +1534,22 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         )
         context_hysteresis_pct = CONTEXT_DEFAULT_HYSTERESIS_PCT
 
+    # ADR-0016 옵션 D — context_refresh_loop env. opt-in.
+    context_refresh_enabled = env.get("CONTEXT_REFRESH_ENABLED", "0") == "1"
+    try:
+        context_refresh_interval = float(
+            env.get(
+                "CONTEXT_REFRESH_INTERVAL_SEC",
+                str(CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS),
+            )
+        )
+    except ValueError:
+        logger.warning(
+            "CONTEXT_REFRESH_INTERVAL_SEC 숫자 아님 — 기본값 %d 사용",
+            CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS,
+        )
+        context_refresh_interval = float(CONTEXT_REFRESH_DEFAULT_INTERVAL_SECONDS)
+
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
@@ -1488,6 +1623,27 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 target_pane,
                 context_trigger_pct,
                 context_hysteresis_pct,
+            )
+
+        if (
+            context_refresh_enabled
+            and maestro_watcher_path
+            and not hasattr(client, "_context_refresh_task_started")
+        ):
+            client._context_refresh_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                context_refresh_loop(
+                    client,
+                    target_pane,
+                    maestro_watcher_path,
+                    interval_seconds=context_refresh_interval,
+                )
+            )
+            logger.info(
+                "context_refresh_loop launched: pane=%s path=%s interval=%.0fs",
+                target_pane,
+                maestro_watcher_path,
+                context_refresh_interval,
             )
 
     @client.event
