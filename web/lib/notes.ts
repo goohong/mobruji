@@ -59,9 +59,33 @@ export const MAX_MIDI = 119; // B8
  */
 export const INVALID_MIDI_PLACEHOLDER = "--";
 
-export function midiToNoteName(midi: number): string {
+/**
+ * 비유한 MIDI 입력 시 사용할 a11y 친화 fallback 기본값 (이슈 #766).
+ *
+ * 호출자가 별도 fallback 을 지정하지 않고 a11y 컨텍스트(aria-label/스크린리더
+ * 노출 텍스트)에서 사용할 수 있는 한국어 안내 문구. 스크린리더가 "--" 를
+ * "dash dash" 로 읽어 의미를 잃는 문제를 차단한다.
+ */
+export const INVALID_MIDI_A11Y_FALLBACK = "음정 정보 없음";
+
+/**
+ * note 변환 호출자가 비유한 입력에 대해 표시 텍스트를 직접 지정할 수 있는 옵션.
+ *
+ * - `a11yFallback`: aria-label/스크린리더 노출 텍스트에서 "--" 대신 사용할 문자열.
+ *   생략 시 시각용 placeholder("--") 가 그대로 반환되어 기존 동작과 호환된다.
+ *   a11y 컨텍스트에서 명시적으로 `INVALID_MIDI_A11Y_FALLBACK` 또는 자체 문구를
+ *   전달하기를 권장한다 (이슈 #766).
+ */
+export type NoteNameOptions = {
+  readonly a11yFallback?: string;
+};
+
+export function midiToNoteName(
+  midi: number,
+  options?: NoteNameOptions,
+): string {
   if (!Number.isFinite(midi)) {
-    return INVALID_MIDI_PLACEHOLDER;
+    return options?.a11yFallback ?? INVALID_MIDI_PLACEHOLDER;
   }
   const pitchClass = PITCH_CLASSES[((midi % 12) + 12) % 12];
   const octave = Math.floor(midi / 12) - 1;
@@ -75,10 +99,15 @@ export function midiToNoteName(midi: number): string {
  * 옥타브 숫자는 SPN과 동일 규칙(C0=옥타브 0, C4=middle C=옥타브 4).
  *
  * 비유한 입력은 `INVALID_MIDI_PLACEHOLDER` 를 반환한다 (이슈 #757).
+ * `options.a11yFallback` 을 전달하면 aria-label 등 a11y 컨텍스트에서 의미 있는
+ * 텍스트로 대체할 수 있다 (이슈 #766).
  */
-export function midiToKoreanNoteName(midi: number): string {
+export function midiToKoreanNoteName(
+  midi: number,
+  options?: NoteNameOptions,
+): string {
   if (!Number.isFinite(midi)) {
-    return INVALID_MIDI_PLACEHOLDER;
+    return options?.a11yFallback ?? INVALID_MIDI_PLACEHOLDER;
   }
   const pitchClass = KOREAN_PITCH_CLASSES[((midi % 12) + 12) % 12];
   const octave = Math.floor(midi / 12) - 1;
@@ -92,8 +121,17 @@ export function midiToKoreanNoteName(midi: number): string {
  *
  * 차트 Y축처럼 공간 좁은 곳은 `midiToKoreanNoteName` 또는 `midiToNoteName`
  * 한쪽만 쓰고, 본문/카드/슬라이더처럼 공간 여유가 있는 곳에서 병기 사용.
+ *
+ * 비유한 입력에 `options.a11yFallback` 이 전달되면 병기 형식 대신 fallback 만
+ * 단독 반환한다 — "음정 정보 없음 (음정 정보 없음)" 같은 중복 노출 방지.
  */
-export function midiToCombinedNoteName(midi: number): string {
+export function midiToCombinedNoteName(
+  midi: number,
+  options?: NoteNameOptions,
+): string {
+  if (!Number.isFinite(midi) && options?.a11yFallback !== undefined) {
+    return options.a11yFallback;
+  }
   return `${midiToKoreanNoteName(midi)} (${midiToNoteName(midi)})`;
 }
 
