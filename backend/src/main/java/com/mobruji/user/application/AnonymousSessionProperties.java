@@ -15,6 +15,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <li>{@code cleanupMaxPerRun}: batch 1회당 최대 처리 sessionId 수 (부하 분산).</li>
  * <li>{@code activityFlushInterval}: SessionActivityTracker 의 5분 캐시 윈도우 (PR 3, #924).
  * 이 간격 미만으로 같은 sessionId 가 재요청하면 DB UPDATE 를 skip — 매 요청 write 부담 회피.</li>
+ * <li>{@code activityCacheMaxSize}: SessionActivityTracker in-memory 캐시 상한 (LRU eviction,
+ * spec §5-2 메모리 누수 방어, PR #937 follow-up). revoke evict 가 정상 경로를 비우고,
+ * 본 상한은 위조/누락된 sessionId 의 비정상 누적을 차단한다.</li>
  * </ul>
  *
  * <p>모두 환경변수로 override 가능. 미지정 시 코드 default fallback — webhook URL 같은
@@ -25,7 +28,8 @@ public record AnonymousSessionProperties(
         Integer ttlDays,
         String cleanupCron,
         Integer cleanupMaxPerRun,
-        Duration activityFlushInterval
+        Duration activityFlushInterval,
+        Integer activityCacheMaxSize
 ) {
 
     /** ADR-0013 §D-1 default — 180일 inactive 만료. */
@@ -39,6 +43,12 @@ public record AnonymousSessionProperties(
 
     /** spec §5-2 / §5-8 default — 5분 캐시 윈도우. */
     public static final Duration DEFAULT_ACTIVITY_FLUSH_INTERVAL = Duration.ofMinutes(5);
+
+    /**
+     * spec §5-2 default — in-memory 캐시 LRU 상한 10,000 entry (~ 1 MB UUID + Instant).
+     * batch {@link #DEFAULT_CLEANUP_MAX_PER_RUN} 과 동일 magnitude. PR #937 follow-up.
+     */
+    public static final int DEFAULT_ACTIVITY_CACHE_MAX_SIZE = 10_000;
 
     public AnonymousSessionProperties {
         // null 인 항목은 default fallback (record canonical constructor 보정).
@@ -54,6 +64,9 @@ public record AnonymousSessionProperties(
         if (activityFlushInterval == null) {
             activityFlushInterval = DEFAULT_ACTIVITY_FLUSH_INTERVAL;
         }
+        if (activityCacheMaxSize == null) {
+            activityCacheMaxSize = DEFAULT_ACTIVITY_CACHE_MAX_SIZE;
+        }
         if (ttlDays <= 0) {
             throw new IllegalArgumentException("mobruji.session.ttl-days must be > 0: " + ttlDays);
         }
@@ -64,6 +77,10 @@ public record AnonymousSessionProperties(
         if (activityFlushInterval.isNegative() || activityFlushInterval.isZero()) {
             throw new IllegalArgumentException(
                     "mobruji.session.activity-flush-interval must be > 0: " + activityFlushInterval);
+        }
+        if (activityCacheMaxSize <= 0) {
+            throw new IllegalArgumentException(
+                    "mobruji.session.activity-cache-max-size must be > 0: " + activityCacheMaxSize);
         }
     }
 }
