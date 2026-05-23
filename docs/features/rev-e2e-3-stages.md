@@ -41,17 +41,18 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 
 ### 3-2. develop 머지 후 사후 검사 (단계 2)
 - **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
+- 후보 발굴: `gh pr list --state merged --base develop --search 'merged:>1h ago -label:rev-post-merge-pass -label:type:release'`
 - develop 머지 직후 NCP dev deploy 사이클 완료까지 대기 (~5분)
 - rev 가 단계 1 시나리오 동일 재실행 — 실제 deploy 환경
-- 통과 → PR 코멘트 `✅ rev e2e post-merge pass`
+- 통과 → PR 코멘트 `✅ rev e2e post-merge pass` + 라벨 `rev-post-merge-pass` (멱등성 표식)
 - 실패 → 즉시 revert 이슈 등록 + `regression:dev` 라벨 + Discord push
 
 ### 3-3. release 후 production 검증 (단계 3)
 - **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
 - release (develop → main) 머지 + production deploy 완료까지 대기
 - rev 가 release 에 포함된 모든 e2e 가능 PR 에 대해 단계 1 시나리오 재실행
-- 통과 → release 노트에 `✅ rev e2e production verified` 추가
-- 실패 → hotfix 이슈 등록 + `regression:prod` 라벨 + 즉시 Discord push
+- 통과 → release 노트에 `✅ rev e2e production verified` 추가 + PR 라벨 `rev-prod-pass`
+- 실패 → hotfix 이슈 등록 + `regression:prod` 라벨 + 즉시 Discord push (사용자 부재여도 자율 hotfix)
 
 ## 4. 비기능 요구사항
 - 단계별 timeout: 단계 1 = 10분, 단계 2 = 5분, 단계 3 = 10분
@@ -59,9 +60,11 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 - 모든 단계 결과는 PR 코멘트 + cycle-status.json `rev.in_progress` 에 기록
 
 ## 5. 구현 계획
-- rev sub-agent prompt template 갱신 (`docs/ai-harness/12-sub-agent-prompt-template.md`) — 별 PR (PR #875 머지 후)
-- CLAUDE.md §4 품질 게이트에 "type:fix/feat PR 머지 전 rev 3단계 e2e" 한 줄 — 별 PR (PR #875 머지 후)
-- rev e2e 시나리오 라이브러리 (`tools/rev-e2e/`) — 별 PR
+- [x] rev sub-agent prompt template 갱신 (`docs/ai-harness/12-sub-agent-prompt-template.md` §E-2) — **PR #945 (2026-05-24 완료)**
+- [x] GitHub Actions `rev-gate.yml` check 신설 (라벨/코멘트 부재 시 머지 차단) — **PR #945 (2026-05-24 완료)**
+- [ ] CLAUDE.md §4 품질 게이트에 "모든 type:* PR 머지 전 rev 3단계 e2e" 한 줄 — 별 PR
+- [ ] rev e2e 시나리오 라이브러리 (`tools/rev-e2e/`) — 별 PR
+- [ ] `rev-gate.yml` 을 `required_status_checks` 로 GitHub 브랜치 보호 설정 등록 — 별 PR (사용자 admin 작업)
 
 ## 6. 마이그레이션 / rollout
 - phase 1: 단계 1 (PR 머지 전) 만 — 즉시
