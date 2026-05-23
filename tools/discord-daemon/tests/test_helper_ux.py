@@ -238,6 +238,16 @@ class BotAutoAckTests(unittest.TestCase):
         self._run_handler(env, message)
         message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
 
+    def test_auto_ack_text_v2_phrasing_guard(self) -> None:
+        """BOT_AUTO_ACK_TEXT 문구 회귀 가드 (이슈 #943 v2).
+
+        사용자 정정 (2026-05-24): helper-nmae 협업 관계 표현 필수.
+        '🤖 helper bot' prefix + 'nmae 상태 확인' 두 substring 모두 포함해야 한다.
+        문구 자체 변경 시 본 가드 갱신 후 진행.
+        """
+        self.assertIn("🤖 helper bot", bot.BOT_AUTO_ACK_TEXT)
+        self.assertIn("nmae 상태 확인", bot.BOT_AUTO_ACK_TEXT)
+
     def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거
         ref = mock.MagicMock()
