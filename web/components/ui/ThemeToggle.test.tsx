@@ -120,15 +120,35 @@ describe("ThemeToggle", () => {
     expect(button.getAttribute("data-theme-mode")).toBe("system");
   });
 
-  it("aria-pressed 가 dark 모드일 때만 true 로 동기화된다", () => {
+  it("aria-pressed 가 실제 다크 활성 여부(isDark) 와 동기화된다 — system+OS light 흐름 (#622)", () => {
+    // OS prefers=light 기본 → system 모드는 dark 비활성.
     render(<ThemeToggle />);
     const button = screen.getByRole("button");
-    expect(button.getAttribute("aria-pressed")).toBe("false"); // system
+    expect(button.getAttribute("aria-pressed")).toBe("false"); // system + OS light
     fireEvent.click(button); // light
     expect(button.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(button); // dark
     expect(button.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(button); // system
+    expect(button.getAttribute("aria-pressed")).toBe("false"); // system + OS light
+  });
+
+  it("[#622] system 모드 + OS dark → aria-pressed='true' (다크 결과 진실값)", () => {
+    // SR 사용자가 들어야 하는 진실은 "현재 다크 활성" 여부. mode 가 system 이어도
+    // OS 가 dark 면 실제 화면은 dark → aria-pressed 도 true 여야 한다.
+    setOsPrefersDark(true);
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("data-theme-mode")).toBe("system");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("[#622] system 모드 중 OS dark→light 변경 시 aria-pressed 도 즉시 false 로 동기화", () => {
+    const fireOsChange = setOsPrefersDark(true);
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    act(() => fireOsChange(false));
     expect(button.getAttribute("aria-pressed")).toBe("false");
   });
 
