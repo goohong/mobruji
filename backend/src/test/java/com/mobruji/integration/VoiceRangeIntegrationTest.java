@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.notNullValue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -56,6 +57,7 @@ class VoiceRangeIntegrationTest {
         // 1) POST → 201
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body(createBody)
                 .when()
                 .post("/api/v1/voice-ranges")
@@ -69,6 +71,7 @@ class VoiceRangeIntegrationTest {
 
         // 2) GET → 200
         given()
+                .header("X-Session-Id", sessionId)
                 .when()
                 .get("/api/v1/voice-ranges/" + sessionId)
                 .then()
@@ -86,6 +89,7 @@ class VoiceRangeIntegrationTest {
                 """;
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body(updateBody)
                 .when()
                 .put("/api/v1/voice-ranges/" + sessionId)
@@ -97,6 +101,7 @@ class VoiceRangeIntegrationTest {
 
         // 4) GET 재조회 → 갱신 확인
         given()
+                .header("X-Session-Id", sessionId)
                 .when()
                 .get("/api/v1/voice-ranges/" + sessionId)
                 .then()
@@ -111,6 +116,7 @@ class VoiceRangeIntegrationTest {
 
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                         """.formatted(sessionId))
@@ -121,6 +127,7 @@ class VoiceRangeIntegrationTest {
 
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"sessionId":"%s","lowestNoteMidi":55,"highestNoteMidi":78,"sourceMethod":"SELF_REPORT"}
                         """.formatted(sessionId))
@@ -143,6 +150,7 @@ class VoiceRangeIntegrationTest {
 
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                         """.formatted(sessionId))
@@ -168,6 +176,7 @@ class VoiceRangeIntegrationTest {
         final String sessionId = "e2e-snapshot-put";
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                         """.formatted(sessionId))
@@ -178,6 +187,7 @@ class VoiceRangeIntegrationTest {
 
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .header("X-Session-Id", sessionId)
                 .body("""
                         {"lowestNoteMidi":50,"highestNoteMidi":72,"sourceMethod":"MIC_MEASURE"}
                         """)
@@ -193,5 +203,134 @@ class VoiceRangeIntegrationTest {
         assertThat(voiceRangeSnapshotResponses.get(1).getLowMidi()).isEqualTo(50);
         assertThat(voiceRangeSnapshotResponses.get(1).getSourceMethod())
                 .isEqualTo(com.mobruji.voice.domain.VoiceRangeSourceMethod.MIC_MEASURE);
+    }
+
+    /**
+     * 이슈 #868 — ADR-0011 §28 후속 적용. POST/GET/PUT 모두 session-bound 이므로
+     * {@code X-Session-Id} 헤더가 누락/blank/path-or-body 와 불일치 시 401 이어야 한다.
+     * sessionId 원문은 응답에 노출되지 않는다 (security-policy.md §3).
+     */
+    @Nested
+    @DisplayName("session-bound 인증 (ADR-0011 §28, 이슈 #868)")
+    class SessionBoundAuth {
+
+        @Test
+        @DisplayName("GET: X-Session-Id 헤더 누락 → 401")
+        void get_missingHeader_returns401() {
+            final String sessionId = "e2e-auth-get-missing";
+
+            given()
+                    .when()
+                    .get("/api/v1/voice-ranges/" + sessionId)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+        }
+
+        @Test
+        @DisplayName("GET: X-Session-Id 헤더 blank → 401")
+        void get_blankHeader_returns401() {
+            final String sessionId = "e2e-auth-get-blank";
+
+            given()
+                    .header("X-Session-Id", "   ")
+                    .when()
+                    .get("/api/v1/voice-ranges/" + sessionId)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+        }
+
+        @Test
+        @DisplayName("GET: X-Session-Id 헤더와 path sessionId 불일치 → 401, 음역 원문 미노출")
+        void get_mismatchedHeader_returns401() {
+            final String sessionA = "e2e-auth-get-A";
+            final String sessionB = "e2e-auth-get-B";
+
+            given()
+                    .header("X-Session-Id", sessionB)
+                    .when()
+                    .get("/api/v1/voice-ranges/" + sessionA)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value())
+                    // 401 응답에 sessionId 원문이 노출되지 않아야 함
+                    .body("message", org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(sessionA)));
+        }
+
+        @Test
+        @DisplayName("PUT: X-Session-Id 헤더 누락 → 401 (음역 갱신 차단)")
+        void put_missingHeader_returns401() {
+            final String sessionId = "e2e-auth-put-missing";
+
+            given()
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .body("""
+                            {"lowestNoteMidi":50,"highestNoteMidi":72,"sourceMethod":"MIC_MEASURE"}
+                            """)
+                    .when()
+                    .put("/api/v1/voice-ranges/" + sessionId)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            // 가드가 service 전에 거부 → 음역이 생성/수정되지 않아야 함
+            assertThat(voiceRangeRepository.findBySessionId(sessionId)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("PUT: X-Session-Id 헤더와 path sessionId 불일치 → 401 (음역 갱신 차단)")
+        void put_mismatchedHeader_returns401() {
+            final String pathSessionId = "e2e-auth-put-A";
+            final String headerSessionId = "e2e-auth-put-B";
+
+            given()
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .header("X-Session-Id", headerSessionId)
+                    .body("""
+                            {"lowestNoteMidi":50,"highestNoteMidi":72,"sourceMethod":"MIC_MEASURE"}
+                            """)
+                    .when()
+                    .put("/api/v1/voice-ranges/" + pathSessionId)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            assertThat(voiceRangeRepository.findBySessionId(pathSessionId)).isEmpty();
+            assertThat(voiceRangeRepository.findBySessionId(headerSessionId)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("POST: X-Session-Id 헤더 누락 → 401 (upsert 실행 차단)")
+        void post_missingHeader_returns401() {
+            final String sessionId = "e2e-auth-post-missing";
+            final String requestBody = """
+                    {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
+                    """.formatted(sessionId);
+
+            given()
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .body(requestBody)
+                    .when()
+                    .post("/api/v1/voice-ranges")
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            assertThat(voiceRangeRepository.findBySessionId(sessionId)).isEmpty();
+            assertThat(voiceRangeSnapshotRepository.findBySessionIdOrderByMeasuredAtDesc(sessionId)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("POST: body sessionId ≠ X-Session-Id 헤더 → 401 (음역 위조 차단)")
+        void post_mismatchedHeader_returns401() {
+            final String bodySessionId = "e2e-auth-post-A";
+            final String headerSessionId = "e2e-auth-post-B";
+            final String requestBody = """
+                    {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
+                    """.formatted(bodySessionId);
+
+            given()
+                    .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .header("X-Session-Id", headerSessionId)
+                    .body(requestBody)
+                    .when()
+                    .post("/api/v1/voice-ranges")
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+            assertThat(voiceRangeRepository.findBySessionId(bodySessionId)).isEmpty();
+            assertThat(voiceRangeRepository.findBySessionId(headerSessionId)).isEmpty();
+        }
     }
 }
