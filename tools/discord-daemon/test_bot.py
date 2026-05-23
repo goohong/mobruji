@@ -619,5 +619,249 @@ class MessagePrefixTests(unittest.TestCase):
         self.assertIn("queue: 3", rendered)
 
 
+class StripAnsiTests(unittest.TestCase):
+    """ANSI escape 제거 — claude TUI 컬러/커서 코드 정리."""
+
+    def test_plain_text_unchanged(self) -> None:
+        self.assertEqual(bot.strip_ansi("hello world"), "hello world")
+
+    def test_removes_color_csi(self) -> None:
+        coloured = "\x1b[31mred\x1b[0m text"
+        self.assertEqual(bot.strip_ansi(coloured), "red text")
+
+    def test_removes_cursor_csi(self) -> None:
+        # 커서 이동 / 화면 클리어 같은 CSI 도 제거.
+        self.assertEqual(bot.strip_ansi("\x1b[2J\x1b[H clean"), " clean")
+
+    def test_removes_osc_title(self) -> None:
+        # OSC (\x1b]) ... BEL — 터미널 타이틀 변경 등.
+        self.assertEqual(bot.strip_ansi("\x1b]0;title\x07body"), "body")
+
+
+class SanitizeChunkTests(unittest.TestCase):
+    """chunk 정리 — ANSI 제거 + 빈 라인 압축 + 길이 임계."""
+
+    def test_short_chunk_returns_none(self) -> None:
+        # 100자 미만은 노이즈로 skip (사용자 입력 echo / 짧은 prompt 가정).
+        self.assertIsNone(bot.sanitize_chunk("hi"))
+
+    def test_strips_ansi_then_returns_text(self) -> None:
+        text = "\x1b[32m" + ("maestro 응답입니다 " * 10) + "\x1b[0m"
+        out = bot.sanitize_chunk(text)
+        self.assertIsNotNone(out)
+        self.assertNotIn("\x1b", out or "")
+        self.assertGreaterEqual(len(out or ""), bot.MAESTRO_WATCHER_MIN_CHUNK_LEN)
+
+    def test_collapses_consecutive_blank_lines(self) -> None:
+        text = "line1\n\n\n\nline2\n" + ("x" * bot.MAESTRO_WATCHER_MIN_CHUNK_LEN)
+        out = bot.sanitize_chunk(text) or ""
+        # 빈 라인 4개가 1개로 줄어들어야 함.
+        self.assertNotIn("\n\n\n", out)
+
+    def test_truncates_when_over_max(self) -> None:
+        text = "a" * (bot.MAESTRO_WATCHER_MAX_CHUNK_LEN * 2)
+        out = bot.sanitize_chunk(text) or ""
+        self.assertLessEqual(len(out), bot.MAESTRO_WATCHER_MAX_CHUNK_LEN)
+        self.assertIn("truncated", out)
+
+    def test_whitespace_only_returns_none(self) -> None:
+        self.assertIsNone(bot.sanitize_chunk("   \n  \n\t  "))
+
+
+class ChunkSignatureTests(unittest.TestCase):
+    """sha256 dedup id 안정성 + namespace prefix."""
+
+    def test_stable_for_same_content(self) -> None:
+        self.assertEqual(
+            bot.chunk_signature("hello maestro"),
+            bot.chunk_signature("hello maestro"),
+        )
+
+    def test_different_for_different_content(self) -> None:
+        self.assertNotEqual(
+            bot.chunk_signature("a"),
+            bot.chunk_signature("b"),
+        )
+
+    def test_has_maestro_prefix(self) -> None:
+        sig = bot.chunk_signature("anything")
+        self.assertTrue(sig.startswith(bot.MAESTRO_WATCHER_DEDUP_PREFIX))
+
+
+class MaestroWatcherLoopTests(unittest.TestCase):
+    """watcher loop 통합 동작: tail → idle flush → sanitize → dedup → push."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
+        self.tmp.close()
+        self.path = self.tmp.name
+        self.ledger_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
+        self.ledger_file.close()
+        self.ledger = bot.DedupLedger(self.ledger_file.name)
+
+    def tearDown(self) -> None:
+        os.unlink(self.path)
+        os.unlink(self.ledger_file.name)
+
+    def _append(self, text: str) -> None:
+        with open(self.path, "a", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def _run_loop_with_script(
+        self,
+        script: list,
+        *,
+        idle_seconds: float = 30.0,
+        initial_offset: int = 0,
+    ) -> list[str]:
+        """script: per-tick actions. None=no-op, str=append, ('time', dt)=clock 진행.
+
+        loop 은 script 다 소비 후 CancelledError 로 종료.
+        반환: channel.send 로 들어온 텍스트 리스트.
+        """
+        sent: list[str] = []
+
+        class FakeChannel:
+            async def send(self_inner, text):  # noqa: ANN001
+                sent.append(text)
+
+        class FakeClient:
+            def get_channel(self_inner, channel_id):  # noqa: ANN001
+                return FakeChannel()
+
+        # 단조 증가 가짜 시계 (poll 한 번에 +1 초). script 항목 중 ('advance', n) 으로 점프 가능.
+        clock = {"t": 0.0}
+
+        def fake_clock() -> float:
+            return clock["t"]
+
+        tick = {"i": 0}
+
+        async def fake_sleep(_seconds):
+            # sleep 호출 시점에 다음 script 항목 처리 후 clock 진행.
+            idx = tick["i"]
+            if idx >= len(script):
+                raise asyncio.CancelledError
+            action = script[idx]
+            tick["i"] = idx + 1
+            if isinstance(action, str):
+                self._append(action)
+                clock["t"] += 1.0
+            elif isinstance(action, tuple) and action[0] == "advance":
+                clock["t"] += float(action[1])
+            else:
+                clock["t"] += 1.0
+
+        import asyncio
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(
+                bot.maestro_response_watcher_loop(
+                    FakeClient(),
+                    channel_id=42,
+                    pipe_pane_path=self.path,
+                    ledger=self.ledger,
+                    poll_interval=1.0,
+                    idle_seconds=idle_seconds,
+                    time_source=fake_clock,
+                    sleep=fake_sleep,
+                    initial_offset=initial_offset,
+                )
+            )
+        return sent
+
+    def test_pushes_long_chunk_after_idle(self) -> None:
+        long_text = "maestro 응답입니다 " * 20  # 100자 넘김
+        script = [
+            long_text,            # tick0: append + clock +1
+            ("advance", 60),      # tick1: idle 초과 → 다음 iter loop 시작에서 flush
+            None,                 # tick2: flush 발생 후 추가 sleep
+            None,                 # tick3: 종료
+        ]
+        sent = self._run_loop_with_script(script, idle_seconds=30.0)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("maestro", sent[0])
+        # ledger 에 mark 되어 다음 동일 chunk push 안 됨.
+        sig = bot.chunk_signature(bot.sanitize_chunk(long_text))
+        self.assertTrue(self.ledger.is_processed(sig))
+
+    def test_skips_short_chunk(self) -> None:
+        # 짧은 chunk (100자 미만) 는 sanitize 에서 None — push 안 됨.
+        script = [
+            "short",
+            ("advance", 60),
+            None,
+            None,
+        ]
+        sent = self._run_loop_with_script(script, idle_seconds=30.0)
+        self.assertEqual(sent, [])
+
+    def test_dedup_blocks_repeat_push(self) -> None:
+        long_text = "x" * 200
+        # 미리 ledger 에 sig 등록.
+        sanitized = bot.sanitize_chunk(long_text)
+        self.ledger.mark_processed(bot.chunk_signature(sanitized))
+        script = [
+            long_text,
+            ("advance", 60),
+            None,
+            None,
+        ]
+        sent = self._run_loop_with_script(script, idle_seconds=30.0)
+        self.assertEqual(sent, [])
+
+    def test_no_flush_while_still_active(self) -> None:
+        # idle 미달이면 flush 안 됨.
+        long_text = "y" * 200
+        script = [
+            long_text,
+            ("advance", 5),  # idle_seconds=30 미달
+            None,
+            None,
+        ]
+        sent = self._run_loop_with_script(script, idle_seconds=30.0)
+        self.assertEqual(sent, [])
+
+    def test_strips_ansi_before_push(self) -> None:
+        coloured = "\x1b[33m" + ("payload " * 30) + "\x1b[0m"
+        script = [
+            coloured,
+            ("advance", 60),
+            None,
+            None,
+        ]
+        sent = self._run_loop_with_script(script, idle_seconds=30.0)
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn("\x1b", sent[0])
+
+
+class MaestroWatcherEnvTests(unittest.TestCase):
+    """env 분기 — opt-in 기본값 확인."""
+
+    def test_defaults_disabled(self) -> None:
+        base = {
+            "DISCORD_BOT_TOKEN": "t",
+            "ALLOWED_USER_IDS": "111",
+            "MOBRUJI_CHANNEL_ID": "999",
+            "GITHUB_PAT": "p",
+            "GITHUB_REPO": "x/y",
+        }
+        with mock.patch.dict(os.environ, base, clear=True):
+            env = bot.load_env()
+        self.assertEqual(env["MAESTRO_RESPONSE_WATCHER_ENABLED"], "0")
+
+    def test_explicit_enable(self) -> None:
+        base = {
+            "DISCORD_BOT_TOKEN": "t",
+            "ALLOWED_USER_IDS": "111",
+            "MOBRUJI_CHANNEL_ID": "999",
+            "GITHUB_PAT": "p",
+            "GITHUB_REPO": "x/y",
+            "MAESTRO_RESPONSE_WATCHER_ENABLED": "1",
+        }
+        with mock.patch.dict(os.environ, base, clear=True):
+            env = bot.load_env()
+        self.assertEqual(env["MAESTRO_RESPONSE_WATCHER_ENABLED"], "1")
+
+
 if __name__ == "__main__":
     unittest.main()
