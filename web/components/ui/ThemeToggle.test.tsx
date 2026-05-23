@@ -172,4 +172,28 @@ describe("ThemeToggle", () => {
     fireOsChange(false);
     expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
   });
+
+  it("다른 탭이 mobruji-theme 를 dark 로 변경하면 <html.dark> 가 동기화된다", () => {
+    render(<ThemeToggle />);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(false);
+    // 다른 탭 시뮬레이션 — setMode 우회, 순수 storage 이벤트 + 사전 localStorage 반영.
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: THEME_STORAGE_KEY, newValue: "dark" }),
+    );
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
+  });
+
+  it("다른 key 의 storage 이벤트는 무시된다 — <html.dark> 불변", () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    render(<ThemeToggle />);
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
+    // 무관 key — subscribe filter 가 callback 호출을 막아야 함.
+    window.localStorage.setItem(THEME_STORAGE_KEY, "light"); // 저장은 바뀌나 이벤트 key 가 다름
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: "other-key", newValue: "noise" }),
+    );
+    // 이벤트가 무시되었으므로 useSyncExternalStore re-read 없음 → 클래스 그대로.
+    expect(document.documentElement.classList.contains(THEME_DARK_CLASS)).toBe(true);
+  });
 });
