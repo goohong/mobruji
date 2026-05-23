@@ -60,6 +60,26 @@ describe("searchSongs", () => {
     expect(url).toMatch(/\/api\/v1\/songs$/);
   });
 
+  it("keyword에 &·공백·+가 섞이면 모두 percent-인코딩한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+
+    await searchSongs("a b&c+d");
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/songs\?keyword=a%20b%26c%2Bd$/);
+  });
+
+  it("서버 5xx 응답이면 ApiError(status=500)를 던진다", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "boom" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(searchSongs("x")).rejects.toBeInstanceOf(ApiError);
+  });
+
   it("응답 JSON을 SongResponse[] 그대로 돌려준다", async () => {
     const songs = [
       {
@@ -127,5 +147,19 @@ describe("readSongById", () => {
     }
     expect(caught).toBeInstanceOf(ApiError);
     expect((caught as ApiError).status).toBe(404);
+  });
+
+  it("서버 5xx 응답이면 ApiError(status=500)를 던진다", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "boom" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(readSongById(1)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 500,
+    });
   });
 });
