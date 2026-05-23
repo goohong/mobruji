@@ -32,9 +32,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class VoiceRangeSnapshot {
 
-    private static final int LOWEST_ALLOWED_MIDI = 12;
-    private static final int HIGHEST_ALLOWED_MIDI = 119;
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -76,15 +73,15 @@ public class VoiceRangeSnapshot {
     }
 
     private static void validateRange(final int lowMidi, final int highMidi) {
-        if (lowMidi < LOWEST_ALLOWED_MIDI || lowMidi > HIGHEST_ALLOWED_MIDI) {
+        if (lowMidi < MidiRange.LOWEST_ALLOWED_MIDI || lowMidi > MidiRange.HIGHEST_ALLOWED_MIDI) {
             throw new IllegalArgumentException(
-                    "lowMidi out of allowed range [" + LOWEST_ALLOWED_MIDI + ", " + HIGHEST_ALLOWED_MIDI + "]: "
-                            + lowMidi);
+                    "lowMidi out of allowed range [" + MidiRange.LOWEST_ALLOWED_MIDI + ", "
+                            + MidiRange.HIGHEST_ALLOWED_MIDI + "]: " + lowMidi);
         }
-        if (highMidi < LOWEST_ALLOWED_MIDI || highMidi > HIGHEST_ALLOWED_MIDI) {
+        if (highMidi < MidiRange.LOWEST_ALLOWED_MIDI || highMidi > MidiRange.HIGHEST_ALLOWED_MIDI) {
             throw new IllegalArgumentException(
-                    "highMidi out of allowed range [" + LOWEST_ALLOWED_MIDI + ", " + HIGHEST_ALLOWED_MIDI + "]: "
-                            + highMidi);
+                    "highMidi out of allowed range [" + MidiRange.LOWEST_ALLOWED_MIDI + ", "
+                            + MidiRange.HIGHEST_ALLOWED_MIDI + "]: " + highMidi);
         }
         if (lowMidi > highMidi) {
             throw new IllegalArgumentException(

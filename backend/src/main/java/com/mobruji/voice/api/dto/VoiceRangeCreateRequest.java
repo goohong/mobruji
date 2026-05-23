@@ -6,12 +6,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import com.mobruji.voice.application.CreateVoiceRangeCommand;
+import com.mobruji.voice.domain.MidiRange;
 import com.mobruji.voice.domain.VoiceRangeSourceMethod;
 
 public record VoiceRangeCreateRequest(
         @NotBlank String sessionId,
-        @NotNull @Min(12) @Max(119) Integer lowestNoteMidi,
-        @NotNull @Min(12) @Max(119) Integer highestNoteMidi,
+        @NotNull @Min(MidiRange.LOWEST_ALLOWED_MIDI) @Max(MidiRange.HIGHEST_ALLOWED_MIDI) Integer lowestNoteMidi,
+        @NotNull @Min(MidiRange.LOWEST_ALLOWED_MIDI) @Max(MidiRange.HIGHEST_ALLOWED_MIDI) Integer highestNoteMidi,
         @NotNull VoiceRangeSourceMethod sourceMethod
 ) {
 
