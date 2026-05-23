@@ -52,3 +52,37 @@ describe("useBookmarksStore.setBookmarkedSongIds", () => {
     expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([42, 99]);
   });
 });
+
+describe("useBookmarksStore 경계 회귀 (#583)", () => {
+  it("동일 songId 3회 toggle은 결국 비어있다 (멱등 누적)", () => {
+    const { toggleBookmark } = useBookmarksStore.getState();
+    toggleBookmark(5);
+    toggleBookmark(5);
+    toggleBookmark(5);
+    expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([5]);
+  });
+
+  it("setBookmarkedSongIds([])는 store를 비운다", () => {
+    const { toggleBookmark, setBookmarkedSongIds } =
+      useBookmarksStore.getState();
+    toggleBookmark(1);
+    setBookmarkedSongIds([]);
+    expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([]);
+  });
+
+  it("clearBookmarks는 전체를 비운다", () => {
+    const { toggleBookmark, clearBookmarks } = useBookmarksStore.getState();
+    toggleBookmark(1);
+    toggleBookmark(2);
+    clearBookmarks();
+    expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([]);
+  });
+
+  it("setBookmarkedSongIds 입력 배열을 외부에서 mutate해도 store는 격리된다", () => {
+    const { setBookmarkedSongIds } = useBookmarksStore.getState();
+    const input = [1, 2, 3];
+    setBookmarkedSongIds(input);
+    (input as number[]).push(999);
+    expect(useBookmarksStore.getState().bookmarkedSongIds).toEqual([1, 2, 3]);
+  });
+});
