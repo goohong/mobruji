@@ -258,4 +258,29 @@ describe("extractVoiceRangeProgressFromSnapshots", () => {
     expect(result!.minLowMidi).toBe(50);
     expect(result!.maxHighMidi).toBe(74);
   });
+
+  it("[regression #569] 모든 snapshot 이 동일 MIDI 면 spanDelta=0 + low/highDelta=0 (flat progress)", () => {
+    const result = extractVoiceRangeProgressFromSnapshots([
+      buildSnapshot({ id: 1, lowMidi: 60, highMidi: 72, measuredAt: "2026-05-21T08:00:00" }),
+      buildSnapshot({ id: 2, lowMidi: 60, highMidi: 72, measuredAt: "2026-05-21T10:00:00" }),
+      buildSnapshot({ id: 3, lowMidi: 60, highMidi: 72, measuredAt: "2026-05-21T12:00:00" }),
+    ]);
+    expect(result).not.toBeNull();
+    expect(result!.points).toHaveLength(3);
+    expect(result!.spanDeltaSemitones).toBe(0);
+    expect(result!.lowMidiDeltaSemitones).toBe(0);
+    expect(result!.highMidiDeltaSemitones).toBe(0);
+  });
+
+  it("[regression #569] min/max 가 중간 snapshot 에 있어도 정확히 스캔된다 (끝점 초기값 트랩 방지)", () => {
+    // 끝점은 50~72 / 52~70. min(48)/max(74) 는 중간 snapshot 에만 존재.
+    const result = extractVoiceRangeProgressFromSnapshots([
+      buildSnapshot({ id: 1, lowMidi: 50, highMidi: 72, measuredAt: "2026-05-21T08:00:00" }),
+      buildSnapshot({ id: 2, lowMidi: 48, highMidi: 74, measuredAt: "2026-05-21T10:00:00" }),
+      buildSnapshot({ id: 3, lowMidi: 52, highMidi: 70, measuredAt: "2026-05-21T12:00:00" }),
+    ]);
+    expect(result).not.toBeNull();
+    expect(result!.minLowMidi).toBe(48);
+    expect(result!.maxHighMidi).toBe(74);
+  });
 });
