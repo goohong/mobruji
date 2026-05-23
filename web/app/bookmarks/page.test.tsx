@@ -1,9 +1,10 @@
 /**
- * 북마크한 곡 페이지 테스트 (closes #184 + 진입 동선 #252).
+ * 북마크한 곡 페이지 테스트 (closes #184 + 진입 동선 #252 + fix #845).
  *
  * 시나리오:
- *  - 빈 상태: BE가 빈 배열 응답 시 안내 + CTA 노출, readSongById 호출 없음.
- *  - BE GET이 N건을 반환하면 readSongById가 N번 호출되고 카드 리스트가 렌더된다.
+ *  - 빈 상태: BE가 빈 wrapper 응답 시 안내 + CTA 노출.
+ *  - BE GET이 N건을 반환하면 응답에 포함된 곡 메타가 카드 리스트로 렌더된다
+ *    (closes #845 — BE join 응답이라 별도 readSongById 호출 없음).
  *  - BE 응답은 zustand store(`useBookmarksStore`)와 동기화된다.
  *
  * 구조는 `web/app/likes/page.test.tsx` 와 대칭 — 두 페이지가 동일한 흐름이라
@@ -18,20 +19,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import BookmarksPage from "./page";
 import {
   readBookmarksBySessionId,
-  type BookmarkResponse,
+  type BookmarkListResponse,
+  type BookmarkWithSongResponse,
 } from "@/lib/api/feedback";
-import { readSongById, type SongResponse } from "@/lib/api/song";
+import type { SongResponse } from "@/lib/api/song";
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useSessionStore } from "@/store/session";
-
-vi.mock("@/lib/api/song", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api/song")>("@/lib/api/song");
-  return {
-    ...actual,
-    readSongById: vi.fn(),
-  };
-});
 
 vi.mock("@/lib/api/feedback", () => ({
   readLikesBySessionId: vi.fn(),
@@ -40,7 +33,6 @@ vi.mock("@/lib/api/feedback", () => ({
   readBookmarksBySessionId: vi.fn(),
 }));
 
-const readSongByIdMock = vi.mocked(readSongById);
 const readBookmarksMock = vi.mocked(readBookmarksBySessionId);
 
 function buildSong(id: number): SongResponse {
@@ -60,12 +52,21 @@ function buildSong(id: number): SongResponse {
   };
 }
 
-function buildBookmark(songId: number): BookmarkResponse {
+function buildBookmarkEntry(songId: number): BookmarkWithSongResponse {
   return {
     id: songId * 10,
-    sessionId: "test-session-id",
-    songId,
-    createdAt: "2026-05-20T12:00:00",
+    song: buildSong(songId),
+    bookmarkedAt: "2026-05-20T12:00:00",
+  };
+}
+
+function buildWrapper(songIds: number[]): BookmarkListResponse {
+  return {
+    responses: songIds.map(buildBookmarkEntry),
+    page: 0,
+    size: 20,
+    totalCount: songIds.length,
+    hasNext: false,
   };
 }
 
@@ -83,7 +84,6 @@ function renderWithQueryClient(ui: ReactNode) {
 }
 
 beforeEach(() => {
-  readSongByIdMock.mockReset();
   readBookmarksMock.mockReset();
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
@@ -102,8 +102,8 @@ afterEach(() => {
 });
 
 describe("/bookmarks 페이지", () => {
-  it("BE가 빈 배열을 반환하면 빈 상태 CTA를 노출하고 readSongById 호출 없음", async () => {
-    readBookmarksMock.mockResolvedValue([]);
+  it("BE가 빈 wrapper 를 반환하면 빈 상태 CTA를 노출", async () => {
+    readBookmarksMock.mockResolvedValue(buildWrapper([]));
 
     renderWithQueryClient(<BookmarksPage />);
 
@@ -118,7 +118,6 @@ describe("/bookmarks 페이지", () => {
     expect(
       screen.getByRole("link", { name: /곡 검색하기/ }),
     ).toHaveAttribute("href", "/songs");
-    expect(readSongByIdMock).not.toHaveBeenCalled();
     // BE는 sessionId를 받아 호출됐다.
     expect(readBookmarksMock).toHaveBeenCalledWith(
       "test-session-id",
@@ -126,9 +125,8 @@ describe("/bookmarks 페이지", () => {
     );
   });
 
-  it("BE GET 응답으로 곡 메타데이터를 페치해서 카드 리스트로 렌더하고 store를 동기화한다", async () => {
-    readBookmarksMock.mockResolvedValue([buildBookmark(42), buildBookmark(99)]);
-    readSongByIdMock.mockImplementation(async (id) => buildSong(id));
+  it("BE GET 응답(곡 메타 join)을 카드 리스트로 렌더하고 store 를 동기화한다", async () => {
+    readBookmarksMock.mockResolvedValue(buildWrapper([42, 99]));
 
     renderWithQueryClient(<BookmarksPage />);
 
@@ -136,8 +134,6 @@ describe("/bookmarks 페이지", () => {
       expect(screen.getByText("북마크-곡-42")).toBeInTheDocument();
       expect(screen.getByText("북마크-곡-99")).toBeInTheDocument();
     });
-    expect(readSongByIdMock).toHaveBeenCalledWith(42, expect.anything());
-    expect(readSongByIdMock).toHaveBeenCalledWith(99, expect.anything());
     expect(
       screen.getByRole("heading", { name: /북마크한 곡/ }),
     ).toBeInTheDocument();
@@ -153,8 +149,7 @@ describe("/bookmarks 페이지", () => {
   // closes #431 — 카운트 영역이 polite 라이브 영역으로 마킹되고 BE 응답 도착 시
   // 메시지가 업데이트되어야 한다. /likes 와 대칭 패턴.
   it("BE 응답이 도착하면 라이브 영역에 '총 N곡을 북마크했어요.' 메시지가 노출된다 (#431)", async () => {
-    readBookmarksMock.mockResolvedValue([buildBookmark(7), buildBookmark(8)]);
-    readSongByIdMock.mockImplementation(async (id) => buildSong(id));
+    readBookmarksMock.mockResolvedValue(buildWrapper([7, 8]));
 
     renderWithQueryClient(<BookmarksPage />);
 

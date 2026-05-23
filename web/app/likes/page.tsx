@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * 좋아요한 곡 페이지 (`/likes`, closes #176 + BE 연동 #184).
+ * 좋아한 곡 페이지 (`/likes`, closes #176 + BE 연동 #184, fix #845).
  *
  * 데이터 흐름:
  *   1. `useSessionStore.ensureSessionId()` 로 sessionId 확보.
  *   2. React Query `['likes', sessionId]` 로 `readLikesBySessionId` 호출 — source of truth.
+ *      응답은 `LikeListResponse` wrapper (closes #845) — `responses` 각 항목이
+ *      `LikeWithSongResponse { id, song, likedAt }` 로 곡 메타까지 join 되어 있다.
  *   3. 응답 수신 시 `useLikesStore.setLikedSongIds` 로 zustand 캐시 동기화
  *      (SongCard의 낙관적 업데이트 기준이 BE와 일치하도록).
- *   4. songId 목록만 받으므로 곡 메타데이터는 `useQueries`로 `readSongById` N건 일괄 페치.
+ *   4. `responses[].song` 을 그대로 SongCard 로 전달 — `readSongById` N+1 fan-out 제거
+ *      (BE 가 join 응답을 내려주므로).
  *
  * 결정 배경:
  *  - spec §5-6 은 v0.2 에서 `/likes` 전용 페이지를 만들지 않고 `/history` 탭으로만 두기로
@@ -21,17 +24,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { SongCard } from "@/app/recommend/components/SongCard";
 import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
 import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
-import { ApiError } from "@/lib/api/client";
 import { readLikesBySessionId } from "@/lib/api/feedback";
-import { readSongById, type SongResponse } from "@/lib/api/song";
+import type { SongResponse } from "@/lib/api/song";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
-import { Card } from "@/components/ui";
 
 export default function LikesPage() {
   const ensureSessionId = useSessionStore((state) => state.ensureSessionId);
@@ -54,9 +55,12 @@ export default function LikesPage() {
   });
 
   // BE 응답 → zustand store 동기화. SongCard의 낙관적 업데이트가 BE 기준에서 출발하도록.
+  // closes #845 — 응답 wrapper `responses[].song.id` 에서 songId 추출.
   useEffect(() => {
     if (likesQuery.data) {
-      setLikedSongIds(likesQuery.data.map((entry) => entry.songId));
+      setLikedSongIds(
+        likesQuery.data.responses.map((entry) => entry.song.id),
+      );
     }
   }, [likesQuery.data, setLikedSongIds]);
 
@@ -64,57 +68,23 @@ export default function LikesPage() {
     return <LoadingLikes />;
   }
 
-  const likedSongIds = (likesQuery.data ?? []).map((entry) => entry.songId);
+  // closes #845 — BE join 응답으로 곡 메타까지 한 번에 받는다 (N+1 제거).
+  const songs: SongResponse[] = (likesQuery.data?.responses ?? []).map(
+    (entry) => entry.song,
+  );
 
-  if (likedSongIds.length === 0) {
+  if (songs.length === 0) {
     return <EmptyLikes />;
   }
 
-  return <LikesContent likedSongIds={likedSongIds} />;
+  return <LikesContent songs={songs} />;
 }
 
 type LikesContentProps = {
-  likedSongIds: number[];
+  songs: SongResponse[];
 };
 
-function LikesContent({ likedSongIds }: LikesContentProps) {
-  const results = useQueries({
-    queries: likedSongIds.map((songId) => ({
-      queryKey: ["song", songId],
-      queryFn: ({ signal }: { signal?: AbortSignal }) =>
-        readSongById(songId, signal),
-      // 메타데이터는 자주 바뀌지 않음 — 좋아요 페이지 재진입 시 캐시 우선.
-      staleTime: 60_000,
-      retry: (failureCount: number, error: Error) => {
-        // 404는 곡이 삭제됐을 가능성 — 재시도 무의미.
-        if (error instanceof ApiError && error.status === 404) {
-          return false;
-        }
-        return failureCount < 1;
-      },
-    })),
-  });
-
-  const songs: SongResponse[] = [];
-  const missingSongIds: number[] = [];
-  let pendingCount = 0;
-
-  results.forEach((result, index) => {
-    const songId = likedSongIds[index];
-    if (result.isPending) {
-      pendingCount += 1;
-      return;
-    }
-    if (result.isError) {
-      // 404 ↔ 그 외 오류 분리: 404 는 "삭제된 곡" 안내, 그 외는 단순 누락 처리.
-      missingSongIds.push(songId);
-      return;
-    }
-    if (result.data) {
-      songs.push(result.data);
-    }
-  });
-
+function LikesContent({ songs }: LikesContentProps) {
   return (
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
       <div className="w-full max-w-2xl flex flex-col gap-6">
@@ -127,10 +97,10 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
           </h1>
           {/*
             (closes #431) 카운트 영역을 스크린 리더 라이브 영역으로 마킹한다.
-            BE 응답으로 likedSongIds 가 채워지거나 곡 메타데이터 N건 페치가 끝나며
-            메시지가 바뀌므로 polite live 로 알린다 (PR #428 /recommend 와 동일 패턴).
-            시각 표시는 그대로 유지하고 `aria-live` 만 부여 — 별도 sr-only 영역을
-            중복으로 두면 시각/SR 텍스트가 어긋날 위험이 있어 헤더 카피에 직접 부여.
+            BE 응답으로 likedSongIds 가 채워지면 메시지가 바뀌므로 polite live 로 알린다
+            (PR #428 /recommend 와 동일 패턴). 시각 표시는 그대로 유지하고 `aria-live` 만
+            부여 — 별도 sr-only 영역을 중복으로 두면 시각/SR 텍스트가 어긋날 위험이 있어
+            헤더 카피에 직접 부여.
           */}
           <p
             data-testid="likes-count-live"
@@ -139,29 +109,11 @@ function LikesContent({ likedSongIds }: LikesContentProps) {
             aria-atomic="true"
             className="text-sm text-zinc-600 dark:text-zinc-400"
           >
-            총 {likedSongIds.length}곡을 좋아했어요.
-            {pendingCount > 0 ? ` (불러오는 중 ${pendingCount}곡)` : null}
+            총 {songs.length}곡을 좋아했어요.
           </p>
         </header>
 
-        {songs.length > 0 ? (
-          <SongListWithModal songs={songs} />
-        ) : pendingCount === 0 ? (
-          <Card
-            role="status"
-            as="p"
-            flush
-            className="border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-          >
-            좋아한 곡 정보를 불러올 수 없어요. 잠시 후 다시 시도해주세요.
-          </Card>
-        ) : null}
-
-        {missingSongIds.length > 0 ? (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            ※ {missingSongIds.length}곡은 카탈로그에서 찾을 수 없어 표시하지 못했어요.
-          </p>
-        ) : null}
+        <SongListWithModal songs={songs} />
       </div>
     </main>
   );

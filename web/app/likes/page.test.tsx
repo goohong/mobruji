@@ -1,9 +1,10 @@
 /**
- * 좋아한 곡 페이지 테스트 (closes #176 + BE 연동 #184).
+ * 좋아한 곡 페이지 테스트 (closes #176 + BE 연동 #184 + fix #845).
  *
  * 시나리오:
- *  - 빈 상태: BE가 빈 배열 응답 시 안내 + CTA 노출, readSongById 호출 없음.
- *  - BE GET이 N건을 반환하면 readSongById가 N번 호출되고 카드 리스트가 렌더된다.
+ *  - 빈 상태: BE가 빈 wrapper 응답 시 안내 + CTA 노출.
+ *  - BE GET이 N건을 반환하면 응답에 포함된 곡 메타가 카드 리스트로 렌더된다
+ *    (closes #845 — BE join 응답이라 별도 readSongById 호출 없음).
  *  - BE 응답은 zustand store(`useLikesStore`)와 동기화된다.
  */
 
@@ -13,19 +14,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import LikesPage from "./page";
-import { readLikesBySessionId, type LikeResponse } from "@/lib/api/feedback";
-import { readSongById, type SongResponse } from "@/lib/api/song";
+import {
+  readLikesBySessionId,
+  type LikeListResponse,
+  type LikeWithSongResponse,
+} from "@/lib/api/feedback";
+import type { SongResponse } from "@/lib/api/song";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
-
-vi.mock("@/lib/api/song", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api/song")>("@/lib/api/song");
-  return {
-    ...actual,
-    readSongById: vi.fn(),
-  };
-});
 
 vi.mock("@/lib/api/feedback", () => ({
   readLikesBySessionId: vi.fn(),
@@ -34,7 +30,6 @@ vi.mock("@/lib/api/feedback", () => ({
   readBookmarksBySessionId: vi.fn(),
 }));
 
-const readSongByIdMock = vi.mocked(readSongById);
 const readLikesMock = vi.mocked(readLikesBySessionId);
 
 function buildSong(id: number): SongResponse {
@@ -54,12 +49,21 @@ function buildSong(id: number): SongResponse {
   };
 }
 
-function buildLike(songId: number): LikeResponse {
+function buildLikeEntry(songId: number): LikeWithSongResponse {
   return {
     id: songId * 10,
-    sessionId: "test-session-id",
-    songId,
-    createdAt: "2026-05-20T12:00:00",
+    song: buildSong(songId),
+    likedAt: "2026-05-20T12:00:00",
+  };
+}
+
+function buildWrapper(songIds: number[]): LikeListResponse {
+  return {
+    responses: songIds.map(buildLikeEntry),
+    page: 0,
+    size: 20,
+    totalCount: songIds.length,
+    hasNext: false,
   };
 }
 
@@ -77,7 +81,6 @@ function renderWithQueryClient(ui: ReactNode) {
 }
 
 beforeEach(() => {
-  readSongByIdMock.mockReset();
   readLikesMock.mockReset();
   useLikesStore.setState({ likedSongIds: [] });
   useSessionStore.setState({
@@ -96,8 +99,8 @@ afterEach(() => {
 });
 
 describe("/likes 페이지", () => {
-  it("BE가 빈 배열을 반환하면 빈 상태 CTA를 노출하고 readSongById 호출 없음", async () => {
-    readLikesMock.mockResolvedValue([]);
+  it("BE가 빈 wrapper 를 반환하면 빈 상태 CTA를 노출", async () => {
+    readLikesMock.mockResolvedValue(buildWrapper([]));
 
     renderWithQueryClient(<LikesPage />);
 
@@ -112,7 +115,6 @@ describe("/likes 페이지", () => {
     expect(
       screen.getByRole("link", { name: /곡 검색하기/ }),
     ).toHaveAttribute("href", "/songs");
-    expect(readSongByIdMock).not.toHaveBeenCalled();
     // BE는 sessionId를 받아 호출됐다.
     expect(readLikesMock).toHaveBeenCalledWith(
       "test-session-id",
@@ -120,9 +122,8 @@ describe("/likes 페이지", () => {
     );
   });
 
-  it("BE GET 응답으로 곡 메타데이터를 페치해서 카드 리스트로 렌더하고 store를 동기화한다", async () => {
-    readLikesMock.mockResolvedValue([buildLike(42), buildLike(99)]);
-    readSongByIdMock.mockImplementation(async (id) => buildSong(id));
+  it("BE GET 응답(곡 메타 join)을 카드 리스트로 렌더하고 store 를 동기화한다", async () => {
+    readLikesMock.mockResolvedValue(buildWrapper([42, 99]));
 
     renderWithQueryClient(<LikesPage />);
 
@@ -130,12 +131,10 @@ describe("/likes 페이지", () => {
       expect(screen.getByText("좋아요-곡-42")).toBeInTheDocument();
       expect(screen.getByText("좋아요-곡-99")).toBeInTheDocument();
     });
-    expect(readSongByIdMock).toHaveBeenCalledWith(42, expect.anything());
-    expect(readSongByIdMock).toHaveBeenCalledWith(99, expect.anything());
     expect(
       screen.getByRole("heading", { name: /좋아한 곡/ }),
     ).toBeInTheDocument();
-    // closes #323 — 카드는 페이지 이동이 아닌 상세 모달 트리거 (button + aria-haspopup="dialog").
+    // closes #323 — 카드는 페이지 이동이 아닌 상세 모달 트리거.
     const detailTrigger = screen.getByRole("button", {
       name: /좋아요-곡-42 상세 보기/,
     });
@@ -147,8 +146,7 @@ describe("/likes 페이지", () => {
   // closes #431 — 카운트 영역이 polite 라이브 영역으로 마킹되고 BE 응답 도착 시
   // 메시지가 업데이트되어야 한다. PR #428 /recommend 와 동일 패턴.
   it("BE 응답이 도착하면 라이브 영역에 '총 N곡을 좋아했어요.' 메시지가 노출된다 (#431)", async () => {
-    readLikesMock.mockResolvedValue([buildLike(7), buildLike(8)]);
-    readSongByIdMock.mockImplementation(async (id) => buildSong(id));
+    readLikesMock.mockResolvedValue(buildWrapper([7, 8]));
 
     renderWithQueryClient(<LikesPage />);
 
