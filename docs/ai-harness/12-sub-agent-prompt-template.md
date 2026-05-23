@@ -93,6 +93,8 @@ sub-agent가 maestro에 회신할 때 다음을 포함:
   ```
 - API 호출은 `web/src/lib/api/` 한 곳에서 집중 관리
 - 환경변수 `NEXT_PUBLIC_*` / 서버 전용 명확히 구분
+- **의존성 설치 금지** — `npm install` / `npm ci` / `pnpm install` / `yarn` 등 직접 실행 금지. 의존성 누락(`Cannot find module ...`) 시 maestro에 보고 + 사이클 일시 정지. `web/node_modules`는 외부 디스크 symlink로 운영될 수 있어 sub-agent install이 symlink를 깨뜨릴 위험이 있다. 상세: `11-multi-session-runbook.md §0-7 fe 워크트리 node_modules 동기화`.
+- `web/node_modules` 디렉토리 자체를 `rm`/`mv`/`ln` 으로 건드리지 마. symlink 보존이 필수.
 
 ### rev (mobruji-rev)
 - 워크트리: `/Users/goohong/workspace/github/mobruji-rev`
@@ -184,3 +186,4 @@ PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서
 - 2026-05-21 — 최초 작성 (be/fe/rev/plan 4역할, 공통 룰 추출).
 - 2026-05-21 — rev §E-1 추가: 비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 표 / 결론 헤더 폐기 (이슈 #104, PR #109).
 - 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
+- 2026-05-23 — fe 역할에 의존성 설치 금지 룰 + `node_modules` symlink 보존 룰 추가. 사고: sub-agent `npm install --no-save` 실행으로 외부 디스크 symlink 풀림 (이슈 #187).
