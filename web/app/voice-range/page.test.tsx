@@ -354,3 +354,26 @@ describe("VoiceRangePage a11y", () => {
     expect(alert).toHaveTextContent(/500: boom/);
   });
 });
+
+// closes #552 — 폼 키보드 탐색(Tab) 자연 순서 회귀 가드.
+// 폼 내부 focusable: 최저음 select → 최고음 select → "추천 받기" submit button.
+// tabIndex 미지정/끼어드는 요소 회귀를 방지한다.
+describe("VoiceRangePage 폼 Tab 키보드 탐색", () => {
+  it("최저음 → 최고음 → 추천 받기 버튼 순으로 Tab 포커스가 이동한다", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    const submitButton = screen.getByRole("button", { name: /추천 받기/ });
+
+    lowSelect.focus();
+    expect(lowSelect).toHaveFocus();
+
+    await user.tab();
+    expect(highSelect).toHaveFocus();
+
+    await user.tab();
+    expect(submitButton).toHaveFocus();
+  });
+});
