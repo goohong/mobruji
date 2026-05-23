@@ -8,6 +8,7 @@
  * - SSR safe — 초기 렌더는 system 모드 + light 가정, mount 후 useTheme 가 보정.
  *   THEME_INIT_SCRIPT 가 hydration 전에 이미 `<html.dark>` 결정 → 시각적 flash 없음.
  * - a11y: `aria-label` 에 현재 모드와 다음 액션을 함께 명시. 키보드 focus ring 유지.
+ *   `aria-pressed` 는 사용자가 명시적으로 dark 모드를 선택한 경우만 true (system 은 false).
  * - 의존성 0 (lucide-react 미사용, fe 25/33/34 외부 lib 회피 패턴).
  */
 
@@ -33,6 +34,7 @@ export function ThemeToggle() {
       type="button"
       onClick={toggleMode}
       aria-label={`${CURRENT_MODE_LABEL[mode]} — ${NEXT_MODE_LABEL[mode]}`}
+      aria-pressed={mode === "dark"}
       title={CURRENT_MODE_LABEL[mode]}
       data-theme-mode={mode}
       className={[

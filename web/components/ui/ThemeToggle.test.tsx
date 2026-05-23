@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { ThemeToggle } from "./ThemeToggle";
 import { THEME_DARK_CLASS, THEME_STORAGE_KEY } from "@/lib/theme";
@@ -108,5 +109,35 @@ describe("ThemeToggle", () => {
     render(<ThemeToggle />);
     const button = screen.getByRole("button");
     expect(button.getAttribute("data-theme-mode")).toBe("system");
+  });
+
+  it("aria-pressed 가 dark 모드일 때만 true 로 동기화된다", () => {
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("aria-pressed")).toBe("false"); // system
+    fireEvent.click(button); // light
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(button); // dark
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(button); // system
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("Enter 키로 모드 순환이 활성화된다", async () => {
+    const user = userEvent.setup();
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(button.getAttribute("data-theme-mode")).toBe("light");
+  });
+
+  it("Space 키로 모드 순환이 활성화된다", async () => {
+    const user = userEvent.setup();
+    render(<ThemeToggle />);
+    const button = screen.getByRole("button");
+    button.focus();
+    await user.keyboard(" ");
+    expect(button.getAttribute("data-theme-mode")).toBe("light");
   });
 });
