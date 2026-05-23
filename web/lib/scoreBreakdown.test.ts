@@ -131,3 +131,38 @@ describe("buildScoreBreakdown", () => {
     expect(blankGenre?.detail).toBe("장르 정보 없음");
   });
 });
+
+describe("buildScoreBreakdown — rangeFit 클램프/정규화 가드 (#639)", () => {
+  it("겹침 없음 → 0 클램프 / 완전 포함 → 1 상한 / low>high 역전 → 0 / zero-span 가드", () => {
+    const item = buildItem();
+    // 곡 55-77, 사용자 30-40 → overlap 음수 → 0
+    const noOverlap = buildScoreBreakdown(item, { lowMidi: 30, highMidi: 40 });
+    expect(noOverlap.find((b) => b.key === "rangeFit")?.score).toBe(0);
+    // 사용자 0-127 → ratio 1 상한
+    const full = buildScoreBreakdown(item, { lowMidi: 0, highMidi: 127 });
+    expect(full.find((b) => b.key === "rangeFit")?.score).toBe(1);
+    // low > high 역전 → 음수 overlap → 0
+    const inverted = buildScoreBreakdown(item, { lowMidi: 80, highMidi: 40 });
+    expect(inverted.find((b) => b.key === "rangeFit")?.score).toBe(0);
+    // zero-span: songSpan = max(1, 0) 가드 → 유한값
+    const zero = buildScoreBreakdown(buildItem({ lowMidi: 60, highMidi: 60 }), {
+      lowMidi: 48,
+      highMidi: 72,
+    });
+    const zeroScore = zero.find((b) => b.key === "rangeFit")?.score;
+    expect(Number.isFinite(zeroScore ?? NaN)).toBe(true);
+    expect(zeroScore).toBe(1);
+  });
+
+  it("BE-provided breakdown score 는 0/1 boundary 및 범위 밖 값도 변형 없이 통과 (BE 책임 lock-in)", () => {
+    const provided: RecommendationBreakdownItem[] = [
+      { key: "keyMatch", label: "k", score: 0, detail: "lo", estimated: true },
+      { key: "rangeFit", label: "r", score: 1, detail: "hi", estimated: true },
+      { key: "popularity", label: "p", score: 1.5, detail: "over", estimated: true },
+    ];
+    const item = { ...buildItem(), breakdown: provided } as RecommendedSongResponse;
+    const out = buildScoreBreakdown(item, null);
+    expect(out.map((b) => b.score)).toEqual([0, 1, 1.5]);
+    expect(out.every((b) => b.estimated === false)).toBe(true);
+  });
+});
