@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  INVALID_MIDI_A11Y_FALLBACK,
   INVALID_MIDI_PLACEHOLDER,
   MAX_MIDI,
   MIN_MIDI,
@@ -188,6 +189,69 @@ describe("MIDI 경계 회귀 가드 (#576)", () => {
     expect(midiToCombinedNoteName(Number.NaN)).toBe(
       `${INVALID_MIDI_PLACEHOLDER} (${INVALID_MIDI_PLACEHOLDER})`,
     );
+  });
+
+  describe("a11yFallback 옵션 (#766)", () => {
+    // 스크린리더가 "--" 를 "dash dash" 로 읽어 의미를 잃는 문제를 차단하기 위해
+    // 호출자가 aria-label/스크린리더 컨텍스트에서 의미 있는 fallback 을 주입할
+    // 수 있어야 한다. 옵션 미지정 시 기존 placeholder("--") 와 100% 호환되어야
+    // 호출처 전수 마이그레이션 부담을 없앤다.
+    it("midiToNoteName: 비유한 입력 + a11yFallback 지정 시 fallback 반환", () => {
+      expect(
+        midiToNoteName(Number.NaN, { a11yFallback: "음정 정보 없음" }),
+      ).toBe("음정 정보 없음");
+      expect(
+        midiToNoteName(Number.POSITIVE_INFINITY, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe(INVALID_MIDI_A11Y_FALLBACK);
+    });
+
+    it("midiToKoreanNoteName: 비유한 입력 + a11yFallback 지정 시 fallback 반환", () => {
+      expect(
+        midiToKoreanNoteName(Number.NaN, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe(INVALID_MIDI_A11Y_FALLBACK);
+    });
+
+    it("midiToCombinedNoteName: 비유한 입력 + a11yFallback 지정 시 중복 병기 없이 fallback 단독", () => {
+      // 명세: "음정 정보 없음 (음정 정보 없음)" 같은 중복 출력 회피.
+      expect(
+        midiToCombinedNoteName(Number.NaN, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe(INVALID_MIDI_A11Y_FALLBACK);
+    });
+
+    it("옵션 미지정 시 기존 placeholder 동작 유지 (backward compat)", () => {
+      // 기존 호출처는 옵션 없이 그대로 동작해야 한다.
+      expect(midiToNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+      expect(midiToKoreanNoteName(Number.NaN)).toBe(INVALID_MIDI_PLACEHOLDER);
+      expect(midiToCombinedNoteName(Number.NaN)).toBe(
+        `${INVALID_MIDI_PLACEHOLDER} (${INVALID_MIDI_PLACEHOLDER})`,
+      );
+    });
+
+    it("유효 입력은 옵션 전달과 무관하게 정상 변환 (옵션이 정상 경로 침범 X)", () => {
+      expect(
+        midiToNoteName(60, { a11yFallback: INVALID_MIDI_A11Y_FALLBACK }),
+      ).toBe("C4");
+      expect(
+        midiToKoreanNoteName(69, { a11yFallback: INVALID_MIDI_A11Y_FALLBACK }),
+      ).toBe("라4");
+      expect(
+        midiToCombinedNoteName(60, {
+          a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
+        }),
+      ).toBe("도4 (C4)");
+    });
+
+    it("INVALID_MIDI_A11Y_FALLBACK 상수는 한글 안내 문구 (스크린리더 호환)", () => {
+      // ASCII 기호 ("--") 가 아닌 한글 텍스트여야 스크린리더가 의미 있게 낭독.
+      expect(INVALID_MIDI_A11Y_FALLBACK).toBe("음정 정보 없음");
+      expect(INVALID_MIDI_A11Y_FALLBACK).not.toBe(INVALID_MIDI_PLACEHOLDER);
+    });
   });
 
   it("SPN-한국어 옥타브 일치 round-trip (MIDI 0~127 전수)", () => {

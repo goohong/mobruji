@@ -153,6 +153,51 @@ describe("VoiceRangeProgressCard", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("#766: 최신 measurement 의 lowMidi/highMidi 가 NaN 이면 aria-label/헤더가 '음정 정보 없음' 으로 낭독된다", () => {
+    // 회귀 시나리오: audio analyzer raw → MIDI 변환 경로에서 NaN 이 그대로
+    // 그래프 데이터에 흘러들어왔을 때, aria-label 이 "-- ~ -- 음역" 으로
+    // 낭독되어 스크린리더 사용자에게 의미 불명. fallback 도입 후에는
+    // "음정 정보 없음" 으로 의미 있게 안내되어야 한다.
+    const summary = buildSummary({
+      points: [
+        {
+          id: "broken-1",
+          requestedAt: "2026-05-21T08:00:00Z",
+          lowMidi: 50,
+          highMidi: 70,
+          voiceRangeId: 1,
+          sourceMethod: "SELF_REPORT",
+        },
+        {
+          id: "broken-2",
+          requestedAt: "2026-05-21T12:00:00Z",
+          // 최신 datapoint 가 NaN — analyzer silence path 회귀 케이스.
+          lowMidi: Number.NaN,
+          highMidi: Number.NaN,
+          voiceRangeId: 2,
+          sourceMethod: "MIC_MEASURE",
+        },
+      ],
+      minLowMidi: 50,
+      maxHighMidi: 70,
+    });
+
+    render(<VoiceRangeProgressCard summary={summary} />);
+
+    // 1) SVG aria-label: 의미 없는 "--" 가 아닌 "음정 정보 없음" 으로 낭독.
+    const chart = screen.getByRole("img");
+    const label = chart.getAttribute("aria-label") ?? "";
+    expect(label).toMatch(/음정 정보 없음/);
+    expect(label).not.toMatch(/--/);
+
+    // 2) 헤더 측정 라인도 스크린리더가 읽으므로 "--" 표시 금지.
+    // "최근 측정" 문구는 SVG x축 라벨에도 존재하므로 측정 요약 라인을
+    // "회 측정 기록" 마커로 특정한다.
+    expect(screen.getByText(/회 측정 기록/)).toHaveTextContent(
+      /음정 정보 없음/,
+    );
+  });
+
   it("#249: 가시 범위에 옥타브 시작음이 전혀 없으면 가장 가까운 C-노트 1개를 표시한다 (fallback)", () => {
     // D4(62) ~ G4(67) — 차트 가시 범위 yMin=60,yMax=69 에 C4(60)는 경계 위에 있으므로
     // 'fallback path' 가 아닌 정상 후보 path 가 실행된다.
