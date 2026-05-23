@@ -405,6 +405,43 @@ describe("ApiError stack 보존 가드 (#713)", () => {
   });
 });
 
+describe("apiFetch Response body 단일 소비 가드 (#716)", () => {
+  // Fetch spec: Response.body 는 ReadableStream → json()/text() 중 하나만 호출 가능.
+  // apiFetch 내부 isJson 분기(client.ts L70-73)가 json/text 중 하나만 호출하는 이유를 lock.
+  it("Response.json() 호출 후 동일 인스턴스 text() 재시도 → TypeError (body stream lock)", async () => {
+    const response = new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    await response.json();
+    await expect(response.text()).rejects.toBeInstanceOf(TypeError);
+    expect(response.bodyUsed).toBe(true);
+  });
+
+  it("apiFetch 호출 후 fetchMock에 전달된 Response 는 bodyUsed=true 로 소비된 상태", async () => {
+    const response = new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    fetchMock.mockResolvedValueOnce(response);
+    await apiFetch("/api/v1/probe");
+    expect(response.bodyUsed).toBe(true);
+  });
+});
+
+describe("apiFetch method case 가드 (#716)", () => {
+  // 현 동작 lock: TypeScript Method 타입은 대문자만 허용하나 runtime 검증 없음.
+  // 호출자가 소문자/혼합 case 를 강제 전달하면 fetch init.method 에 그대로 패스 (정규화 호출자 책임).
+  it.each([
+    { label: '소문자 "get" → init.method="get" 그대로 전달', method: "get" },
+    { label: '혼합 case "Post" → init.method="Post" 그대로 전달', method: "Post" },
+  ])("$label", async ({ method }: { method: string }) => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/probe", { method } as unknown as RequestOptionsForTest);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe(method);
+  });
+});
+
 describe("apiFetch URL path 한글/유니코드 가드 (#713)", () => {
   // 현 동작 lock: client.ts 는 path 를 raw concat 하며 encodeURI/encodeURIComponent 를 수행하지 않는다.
   // 미인코딩 한글 path 는 그대로 fetch URL 에 전달 → 인코딩은 호출자 책임 (encodeURIComponent 권장).
