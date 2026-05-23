@@ -57,6 +57,7 @@ MAESTRO_WATCHER_IDLE_SECONDS: Final[float] = 30.0
 MAESTRO_WATCHER_MIN_CHUNK_LEN: Final[int] = 100  # 이보다 짧은 chunk 는 노이즈로 skip
 MAESTRO_WATCHER_MAX_CHUNK_LEN: Final[int] = 1800  # Discord 한도 2000 여유 200
 MAESTRO_WATCHER_DEDUP_PREFIX: Final[str] = "maestro:"
+MAESTRO_WATCHER_SEND_MAX_RETRIES: Final[int] = 3  # transient send 실패 시 최대 재시도 횟수
 # ANSI escape sequence: CSI (`ESC [ ... letter`) + OSC (`ESC ] ... BEL/ST`) + 단일 ESC.
 # claude TUI 가 컬러/커서/타이틀 코드 다수 출력 — Discord 에 raw 노출 방지.
 ANSI_ESCAPE_RE: Final[re.Pattern[str]] = re.compile(
@@ -932,6 +933,10 @@ async def maestro_response_watcher_loop(
 
     buffer = ""
     last_new_at: float | None = None
+    # send 실패 재시도 상태. pending_candidate 가 존재하면 다음 idle flush 에서 같은 chunk 를 재시도한다.
+    pending_candidate: str | None = None
+    pending_sig: str | None = None
+    pending_retry_count = 0
     logger.info(
         "maestro_response_watcher_loop 시작: path=%s offset=%d idle=%.0fs poll=%.1fs",
         pipe_pane_path,
@@ -973,8 +978,9 @@ async def maestro_response_watcher_loop(
                     except OSError as exc:
                         logger.warning("maestro watcher: 파일 read 실패 %s", exc)
 
-            # idle 임계 확인 — 마지막 신규 이후 idle_seconds 경과면 buffer flush 검토.
-            if buffer and last_new_at is not None:
+            # pending (직전 send 실패) 가 없을 때만 새 chunk 를 idle 임계로 확정한다.
+            # pending 이 있으면 그 chunk 를 우선 재시도한다 (새 buffer 는 계속 누적).
+            if pending_candidate is None and buffer and last_new_at is not None:
                 idle_for = time_source() - last_new_at
                 if idle_for >= idle_seconds:
                     candidate = sanitize_chunk(buffer)
@@ -983,30 +989,70 @@ async def maestro_response_watcher_loop(
                     if candidate is None:
                         logger.debug("maestro watcher: chunk skip (length < min)")
                     else:
-                        sig = chunk_signature(candidate)
-                        if ledger is not None and ledger.is_processed(sig):
-                            logger.info("maestro watcher: dedup hit sig=%s", sig)
-                        else:
-                            channel = client.get_channel(channel_id)
-                            if channel is None:
-                                logger.warning(
-                                    "maestro watcher: channel_id=%s 못 찾음 — skip",
-                                    channel_id,
+                        pending_candidate = candidate
+                        pending_sig = chunk_signature(candidate)
+                        pending_retry_count = 0
+
+            # pending chunk 가 있으면 send 시도. 실패하면 다음 iteration 에서 재시도.
+            if pending_candidate is not None and pending_sig is not None:
+                if ledger is not None and ledger.is_processed(pending_sig):
+                    logger.info("maestro watcher: dedup hit sig=%s", pending_sig)
+                    pending_candidate = None
+                    pending_sig = None
+                    pending_retry_count = 0
+                else:
+                    channel = client.get_channel(channel_id)
+                    if channel is None:
+                        logger.warning(
+                            "maestro watcher: channel_id=%s 못 찾음 — skip",
+                            channel_id,
+                        )
+                        # 채널 미발견은 transient 가능 (bot 아직 ready 전 등) → 재시도 카운트.
+                        pending_retry_count += 1
+                        if pending_retry_count >= MAESTRO_WATCHER_SEND_MAX_RETRIES:
+                            logger.error(
+                                "maestro watcher: send drop (channel 미발견 %d회 연속) sig=%s len=%d",
+                                pending_retry_count,
+                                pending_sig,
+                                len(pending_candidate),
+                            )
+                            pending_candidate = None
+                            pending_sig = None
+                            pending_retry_count = 0
+                    else:
+                        try:
+                            await channel.send(pending_candidate)
+                            if ledger is not None:
+                                ledger.mark_processed(pending_sig)
+                            logger.info(
+                                "maestro watcher push: sig=%s len=%d retries=%d",
+                                pending_sig,
+                                len(pending_candidate),
+                                pending_retry_count,
+                            )
+                            pending_candidate = None
+                            pending_sig = None
+                            pending_retry_count = 0
+                        except Exception as exc:  # noqa: BLE001
+                            pending_retry_count += 1
+                            if pending_retry_count >= MAESTRO_WATCHER_SEND_MAX_RETRIES:
+                                logger.error(
+                                    "maestro watcher: send drop (%d회 연속 실패) sig=%s len=%d 마지막 예외=%s",
+                                    pending_retry_count,
+                                    pending_sig,
+                                    len(pending_candidate),
+                                    exc,
                                 )
+                                pending_candidate = None
+                                pending_sig = None
+                                pending_retry_count = 0
                             else:
-                                try:
-                                    await channel.send(candidate)
-                                    if ledger is not None:
-                                        ledger.mark_processed(sig)
-                                    logger.info(
-                                        "maestro watcher push: sig=%s len=%d",
-                                        sig,
-                                        len(candidate),
-                                    )
-                                except Exception as exc:  # noqa: BLE001
-                                    logger.warning(
-                                        "maestro watcher send 실패: %s", exc
-                                    )
+                                logger.warning(
+                                    "maestro watcher send 실패 (재시도 %d/%d): %s",
+                                    pending_retry_count,
+                                    MAESTRO_WATCHER_SEND_MAX_RETRIES,
+                                    exc,
+                                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
