@@ -6,7 +6,7 @@
 노래방에서 **"뭐 부르지?"** 고민하는 사람에게 음역대·성별·분위기 기반으로 곡을 추천. Spring Boot + Next.js 모노레포.
 
 ## 2) 스택
-- **Backend**: Java 21, Spring Boot 3.5.3, Gradle
+- **Backend**: Java 21, Spring Boot 3.5.12, Gradle
 - **Frontend**: Next.js (App Router), TypeScript, Tailwind
 - **DB**: MySQL 8.4 (로컬 docker-compose)
 - **CI**: GitHub Actions
