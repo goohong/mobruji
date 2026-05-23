@@ -128,12 +128,13 @@ cd web && npm run dev                                                   # FE 실
 **채널**: `MOBRUJI_CHANNEL_ID` (#모부르지) 전용. `NOTIFY_CHANNEL_ID` 는 digest cron 만.
 
 **매 사용자 메시지마다 순서대로 (한 단계라도 건너뛰면 룰 위반)**:
-1. **ack push** — `bash /home/mobruji/.mobruji/discord-reply.sh "<ack 문구>"`. 다른 어떤 action 보다 먼저. **turn 중간에 system-reminder 로 새 사용자 메시지가 도착해도 진행 중 작업 멈추고 즉시 ack push 먼저**. "작업 끝나고 일괄 처리" 금지 — 사용자 입장에선 깜깜이.
+1. **ack push** — `bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack-thread "<ack 문구>"`. 다른 어떤 action 보다 먼저. **turn 중간에 system-reminder 로 새 사용자 메시지가 도착해도 진행 중 작업 멈추고 즉시 ack push 먼저**. "작업 끝나고 일괄 처리" 금지 — 사용자 입장에선 깜깜이.
+1b. **thread 자동 생성** — `--auto-ack-thread` 가 ack push 와 동시에 thread 생성 + thread_id 를 `~/.mobruji/helper-current-thread.txt` 에 저장 (#947). 이후 tool call milestone 마다 `bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "<진행 1줄>"` 호출해 사용자 가시화. milestone 단위 (sub-task 끝 / 위임 결정 / 발견 사항) — 매 grep/cat 단위는 아님 (noise).
 2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}`.
 3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문.
 4. **처리** — (a) 직접 / (b) sub-agent·nmae 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push.
 5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작 (ack 와 시각적 분리).
-6. **queue done + 검증** — message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. 1건이라도 남으면 turn 안 끝남.
+6. **queue done + 검증** — message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. 1건이라도 남으면 turn 안 끝남. thread 마지막 줄로 `--auto-thread "[done]"` push 후 종료.
 
 **ack 문구 3종 (확정 — 부가 설명/사과/계획 금지, 한 줄만)**:
 - 즉답 가능 → "답변 가능합니다. 잠시만 기다려주세요."

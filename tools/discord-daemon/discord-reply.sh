@@ -22,6 +22,20 @@
 #       discord-reply.sh --thread <id> "<진행 줄>"
 #         → 해당 thread 에만 push (메인 채널 잡음 없음).
 #
+#   4) auto-ack + thread (#947 helper 자동 활용):
+#       discord-reply.sh --auto-ack-thread "<ack 문구>"
+#         → 동작은 --ack 와 동일하나 helper 본체 룰 (CLAUDE.md §11) 직설 명명.
+#         → ack push + thread 생성 + thread_id 를 ~/.mobruji/helper-current-thread.txt
+#           에 atomic 저장 + stdout 으로 thread_id 출력.
+#         → helper 가 stdout 캡쳐를 잊어도 다음 --auto-thread 호출이 파일에서 복구.
+#
+#   5) auto-thread (#947 helper 자동 활용):
+#       discord-reply.sh --auto-thread "<진행 줄>"
+#         → ~/.mobruji/helper-current-thread.txt 자동 읽어 --thread <id> 처럼 동작.
+#         → 파일 없거나 비어 있으면 graceful skip (exit 0, stderr warning).
+#         → thread 만료 (24h archive) / 삭제 시 Discord 404 → stderr warning + exit 0
+#           (helper turn 깨지지 않게).
+#
 # 배포 위치 권장:
 #   - 워크트리: tools/discord-daemon/discord-reply.sh (소스 진실)
 #   - 운영: ~/.mobruji/discord-reply.sh (helper PATH 진입점). 심볼릭 링크 또는 복사.
@@ -98,14 +112,17 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh \"<메시지>\"" >&2
   echo "  discord-reply.sh --ack \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
+  echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
+  echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
   exit 1
 fi
 
 case "$1" in
-  --ack)
+  --ack|--auto-ack-thread)
+    # --auto-ack-thread 는 --ack 와 동일 동작 — helper 본체 룰 가독성용 alias (#947).
     MODE="ack"
     if [[ $# -lt 2 ]]; then
-      echo "discord-reply.sh: --ack 뒤에 ack 문구가 필요합니다" >&2
+      echo "discord-reply.sh: $1 뒤에 ack 문구가 필요합니다" >&2
       exit 1
     fi
     MSG="$2"
@@ -118,6 +135,15 @@ case "$1" in
     fi
     THREAD_ID="$2"
     MSG="$3"
+    ;;
+  --auto-thread)
+    # helper-current-thread.txt 자동 읽어 thread push (#947).
+    MODE="auto-thread"
+    if [[ $# -lt 2 ]]; then
+      echo "discord-reply.sh: --auto-thread 뒤에 진행 줄이 필요합니다" >&2
+      exit 1
+    fi
+    MSG="$2"
     ;;
   --*)
     echo "discord-reply.sh: 알 수 없는 옵션 $1" >&2
@@ -309,5 +335,27 @@ case "$MODE" in
   thread)
     PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
     post_thread_message "$THREAD_ID" "$PAYLOAD"
+    ;;
+
+  auto-thread)
+    # helper-current-thread.txt 자동 읽기 (#947 helper 자동 활용).
+    # 파일 없거나 비어 있으면 graceful skip — helper turn 안 깨지게.
+    if [[ ! -f "$HELPER_THREAD_FILE" ]]; then
+      echo "discord-reply.sh: $HELPER_THREAD_FILE 없음 — auto-thread skip" >&2
+      exit 0
+    fi
+    AUTO_THREAD_ID=$(head -1 "$HELPER_THREAD_FILE" | tr -d '\r\n' | tr -d ' ')
+    if [[ -z "$AUTO_THREAD_ID" ]]; then
+      echo "discord-reply.sh: $HELPER_THREAD_FILE 비어 있음 — auto-thread skip" >&2
+      exit 0
+    fi
+    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
+    # post_thread_message 의 retry wrapper 가 4xx 면 1 반환. thread 만료 / 삭제
+    # 시 Discord 가 404 — helper turn 깨지지 않게 stderr warning + exit 0 으로
+    # graceful 처리.
+    if ! post_thread_message "$AUTO_THREAD_ID" "$PAYLOAD" >/dev/null; then
+      echo "discord-reply.sh: auto-thread push 실패 (thread_id=$AUTO_THREAD_ID, 만료/삭제 추정) — skip" >&2
+      exit 0
+    fi
     ;;
 esac
