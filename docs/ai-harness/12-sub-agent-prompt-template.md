@@ -18,6 +18,31 @@ maestro이 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 ### 워크트리 격리
 - prompt 첫 명령으로 `cd <워크트리 절대경로>` 실행. maestro(`mobruji`), 다른 세션(`mobruji-be`/`mobruji-fe`/`mobruji-rev`/`mobruji-plan`) **절대 건드리지 마**.
 - 워크트리 경로 외 다른 경로(예: `~/.claude/`, 다른 repo)를 읽거나 쓰지 마.
+- 실제 절대경로 (NCP Linux 호스트, 2026-05-23 기준):
+  - maestro: `/home/mobruji/mobruji`
+  - be: `/home/mobruji/mobruji-be`
+  - fe: `/home/mobruji/mobruji-fe`
+  - rev: `/home/mobruji/mobruji-rev`
+  - plan: `/home/mobruji/mobruji-plan`
+
+### 본진(maestro) 항시 가동 — sub-agent launch mandatory
+- 본진은 be/fe/rev/plan **4 워크트리에 sub-agent 1개씩 항상 가동** 유지 ([[feedback-keep-4-cycles-active]]). 1 sub-agent 완료 통지 받자마자 같은 워크트리에 다음 백로그 launch (idle 워크트리 default 금지).
+- 본진 sub-agent launch 절대 까먹기 금지 ([[feedback-sub-agent-launch-mandatory]]). 본진 자체 reasoning 으로 코드/테스트 처리 시 → 워크트리 idle + 컨텍스트 폭증 + 사용자 의도 위배.
+- 본진 default = 메타 (spec/ADR/메모리/orchestration/Discord 답). 코드/테스트/문서 본문 작성은 sub-agent 위임 default.
+- sub-agent 본인은 본진 룰을 직접 적용할 일은 없지만, 완료 보고 시 "다음 사이클 후보" 제시로 본진 launch loop 를 돕는다 (§4 보고 양식).
+
+### 워크트리 lock (한 워크트리 = 동시 1 sub-agent)
+- 본진은 한 워크트리에 동시 1 sub-agent 만 launch ([[feedback-worktree-lock]]). 같은 도메인 사이클 동시 launch 시 git stash/checkout 충돌로 in-progress 변경 유실 위험.
+- sub-agent 본인은 자기 워크트리의 git state 를 다른 sub-agent 가 만지지 않는다고 가정 가능. 단 본진이 룰을 어겨 동시 launch 한 경우, `git status` 가 예상과 다르면 즉시 본진에 보고 후 중단.
+- 같은 도메인 백로그 병렬 필요 시 본진이 임시 워크트리 (`git worktree add /tmp/<name> <branch>`) 신설.
+
+### reasoning chunk 5분 룰
+- sub-agent 한 turn 의 reasoning + tool call 누적이 **5분 이상** 길어지면 의도적 자기 interrupt ([[feedback-reasoning-chunk-limit]]). 10분 이상이면 강제 분할.
+- 5분 경과 시점:
+  - 진행한 작업의 외부 효과 (commit/push/PR 생성) 는 완수
+  - 남은 작업은 본진 보고에 "다음 사이클 후보" 로 hand-off
+  - 짧은 마무리 보고 후 turn 종료
+- 본진은 5분 룰 어긴 sub-agent 의 결과물도 일단 수용하되, 다음 사이클부터 작업 범위 축소.
 
 ### 메모리 보호
 - `~/.claude/projects/*/memory/` 디렉토리 **쓰기 금지**.
@@ -72,7 +97,7 @@ sub-agent가 maestro에 회신할 때 다음을 포함:
 ## 2) 역할별 추가 룰
 
 ### be (mobruji-be)
-- 워크트리: `/Users/goohong/workspace/github/mobruji-be`
+- 워크트리: `/home/mobruji/mobruji-be` (NCP Linux 호스트)
 - 작업 가능 경로: `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시)
 - 금지: `web/**`, 공유 영역(`CLAUDE.md`/`AGENTS.md`/`docs/ai-harness/**` 단 §5/§6 entity 갱신 제외)/root 설정
 - 품질 게이트 (푸시 전 필수):
@@ -84,20 +109,27 @@ sub-agent가 maestro에 회신할 때 다음을 포함:
 - DDD 계층 침범 금지 (Controller → Repository 직접 호출 등)
 
 ### fe (mobruji-fe)
-- 워크트리: `/Users/goohong/workspace/github/mobruji-fe`
+- 워크트리: `/home/mobruji/mobruji-fe` (NCP Linux 호스트)
+- 작업 디렉토리: 거의 모든 명령은 `web/` 하위에서 실행 — `cd /home/mobruji/mobruji-fe/web` 한 번 박고 시작.
 - 작업 가능 경로: `web/**`, `docs/features/*.md`(UI 부분)
 - 금지: `backend/**`, 공유 영역, root 설정
 - 품질 게이트 (푸시 전 필수):
   ```bash
-  cd web && npm run lint && npm run typecheck && npm test && npm run build
+  cd /home/mobruji/mobruji-fe/web && npm run lint && npm run typecheck && npm test && npm run build
   ```
 - API 호출은 `web/src/lib/api/` 한 곳에서 집중 관리
 - 환경변수 `NEXT_PUBLIC_*` / 서버 전용 명확히 구분
+
+#### node_modules / `npm install` 룰
+- `post-merge-cleanup.sh` 는 `node_modules` 를 **건드리지 않는다** (의도, `11-runbook §1` lines 138-153). 매 사이클 재설치는 wall-clock 손해.
+- 본진 prompt 에 "직전 사이클에서 web deps 변경 PR(예: #N) 머지됨" 명시가 있으면 **1회만** `cd /home/mobruji/mobruji-fe/web && npm install` 실행. 그 외 사이클은 생략.
+- `web/package.json` / lockfile (`package-lock.json` / `pnpm-lock.yaml`) 변경은 보호 영역 (`needs-human-review` 필수). devDep 추가 only 도 동일.
+- `node_modules/` 디렉토리를 commit/symlink 변경/rm 금지. 워크트리 첫 launch 시 누락이면 `npm install` 1회만.
 - **의존성 설치 금지** — `npm install` / `npm ci` / `pnpm install` / `yarn` 등 직접 실행 금지. 의존성 누락(`Cannot find module ...`) 시 maestro에 보고 + 사이클 일시 정지. `web/node_modules`는 외부 디스크 symlink로 운영될 수 있어 sub-agent install이 symlink를 깨뜨릴 위험이 있다. 상세: `11-multi-session-runbook.md §0-7 fe 워크트리 node_modules 동기화`.
 - `web/node_modules` 디렉토리 자체를 `rm`/`mv`/`ln` 으로 건드리지 마. symlink 보존이 필수.
 
 ### rev (mobruji-rev)
-- 워크트리: `/Users/goohong/workspace/github/mobruji-rev`
+- 워크트리: `/home/mobruji/mobruji-rev` (NCP Linux 호스트)
 - **파일 수정 절대 금지** (`pre-push` hook으로 push 차단됨). PR 코멘트만.
 - 동작 패턴:
   ```bash
@@ -154,7 +186,7 @@ PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서
 - 사례: 사이클 6 PR #74에서 `🟢 LGTM` 헤더 다음에 EAGER fetch p95=80.9ms(3.7배) 회귀 신호가 누락된 적이 있다.
 
 ### plan (mobruji-plan)
-- 워크트리: `/Users/goohong/workspace/github/mobruji-plan`
+- 워크트리: `/home/mobruji/mobruji-plan` (NCP Linux 호스트)
 - 작업 가능 경로: 큰 docs/spec/ADR — `docs/ai-harness/**`, `docs/features/**`, `docs/decisions/**`, `scripts/**`, `.github/**`(보호 영역 라벨 필수)
 - 금지: `backend/**`/`web/**` 구현 코드 (구현은 be/fe 담당)
 - ADR/spec 작성 시 `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md` 규약 준수
@@ -181,9 +213,61 @@ PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서
 너는 be 세션. 워크트리 ... cd ... 메모리 절대 ... --no-verify ... (300줄)
 ```
 
-## 4) 변경 이력
+## 4) sub-agent → maestro 완료 보고 표준 양식
+
+sub-agent 가 turn 종료 시 maestro 에 회신할 때 다음 구조를 권장. 본진이 발견 사항을 다음 사이클 백로그로 전환하기 쉽게 만든다.
+
+### 4-1) 필수 헤더
+- **PR URL** + draft/ready 상태 + mergeable (yes/no/UNKNOWN)
+- **변경 한 줄 요약** — 수십 줄 코드 dump 금지, 무엇을 왜 바꿨는지만
+- **품질 게이트 결과** — be: `checkstyleMain + spotlessCheck + test` 통과 여부 / fe: `lint + typecheck + test + build` / plan: 해당 없음 명시
+- **보호 영역 변경 여부** — yes 면 `needs-human-review` 부착 확인까지
+
+### 4-2) 발견 사항 분류 (선택)
+sub-agent 가 작업 중 발견한 잠재 이슈 / 후속 작업을 다음 3분류로 보고. 본진이 백로그 우선순위 매기는 비용 절감.
+
+| 분류 | 의미 | 본진 처리 |
+|---|---|---|
+| 🔴 | 시급 — 머지된 코드/spec 에 회귀/보안/결정성 위반. 본 PR 사이클 안에 해소 권고. | 다음 cycle 즉시 launch 또는 본 PR revert. |
+| 🟡 | 보강 — 작동은 하지만 컨벤션/관측성/문서 drift. 별도 PR 권고. | 백로그 등록, 다음 사이클 후보. |
+| 🟢 | 관찰 — 패턴/메타 발견. 메모리/ADR 후보. | maestro 메모리 갱신 또는 ADR 트리거. |
+
+### 4-3) "다음 사이클 후보"
+같은 도메인 (be/fe/rev/plan) 의 다음 백로그 후보 1~3개 제시. 본진 launch loop 가 idle 워크트리 빠르게 채우도록 돕는다 ([[feedback-keep-4-cycles-active]]).
+
+### 4-4) 보고 예시
+```
+PR https://github.com/.../405 — ready, mergeable yes
+변경: 12 문서에 Linux 워크트리 경로 + 5분/lock/4-cycles 룰 추가
+게이트: 해당 없음 (docs only)
+보호 영역: yes (docs/ai-harness/**) — needs-human-review 부착됨
+
+발견 사항
+- 🟡 session:plan 라벨 매핑 (auto-set-session.yml) 누락 — issue/PR 생성 시 차단됨
+- 🟢 본 PR 의 §4 보고 양식이 11-runbook §0-X 의 보고 룰과 중복 가능 — drift 점검 필요
+
+다음 사이클 후보 (plan)
+- session:plan 라벨 신설 PR (.github/workflows/ 보호 영역)
+- 01-harness-spec.md §6 ADR-0014 cross-ref 보강
+```
+
+## 5) 안티패턴 (sub-agent 가 절대 하지 말 것)
+
+| 안티패턴 | 무엇이 잘못인가 | 회피책 |
+|---|---|---|
+| **다른 워크트리 침범** | be sub-agent 가 `mobruji-fe/web/**` 를 cd / Read / Edit | prompt 첫 줄에 `cd /home/mobruji/mobruji-<role>` 박고 그 외 경로 접근 금지. 본진(`mobruji`) 워크트리도 동일하게 금지. |
+| **다른 도메인 작업** | be sub-agent 가 `web/**` 코드 / fe sub-agent 가 `backend/**` 코드 수정 | 도메인 boundary 위반 발견 시 즉시 중단, 본진에 보고. 풀스택 기능은 두 PR 로 분리. |
+| **시크릿 raw 출력** | `.env`, GitHub token, NCP API key 등을 PR body / 코멘트 / 로그에 그대로 박음 | grep 결과 mask 또는 "redacted" 표기. `04-security-policy.md` 참조. |
+| **spec 무시** | `docs/features/<slug>.md` 가 있는 기능에서 spec §3 체크박스 미확인 후 구현 | `CLAUDE.md §7-1` 자기 점검 절차 준수. 누락 시 본진 보고. |
+| **hook 우회** | `git push --no-verify` / `--no-gpg-sign` 로 pre-push/pre-commit 우회 | hook 실패 → 원인 수정 → 재커밋. 우회 필요하면 본진에 사전 보고. |
+| **본진 룰 재해석** | "더 효율적이라" 며 본진이 박은 작업 범위를 사이클 안에서 확장 | 본진 prompt 외 작업은 별 사이클 후보로 보고만. 본 사이클 안에서 처리 금지. |
+| **메모리 직접 수정** | sub-agent 가 `~/.claude/projects/*/memory/*.md` 를 write/edit | 메모리는 maestro 전담. sub-agent 는 회신 본문에 "메모리 후보" 만 적시. |
+| **워크트리 lock 위반 무시** | 같은 워크트리에서 다른 sub-agent in-progress 변경 발견했는데 계속 진행 | 즉시 본진 보고 + turn 종료. `git status` 가 예상과 다르면 무조건 멈춤. |
+
+## 6) 변경 이력
 
 - 2026-05-21 — 최초 작성 (be/fe/rev/plan 4역할, 공통 룰 추출).
 - 2026-05-21 — rev §E-1 추가: 비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 표 / 결론 헤더 폐기 (이슈 #104, PR #109).
 - 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
 - 2026-05-23 — fe 역할에 의존성 설치 금지 룰 + `node_modules` symlink 보존 룰 추가. 사고: sub-agent `npm install --no-save` 실행으로 외부 디스크 symlink 풀림 (이슈 #187).
+- 2026-05-23 — NCP Linux 워크트리 절대경로 박제 (`/home/mobruji/...`) + §1 본진 항시 가동 / 워크트리 lock / 5분 reasoning 룰 박스 / fe `npm install` 1회 룰 / §4 sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢) / §5 안티패턴 매트릭스 신설 (이슈 #405, PR TBD). 메모리 [[feedback-keep-4-cycles-active]] [[feedback-worktree-lock]] [[feedback-reasoning-chunk-limit]] [[feedback-sub-agent-launch-mandatory]] 영속화.

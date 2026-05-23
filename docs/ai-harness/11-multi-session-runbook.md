@@ -26,7 +26,12 @@
 
 > 위 5줄 공통 룰은 매번 반복하지 말고 prompt에 다음 한 줄만 박는다:
 > `공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.`
-> 역할별 추가 룰(워크트리 경로, 작업 가능 경로, 품질 게이트)도 그 문서에 정리되어 있다.
+> §12 에는 위 5줄 외에도 다음이 박혀 있다 — 별도 prompt 박지 말 것:
+> - NCP Linux 워크트리 절대경로 (`/home/mobruji/mobruji-{be,fe,rev,plan}`)
+> - 본진 항시 가동 / 워크트리 lock / 5분 reasoning chunk 룰
+> - 역할별 추가 룰 (작업 가능 경로, 품질 게이트, fe `npm install` 1회 룰 등)
+> - sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢 + 다음 사이클 후보)
+> - 안티패턴 매트릭스 (워크트리 침범 / 도메인 boundary / 시크릿 raw / hook 우회 등)
 
 **언제 쓰나**: 사용자가 백로그를 maestro에 풀어놓고 한 자리에서 운영하고 싶을 때. 대부분의 경우.
 
