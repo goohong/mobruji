@@ -78,9 +78,9 @@ LAST_USER_MSG_ID_MIN_DIGITS: Final[int] = 17
 LAST_USER_MSG_ID_MAX_DIGITS: Final[int] = 20
 
 # digest cron 튜닝값 — cycle-status.json (사용자 룰 2026-05-23).
-DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 900  # 15분
+DEFAULT_DIGEST_INTERVAL_SECONDS: Final[int] = 300  # 5분 (#1017 사용자 — 최소 5분 1회 보장)
 DIGEST_INITIAL_DELAY_SECONDS: Final[int] = 60  # boot 1분 warmup
-DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 15  # delta 없어도 15분 1회는 push (#1006 사용자 가시성)
+DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 5  # delta 없어도 5분 1회는 push (#1017 사용자 가시성)
 
 # Discord API resilience (#911 G-6) — channel.send 시 429 / 5xx 명시적 retry.
 # discord.py 가 라이브러리 차원 ratelimiter 를 가지지만 갑작스러운 5xx /
