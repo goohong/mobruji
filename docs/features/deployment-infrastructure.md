@@ -5,8 +5,8 @@ owner: @goohong
 scope: infra
 status: draft
 related_issues: [242, 243]
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [315, 390, 892, 939]
+last_reviewed: 2026-05-24
 ---
 
 # 운영 배포 인프라 (Phase 5 prod — NCP 별 VM + Cloudflare)

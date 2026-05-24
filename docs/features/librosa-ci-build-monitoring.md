@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: [180, 207, 209, 242]
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [285, 349, 892, 939]
+last_reviewed: 2026-05-24
 ---
 
 # librosa CI 빌드 시간 모니터링 + 캐싱 전략

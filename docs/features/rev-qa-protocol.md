@@ -5,8 +5,8 @@ status: implementing
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [316, 336, 349, 376, 377]
+last_reviewed: 2026-05-24
 ---
 
 # rev 세션 QA 실행 검증 프로토콜
