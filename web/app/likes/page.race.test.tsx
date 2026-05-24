@@ -49,7 +49,6 @@
 
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -60,7 +59,12 @@ import {
   type LikeWithSongResponse,
   type LikeToggleResponse,
 } from "@/lib/api/feedback";
-import { ApiError } from "@/lib/api/client";
+import {
+  createDeferred,
+  makeQueryClient,
+  makeWrapper,
+  unauthorizedError,
+} from "@/lib/test-helpers/race-helpers";
 import type { SongResponse } from "@/lib/api/song";
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
@@ -123,42 +127,12 @@ function buildWrapper(songIds: number[]): LikeListResponse {
   };
 }
 
+// renderWithQueryClient / createDeferred / unauthorizedError 는
+// `@/lib/test-helpers/race-helpers` 단일 소스 (PR #1057 refactor). render() 호출 시
+// 매 케이스마다 새 QueryClient 를 만들어 retry / cache 격리.
 function renderWithQueryClient(ui: ReactNode) {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-  function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-  }
-  return render(ui, { wrapper: Wrapper });
-}
-
-/**
- * mutationFn pending 도중 응답 도착 시점을 외부에서 제어할 수 있게 한다.
- * race / unmount 케이스의 핵심 도구 (PR #985 hook 테스트 / PR #989 통합 / PR #1048
- * recommend race 와 동일 형태).
- */
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason: unknown) => void;
-} {
-  let resolveFn!: (value: T) => void;
-  let rejectFn!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolveFn = res;
-    rejectFn = rej;
-  });
-  return { promise, resolve: resolveFn, reject: rejectFn };
-}
-
-function unauthorizedError(): ApiError {
-  return new ApiError(401, "Unauthorized", { error: "UNAUTHORIZED" });
+  const client = makeQueryClient();
+  return render(ui, { wrapper: makeWrapper(client) });
 }
 
 beforeEach(() => {
@@ -198,8 +172,8 @@ describe("/likes 페이지 mutation race 가드 (PR #993 후속, PR #1048 패턴
     readLikesMock.mockResolvedValue(buildWrapper([1, 2]));
 
     // song #1 / #2 각각 별 deferred — 응답 순서를 우리가 정한다.
-    const def1 = deferred<LikeToggleResponse>();
-    const def2 = deferred<LikeToggleResponse>();
+    const def1 = createDeferred<LikeToggleResponse>();
+    const def2 = createDeferred<LikeToggleResponse>();
     toggleLikeMock
       .mockReturnValueOnce(def1.promise)
       .mockReturnValueOnce(def2.promise);
@@ -266,7 +240,7 @@ describe("/likes 페이지 mutation race 가드 (PR #993 후속, PR #1048 패턴
     const user = userEvent.setup();
     readLikesMock.mockResolvedValue(buildWrapper([1]));
 
-    const def = deferred<LikeToggleResponse>();
+    const def = createDeferred<LikeToggleResponse>();
     toggleLikeMock.mockReturnValueOnce(def.promise);
 
     renderWithQueryClient(<LikesPage />);
@@ -344,7 +318,7 @@ describe("/likes 페이지 mutation race 가드 (PR #993 후속, PR #1048 패턴
     const user = userEvent.setup();
     readLikesMock.mockResolvedValue(buildWrapper([1]));
 
-    const def = deferred<LikeToggleResponse>();
+    const def = createDeferred<LikeToggleResponse>();
     toggleLikeMock.mockReturnValueOnce(def.promise);
 
     const consoleErrorSpy = vi

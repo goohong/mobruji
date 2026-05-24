@@ -18,7 +18,6 @@
 
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -29,7 +28,12 @@ import {
   type BookmarkWithSongResponse,
   type BookmarkToggleResponse,
 } from "@/lib/api/feedback";
-import { ApiError } from "@/lib/api/client";
+import {
+  createDeferred,
+  makeQueryClient,
+  makeWrapper,
+  unauthorizedError,
+} from "@/lib/test-helpers/race-helpers";
 import type { SongResponse } from "@/lib/api/song";
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
@@ -91,37 +95,11 @@ function buildWrapper(songIds: number[]): BookmarkListResponse {
   };
 }
 
+// renderWithQueryClient / createDeferred / unauthorizedError 는
+// `@/lib/test-helpers/race-helpers` 단일 소스 (PR #1057 refactor).
 function renderWithQueryClient(ui: ReactNode) {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-  function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-  }
-  return render(ui, { wrapper: Wrapper });
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason: unknown) => void;
-} {
-  let resolveFn!: (value: T) => void;
-  let rejectFn!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolveFn = res;
-    rejectFn = rej;
-  });
-  return { promise, resolve: resolveFn, reject: rejectFn };
-}
-
-function unauthorizedError(): ApiError {
-  return new ApiError(401, "Unauthorized", { error: "UNAUTHORIZED" });
+  const client = makeQueryClient();
+  return render(ui, { wrapper: makeWrapper(client) });
 }
 
 beforeEach(() => {
@@ -155,8 +133,8 @@ describe("/bookmarks 페이지 mutation race 가드 (PR #993 후속, PR #1048 �
     const user = userEvent.setup();
     readBookmarksMock.mockResolvedValue(buildWrapper([1, 2]));
 
-    const def1 = deferred<BookmarkToggleResponse>();
-    const def2 = deferred<BookmarkToggleResponse>();
+    const def1 = createDeferred<BookmarkToggleResponse>();
+    const def2 = createDeferred<BookmarkToggleResponse>();
     toggleBookmarkMock
       .mockReturnValueOnce(def1.promise)
       .mockReturnValueOnce(def2.promise);
@@ -211,7 +189,7 @@ describe("/bookmarks 페이지 mutation race 가드 (PR #993 후속, PR #1048 �
     const user = userEvent.setup();
     readBookmarksMock.mockResolvedValue(buildWrapper([1]));
 
-    const def = deferred<BookmarkToggleResponse>();
+    const def = createDeferred<BookmarkToggleResponse>();
     toggleBookmarkMock.mockReturnValueOnce(def.promise);
 
     renderWithQueryClient(<BookmarksPage />);
@@ -269,7 +247,7 @@ describe("/bookmarks 페이지 mutation race 가드 (PR #993 후속, PR #1048 �
     const user = userEvent.setup();
     readBookmarksMock.mockResolvedValue(buildWrapper([1]));
 
-    const def = deferred<BookmarkToggleResponse>();
+    const def = createDeferred<BookmarkToggleResponse>();
     toggleBookmarkMock.mockReturnValueOnce(def.promise);
 
     const consoleErrorSpy = vi
