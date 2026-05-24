@@ -51,12 +51,21 @@
 #         → helper 가 stdout 캡쳐를 잊어도 다음 --auto-thread 호출이 파일에서 복구.
 #         → ack push 도 `message_reference` 자동 적용 (#960).
 #
-#   5) auto-thread (#947 helper 자동 활용):
+#   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
-#         → ~/.mobruji/helper-current-thread.txt 자동 읽어 --thread <id> 처럼 동작.
-#         → 파일 없거나 비어 있으면 graceful skip (exit 0, stderr warning).
+#         → thread_id resolve 우선순위 (높음 → 낮음):
+#             1. `--thread <id>` 명시 (해당 모드는 별도 dispatch — 본 chain 우회)
+#             2. `LAUNCH_THREAD_ID` 환경변수 (sub-agent 가 부모 launch prompt 에서 inherit)
+#             3. `~/.mobruji/last-launch-thread.txt` (helper 본체가 sub-agent launch
+#                직전 `--auto-ack-thread` 호출 시 자동 write — #1021)
+#             4. `~/.mobruji/helper-current-thread.txt` (helper turn-level thread)
+#         → 각 소스 snowflake 검증 (17–20 digit) → 실패 시 다음 fallback.
+#         → 모두 실패면 graceful skip (exit 0, stderr warning).
 #         → thread 만료 (24h archive) / 삭제 시 Discord 404 → stderr warning + exit 0
 #           (helper turn 깨지지 않게).
+#         → #1021 의도: helper LLM 이 launch prompt 안에 thread_id 값을 hallucinate
+#           해서 invalid ID 를 박는 사고 우회. sub-agent 는 prompt 안 hardcoded
+#           ID 대신 env / file 자동 read 로 정확한 thread 에 push.
 #
 # 배포 위치 권장:
 #   - 워크트리: tools/discord-daemon/discord-reply.sh (소스 진실)
@@ -116,6 +125,14 @@ fi
 # $HOME 이 unbound 환경 (예: 테스트 / systemd unit 일부) 에서 set -u 로 죽지
 # 않도록 명시적 default. 운영에서 $HOME 은 항상 존재 — 이 default 는 안전망.
 HELPER_THREAD_FILE="${HELPER_THREAD_FILE:-${HOME:-/tmp}/.mobruji/helper-current-thread.txt}"
+
+# #1021 (2026-05-24) — sub-agent launch 별 thread ID file passthrough.
+# helper 본체가 `--auto-ack-thread` 호출 시 atomic write 하는 별도 파일.
+# `--auto-thread` resolve chain 에서 LAUNCH_THREAD_ID env 다음으로 우선.
+# 의도: helper LLM 이 launch prompt 작성 시 thread_id 값을 hallucinate 해서
+# invalid ID 를 박는 사고 우회. sub-agent 가 env 없어도 파일에서 read.
+LAUNCH_THREAD_FILE="${LAUNCH_THREAD_FILE:-${HOME:-/tmp}/.mobruji/last-launch-thread.txt}"
+
 THREAD_NAME_MAX_LEN=30
 
 # helper 본답/ack → 사용자 메시지 reply (#946 본답, #960 ack 확장, 2026-05-24).
@@ -565,6 +582,12 @@ case "$MODE" in
     #    동시 --ack 호출 race 회피를 위해 mktemp+mv atomic write (#911 G-5).
     atomic_write_thread_file "$NEW_THREAD_ID" "$HELPER_THREAD_FILE"
 
+    # 4b) #1021 — sub-agent launch passthrough 파일도 함께 atomic write.
+    #     helper 본체가 sub-agent launch 직전 본 mode 를 호출하므로 결과 thread
+    #     를 launch 전용 파일에도 저장 → sub-agent 의 `--auto-thread` 가 env
+    #     없어도 파일에서 read. helper LLM hallucination 우회의 핵심 단계.
+    atomic_write_thread_file "$NEW_THREAD_ID" "$LAUNCH_THREAD_FILE"
+
     # 5) stdout 으로 thread id 만 출력.
     printf '%s\n' "$NEW_THREAD_ID"
     ;;
@@ -575,23 +598,62 @@ case "$MODE" in
     ;;
 
   auto-thread)
-    # helper-current-thread.txt 자동 읽기 (#947 helper 자동 활용).
-    # 파일 없거나 비어 있으면 graceful skip — helper turn 안 깨지게.
-    if [[ ! -f "$HELPER_THREAD_FILE" ]]; then
-      echo "discord-reply.sh: $HELPER_THREAD_FILE 없음 — auto-thread skip" >&2
-      exit 0
+    # thread_id resolve chain (#947 helper 자동 활용 + #1021 launch passthrough).
+    # 우선순위 (높음 → 낮음):
+    #   1. LAUNCH_THREAD_ID env (sub-agent 가 부모 launch prompt 에서 inherit)
+    #   2. LAUNCH_THREAD_FILE (~/.mobruji/last-launch-thread.txt — #1021 helper
+    #      본체가 sub-agent launch 직전 atomic write)
+    #   3. HELPER_THREAD_FILE (~/.mobruji/helper-current-thread.txt — helper
+    #      turn-level thread, 기존 fallback)
+    # 각 소스 snowflake 검증 → 실패 시 다음 fallback. 모두 실패면 graceful
+    # skip (exit 0, stderr warning — helper turn 안 깨지게).
+    AUTO_THREAD_ID=""
+    AUTO_THREAD_SOURCE=""
+
+    # 1) LAUNCH_THREAD_ID env (sub-agent inherit).
+    if [[ -n "${LAUNCH_THREAD_ID:-}" ]]; then
+      if AUTO_THREAD_ID=$(validate_snowflake "$LAUNCH_THREAD_ID" "LAUNCH_THREAD_ID env"); then
+        AUTO_THREAD_SOURCE="LAUNCH_THREAD_ID env"
+      else
+        AUTO_THREAD_ID=""
+      fi
     fi
-    AUTO_THREAD_ID=$(head -1 "$HELPER_THREAD_FILE" | tr -d '\r\n' | tr -d ' ')
+
+    # 2) LAUNCH_THREAD_FILE (helper 본체가 launch 직전 write — #1021).
+    if [[ -z "$AUTO_THREAD_ID" && -r "$LAUNCH_THREAD_FILE" ]]; then
+      LAUNCH_RAW=$(head -1 "$LAUNCH_THREAD_FILE" 2>/dev/null | tr -d '\r\n' | tr -d ' ')
+      if [[ -n "$LAUNCH_RAW" ]]; then
+        if AUTO_THREAD_ID=$(validate_snowflake "$LAUNCH_RAW" "$LAUNCH_THREAD_FILE"); then
+          AUTO_THREAD_SOURCE="$LAUNCH_THREAD_FILE"
+        else
+          AUTO_THREAD_ID=""
+        fi
+      fi
+    fi
+
+    # 3) HELPER_THREAD_FILE (helper turn-level fallback).
+    #    기존 호환을 위해 snowflake 검증을 적용하지 않고 raw 값을 그대로 사용.
+    #    (회귀 가드: test_helper_ux.test_auto_thread_mode_does_not_include_message_reference)
     if [[ -z "$AUTO_THREAD_ID" ]]; then
-      echo "discord-reply.sh: $HELPER_THREAD_FILE 비어 있음 — auto-thread skip" >&2
-      exit 0
+      if [[ ! -f "$HELPER_THREAD_FILE" ]]; then
+        echo "discord-reply.sh: $HELPER_THREAD_FILE 없음 — auto-thread skip" >&2
+        exit 0
+      fi
+      HELPER_RAW=$(head -1 "$HELPER_THREAD_FILE" | tr -d '\r\n' | tr -d ' ')
+      if [[ -z "$HELPER_RAW" ]]; then
+        echo "discord-reply.sh: $HELPER_THREAD_FILE 비어 있음 — auto-thread skip" >&2
+        exit 0
+      fi
+      AUTO_THREAD_ID="$HELPER_RAW"
+      AUTO_THREAD_SOURCE="$HELPER_THREAD_FILE"
     fi
+
     PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
     # post_thread_message 의 retry wrapper 가 4xx 면 1 반환. thread 만료 / 삭제
     # 시 Discord 가 404 — helper turn 깨지지 않게 stderr warning + exit 0 으로
     # graceful 처리.
     if ! post_thread_message "$AUTO_THREAD_ID" "$PAYLOAD" >/dev/null; then
-      echo "discord-reply.sh: auto-thread push 실패 (thread_id=$AUTO_THREAD_ID, 만료/삭제 추정) — skip" >&2
+      echo "discord-reply.sh: auto-thread push 실패 (thread_id=$AUTO_THREAD_ID, source=$AUTO_THREAD_SOURCE, 만료/삭제 추정) — skip" >&2
       exit 0
     fi
     ;;
