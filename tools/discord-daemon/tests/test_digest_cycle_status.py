@@ -159,8 +159,8 @@ class FormatCycleDigestTest(unittest.TestCase):
         self.assertIn("🛠", be_field.name)
         self.assertIn("진행: PR #804 digest cron 작성 중", be_field.value)
         self.assertIn("최근: #803 (bot.py auto-ack 동적화)", be_field.value)
-        # field value 는 정확히 2줄 구조.
-        self.assertEqual(be_field.value.count("\n"), 1)
+        # field value 는 진행/최근 + 빈 줄 separator → 2개 newline (#1023 가독성 개선).
+        self.assertEqual(be_field.value.count("\n"), 2)
 
         # fe: in_progress null → "idle".
         fe_field = _field_by_ws(embed, "fe")
@@ -480,8 +480,8 @@ class FormatCycleDigestTest(unittest.TestCase):
         for field in embed.fields:
             self.assertIn("진행:", field.value)
             self.assertIn("최근:", field.value)
-            # 정확히 2줄 (한 줄당 라벨 하나).
-            self.assertEqual(field.value.count("\n"), 1)
+            # 진행/최근 사이 빈 줄 separator (#1023 가독성 개선) → 2 newline.
+            self.assertEqual(field.value.count("\n"), 2)
 
     def test_embed_fields_are_not_inline(self) -> None:
         # 한 줄에 하나씩 (스캔 친화적) — inline=False.
@@ -526,6 +526,38 @@ class FormatCycleDigestTest(unittest.TestCase):
         embed, _signature = bot.format_cycle_digest({})
         # discord.Embed footer.text 는 미설정 시 None.
         self.assertIn(embed.footer.text, (None, ""))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 가독성 개선 #1023 (사용자 P0 — "진행과 최근 구분 안돼")
+    # ─────────────────────────────────────────────────────────────────────
+
+    def test_field_value_has_blank_line_separator(self) -> None:
+        """진행/최근 사이 빈 줄 — 시선 분리 의무."""
+        embed, _signature = bot.format_cycle_digest({})
+        for field in embed.fields:
+            # 빈 줄 = "\n\n" 시퀀스 또는 정확히 3줄 (진행 / 빈 / 최근).
+            self.assertIn("\n\n", field.value, f"빈 줄 누락: {field.value!r}")
+
+    def test_field_value_uses_in_progress_emoji(self) -> None:
+        """진행 라벨 앞에 🔄 emoji — 첫 눈에 의미 인지."""
+        embed, _signature = bot.format_cycle_digest({})
+        for field in embed.fields:
+            self.assertIn("🔄", field.value)
+            self.assertIn("✅", field.value)
+
+    def test_field_value_emoji_precedes_labels(self) -> None:
+        """🔄 진행 / ✅ 최근 순서 — emoji+label 연속 배치."""
+        embed, _signature = bot.format_cycle_digest({})
+        for field in embed.fields:
+            # 🔄 가 "진행:" 앞에, ✅ 가 "최근:" 앞에 위치.
+            in_progress_idx = field.value.index("진행:")
+            recent_idx = field.value.index("최근:")
+            in_progress_emoji_idx = field.value.index("🔄")
+            recent_emoji_idx = field.value.index("✅")
+            self.assertLess(in_progress_emoji_idx, in_progress_idx)
+            self.assertLess(recent_emoji_idx, recent_idx)
+            # 진행 이 최근 보다 앞 (순서 보존).
+            self.assertLess(in_progress_idx, recent_idx)
 
 
 if __name__ == "__main__":

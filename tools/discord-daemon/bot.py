@@ -26,7 +26,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo
@@ -297,6 +297,31 @@ DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
 # boot warmup — 다른 loop 와 stagger (digest 60s, claude_usage 120s 사이).
 DIRECTIVE_BOARD_SYNC_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 150
 
+# Discord thread auto-cleanup (#1023, 2026-05-24 사용자 P0).
+# helper sub-agent launch per-thread (#1011) + auto-ack thread 누적 → 채널 sidebar
+# 가시성 ↓. 주기적으로 오래된 thread 를 archive (또는 delete) 해 시야 정리.
+# default 값은 per-launch 페이스(분 단위 생성)에 맞춘 짧은 age + 짧은 interval.
+THREAD_CLEANUP_DEFAULT_ENABLED: Final[str] = "1"
+# interval default 300 → 120 (사용자 P1, #1062): 5분 → 2분 단축. per-launch
+# thread 가 분 단위 페이스로 누적되는 운영 상황에서 5분 주기는 가시 효과 ↓.
+THREAD_CLEANUP_DEFAULT_INTERVAL_SECONDS: Final[int] = 120  # 2분 (사용자 P1)
+THREAD_CLEANUP_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 90  # boot warmup
+# age 기준 (분). 마지막 activity 가 이 시간보다 오래된 thread 만 archive 후보.
+# 분 단위로 표현 — per-launch thread 페이스 (수~수십 분) 와 일치.
+# 후방호환: THREAD_CLEANUP_AGE_HOURS (시간) 도 인식, MINUTES 가 우선.
+THREAD_CLEANUP_DEFAULT_AGE_MINUTES: Final[int] = 15
+# 최근 활동 thread 는 N 개 보존 (사용자가 진행 중인 작업 보호).
+THREAD_CLEANUP_DEFAULT_KEEP_RECENT: Final[int] = 3
+# 0 = archive (sidebar 가시성 ↓ 만, 데이터 보존). 1 = delete (DELETE channel API).
+# default archive — 실수로 진행 중 thread 가 사라지지 않게.
+THREAD_CLEANUP_DEFAULT_DELETE: Final[str] = "0"
+# Discord API 호출 사이 짧은 휴식 — bulk archive/delete 시 429 ratelimit 회피.
+THREAD_CLEANUP_PER_THREAD_SLEEP_SECONDS: Final[float] = 0.5
+# Discord HTTP 요청 timeout.
+THREAD_CLEANUP_HTTP_TIMEOUT_SECONDS: Final[int] = 10
+# Discord snowflake epoch (ms): 2015-01-01T00:00:00Z.
+DISCORD_EPOCH_MS: Final[int] = 1_420_070_400_000
+
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
 
@@ -463,6 +488,30 @@ def load_env() -> dict[str, str]:
     env["REV_POST_MERGE_AUDIT_INTERVAL_SECONDS"] = os.environ.get(
         "REV_POST_MERGE_AUDIT_INTERVAL_SECONDS",
         str(REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS),
+    )
+    # Discord thread auto-cleanup (#1023) — 사용자 P0. per-launch thread 누적 →
+    # sidebar 가시성 ↓ → 주기 archive (default) 또는 delete.
+    env["THREAD_CLEANUP_ENABLED"] = os.environ.get(
+        "THREAD_CLEANUP_ENABLED", THREAD_CLEANUP_DEFAULT_ENABLED
+    )
+    env["THREAD_CLEANUP_INTERVAL_SECONDS"] = os.environ.get(
+        "THREAD_CLEANUP_INTERVAL_SECONDS",
+        str(THREAD_CLEANUP_DEFAULT_INTERVAL_SECONDS),
+    )
+    env["THREAD_CLEANUP_AGE_MINUTES"] = os.environ.get(
+        "THREAD_CLEANUP_AGE_MINUTES",
+        str(THREAD_CLEANUP_DEFAULT_AGE_MINUTES),
+    )
+    # 후방호환: 기존 HOURS env 도 인식 (별도 키로 보존, build_client 에서 minutes
+    # 우선 적용).
+    env["THREAD_CLEANUP_AGE_HOURS"] = os.environ.get(
+        "THREAD_CLEANUP_AGE_HOURS", ""
+    )
+    env["THREAD_CLEANUP_KEEP_RECENT"] = os.environ.get(
+        "THREAD_CLEANUP_KEEP_RECENT", str(THREAD_CLEANUP_DEFAULT_KEEP_RECENT)
+    )
+    env["THREAD_CLEANUP_DELETE"] = os.environ.get(
+        "THREAD_CLEANUP_DELETE", THREAD_CLEANUP_DEFAULT_DELETE
     )
     env["REV_POST_MERGE_AUDIT_INJECT_TARGET"] = os.environ.get(
         "REV_POST_MERGE_AUDIT_INJECT_TARGET",
@@ -1121,7 +1170,17 @@ def format_cycle_digest(
 
         emoji = CYCLE_DIGEST_WORKSPACE_EMOJI.get(ws, "")
         field_name = f"{emoji} {ws}".strip() if emoji else ws
-        field_value = f"진행: {in_progress_text}\n최근: {recent_text}"
+        # 가독성 개선 (#1023 사용자 P0): 진행 vs 최근 구분이 모호하다는 피드백 반영.
+        # 1) 두 줄 사이 빈 줄 — 시선 분리.
+        # 2) ``🔄 진행`` / ``✅ 최근`` emoji + 라벨 — 첫 눈에 의미 인지.
+        # 3) 들여쓰기 (전각 공백) — 라벨과 본문 시각 위계 분리.
+        # 4) 후방호환: 본문에 ``진행:`` / ``최근:`` 문자열을 유지 (test fixture
+        #    keyword 매칭 + 메모리/스크린샷 분석 도구가 라벨로 grep).
+        field_value = (
+            f"🔄 진행: {in_progress_text}\n"
+            f"\n"
+            f"✅ 최근: {recent_text}"
+        )
         embed.add_field(name=field_name, value=field_value, inline=False)
 
     embed.color = CYCLE_DIGEST_COLOR_ACTIVE if any_active else CYCLE_DIGEST_COLOR_IDLE
@@ -2792,6 +2851,419 @@ async def directive_board_sync_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Discord thread auto-cleanup (#1023, 2026-05-24 사용자 P0)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Why: helper sub-agent launch 별 per-launch thread (#1011) + auto-ack thread
+# 가 쌓이면 채널 sidebar 가 18+ 누적 → 사용자 가시성 ↓. 주기 archive (또는
+# delete) 로 시야 정리. requests 모듈을 직접 import 하지 않고 의존성 주입식
+# (`http_get`/`http_patch`/`http_delete`) 으로 정의 — 테스트 stub 친화 + bot.py
+# 시작 시점에 requests 부재여도 import 자체는 깨지지 않게 lazy import.
+
+
+def snowflake_to_datetime(snowflake) -> datetime:
+    """Discord snowflake 를 timezone-aware (UTC) datetime 으로 변환합니다.
+
+    snowflake bit layout:
+      [42b unix ms - DISCORD_EPOCH][5b worker][5b process][12b increment]
+
+    Args:
+        snowflake: int 또는 str. 정수 변환 불가 시 ValueError raise.
+
+    Returns:
+        ``datetime`` (tz=UTC).
+    """
+    value = int(snowflake)
+    ms = (value >> 22) + DISCORD_EPOCH_MS
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+
+def thread_last_activity(thread: dict) -> datetime:
+    """thread dict 에서 마지막 활동 시각을 추정합니다.
+
+    우선순위:
+      1. ``last_message_id`` (snowflake) → 변환.
+      2. ``thread_metadata.create_timestamp`` (ISO8601) → 파싱.
+      3. ``id`` (thread snowflake = 생성 시각) → 변환.
+
+    어느 source 도 valid 하지 않으면 ``id`` 기반 결과 (= 2015 epoch) 로 fallback.
+    """
+    raw_last = thread.get("last_message_id")
+    if raw_last is not None:
+        try:
+            return snowflake_to_datetime(raw_last)
+        except (TypeError, ValueError):
+            pass
+    meta = thread.get("thread_metadata") or {}
+    create_ts = meta.get("create_timestamp")
+    if isinstance(create_ts, str) and create_ts.strip():
+        try:
+            # Discord ISO8601 timestamp — 'Z' 정규화.
+            normalized = create_ts.strip().replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized).astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            pass
+    return snowflake_to_datetime(thread.get("id", "0"))
+
+
+def select_threads_to_archive(
+    threads: list[dict],
+    *,
+    now_utc: datetime,
+    age_hours: float | None = None,
+    age_minutes: float | None = None,
+    keep_recent: int = 3,
+) -> list[dict]:
+    """archive 후보 thread 목록을 산출합니다.
+
+    Args:
+        threads: ``fetch_active_threads`` 결과.
+        now_utc: 현재 시각 (tz=UTC) — 테스트 deterministic 위해 외부 주입.
+        age_hours: 시간 단위 임계. (후방호환 — 호출부 minutes 우선시 무시.)
+        age_minutes: 분 단위 임계. None 이면 ``age_hours`` 사용.
+        keep_recent: 가장 최근 활동 thread N 개 보존.
+
+    Returns:
+        archive 대상 thread dict list (입력 순서 유지).
+    """
+    if not threads:
+        return []
+    if age_minutes is not None:
+        threshold = timedelta(minutes=age_minutes)
+    elif age_hours is not None:
+        threshold = timedelta(hours=age_hours)
+    else:
+        # 안전 default — age 미지정 시 archive 안 함 (보수).
+        return []
+
+    enriched = [(thread_last_activity(t), t) for t in threads]
+    enriched.sort(key=lambda pair: pair[0], reverse=True)
+    # keep_recent 만큼 가장 최근 thread 제외.
+    candidates = enriched[max(keep_recent, 0):]
+    cutoff = now_utc - threshold
+    return [t for ts, t in candidates if ts < cutoff]
+
+
+def fetch_guild_id(
+    channel_id: str,
+    token: str,
+    *,
+    http_get=None,
+) -> str | None:
+    """채널의 guild_id 조회 (GET /channels/{channel.id}). 실패 시 None."""
+    url = f"https://discord.com/api/v10/channels/{channel_id}"
+    headers = {"Authorization": f"Bot {token}"}
+    get = http_get if http_get is not None else _default_http_get
+    try:
+        resp = get(url, headers=headers, timeout=THREAD_CLEANUP_HTTP_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_guild_id 실패: channel=%s err=%s", channel_id, exc)
+        return None
+    ok = getattr(resp, "ok", 200 <= getattr(resp, "status_code", 500) < 300)
+    if not ok:
+        logger.warning(
+            "fetch_guild_id non-2xx: channel=%s status=%s body=%r",
+            channel_id,
+            getattr(resp, "status_code", "?"),
+            truncate_for_log(getattr(resp, "text", "") or ""),
+        )
+        return None
+    try:
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_guild_id JSON 파싱 실패: %s", exc)
+        return None
+    guild_id = data.get("guild_id") if isinstance(data, dict) else None
+    return str(guild_id) if guild_id is not None else None
+
+
+def fetch_active_threads(
+    guild_id: str,
+    parent_channel_id: str,
+    token: str,
+    *,
+    http_get=None,
+) -> list[dict]:
+    """guild 의 active threads 중 ``parent_id == parent_channel_id`` 인 것만 반환.
+
+    실패 / 네트워크 오류 → 빈 list (loop 진행 보장).
+    """
+    url = f"https://discord.com/api/v10/guilds/{guild_id}/threads/active"
+    headers = {"Authorization": f"Bot {token}"}
+    get = http_get if http_get is not None else _default_http_get
+    try:
+        resp = get(url, headers=headers, timeout=THREAD_CLEANUP_HTTP_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "fetch_active_threads 실패: guild=%s err=%s", guild_id, exc
+        )
+        return []
+    ok = getattr(resp, "ok", 200 <= getattr(resp, "status_code", 500) < 300)
+    if not ok:
+        logger.warning(
+            "fetch_active_threads non-2xx: guild=%s status=%s body=%r",
+            guild_id,
+            getattr(resp, "status_code", "?"),
+            truncate_for_log(getattr(resp, "text", "") or ""),
+        )
+        return []
+    try:
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_active_threads JSON 파싱 실패: %s", exc)
+        return []
+    if not isinstance(data, dict):
+        return []
+    threads = data.get("threads") or []
+    if not isinstance(threads, list):
+        return []
+    return [
+        t
+        for t in threads
+        if isinstance(t, dict) and str(t.get("parent_id")) == str(parent_channel_id)
+    ]
+
+
+def archive_thread(
+    thread_id: str,
+    token: str,
+    *,
+    http_patch=None,
+) -> bool:
+    """PATCH /channels/{thread.id} {"archived": true}. 성공 시 True."""
+    url = f"https://discord.com/api/v10/channels/{thread_id}"
+    headers = {
+        "Authorization": f"Bot {token}",
+        "Content-Type": "application/json",
+    }
+    patch = http_patch if http_patch is not None else _default_http_patch
+    try:
+        resp = patch(
+            url,
+            headers=headers,
+            json={"archived": True},
+            timeout=THREAD_CLEANUP_HTTP_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("archive_thread 실패: thread=%s err=%s", thread_id, exc)
+        return False
+    ok = getattr(resp, "ok", 200 <= getattr(resp, "status_code", 500) < 300)
+    if not ok:
+        logger.warning(
+            "archive_thread non-2xx: thread=%s status=%s body=%r",
+            thread_id,
+            getattr(resp, "status_code", "?"),
+            truncate_for_log(getattr(resp, "text", "") or ""),
+        )
+        return False
+    return True
+
+
+def delete_thread(
+    thread_id: str,
+    token: str,
+    *,
+    http_delete=None,
+) -> bool:
+    """DELETE /channels/{thread.id}. 성공 시 True. 사용자 옵션 (#1023 P0)."""
+    url = f"https://discord.com/api/v10/channels/{thread_id}"
+    headers = {"Authorization": f"Bot {token}"}
+    delete = http_delete if http_delete is not None else _default_http_delete
+    try:
+        resp = delete(
+            url, headers=headers, timeout=THREAD_CLEANUP_HTTP_TIMEOUT_SECONDS
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("delete_thread 실패: thread=%s err=%s", thread_id, exc)
+        return False
+    ok = getattr(resp, "ok", 200 <= getattr(resp, "status_code", 500) < 300)
+    if not ok:
+        logger.warning(
+            "delete_thread non-2xx: thread=%s status=%s body=%r",
+            thread_id,
+            getattr(resp, "status_code", "?"),
+            truncate_for_log(getattr(resp, "text", "") or ""),
+        )
+        return False
+    return True
+
+
+def _default_http_get(url, headers=None, timeout=None):
+    """lazy ``requests.get`` — bot.py top-level import 회피."""
+    import requests  # type: ignore[import-not-found]
+
+    return requests.get(url, headers=headers, timeout=timeout)
+
+
+def _default_http_patch(url, headers=None, json=None, timeout=None):
+    """lazy ``requests.patch``."""
+    import requests  # type: ignore[import-not-found]
+
+    return requests.patch(url, headers=headers, json=json, timeout=timeout)
+
+
+def _default_http_delete(url, headers=None, timeout=None):
+    """lazy ``requests.delete``."""
+    import requests  # type: ignore[import-not-found]
+
+    return requests.delete(url, headers=headers, timeout=timeout)
+
+
+async def thread_cleanup_loop(
+    channel_id: str,
+    token: str,
+    *,
+    poll_interval: int = THREAD_CLEANUP_DEFAULT_INTERVAL_SECONDS,
+    initial_delay: int = THREAD_CLEANUP_DEFAULT_INITIAL_DELAY_SECONDS,
+    age_hours: float | None = None,
+    age_minutes: float | None = THREAD_CLEANUP_DEFAULT_AGE_MINUTES,
+    keep_recent: int = THREAD_CLEANUP_DEFAULT_KEEP_RECENT,
+    delete: bool = False,
+    guild_id_fetcher=None,
+    threads_fetcher=None,
+    archiver=None,
+    deleter=None,
+    sleeper=asyncio.sleep,
+    now_source=None,
+) -> None:
+    """주기적으로 채널의 오래된 thread 를 archive (또는 delete) 합니다 (#1023).
+
+    의존성 주입 (모두 keyword-only)  로 테스트 stub 친화:
+      - ``guild_id_fetcher``: ``() -> str | None``. None 이면 ``fetch_guild_id``.
+      - ``threads_fetcher``: ``(guild_id) -> list[dict]``.
+      - ``archiver``: ``(thread_id) -> bool``. None 이면 ``archive_thread``.
+      - ``deleter``: ``(thread_id) -> bool``. None 이면 ``delete_thread``.
+      - ``sleeper``: ``async (sec)``. asyncio.sleep default — pytest 에서 noop.
+      - ``now_source``: ``() -> datetime (UTC)``. None 이면 ``datetime.now(tz)``.
+
+    동작:
+      1. ``poll_interval <= 0`` → disabled, 즉시 return.
+      2. ``initial_delay`` 후 polling 시작.
+      3. 매 iter:
+         a. guild_id 미상이면 fetch — None 이면 다음 iter 재시도.
+         b. active threads 조회 → ``select_threads_to_archive`` 로 후보 산출.
+         c. 각 후보 archive (또는 delete) — per-thread sleep 으로 ratelimit 완화.
+      4. 예외는 warning 으로 swallow — loop 가 죽지 않게.
+    """
+    if poll_interval <= 0:
+        logger.info("thread_cleanup_loop disabled (poll_interval<=0)")
+        return
+
+    await sleeper(initial_delay)
+
+    if guild_id_fetcher is None:
+        def guild_id_fetcher() -> str | None:
+            return fetch_guild_id(channel_id, token)
+    if threads_fetcher is None:
+        def threads_fetcher(guild_id: str) -> list[dict]:
+            return fetch_active_threads(guild_id, channel_id, token)
+    if archiver is None:
+        def archiver(thread_id: str) -> bool:
+            return archive_thread(thread_id, token)
+    if deleter is None:
+        def deleter(thread_id: str) -> bool:
+            return delete_thread(thread_id, token)
+    if now_source is None:
+        def now_source() -> datetime:
+            return datetime.now(timezone.utc)
+
+    cached_guild_id: str | None = None
+    age_repr = (
+        f"{age_minutes}min" if age_minutes is not None else f"{age_hours}h"
+    )
+    logger.info(
+        "thread_cleanup_loop launched: channel=%s interval=%ds age=%s keep=%d delete=%s",
+        channel_id,
+        poll_interval,
+        age_repr,
+        keep_recent,
+        delete,
+    )
+    iter_count = 0
+    while True:
+        iter_count += 1
+        try:
+            if cached_guild_id is None:
+                cached_guild_id = guild_id_fetcher()
+                if cached_guild_id is None:
+                    # #1062 silent root cause fix: debug → warning 격상.
+                    # guild_id 미상이 silent 일 때 사용자는 "주기 청소 안되고
+                    # 있네" 보고. warning 으로 가시화해야 root cause 추적 가능.
+                    logger.warning(
+                        "thread_cleanup_loop iter=%d: guild_id 미상 — "
+                        "다음 iter 재시도 (channel=%s). 지속 발생 시 "
+                        "Bot 권한 / channel ID 검증 필요.",
+                        iter_count,
+                        channel_id,
+                    )
+                    await sleeper(poll_interval)
+                    continue
+
+            # #1062 silent root cause fix: iter 진입 가시화 — debug 가 아닌
+            # info 로 매 iter "alive" 신호. 사용자가 "주기 청소 안되고 있네"
+            # 보고 시 첫 진단 점이 "loop 가 iter 도는가" 인데 이 로그가 없으면
+            # silent. INFO 로 격상해 journal grep 으로 즉시 확인 가능.
+            logger.info(
+                "thread_cleanup_loop iter=%d: scan 시작 (guild=%s channel=%s)",
+                iter_count,
+                cached_guild_id,
+                channel_id,
+            )
+            threads = threads_fetcher(cached_guild_id)
+            scanned = len(threads)
+            candidates = select_threads_to_archive(
+                threads,
+                now_utc=now_source(),
+                age_hours=age_hours,
+                age_minutes=age_minutes,
+                keep_recent=keep_recent,
+            )
+
+            archived = 0
+            deleted = 0
+            skipped = 0
+            for cand in candidates:
+                tid = str(cand.get("id"))
+                if not tid or tid == "None":
+                    skipped += 1
+                    continue
+                if delete:
+                    ok = deleter(tid)
+                    if ok:
+                        deleted += 1
+                    else:
+                        skipped += 1
+                else:
+                    ok = archiver(tid)
+                    if ok:
+                        archived += 1
+                    else:
+                        skipped += 1
+                # per-thread 짧은 휴식 — 429 회피.
+                await sleeper(THREAD_CLEANUP_PER_THREAD_SLEEP_SECONDS)
+
+            logger.info(
+                "thread_cleanup_loop iter=%d: scanned=%d candidates=%d "
+                "archived=%d deleted=%d skipped=%d (keep=%d age=%s)",
+                iter_count,
+                scanned,
+                len(candidates),
+                archived,
+                deleted,
+                skipped,
+                keep_recent,
+                age_repr,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "thread_cleanup_loop iter=%d 실패: %s", iter_count, exc
+            )
+        await sleeper(poll_interval)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Discord client
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -3045,6 +3517,49 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         )
     )
 
+    # Discord thread auto-cleanup (#1023) — env 해석.
+    thread_cleanup_enabled = (
+        env.get("THREAD_CLEANUP_ENABLED", THREAD_CLEANUP_DEFAULT_ENABLED) == "1"
+    )
+    thread_cleanup_interval = _resolve_int_env(
+        "THREAD_CLEANUP_INTERVAL_SECONDS",
+        THREAD_CLEANUP_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    # minutes 우선. legacy HOURS 도 인식 (비어 있지 않으면 시간 → 분 변환).
+    thread_cleanup_age_minutes: float | None = float(
+        _resolve_int_env(
+            "THREAD_CLEANUP_AGE_MINUTES",
+            THREAD_CLEANUP_DEFAULT_AGE_MINUTES,
+            allow_zero=False,
+        )
+    )
+    legacy_hours_raw = env.get("THREAD_CLEANUP_AGE_HOURS", "")
+    if legacy_hours_raw and env.get(
+        "THREAD_CLEANUP_AGE_MINUTES"
+    ) is None:
+        # MINUTES 미설정 + HOURS 만 설정 — legacy 모드. 시간 → 분 변환.
+        try:
+            thread_cleanup_age_minutes = float(legacy_hours_raw) * 60.0
+            logger.info(
+                "THREAD_CLEANUP_AGE_HOURS legacy 인식 — %s시간 = %.0f분",
+                legacy_hours_raw,
+                thread_cleanup_age_minutes,
+            )
+        except ValueError:
+            logger.warning(
+                "THREAD_CLEANUP_AGE_HOURS 정수 아님(%r) — 기본 %d분 사용",
+                legacy_hours_raw,
+                THREAD_CLEANUP_DEFAULT_AGE_MINUTES,
+            )
+    thread_cleanup_keep_recent = _resolve_int_env(
+        "THREAD_CLEANUP_KEEP_RECENT",
+        THREAD_CLEANUP_DEFAULT_KEEP_RECENT,
+    )
+    thread_cleanup_delete = (
+        env.get("THREAD_CLEANUP_DELETE", THREAD_CLEANUP_DEFAULT_DELETE) == "1"
+    )
+
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
         env.get("CONTEXT_CLEAR_TRIGGER_PCT"),
@@ -3279,6 +3794,34 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info(
                 "directive_board_sync_loop disabled (DIRECTIVE_BOARD_SYNC_ENABLED=0)"
             )
+
+        # Discord thread auto-cleanup (#1023, 2026-05-24 사용자 P0 + #1062 사용자 P1).
+        # per-launch thread 누적 → sidebar 가시성 ↓ 해소.
+        # default age=15min interval=2min (#1062) keep=3 archive (delete 옵션 별도 toggle).
+        if thread_cleanup_enabled and not hasattr(
+            client, "_thread_cleanup_task_started"
+        ):
+            client._thread_cleanup_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                thread_cleanup_loop(
+                    str(target_channel_id),
+                    env["DISCORD_BOT_TOKEN"],
+                    poll_interval=thread_cleanup_interval,
+                    age_minutes=thread_cleanup_age_minutes,
+                    keep_recent=thread_cleanup_keep_recent,
+                    delete=thread_cleanup_delete,
+                )
+            )
+            logger.info(
+                "thread_cleanup_loop launched: channel=%s interval=%ds age=%.0fmin keep=%d delete=%s",
+                target_channel_id,
+                thread_cleanup_interval,
+                thread_cleanup_age_minutes,
+                thread_cleanup_keep_recent,
+                thread_cleanup_delete,
+            )
+        elif not thread_cleanup_enabled:
+            logger.info("thread_cleanup_loop disabled (THREAD_CLEANUP_ENABLED=0)")
 
     @client.event
     async def on_message(message: discord.Message) -> None:
