@@ -1,6 +1,8 @@
 # Memory → Code Promote Tracking
 
-> maestro/세션이 Claude 메모리(`~/.claude/projects/.../memory/`)에 보관 중인 항목 중 **반복적으로 적용되는 운영 룰·프로젝트 결정**을 코드베이스(런북/CLAUDE.md/ADR/spec)로 promote한 기록.
+> maestro/세션이 Claude 메모리(`~/.claude/projects/.../memory/<actor>/`)에 보관 중인 항목 중 **반복적으로 적용되는 운영 룰·프로젝트 결정**을 코드베이스(런북/CLAUDE.md/ADR/spec)로 promote한 기록.
+>
+> **2026-05-24 #1004**: 메모리 디렉토리가 actor 별로 분리됨 (`common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/`). 본 매트릭스의 "메모리 항목" 열은 디렉토리 prefix 없이 slug 만 표기 (slug 가 unique).
 > 메모리는 휘발성·세션 의존이라 핵심 룰은 코드로 옮겨 다음 세션도 동일 룰을 읽게 한다.
 >
 > 본 문서는 **트래킹 매트릭스**이며 실제 promote는 별 PR로 진행. 메모리 본문은 **수정하지 않는다** (race 회피, `11-multi-session-runbook.md §1-2`).
@@ -46,7 +48,7 @@ plan 22 이후 추가된 메모리 항목 중 다른 메모리와 중복도가 �
 - **`feedback_rev_release_gate`** — `feedback_autonomous_loop`(release만 사용자 확인)과 의미 겹침. "release 전 모든 PR `reviewed:claude` 라벨 gate" 1줄로 압축.
 - **`feedback_external_research`** — 단독 유지 무방하나, `user_working_style`에 "기획 영감 부족 시 외부 서비스 분석 위임" 한 줄 추가하고 본 항목 삭제도 검토 가능.
 
-처리 가이드: maestro이 다음 사용자 입력 idle 사이클에 메모리 편집 (`~/.claude/projects/.../memory/MEMORY.md` 직접 수정). plan 세션은 본 매트릭스에서만 추적.
+처리 가이드: maestro이 다음 사용자 입력 idle 사이클에 메모리 편집 (`~/.claude/projects/.../memory/MEMORY.md` index 직접 수정 + actor 디렉토리 하위 feedback 본문 수정). plan 세션은 본 매트릭스에서만 추적.
 
 ## 3) 운영 룰
 

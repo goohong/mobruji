@@ -320,7 +320,7 @@ helper LLM 응답 = Discord raw push. nmae 작업 + digest 도 직접 push 유�
 helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또는 세션 종료 시점 직전 turn 마지막 단계에서 **4-way 문서화 일치 체크**.
 
 ### 4-way
-1. **메모리** (`/home/mobruji/.claude/projects/-home-mobruji-mobruji/memory/feedback_*.md`)
+1. **메모리** (`/home/mobruji/.claude/projects/-home-mobruji-mobruji/memory/<actor>/feedback_*.md` — 2026-05-24 #1004 actor 디렉토리 분리: `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/`)
 2. **CLAUDE.md** 본문 §1-§N
 3. **docs/ai-harness/** (런북/spec/컨벤션)
 4. **docs/features/** (feature spec)
