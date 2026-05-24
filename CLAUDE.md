@@ -221,6 +221,16 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - rev 코멘트는 nmae 가 자동 후속 이슈 등록 ([[feedback-auto-register-rev-findings]]). 🔴 시급 항목은 같은 사이클에 즉시 트리거.
 - nmae 가 Agent 도구로 be/fe/rev/plan background 가동 ([[feedback-orchestration-pattern]]) — 사용자가 워크트리마다 새 Claude 띄우지 않음.
 
+### 11-8) nmae status push 채널 라우팅 (#1036, 2026-05-24 채널 분리 leak fix)
+
+- **nmae 의 모든 status push 는 DIGEST_CHANNEL_ID 로** ([[feedback-nmae-status-channel]]). sub-agent launch / 완료 / cycle alert / audit / digest 모두 해당. #모부르지 (MOBRUJI_CHANNEL_ID) leak 금지 — 사용자 응답 전용 채널.
+- 호출 방법 (택 1):
+  - **wrapper** (권장): `bash /home/mobruji/.mobruji/nmae-discord-push.sh "<본문>"`. `--auto-ack-thread` / `--thread` / `--auto-thread` 모두 forward.
+  - **flag 직접**: `bash /home/mobruji/.mobruji/discord-reply.sh --status-channel "<본문>"`. 또는 `--channel <id>` 임의 채널.
+- **거울 룰**: helper 측 [[feedback-helper-relay-scope]] (§12-1) 와 짝. helper 는 nmae 사이클 디테일 relay 금지 + nmae 는 자기 status 를 status 채널로 송신 — 두 룰이 합쳐져 채널 분리 보장.
+- 검증: push 후 `channel_id` 가 `MOBRUJI_CHANNEL_ID` 와 같으면 leak. 다음 grep 으로 위반 패턴 점검: `grep -RnE 'discord-reply\.sh "🚀|discord-reply\.sh ".*sub-agent' .` (해당 호출은 `nmae-discord-push.sh` 또는 `--status-channel` 으로 갱신).
+- 사용자 정정 인용 (2026-05-24): "이런게 모부르지 채널로 오니" — nmae launch 알림이 #모부르지 로 leak 된 사고 박제.
+
 ---
 
 ## 12) helper 전용 룰 (mac maestro 사용자 응답)

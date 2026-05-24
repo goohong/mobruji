@@ -51,6 +51,28 @@
 #         → helper 가 stdout 캡쳐를 잊어도 다음 --auto-thread 호출이 파일에서 복구.
 #         → ack push 도 `message_reference` 자동 적용 (#960).
 #
+#   5a) status channel routing (#1036, 2026-05-24 — 채널 분리 leak fix):
+#       discord-reply.sh --status-channel "<status 본문>"
+#       discord-reply.sh --channel <id> "<본문>"
+#         → 채널을 DIGEST_CHANNEL_ID (또는 임의 id) 로 강제 override.
+#           기본 채널은 MOBRUJI_CHANNEL_ID = 사용자 응답 #모부르지 — nmae sub-agent
+#           launch/완료/cycle alert push 가 이 채널로 leak 되는 사고가 있어,
+#           nmae status push 는 본 flag 또는 `nmae-discord-push.sh` wrapper 를
+#           반드시 사용한다.
+#         → --status-channel: .env 의 DIGEST_CHANNEL_ID (없으면 NOTIFY_CHANNEL_ID
+#           backward-compat) 로 자동 override. 둘 다 미설정이면 명시적 에러
+#           (silent fallback 으로 MOBRUJI 로 회귀하면 leak 룰 본질이 무력화 — 채널
+#           분리가 안 됐다는 사실을 호출자에게 알린다).
+#         → --channel <id>: 임의 채널 id 직접 지정. wrapper 작성 / 신설 status
+#           채널용. id snowflake 검증은 하지 않음 (호출자 책임).
+#         → 두 flag 모두 자동으로 `--no-reply` 와 동등한 효과 — status push 는
+#           사용자 메시지에 답장 형태로 매달 필요가 없고, message_reference 가
+#           원본 메시지 (다른 채널) 를 참조하면 Discord 가 404 처리.
+#         → bare body / --ack / --auto-ack-thread / --auto-thread 등 모든 mode 와
+#           조합 가능. thread 생성도 override 된 채널 안에서 발생.
+#         → 관련 룰: CLAUDE.md §11-8 [[feedback-nmae-status-channel]]
+#                   [[feedback-helper-relay-scope]] 거울 룰.
+#
 #   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
 #         → thread_id resolve 우선순위 (높음 → 낮음):
@@ -113,15 +135,24 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-# MOBRUJI_CHANNEL_ID 우선 (helper raw 응답 = 메인 #모부르지),
-# DIGEST_CHANNEL_ID (또는 backward-compat NOTIFY_CHANNEL_ID) 는 digest 전용 fallback.
-CHANNEL=$(read_env_value MOBRUJI_CHANNEL_ID)
+# 채널 resolve — MOBRUJI_CHANNEL_ID 우선 (helper raw 응답 = 메인 #모부르지),
+# DIGEST_CHANNEL_ID (또는 backward-compat NOTIFY_CHANNEL_ID) 는 digest/status 전용 fallback.
+# 본 변수는 default 경로용. `--status-channel` flag 가 명시되면 아래 mode dispatch
+# 단계 후 channel 을 DIGEST 로 강제 override 한다 (사용자 응답 채널 leak 방지 — 이슈
+# #1036, 2026-05-24 채널 분리 사고).
+# read_env_value 는 grep 으로 키 검색 — 부재 키는 grep 이 1 종료 → set -e 와
+# 충돌. `|| true` 로 graceful empty 보장 (변수 자체는 empty string 가짐).
+MOBRUJI_CHANNEL_VALUE=$(read_env_value MOBRUJI_CHANNEL_ID || true)
+DIGEST_CHANNEL_VALUE=$(read_env_value DIGEST_CHANNEL_ID || true)
+NOTIFY_CHANNEL_VALUE=$(read_env_value NOTIFY_CHANNEL_ID || true)
+
+CHANNEL="$MOBRUJI_CHANNEL_VALUE"
 if [[ -z "$CHANNEL" ]]; then
-  CHANNEL=$(read_env_value DIGEST_CHANNEL_ID)
+  CHANNEL="$DIGEST_CHANNEL_VALUE"
 fi
 if [[ -z "$CHANNEL" ]]; then
   # #1019 backward-compat — 기존 NOTIFY_CHANNEL_ID 도 fallback.
-  CHANNEL=$(read_env_value NOTIFY_CHANNEL_ID)
+  CHANNEL="$NOTIFY_CHANNEL_VALUE"
   if [[ -n "$CHANNEL" ]]; then
     echo "discord-reply.sh: NOTIFY_CHANNEL_ID 는 deprecated — DIGEST_CHANNEL_ID 로 rename 됐습니다 (#1019). .env 갱신 권장." >&2
   fi
@@ -183,11 +214,22 @@ MSG=""
 NO_REPLY=0
 # --reply-to <id>: target msg id 명시적 override (#987). resolve 우선순위 최상위.
 REPLY_TO_OVERRIDE=""
+# --status-channel: 채널을 DIGEST_CHANNEL_ID 로 강제 override (#1036, 2026-05-24).
+# 의도: nmae sub-agent launch/완료/cycle alert push 가 사용자 응답 채널
+# (#모부르지 = MOBRUJI_CHANNEL_ID) 으로 leak 되는 사고 방지. nmae 가 status
+# 알림을 송신할 때 본 flag 또는 nmae-discord-push.sh wrapper 를 사용한다.
+# --status-channel 사용 시 자동으로 NO_REPLY=1 가 강제된다 — status push 는
+# 사용자 메시지에 답장 형태로 매달 필요가 없고, 그 reply 시도가 다시 leak
+# 의심 패턴을 만들 수 있다.
+STATUS_CHANNEL=0
+# --channel <id>: 임의 채널 id 로 직접 override. 일반 wrapper 작성용.
+# --status-channel 보다 우선 (명시 > 의미). reply 자동 disable 동일.
+CHANNEL_OVERRIDE=""
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
   echo "  discord-reply.sh \"<메시지>\"" >&2
-  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] \"<메시지>\"" >&2
+  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] [--status-channel | --channel <id>] \"<메시지>\"" >&2
   echo "  discord-reply.sh --ack \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
@@ -195,9 +237,9 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
-# --no-reply / --reply-to 는 선택적 prefix — 다른 flag 보다 먼저 consume.
-# 두 flag 의 순서는 자유 (--no-reply --reply-to 도, --reply-to --no-reply 도 OK).
-# --no-reply 가 우선 — --reply-to 와 동시 지정 시 standalone (안전한 쪽으로 fail-safe).
+# --no-reply / --reply-to / --status-channel / --channel 은 선택적 prefix —
+# 다른 mode flag 보다 먼저 consume. 순서 자유 (CLI 친화).
+# --no-reply 가 --reply-to 와 동시 지정 시 standalone (안전 fail-safe).
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-reply)
@@ -212,11 +254,49 @@ while [[ $# -gt 0 ]]; do
       REPLY_TO_OVERRIDE="$2"
       shift 2
       ;;
+    --status-channel)
+      STATUS_CHANNEL=1
+      # status 채널 push 는 사용자 메시지 reply 가 의미 없음 + leak 의심
+      # 패턴 회피 — 자동 NO_REPLY 강제.
+      NO_REPLY=1
+      shift
+      ;;
+    --channel)
+      if [[ $# -lt 2 ]]; then
+        echo "discord-reply.sh: --channel 뒤에 channel_id 가 필요합니다" >&2
+        exit 1
+      fi
+      CHANNEL_OVERRIDE="$2"
+      NO_REPLY=1
+      shift 2
+      ;;
     *)
       break
       ;;
   esac
 done
+
+# 채널 override 적용 (mode dispatch 이전 — start_thread_from_message 등 모든
+# 헬퍼가 동일 $CHANNEL 을 보고 호출하기 때문).
+# 우선순위: --channel <id> > --status-channel > default ($CHANNEL 위에서 resolve)
+if [[ -n "$CHANNEL_OVERRIDE" ]]; then
+  CHANNEL="$CHANNEL_OVERRIDE"
+elif [[ "$STATUS_CHANNEL" -eq 1 ]]; then
+  # DIGEST_CHANNEL_ID 또는 backward-compat NOTIFY_CHANNEL_ID 로 강제.
+  # MOBRUJI 만 설정돼 있어 DIGEST 가 비어 있다면 명시적 에러 (silent leak
+  # 방지 — 채널 분리 의도가 명백한데 fallback 으로 다시 MOBRUJI 로 가면 룰
+  # 위반의 본질이 무력화됨).
+  if [[ -n "$DIGEST_CHANNEL_VALUE" ]]; then
+    CHANNEL="$DIGEST_CHANNEL_VALUE"
+  elif [[ -n "$NOTIFY_CHANNEL_VALUE" ]]; then
+    CHANNEL="$NOTIFY_CHANNEL_VALUE"
+    echo "discord-reply.sh: --status-channel — NOTIFY_CHANNEL_ID 사용 (DIGEST_CHANNEL_ID 로 rename 권장, #1019)." >&2
+  else
+    echo "discord-reply.sh: --status-channel 지정됐으나 DIGEST_CHANNEL_ID / NOTIFY_CHANNEL_ID 미설정 — 채널 분리 불가" >&2
+    echo "  .env 에 DIGEST_CHANNEL_ID=<id> 추가 후 재시도하세요." >&2
+    exit 1
+  fi
+fi
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: prefix flag 뒤에 메시지가 필요합니다" >&2
