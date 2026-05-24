@@ -98,16 +98,56 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
   - 로드 금지 (다른 actor 룰): `nmae/` (orchestration — nmae 만), `helper/` (사용자 응답 — helper 만), 다른 sub-agent role 특이 항목.
   - 루트 `MEMORY.md` (index) + `project_*` / `user_*` (핸드오프/상태) 는 sub-agent 도 참고 가능 (read-only).
 
-### sub-agent 자율 결정 (사용자 없는 것처럼)
+### sub-agent 자율 결정 (사용자 없는 것처럼) — STRICT (#1015 P1)
 
-sub-agent (be/fe/rev/plan/일회성 helper sub-agent) 는 작업 도중 **사용자 결정 wait state 금지**:
-- 금지 표현: "사용자 결정 대기", "사용자 확인 필요", "사용자 승인 후 진행", "wait for user"
+sub-agent (be/fe/rev/plan/일회성 helper sub-agent) 는 작업 도중 **사용자 결정 wait state 절대 금지**:
+- 금지 표현: "사용자 결정 대기", "사용자 확인 필요", "사용자 승인 후 진행", "wait for user", "사용자에게 질문"
+- **AskUserQuestion 도구 사용 절대 금지** (STRICT, 2026-05-24 #1015 P1 박제):
+  - sub-agent 는 사용자가 부재한 것처럼 모든 결정을 자율 수행한다.
+  - 모호한 분기 점 발견 시 → "**자율 결정 + 사유 보고**" 패턴 적용 (아래 §자율 결정 + 사유 보고 패턴 참조).
+  - high-stakes 항목 (release / production secret / 대규모 destructive 변경) 도 sub-agent 는 직접 결정하지 않고 nmae 또는 helper 본체에 보고 후 turn 종료 — sub-agent 가 직접 사용자에게 묻지 않는다.
 - 결정 책임 순서:
   1. sub-agent 자체 자율 결정 (대부분 — task brief 의 spec 따라)
-  2. 분기 점 있으면 nmae (orchestrator) 가 결정 — sub-agent 가 nmae 에 보고
+  2. 분기 점 있으면 nmae (orchestrator) 가 결정 — sub-agent 가 nmae 에 보고 후 turn 종료
   3. helper 본체만 사용자 인터페이스 — sub-agent 는 사용자에게 직접 메시지 보내거나 답 받지 않음
 
-**Why:** 2026-05-24 사용자: "나는 없다고 생각해야돼 걔네는". sub-agent 가 사용자 wait 면 wall-clock 정체. 자율 결정이 redo 비용보다 낫음. nmae 가 책임자.
+#### 자율 결정 + 사유 보고 패턴 (STRICT 적용 시 의무)
+
+모호한 분기 점 마주쳐도 wait 하지 말고 다음 절차:
+
+1. **alternative 1개 이상 도출** — task brief / spec / 기존 코드 컨벤션 기반으로 가장 합리적 결정을 자율 채택.
+2. **결정 + 사유 기록** — 채택 결정 + 후보 alternative + 채택 사유를 PR 본문에 `## 자율 결정 (사유)` 섹션으로 명시.
+3. **계속 진행** — 사용자 응답 기다리지 말고 다음 단계 실행.
+4. **PR 본문 보고** — nmae/helper/사용자가 PR 본문 보면 결정 trail 추적 가능.
+
+PR 본문 예시:
+
+```markdown
+## 자율 결정 (사유)
+- 결정: TTL default 5분 채택
+- 후보: 5분 / 10분 / 1시간
+- 사유: 기존 RecommendationCache 가 5분 사용 중 + spec §3-2 "stale 허용 5분 이내"
+- 사용자 결정 필요 시 follow-up 이슈로 분리 가능 (현재 결정으로 머지 가능)
+```
+
+#### high-stakes 항목 처리 (질문 X, 상태 명시)
+
+다음 항목은 sub-agent 가 자율 결정 안 하고 nmae/helper 에 위임:
+
+- 의존성 부재 (`Cannot find module` 등) — npm install / dep 추가는 fe 워크트리 보호 영역 (`web/package.json` 보호 영역). nmae 보고 후 turn 종료.
+- 보호 영역 변경 결정 (`.github/workflows/**`, `application*.yml`, `Dockerfile` 등) — task brief 에 명시 없으면 nmae 위임.
+- release 절차 / production secret / `main` 직접 변경 — sub-agent 가 시도 자체 금지 (release PR = maestro 전용).
+
+위임 시에도 **사용자에게 직접 질문 X**. PR 본문 `## 사용자 확인 필요` 섹션으로 상태만 명시 (질문 형식 X, 사실 진술):
+
+```markdown
+## 사용자 확인 필요
+- 의존성 `lodash` 누락 — `web/package.json` 보호 영역 변경 필요.
+- 현재 PR 은 import 추가 없이 native 구현으로 우회 (자율 결정).
+- 사용자 결정 follow-up: lodash 도입 vs native 유지 — 별도 이슈 #N 등록 권고.
+```
+
+**Why:** 2026-05-24 사용자: "나는 없다고 생각해야돼 걔네는". sub-agent 가 사용자 wait 면 wall-clock 정체. 자율 결정이 redo 비용보다 낫음. nmae 가 책임자. (#1015 P1 박제 사유: AskUserQuestion 표현이 "허용된 우회"로 학습되는 사고 방지 — 도구 사용 자체 금지로 strict 강화.)
 
 **watchdog escalation 표현**: "확인 필요" → "가시화 알림". 사용자 결정 대기 X, 단순 알림.
 
@@ -582,3 +622,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — 본 문서 actor 범위 명시화 (#1004): Actor TOC 섹션 추가 — 본 문서 = sub-agent actor (be/fe/rev/plan + helper-launched) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 로 분리. 메모리 frontmatter `metadata.actor` 추가 (nmae/helper/subagent/rev/common/workflow). 사용자: "nmae helper subagent 들이 각자 지켜야할 규칙이 다를텐데 이걸 하나에 담으려해서 그런 거 아니야 — 진행하고 분리한 문서대로 적용해".
 - 2026-05-24 — 메모리 actor 디렉토리 분리 (#1004 후속): 메모리 파일 44건이 `~/.claude/projects/-home-mobruji-mobruji/memory/` 단일 디렉토리에서 `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/` 6개 actor 디렉토리로 이동. Actor TOC 표 "메모리 actor 매칭" 컬럼 → 디렉토리 경로 명시. §1 "메모리 보호 + 로드 범위" 절 신설 — sub-agent 가 자기 actor 디렉토리만 명시 Read 하도록 가이드. MEMORY.md index 도 디렉토리 경로 갱신. CLAUDE.md §15 메모리 path 동기화. 트리거: 사용자 "메모리를 actor만 명시하지말고 아예 문서 자체를 분리해야 너가 너꺼에만 집중해서 읽지" (2026-05-24).
 - 2026-05-24 — §1 "Discord thread 진행 stream (`LAUNCH_THREAD_ID` env)" 절 추가 (#1011): helper/nmae 본체가 `--auto-ack-thread` 로 사전에 만든 thread_id 를 launch prompt 안에 `LAUNCH_THREAD_ID=<id>` env 로 전달하면 sub-agent 는 milestone 마다 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` push 의무. main 채널 noise 없이 sub-agent 별 진행 stream 확보. helper turn-level (`helper-current-thread.txt` / `--auto-thread`) 와 독립 채널.
+- 2026-05-24 — §1 "sub-agent 자율 결정 STRICT" 보강 (#1015 P1): AskUserQuestion 도구 사용 자체 금지 명시 + "자율 결정 + 사유 보고" 패턴 (PR 본문 `## 자율 결정 (사유)` 섹션) + high-stakes 항목 처리 패턴 (`## 사용자 확인 필요` 섹션 — 질문 X, 상태 명시) 추가. 트리거: #1014 helper-turn-start wrapper 도입 후 자동화 audit (#1015) 결과 자율 결정 룰이 학습 의존으로 잔존 — sub-agent prompt template 자체 강화로 학습 의존 ↓. 메모리 [[feedback-sub-agent-no-user-wait]] 본문에 AskUserQuestion 금지 라인 추가.
