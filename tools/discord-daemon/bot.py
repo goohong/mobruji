@@ -277,9 +277,24 @@ def load_env() -> dict[str, str]:
         os.environ.get("DEDUP_LEDGER_PATH", "~/.mobruji/discord-bridge.sqlite")
     )
     env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "1")
-    env["NOTIFY_CHANNEL_ID"] = os.environ.get(
-        "NOTIFY_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"]
-    )
+    # DIGEST_CHANNEL_ID (rename, #1019) — cycle digest 송신 채널.
+    # backward compat: 기존 NOTIFY_CHANNEL_ID 도 fallback 으로 인식 (deprecation
+    # warning 1회). 미설정 시 MOBRUJI_CHANNEL_ID 로 fallback (단일 채널 운영).
+    digest_channel_raw = os.environ.get("DIGEST_CHANNEL_ID")
+    if digest_channel_raw is None:
+        legacy_notify_raw = os.environ.get("NOTIFY_CHANNEL_ID")
+        if legacy_notify_raw is not None:
+            if not getattr(load_env, "_notify_deprecation_warned", False):
+                logger.warning(
+                    "NOTIFY_CHANNEL_ID 는 deprecated — DIGEST_CHANNEL_ID 로 rename 됐습니다 (#1019). "
+                    "현재 값(%r) 을 fallback 으로 사용. .env 갱신 권장.",
+                    legacy_notify_raw,
+                )
+                load_env._notify_deprecation_warned = True  # type: ignore[attr-defined]
+            digest_channel_raw = legacy_notify_raw
+        else:
+            digest_channel_raw = env["MOBRUJI_CHANNEL_ID"]
+    env["DIGEST_CHANNEL_ID"] = digest_channel_raw
     env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
         "CONTEXT_AUTO_CLEAR_ENABLED", CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED
     )
@@ -326,9 +341,11 @@ def load_env() -> dict[str, str]:
     env["CYCLE_WATCH_WORKSPACES"] = os.environ.get(
         "CYCLE_WATCH_WORKSPACES", CYCLE_IDLE_WATCH_DEFAULT_WORKSPACES
     )
-    # CYCLE_NOTIFY_CHANNEL_ID 부재 시 NOTIFY_CHANNEL_ID fallback.
+    # CYCLE_NOTIFY_CHANNEL_ID 부재 시 DIGEST_CHANNEL_ID fallback.
+    # (CYCLE_NOTIFY 는 watchdog idle 알림 — 의미상 'notify' 가 적합해 유지.
+    #  default 만 digest 채널 공유 — 단일 채널 운영 시 일관 동작.)
     env["CYCLE_NOTIFY_CHANNEL_ID"] = os.environ.get(
-        "CYCLE_NOTIFY_CHANNEL_ID", env["NOTIFY_CHANNEL_ID"]
+        "CYCLE_NOTIFY_CHANNEL_ID", env["DIGEST_CHANNEL_ID"]
     )
     # escalation (#972) — env override.
     env["CYCLE_INJECT_ESCALATION_THRESHOLD"] = os.environ.get(
@@ -1711,7 +1728,7 @@ def _format_workspace_reason_line(entry: dict) -> str:
 
 async def cycle_idle_watch_loop(
     client: "discord.Client",
-    notify_channel_id: int,
+    digest_channel_id: int,
     *,
     cycle_status_path: str,
     inject_target: str = CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET,
@@ -1738,7 +1755,7 @@ async def cycle_idle_watch_loop(
          ``debounce_seconds`` 내 재알림 안 함.
       4. debounce 통과한 idle ≥ 1 이면:
          - nmae tmux pane (``inject_target``) 에 `tmux_inject_text` 알림 inject.
-         - Discord ``notify_channel_id`` 에 경고 push.
+         - Discord ``digest_channel_id`` 에 경고 push (cycle digest 채널 공유).
          - 워크트리별 inject counter += 1 (#972).
       5. (#972) escalation — counter 가 ``escalation_threshold`` 도달 + in_progress
          여전히 NULL 이면 ``escalation_channel_id`` (= MOBRUJI_CHANNEL_ID 권장) 에
@@ -1825,7 +1842,7 @@ async def cycle_idle_watch_loop(
                     >= future_ts_debounce_seconds
                 ]
                 if fresh_future:
-                    channel = client.get_channel(notify_channel_id)
+                    channel = client.get_channel(digest_channel_id)
                     if channel is not None:
                         ws_label = ", ".join(
                             e["workspace"] for e in fresh_future
@@ -1908,12 +1925,12 @@ async def cycle_idle_watch_loop(
                 )
                 tmux_inject_text(inject_target, soft_text)
 
-            channel = client.get_channel(notify_channel_id)
+            channel = client.get_channel(digest_channel_id)
             if channel is None:
                 if not missing_channel_warned:
                     logger.warning(
                         "cycle_idle_watch_loop: Discord channel 부재 — push skip (channel_id=%s)",
-                        notify_channel_id,
+                        digest_channel_id,
                     )
                     missing_channel_warned = True
             else:
@@ -2115,7 +2132,7 @@ def format_rev_post_merge_discord(pr_numbers: list[int]) -> str:
 
 async def rev_post_merge_audit_loop(
     client: "discord.Client",
-    notify_channel_id: int,
+    digest_channel_id: int,
     *,
     inject_target: str = REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
     poll_interval: int = REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS,
@@ -2136,7 +2153,7 @@ async def rev_post_merge_audit_loop(
       3. 후보 PR ≥ 1 → debounce 적용 후 fresh PR 만 추출.
       4. fresh ≥ 1:
          - nmae tmux pane (``inject_target``) 에 inject (단계 2 audit launch 알림).
-         - Discord ``notify_channel_id`` 에 push.
+         - Discord ``digest_channel_id`` 에 push (cycle digest 채널 공유).
          - 각 fresh PR `last_inject_at` 갱신.
       5. graceful skip — gh CLI 실패 / fresh 없음 / tmux 부재 / Discord channel 부재 시
          warn 1회 + 다음 iter 재시도.
@@ -2204,12 +2221,12 @@ async def rev_post_merge_audit_loop(
             inject_msg = format_rev_post_merge_inject(fresh)
             tmux_inject_text(inject_target, inject_msg)
 
-            channel = client.get_channel(notify_channel_id)
+            channel = client.get_channel(digest_channel_id)
             if channel is None:
                 if not missing_channel_warned:
                     logger.warning(
                         "rev post-merge audit: Discord channel 부재 — push skip (channel_id=%s)",
-                        notify_channel_id,
+                        digest_channel_id,
                     )
                     missing_channel_warned = True
             else:
@@ -2250,16 +2267,18 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         logger.error("MOBRUJI_CHANNEL_ID 가 정수 아님: %r", env["MOBRUJI_CHANNEL_ID"])
         sys.exit(1)
 
-    notify_raw = env.get("NOTIFY_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"])
+    # DIGEST_CHANNEL_ID (rename, #1019). load_env 에서 backward-compat
+    # NOTIFY_CHANNEL_ID fallback 처리 후 env["DIGEST_CHANNEL_ID"] 보장.
+    digest_raw = env.get("DIGEST_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"])
     try:
-        notify_channel_id = int(notify_raw)
+        digest_channel_id = int(digest_raw)
     except ValueError:
         logger.warning(
-            "NOTIFY_CHANNEL_ID 가 정수 아님(%r) — 메인 채널(%d)로 fallback",
-            notify_raw,
+            "DIGEST_CHANNEL_ID 가 정수 아님(%r) — 메인 채널(%d)로 fallback",
+            digest_raw,
             target_channel_id,
         )
-        notify_channel_id = target_channel_id
+        digest_channel_id = target_channel_id
 
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
@@ -2312,16 +2331,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     cycle_reason_required = (
         env.get("CYCLE_REASON_REQUIRED", CYCLE_REASON_REQUIRED_DEFAULT) == "1"
     )
-    cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(notify_channel_id))
+    cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(digest_channel_id))
     try:
         cycle_notify_channel_id = int(cycle_notify_raw)
     except ValueError:
         logger.warning(
-            "CYCLE_NOTIFY_CHANNEL_ID 정수 아님(%r) — notify_channel_id(%d) fallback",
+            "CYCLE_NOTIFY_CHANNEL_ID 정수 아님(%r) — digest_channel_id(%d) fallback",
             cycle_notify_raw,
-            notify_channel_id,
+            digest_channel_id,
         )
-        cycle_notify_channel_id = notify_channel_id
+        cycle_notify_channel_id = digest_channel_id
     # (#972) escalation env — threshold + debounce 정수 파싱 + 사용자 채널.
     cycle_escalation_threshold = _resolve_int_env(
         "CYCLE_INJECT_ESCALATION_THRESHOLD",
@@ -2367,10 +2386,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s notify=%s allowed=%d digest=%s auto_ack=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s allowed=%d digest_enabled=%s auto_ack=%s",
             client.user,
             target_channel_id,
-            notify_channel_id,
+            digest_channel_id,
             len(allowed_user_ids),
             digest_enabled,
             bot_auto_ack_enabled,
@@ -2381,7 +2400,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(
                 digest_loop(
                     client,
-                    notify_channel_id,
+                    digest_channel_id,
                     interval=digest_interval,
                     cycle_status_path=cycle_status_path,
                     cycle_counter_path=cycle_counter_path,
@@ -2389,7 +2408,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
             logger.info(
                 "digest_loop launched: channel=%d interval=%ds heartbeat=%ds status=%s counter=%s",
-                notify_channel_id,
+                digest_channel_id,
                 digest_interval,
                 DIGEST_HEARTBEAT_SECONDS,
                 cycle_status_path,
@@ -2420,7 +2439,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(
                 context_auto_clear_loop(
                     client,
-                    notify_channel_id,
+                    digest_channel_id,
                     pane_targets=context_pane_targets,
                     trigger_pct=context_trigger_pct,
                     hysteresis_pct=context_hysteresis_pct,
@@ -2483,14 +2502,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(
                 rev_post_merge_audit_loop(
                     client,
-                    notify_channel_id,
+                    digest_channel_id,
                     inject_target=rev_post_merge_audit_inject_target,
                     poll_interval=rev_post_merge_audit_interval,
                 )
             )
             logger.info(
                 "rev_post_merge_audit_loop launched: channel=%d interval=%ds target=%s",
-                notify_channel_id,
+                digest_channel_id,
                 rev_post_merge_audit_interval,
                 rev_post_merge_audit_inject_target,
             )

@@ -188,15 +188,40 @@ class LoadEnvTests(unittest.TestCase):
         # 기본 helper 세션.
         self.assertEqual(env["TMUX_SESSION_NAME"], "helper")
         self.assertEqual(env["TMUX_TARGET_PANE"], "helper:0.0")
-        # NOTIFY 미설정 → MOBRUJI fallback.
-        self.assertEqual(env["NOTIFY_CHANNEL_ID"], "999")
+        # DIGEST 미설정 → MOBRUJI fallback (#1019 rename).
+        self.assertEqual(env["DIGEST_CHANNEL_ID"], "999")
         # digest 기본 ON.
         self.assertEqual(env["DIGEST_ENABLED"], "1")
 
-    def test_notify_channel_explicit(self) -> None:
-        with mock.patch.dict(os.environ, {**self.BASE, "NOTIFY_CHANNEL_ID": "222"}, clear=True):
+    def test_digest_channel_explicit(self) -> None:
+        with mock.patch.dict(os.environ, {**self.BASE, "DIGEST_CHANNEL_ID": "222"}, clear=True):
             env = bot.load_env()
-        self.assertEqual(env["NOTIFY_CHANNEL_ID"], "222")
+        self.assertEqual(env["DIGEST_CHANNEL_ID"], "222")
+
+    def test_notify_channel_legacy_backward_compat(self) -> None:
+        """#1019: 기존 NOTIFY_CHANNEL_ID 만 설정해도 DIGEST_CHANNEL_ID 로 fallback."""
+        with mock.patch.dict(
+            os.environ, {**self.BASE, "NOTIFY_CHANNEL_ID": "333"}, clear=True
+        ):
+            # deprecation warning idempotent 보장 위해 plug reset.
+            if hasattr(bot.load_env, "_notify_deprecation_warned"):
+                delattr(bot.load_env, "_notify_deprecation_warned")
+            env = bot.load_env()
+        self.assertEqual(env["DIGEST_CHANNEL_ID"], "333")
+
+    def test_digest_channel_wins_over_legacy_notify(self) -> None:
+        """DIGEST_CHANNEL_ID 와 NOTIFY_CHANNEL_ID 둘 다 있으면 DIGEST 우선."""
+        with mock.patch.dict(
+            os.environ,
+            {
+                **self.BASE,
+                "DIGEST_CHANNEL_ID": "444",
+                "NOTIFY_CHANNEL_ID": "555",
+            },
+            clear=True,
+        ):
+            env = bot.load_env()
+        self.assertEqual(env["DIGEST_CHANNEL_ID"], "444")
 
     def test_missing_required_exits(self) -> None:
         incomplete = {"DISCORD_BOT_TOKEN": "t"}
@@ -365,7 +390,7 @@ class OnMessageRoutingTests(unittest.TestCase):
         "TMUX_TARGET_PANE": "helper:0.0",
         "CLAUDE_BIN": "claude",
         "DEDUP_LEDGER_PATH": "/tmp/test-dedup.sqlite",
-        "NOTIFY_CHANNEL_ID": "999",
+        "DIGEST_CHANNEL_ID": "999",
         "DIGEST_ENABLED": "0",
     }
 
@@ -373,8 +398,8 @@ class OnMessageRoutingTests(unittest.TestCase):
         client = bot.build_client(self.BASE_ENV, ledger=None)
         self.assertIsNotNone(client)
 
-    def test_build_client_with_invalid_notify_falls_back(self) -> None:
-        env = {**self.BASE_ENV, "NOTIFY_CHANNEL_ID": "not-an-int"}
+    def test_build_client_with_invalid_digest_falls_back(self) -> None:
+        env = {**self.BASE_ENV, "DIGEST_CHANNEL_ID": "not-an-int"}
         client = bot.build_client(env, ledger=None)
         self.assertIsNotNone(client)
 

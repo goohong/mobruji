@@ -73,8 +73,9 @@
 #
 # 동작:
 #   - .env 에서 DISCORD_BOT_TOKEN 과 채널 id (MOBRUJI_CHANNEL_ID 우선 — 사용자
-#     응답은 #모부르지 채널, NOTIFY_CHANNEL_ID 는 digest cron 전용 fallback) 를
-#     읽어 Discord REST API 호출. bot.py 데몬과 동일한 .env 파일을 공유합니다.
+#     응답은 #모부르지 채널, DIGEST_CHANNEL_ID 는 digest cron 전용 fallback —
+#     기존 NOTIFY_CHANNEL_ID 도 #1019 backward-compat 으로 인식) 를 읽어 Discord
+#     REST API 호출. bot.py 데몬과 동일한 .env 파일을 공유합니다.
 #   - 메시지 본문은 jq 로 JSON-escape. 멀티라인 / 따옴표 안전.
 #
 # 종속:
@@ -112,13 +113,21 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-# MOBRUJI_CHANNEL_ID 우선 (helper raw 응답 = 메인 #모부르지), NOTIFY_CHANNEL_ID 는 digest 전용 fallback.
+# MOBRUJI_CHANNEL_ID 우선 (helper raw 응답 = 메인 #모부르지),
+# DIGEST_CHANNEL_ID (또는 backward-compat NOTIFY_CHANNEL_ID) 는 digest 전용 fallback.
 CHANNEL=$(read_env_value MOBRUJI_CHANNEL_ID)
 if [[ -z "$CHANNEL" ]]; then
-  CHANNEL=$(read_env_value NOTIFY_CHANNEL_ID)
+  CHANNEL=$(read_env_value DIGEST_CHANNEL_ID)
 fi
 if [[ -z "$CHANNEL" ]]; then
-  echo "discord-reply.sh: NOTIFY_CHANNEL_ID / MOBRUJI_CHANNEL_ID 둘 다 비어 있음" >&2
+  # #1019 backward-compat — 기존 NOTIFY_CHANNEL_ID 도 fallback.
+  CHANNEL=$(read_env_value NOTIFY_CHANNEL_ID)
+  if [[ -n "$CHANNEL" ]]; then
+    echo "discord-reply.sh: NOTIFY_CHANNEL_ID 는 deprecated — DIGEST_CHANNEL_ID 로 rename 됐습니다 (#1019). .env 갱신 권장." >&2
+  fi
+fi
+if [[ -z "$CHANNEL" ]]; then
+  echo "discord-reply.sh: MOBRUJI_CHANNEL_ID / DIGEST_CHANNEL_ID / NOTIFY_CHANNEL_ID 모두 비어 있음" >&2
   exit 1
 fi
 

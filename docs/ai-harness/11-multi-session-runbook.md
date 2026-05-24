@@ -308,7 +308,7 @@ maestro가 sub-agent launch를 1회라도 까먹은 채 maestro 자체 작업을
 
 #### bot.py `cycle_idle_watch_loop` (외부 watchdog)
 - **5분 polling** `~/.mobruji/cycle-status.json` → 4 워크트리(be/fe/rev/plan) `in_progress` 검사
-- idle 발견 시 nmae tmux pane (`mobruji:0.0`) 에 `[watchdog ...] cycle-status.json idle 발견 — <ws>. ...` inject + Discord `NOTIFY_CHANNEL_ID` push
+- idle 발견 시 nmae tmux pane (`mobruji:0.0`) 에 `[watchdog ...] cycle-status.json idle 발견 — <ws>. ...` inject + Discord `DIGEST_CHANNEL_ID` push (#1019 rename — 기존 `NOTIFY_CHANNEL_ID` 도 backward-compat 인식)
 - **escalation**: 같은 워크트리 inject 3회 연속 + `in_progress` 여전히 NULL → `MOBRUJI_CHANNEL_ID` (사용자 채널) 에 `🚨 nmae 무응답` 직접 push (debounce 1h)
 - spec: `docs/features/nmae-cycle-watchdog.md`, CLAUDE.md §14
 

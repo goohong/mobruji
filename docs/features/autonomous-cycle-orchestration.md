@@ -180,7 +180,7 @@ nmae turn 시작
   1. `~/.mobruji/cycle-status.json` read
   2. 4 워크트리 state + recent_line 한 줄씩 추출
   3. Discord embed 4 field (워크트리별 emoji prefix — be ⚙️ / fe 🎨 / rev 🔍 / plan 📋, PR #850 참조)
-  4. NOTIFY_CHANNEL_ID (디제스트 전용) push. MOBRUJI_CHANNEL_ID (사용자 양방향) 와 분리 ([[project-discord-channel]] + CLAUDE.md §11-pre)
+  4. DIGEST_CHANNEL_ID (디제스트 전용, #1019 rename — 기존 `NOTIFY_CHANNEL_ID` backward-compat) push. MOBRUJI_CHANNEL_ID (사용자 양방향) 와 분리 ([[project-discord-channel]] + CLAUDE.md §11-pre)
 
 - nmae 측 의무: cycle-status.json 은 **반드시 모든 launch/완료/머지 시점 갱신**. 갱신 누락 시 bot.py digest 가 stale data 노출 → 사용자 오해 ([[feedback-cycle-status-json]] 메모리)
 
@@ -227,7 +227,7 @@ helper 는 다음만 직접 수정:
 1. rev sub-agent v0.4.0-rc release audit 완료. 코멘트에 🔴 (P95 regression / 응답시간 SLO 위반) 발견
 2. nmae 다음 turn 깨움 → rev 결과 read
 3. nmae: 같은 turn 내 `gh issue create` 로 follow-up 이슈 등록 (`label: priority:high,scope:web`)
-4. NOTIFY_CHANNEL_ID 에 Discord push (`🔴 rev audit: P95 950ms (SLO 800ms) — fe 우선순위 변경 launch`)
+4. DIGEST_CHANNEL_ID 에 Discord push (#1019 rename — 기존 `NOTIFY_CHANNEL_ID` backward-compat) (`🔴 rev audit: P95 950ms (SLO 800ms) — fe 우선순위 변경 launch`)
 5. fe 다음 picking 은 일반 백로그 대신 새 이슈 우선
 6. cycle-status.json `fe.current_sub_agent` 갱신
 

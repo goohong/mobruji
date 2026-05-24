@@ -201,7 +201,7 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
             coro = bot.rev_post_merge_audit_loop(
                 client,
-                notify_channel_id=222,
+                digest_channel_id=222,
                 inject_target="mobruji:0.0",
                 poll_interval=1,
                 initial_delay=0,
@@ -218,7 +218,7 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
             coro = bot.rev_post_merge_audit_loop(
                 client,
-                notify_channel_id=222,
+                digest_channel_id=222,
                 inject_target="mobruji:0.0",
                 poll_interval=1,
                 initial_delay=0,
@@ -241,7 +241,7 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
             coro = bot.rev_post_merge_audit_loop(
                 client,
-                notify_channel_id=222,
+                digest_channel_id=222,
                 inject_target="mobruji:0.0",
                 poll_interval=1,
                 initial_delay=0,
@@ -265,7 +265,7 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
             coro = bot.rev_post_merge_audit_loop(
                 client,
-                notify_channel_id=222,
+                digest_channel_id=222,
                 inject_target="mobruji:0.0",
                 poll_interval=1,
                 initial_delay=0,
@@ -290,7 +290,7 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
             # poll_interval=0 → 즉시 return.
             await bot.rev_post_merge_audit_loop(
                 client,
-                notify_channel_id=222,
+                digest_channel_id=222,
                 inject_target="mobruji:0.0",
                 poll_interval=0,
                 initial_delay=0,

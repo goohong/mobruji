@@ -25,7 +25,7 @@ last_reviewed: 2026-05-24
 - [x] `cycle_idle_watch_loop` — 5분 polling (env override 가능) cycle-status.json read.
 - [x] idle 정의: `in_progress` null/누락 AND `last_completed.completed_at` > `now - threshold_minutes` (default 10).
 - [x] idle ≥ 1 워크트리 발견 시 nmae tmux pane (`mobruji:0.0`) 에 알림 inject (`tmux send-keys -l`).
-- [x] Discord `CYCLE_NOTIFY_CHANNEL_ID` (default = `NOTIFY_CHANNEL_ID`) 에 경고 push.
+- [x] Discord `CYCLE_NOTIFY_CHANNEL_ID` (default = `DIGEST_CHANNEL_ID`, #1019 에서 `NOTIFY_CHANNEL_ID` rename — backward-compat) 에 경고 push.
 - [x] 같은 워크트리 재알림 debounce 15분.
 - [x] env toggle: `CYCLE_IDLE_WATCH=1` default. `0` 으로 비활성화.
 - [x] (#956) **idle 시 `note` 필드 의무** — 미명시 시 STRICT relaunch prompt.
@@ -62,7 +62,7 @@ N/A (Discord webhook + tmux 만 사용).
 
 ### 5-3) 외부 연동
 - **tmux** — `send-keys -t mobruji:0.0 -l "<text>"` + Enter. 기존 `tmux_send_payload` 재사용.
-- **Discord** — `discord.Client.get_channel(NOTIFY_CHANNEL_ID).send(...)` + 기존 `send_with_retry` 429/5xx 보호.
+- **Discord** — `discord.Client.get_channel(DIGEST_CHANNEL_ID).send(...)` (#1019 rename, 기존 `NOTIFY_CHANNEL_ID` backward-compat) + 기존 `send_with_retry` 429/5xx 보호.
 
 ### 5-4) 데이터 흐름 / 시퀀스
 ```
