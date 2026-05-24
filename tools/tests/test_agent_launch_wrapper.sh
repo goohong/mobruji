@@ -29,6 +29,11 @@ make_tmp() {
   mktemp -d -t agent-launch-wrapper-XXXXXX
 }
 
+# B2 (2026-05-24): wrapper 가 per-cycle 채널에 launch 알림 자동 push 한다.
+# 본 테스트 스위트는 set-active / stdout / exit code 만 검증하므로 push 단계는
+# 명시적으로 skip — 그렇지 않으면 운영 .env 에서 real Discord 채널에 spam.
+export AGENT_LAUNCH_NO_DISCORD=1
+
 assert_exit() {
   local name="$1" expected="$2" actual="$3"
   if [[ "$actual" == "$expected" ]]; then
