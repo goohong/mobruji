@@ -290,6 +290,7 @@ bot.py `on_message` 가 사용자 메시지 받자마자 1초 generic auto-ack (
 
 0. **turn-start wrapper 호출** (#1014) — `bash /home/mobruji/.mobruji/helper-turn-start.sh`. **매 turn 첫 명령 의무**. 5 액션 자동 수행 (target freeze + cycle-status 요약 + user-presence 표시 + queue pending 표시 + 다음 액션 reminder). 학습 의존 → wrapper 강제. graceful (exit 1 안 함 — helper turn 안 깨짐). 아래 1-6 단계는 wrapper 가 처리한 1-2단계 (queue append/target freeze) 를 명시적으로 재확인.
 1. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}` ([[feedback-user-request-queue]])
+   - 동시에 **bot.py 가 자동 분류** (#1071) — `on_message` 가 메시지를 `~/.mobruji/directive-detect.jsonl` 에 append 하면서 directive / query / conversation 으로 분류. `directive_register_watch_loop` 10분 주기 mismatch 감지 + #모부르지 push. helper 본체는 분류 결과를 참고해 (a) directive → `--forum-post directive` 호출 의무 (b) query/conversation → 기존 흐름.
 2. **target msg freeze** (#987) — `cp ~/.mobruji/last-user-msg-id.txt ~/.mobruji/helper-current-target.txt`. turn 시작 시점 target msg id freeze ([[feedback-helper-reply-target-freeze]]). **wrapper (#1014) 가 자동 수행** — 명시적 호출은 불필요하지만 wrapper 미사용 시 폴백.
 3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문
 4. **(선택) thread 생성** — 장시간 작업 (위임/조사/PR) 일 때만 `discord-reply.sh --auto-ack-thread "🔍 작업 시작 — <한 줄>"` ([[feedback-helper-thread-usage]]). thread_id 를 `~/.mobruji/helper-current-thread.txt` 저장. milestone 마다 `--auto-thread "<진행 1줄>"` stream. 단순 즉답이면 skip.
