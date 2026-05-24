@@ -6,10 +6,13 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import com.mobruji.recommendation.application.CreateRecommendationCommand;
 import com.mobruji.song.domain.Mood;
+import com.mobruji.user.domain.AnonymousSession;
+import com.mobruji.user.domain.SessionIdPatterns;
 
 /**
  * 추천 생성 요청 DTO.
@@ -24,9 +27,15 @@ import com.mobruji.song.domain.Mood;
  *
  * <p>{@code preferredBpm}은 v2(#218)에서 추가된 사용자 선호 BPM 입력(옵션). null이면 mood 기반 default BPM 적용.
  * 결정성 보장을 위해 {@code SeedDeriver}의 입력에도 포함된다.
+ *
+ * <p>{@code sessionId} 는 client 가 발급한 UUIDv4 (ADR-0011).
+ * {@link SessionIdPatterns#UUID_V4} 형식 강제 — {@code SessionRotateRequest} /
+ * {@code VoiceRangeCreateRequest} 와 동일한 검증 일관성 유지 (#948 후속).
  */
 public record RecommendationCreateRequest(
-        @NotBlank @Size(max = 64) String sessionId,
+        @NotBlank @Size(max = AnonymousSession.SESSION_ID_MAX_LENGTH) @Pattern(
+                regexp = SessionIdPatterns.UUID_V4, message = SessionIdPatterns.UUID_V4_MESSAGE
+        ) String sessionId,
         @NotNull @Min(12) @Max(119) Integer voiceRangeLow,
         @NotNull @Min(12) @Max(119) Integer voiceRangeHigh,
         Mood mood,

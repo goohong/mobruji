@@ -46,7 +46,8 @@ import com.mobruji.song.domain.Song;
 @ActiveProfiles("test")
 class RecommendationControllerTest {
 
-    private static final String SESSION_ID = "session-abc";
+    // UUIDv4 (#948 SessionIdPatterns 강제) — 비-UUIDv4 면 400 으로 빠져 contract 통과 못함
+    private static final String SESSION_ID = "550e8400-e29b-41d4-a716-11ee5e55c011";
     private static final long REQUEST_ID = 100L;
 
     @Autowired

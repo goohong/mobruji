@@ -62,17 +62,21 @@ class LikeControllerTest {
     @MockitoBean
     private SessionAuthGuard sessionAuthGuard;
 
+    // UUIDv4 (#948 SessionIdPatterns 강제) — POST body sessionId 는 @Pattern 검증을 통과해야 SessionAuthGuard 로 들어감
+    private static final String SESSION_ID = "550e8400-e29b-41d4-a716-11ee5e55c101";
+    private static final String SESSION_ID_OTHER = "550e8400-e29b-41d4-a716-11ee5e55c102";
+
     @Test
     @DisplayName("POST /api/v1/likes: body sessionId == header → 200 + liked/songId 직렬화")
     void toggle_matchingSessionId_returns200() throws Exception {
         // given
-        given(likeService.toggle("s-1", 42L)).willReturn(new ToggleResult(true, 42L));
+        given(likeService.toggle(SESSION_ID, 42L)).willReturn(new ToggleResult(true, 42L));
 
         // when / then
         mockMvc.perform(post("/api/v1/likes")
-                .header("X-Session-Id", "s-1")
+                .header("X-Session-Id", SESSION_ID)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
+                .content("{\"sessionId\":\"" + SESSION_ID + "\",\"songId\":42}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.liked", is(true)))
                 .andExpect(jsonPath("$.songId", is(42)));
@@ -82,11 +86,11 @@ class LikeControllerTest {
     @DisplayName("POST /api/v1/likes: X-Session-Id 헤더 누락 → 401 (service 미호출)")
     void toggle_missingHeader_returns401() throws Exception {
         willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id"))
-                .given(sessionAuthGuard).verify("s-1", null);
+                .given(sessionAuthGuard).verify(SESSION_ID, null);
 
         mockMvc.perform(post("/api/v1/likes")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
+                .content("{\"sessionId\":\"" + SESSION_ID + "\",\"songId\":42}"))
                 .andExpect(status().isUnauthorized());
 
         then(likeService).should(never()).toggle(anyString(), any());
@@ -96,12 +100,12 @@ class LikeControllerTest {
     @DisplayName("POST /api/v1/likes: body/header sessionId 불일치 → 401")
     void toggle_mismatchedHeader_returns401() throws Exception {
         willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
-                .given(sessionAuthGuard).verify("s-1", "s-other");
+                .given(sessionAuthGuard).verify(SESSION_ID, SESSION_ID_OTHER);
 
         mockMvc.perform(post("/api/v1/likes")
-                .header("X-Session-Id", "s-other")
+                .header("X-Session-Id", SESSION_ID_OTHER)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
+                .content("{\"sessionId\":\"" + SESSION_ID + "\",\"songId\":42}"))
                 .andExpect(status().isUnauthorized());
     }
 
