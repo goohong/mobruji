@@ -2582,11 +2582,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
         # ack] → [thread stream...] → [helper 본답] 순.
         # #807 에서 제거됐던 것 부활. BOT_AUTO_ACK=false 면 legacy 동작.
+        # #1026: success 시에도 INFO log — journal 만 보고도 송신 여부 확인 가능
+        # 하도록. 이전에는 실패 시에만 warning 이 남아 "정상 송신 vs silent drop"
+        # 분간이 불가능했음 (사용자가 "안 왔다" 정정 → helper 가 root cause 잘못
+        # 짚어 sub-agent launch 2회 발생). 실패 path 도 exc_info=True 로 traceback
+        # 보존 + message_id 같이.
         if bot_auto_ack_enabled:
             try:
-                await message.channel.send(BOT_AUTO_ACK_TEXT)
+                ack_msg = await message.channel.send(BOT_AUTO_ACK_TEXT)
+                logger.info(
+                    "bot auto-ack 송신 OK: message_id=%s ack_id=%s",
+                    message_id,
+                    ack_msg.id,
+                )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("bot auto-ack push 실패: %s", exc)
+                logger.warning(
+                    "bot auto-ack 송신 실패: message_id=%s exc=%r",
+                    message_id,
+                    exc,
+                    exc_info=True,
+                )
 
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
