@@ -337,6 +337,20 @@ def load_env() -> dict[str, str]:
         env["ALERT_CHANNEL_ID"] = alert_channel_raw.strip()
     else:
         env["ALERT_CHANNEL_ID"] = env["DIGEST_CHANNEL_ID"]
+
+    # Per-cycle 채널 (P12, 2026-05-24) — `discord-reply.sh --cycle-channel`
+    # 및 `nmae-discord-push.sh --cycle` 가 라우팅 대상으로 읽는 4 채널 id.
+    # 미설정 시 빈 문자열 (load_env 는 단순 load — fallback 은 호출 시점에 결정).
+    # discord-reply.sh 측 fallback: <CYCLE>_CHANNEL_ID → DIGEST → NOTIFY → 에러.
+    # bot.py 가 본 값을 직접 사용하진 않으나, on_ready 로그 / 향후 digest aggregate
+    # 확장 (4 cycle 별 최근 N 메시지) 의 진입점으로 env dict 에 보존한다.
+    for _cycle in ("BE", "FE", "REV", "PLAN"):
+        _key = f"{_cycle}_CHANNEL_ID"
+        _raw = os.environ.get(_key)
+        if _raw is not None and _raw.strip():
+            env[_key] = _raw.strip()
+        else:
+            env[_key] = ""
     env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
         "CONTEXT_AUTO_CLEAR_ENABLED", CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED
     )
@@ -2633,6 +2647,32 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         )
         alert_channel_id = digest_channel_id
 
+    # Per-cycle 채널 (P12, 2026-05-24) — on_ready 로그용. 미설정 시 0 (= "unset").
+    # discord-reply.sh 측이 fallback (DIGEST/NOTIFY) 책임 — bot.py 는 단순히
+    # 운영자가 4 채널 분리를 의도했는지 가시화. 본 값을 별도 사용하지 않으나,
+    # 향후 digest aggregate 가 4 cycle 별 최근 N 메시지를 묶어 전송하는 확장
+    # (본 PR 범위 외) 의 진입점.
+    def _parse_cycle_channel(name: str) -> int:
+        raw = env.get(f"{name}_CHANNEL_ID", "")
+        if not raw:
+            return 0
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning(
+                "%s_CHANNEL_ID 가 정수 아님(%r) — 라우팅 disabled (DIGEST fallback)",
+                name,
+                raw,
+            )
+            return 0
+
+    cycle_channel_ids = {
+        "be": _parse_cycle_channel("BE"),
+        "fe": _parse_cycle_channel("FE"),
+        "rev": _parse_cycle_channel("REV"),
+        "plan": _parse_cycle_channel("PLAN"),
+    }
+
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
     claude_bin = env["CLAUDE_BIN"]
@@ -2789,6 +2829,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             len(allowed_user_ids),
             digest_enabled,
             bot_auto_ack_enabled,
+        )
+        # P12 (2026-05-24) per-cycle 채널 가시화. 0 = unset (DIGEST fallback).
+        logger.info(
+            "cycle channels: be=%s fe=%s rev=%s plan=%s (0 = unset → DIGEST fallback)",
+            cycle_channel_ids["be"] or "unset",
+            cycle_channel_ids["fe"] or "unset",
+            cycle_channel_ids["rev"] or "unset",
+            cycle_channel_ids["plan"] or "unset",
         )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
             # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.

@@ -54,7 +54,8 @@
 #   5a) status channel routing (#1036, 2026-05-24 — 채널 분리 leak fix):
 #       discord-reply.sh --status-channel "<status 본문>"
 #       discord-reply.sh --channel <id> "<본문>"
-#         → 채널을 DIGEST_CHANNEL_ID (또는 임의 id) 로 강제 override.
+#       discord-reply.sh --cycle-channel <be|fe|rev|plan> "<본문>"   (P12, 2026-05-24)
+#         → 채널을 DIGEST_CHANNEL_ID (또는 임의 id, 또는 per-cycle 채널) 로 강제 override.
 #           기본 채널은 MOBRUJI_CHANNEL_ID = 사용자 응답 #모부르지 — nmae sub-agent
 #           launch/완료/cycle alert push 가 이 채널로 leak 되는 사고가 있어,
 #           nmae status push 는 본 flag 또는 `nmae-discord-push.sh` wrapper 를
@@ -65,7 +66,12 @@
 #           분리가 안 됐다는 사실을 호출자에게 알린다).
 #         → --channel <id>: 임의 채널 id 직접 지정. wrapper 작성 / 신설 status
 #           채널용. id snowflake 검증은 하지 않음 (호출자 책임).
-#         → 두 flag 모두 자동으로 `--no-reply` 와 동등한 효과 — status push 는
+#         → --cycle-channel <be|fe|rev|plan> (P12, 2026-05-24): per-cycle 라우팅.
+#           cycle 이름에 따라 BE/FE/REV/PLAN_CHANNEL_ID env 를 읽어 override.
+#           미설정 시 DIGEST_CHANNEL_ID 로 graceful fallback + stderr deprecation
+#           warning. 의도: 사이클 alert (launch/완료/오류) 가 사이클 별 채널로
+#           분기 → 사용자가 워크트리 별 진행을 분리해 follow.
+#         → 모든 flag 자동으로 `--no-reply` 와 동등한 효과 — status push 는
 #           사용자 메시지에 답장 형태로 매달 필요가 없고, message_reference 가
 #           원본 메시지 (다른 채널) 를 참조하면 Discord 가 404 처리.
 #         → bare body / --ack / --auto-ack-thread / --auto-thread 등 모든 mode 와
@@ -171,6 +177,14 @@ MOBRUJI_CHANNEL_VALUE=$(read_env_value MOBRUJI_CHANNEL_ID || true)
 DIGEST_CHANNEL_VALUE=$(read_env_value DIGEST_CHANNEL_ID || true)
 NOTIFY_CHANNEL_VALUE=$(read_env_value NOTIFY_CHANNEL_ID || true)
 
+# Per-cycle 채널 env (P12, 2026-05-24) — `--cycle-channel <be|fe|rev|plan>` flag
+# 가 참조. 미설정 (빈 값) 시 DIGEST 로 graceful fallback (호출 시점에 결정).
+# read_env_value 는 grep no-match graceful → 빈 문자열.
+BE_CHANNEL_VALUE=$(read_env_value BE_CHANNEL_ID || true)
+FE_CHANNEL_VALUE=$(read_env_value FE_CHANNEL_ID || true)
+REV_CHANNEL_VALUE=$(read_env_value REV_CHANNEL_ID || true)
+PLAN_CHANNEL_VALUE=$(read_env_value PLAN_CHANNEL_ID || true)
+
 CHANNEL="$MOBRUJI_CHANNEL_VALUE"
 if [[ -z "$CHANNEL" ]]; then
   CHANNEL="$DIGEST_CHANNEL_VALUE"
@@ -250,11 +264,16 @@ STATUS_CHANNEL=0
 # --channel <id>: 임의 채널 id 로 직접 override. 일반 wrapper 작성용.
 # --status-channel 보다 우선 (명시 > 의미). reply 자동 disable 동일.
 CHANNEL_OVERRIDE=""
+# --cycle-channel <be|fe|rev|plan> (P12, 2026-05-24): per-cycle 라우팅.
+# cycle 이름에 따라 BE/FE/REV/PLAN_CHANNEL_ID env 로 override. 미설정 시
+# DIGEST_CHANNEL_ID 로 fallback + stderr deprecation warning. NO_REPLY 자동 1.
+# 우선순위: --channel <id> > --cycle-channel <name> > --status-channel > default.
+CYCLE_CHANNEL=""
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
   echo "  discord-reply.sh \"<메시지>\"" >&2
-  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] [--status-channel | --channel <id>] \"<메시지>\"" >&2
+  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] [--status-channel | --channel <id> | --cycle-channel <be|fe|rev|plan>] \"<메시지>\"" >&2
   echo "  discord-reply.sh --ack \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
@@ -295,6 +314,26 @@ while [[ $# -gt 0 ]]; do
       NO_REPLY=1
       shift 2
       ;;
+    --cycle-channel)
+      # P12 (2026-05-24) — per-cycle 채널 라우팅. cycle 이름 (be/fe/rev/plan)
+      # 받아 해당 cycle 의 *_CHANNEL_ID env 로 override. 미설정 시 DIGEST 로
+      # graceful fallback + stderr warning. status 와 동일하게 NO_REPLY 강제.
+      if [[ $# -lt 2 ]]; then
+        echo "discord-reply.sh: --cycle-channel 뒤에 cycle 이름 (be|fe|rev|plan) 이 필요합니다" >&2
+        exit 1
+      fi
+      CYCLE_CHANNEL="$2"
+      # cycle 이름 검증 — 잘못된 이름이면 명시 에러 (silent fallback 금지).
+      case "$CYCLE_CHANNEL" in
+        be|fe|rev|plan) ;;
+        *)
+          echo "discord-reply.sh: --cycle-channel 값은 be|fe|rev|plan 중 하나여야 합니다 (받은 값: $CYCLE_CHANNEL)" >&2
+          exit 1
+          ;;
+      esac
+      NO_REPLY=1
+      shift 2
+      ;;
     *)
       break
       ;;
@@ -303,9 +342,33 @@ done
 
 # 채널 override 적용 (mode dispatch 이전 — start_thread_from_message 등 모든
 # 헬퍼가 동일 $CHANNEL 을 보고 호출하기 때문).
-# 우선순위: --channel <id> > --status-channel > default ($CHANNEL 위에서 resolve)
+# 우선순위: --channel <id> > --cycle-channel <name> > --status-channel > default
+# ($CHANNEL 위에서 resolve).
 if [[ -n "$CHANNEL_OVERRIDE" ]]; then
   CHANNEL="$CHANNEL_OVERRIDE"
+elif [[ -n "$CYCLE_CHANNEL" ]]; then
+  # P12 (2026-05-24) — per-cycle 채널 라우팅.
+  # cycle 이름 → 해당 *_CHANNEL_ID env 변수 값. 미설정 시 DIGEST 로 fallback +
+  # stderr deprecation warning (운영자에게 채널 추가 권장 신호).
+  case "$CYCLE_CHANNEL" in
+    be)   CYCLE_RESOLVED_VALUE="$BE_CHANNEL_VALUE" ;;
+    fe)   CYCLE_RESOLVED_VALUE="$FE_CHANNEL_VALUE" ;;
+    rev)  CYCLE_RESOLVED_VALUE="$REV_CHANNEL_VALUE" ;;
+    plan) CYCLE_RESOLVED_VALUE="$PLAN_CHANNEL_VALUE" ;;
+  esac
+  if [[ -n "$CYCLE_RESOLVED_VALUE" ]]; then
+    CHANNEL="$CYCLE_RESOLVED_VALUE"
+  elif [[ -n "$DIGEST_CHANNEL_VALUE" ]]; then
+    CHANNEL="$DIGEST_CHANNEL_VALUE"
+    echo "discord-reply.sh: --cycle-channel $CYCLE_CHANNEL — $(echo "$CYCLE_CHANNEL" | tr '[:lower:]' '[:upper:]')_CHANNEL_ID 미설정, DIGEST_CHANNEL_ID 로 fallback. .env 에 채널 id 추가 권장." >&2
+  elif [[ -n "$NOTIFY_CHANNEL_VALUE" ]]; then
+    CHANNEL="$NOTIFY_CHANNEL_VALUE"
+    echo "discord-reply.sh: --cycle-channel $CYCLE_CHANNEL — cycle/DIGEST 채널 모두 미설정, NOTIFY_CHANNEL_ID 로 fallback (deprecated)." >&2
+  else
+    echo "discord-reply.sh: --cycle-channel $CYCLE_CHANNEL 지정됐으나 $(echo "$CYCLE_CHANNEL" | tr '[:lower:]' '[:upper:]')_CHANNEL_ID / DIGEST_CHANNEL_ID / NOTIFY_CHANNEL_ID 모두 비어 있음" >&2
+    echo "  .env 에 $(echo "$CYCLE_CHANNEL" | tr '[:lower:]' '[:upper:]')_CHANNEL_ID=<id> 추가 후 재시도하세요." >&2
+    exit 1
+  fi
 elif [[ "$STATUS_CHANNEL" -eq 1 ]]; then
   # DIGEST_CHANNEL_ID 또는 backward-compat NOTIFY_CHANNEL_ID 로 강제.
   # MOBRUJI 만 설정돼 있어 DIGEST 가 비어 있다면 명시적 에러 (silent leak
