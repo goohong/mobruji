@@ -217,6 +217,45 @@ class TestScanUsage(unittest.TestCase):
         # 같은 ISO week 이므로 weekly 600.
         self.assertEqual(snapshot.weekly_tokens, 600)
 
+    def test_invalid_utf8_jsonl_graceful_skip(self) -> None:
+        """invalid utf-8 (0xec position 0) jsonl 파일이 섞여도 scan 이 graceful skip (#1068, 이슈 #1065).
+
+        AS-IS: ``open(..., encoding=\"utf-8\")`` 가 raise →
+            ``claude_usage_watch_loop iter 실패: 'utf-8' codec can't decode byte 0xec``
+        TO-BE: ``errors=\"replace\"`` + 파일 단위 ``UnicodeDecodeError`` 흡수.
+        """
+        # 유효 record 1건 → 합산 보존.
+        valid_ts = datetime(2026, 5, 24, 10, 0, tzinfo=KST)
+        valid_path = self.root / "proj-a" / "valid.jsonl"
+        write_jsonl(
+            valid_path,
+            [make_assistant_record(ts=valid_ts, input_tokens=42)],
+        )
+        # invalid utf-8 byte sequence 파일 — 0xec position 0 (이슈 #1065 재현).
+        invalid_path = self.root / "proj-b" / "invalid.jsonl"
+        invalid_path.parent.mkdir(parents=True, exist_ok=True)
+        invalid_path.write_bytes(b"\xec\xbc\x8c invalid line 1\n")
+        # scan_usage 가 invalid file 만나도 raise 없이 valid 합산만 반환.
+        snapshot = cut.scan_usage(projects_root=self.root, now=self.now)
+        self.assertEqual(snapshot.daily_tokens, 42)
+
+    def test_invalid_utf8_inline_with_valid_records(self) -> None:
+        """동일 파일 안에 invalid utf-8 line + valid record 가 섞여도 valid 합산 보존 (#1068).
+
+        errors=\"replace\" 가 적용되어 invalid line 은 replace char 로 들어오고,
+        json.loads 가 raise → 해당 line skip. valid record 는 합산.
+        """
+        ts = datetime(2026, 5, 24, 10, 0, tzinfo=KST)
+        mixed_path = self.root / "proj-a" / "mixed.jsonl"
+        mixed_path.parent.mkdir(parents=True, exist_ok=True)
+        # invalid utf-8 bytes + 정상 record 1건.
+        valid_line = make_assistant_record(ts=ts, input_tokens=77).encode(
+            "utf-8"
+        )
+        mixed_path.write_bytes(b"\xec\xbc\x8c invalid\n" + valid_line + b"\n")
+        snapshot = cut.scan_usage(projects_root=self.root, now=self.now)
+        self.assertEqual(snapshot.daily_tokens, 77)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # read_state / write_state
