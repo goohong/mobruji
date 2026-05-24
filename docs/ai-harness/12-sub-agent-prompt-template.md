@@ -7,16 +7,18 @@
 
 본 문서는 **sub-agent actor** (be/fe/rev/plan + helper-launched 일회성) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 참조.
 
-| Section | 대상 actor | 메모리 actor 매칭 |
+| Section | 대상 actor | 메모리 디렉토리 |
 |---|---|---|
-| §1 공통 룰 | 모든 sub-agent (be/fe/rev/plan + helper-launched) | `subagent` |
-| §2-be | be sub-agent | `subagent` + be 특이 |
-| §2-fe | fe sub-agent | `subagent` + fe 특이 |
-| §2-rev | rev sub-agent (3단계 e2e + 큐) | `rev` |
-| §2-plan | plan sub-agent | `subagent` + plan 특이 |
-| §3 prompt 예시 | nmae | — |
-| §4 완료 보고 양식 | 모든 sub-agent | `subagent` |
-| §5 안티패턴 | 모든 sub-agent | `subagent` |
+| §1 공통 룰 | 모든 sub-agent (be/fe/rev/plan + helper-launched) | `common/` + `subagent/` + `workflow/` |
+| §2-be | be sub-agent | `common/` + `subagent/` + `workflow/` |
+| §2-fe | fe sub-agent | `common/` + `subagent/` + `workflow/` |
+| §2-rev | rev sub-agent (3단계 e2e + 큐) | `common/` + `subagent/` + `rev/` + `workflow/` |
+| §2-plan | plan sub-agent | `common/` + `subagent/` + `workflow/` |
+| §3 prompt 예시 | nmae | `common/` + `nmae/` + `workflow/` |
+| §4 완료 보고 양식 | 모든 sub-agent | `common/` + `subagent/` |
+| §5 안티패턴 | 모든 sub-agent | `common/` + `subagent/` |
+
+> 메모리 디렉토리 실경로: `~/.claude/projects/-home-mobruji-mobruji/memory/<actor>/`. 2026-05-24 #1004 디렉토리 분리 — actor 별 디렉토리만 로드해 컨텍스트 절약. 자세히는 §1 "메모리 로드 범위" 참조.
 
 **§1 워크트리/launch 대응 절차**는 nmae 가 sub-agent launch 시점에 필요한 부분도 포함. sub-agent 본인은 §1 워크트리 격리 / 워크트리 lock / reasoning 5분 / 메모리 보호 / 자율 결정 / cycle-status.json 보호 / hook 우회 금지 / 보호 영역 라벨 / 기획·이슈 등록 / PR 표준 / 라벨 점검 / 완료 보고 만 적용. **nmae 항시 가동 / watchdog inject 대응** 은 nmae 룰 (`CLAUDE.md §11`).
 
@@ -84,9 +86,17 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
   - 짧은 마무리 보고 후 turn 종료
 - maestro는 5분 룰 어긴 sub-agent 의 결과물도 일단 수용하되, 다음 사이클부터 작업 범위 축소.
 
-### 메모리 보호
+### 메모리 보호 + 로드 범위 (actor 별 디렉토리 분리, #1004)
 - `~/.claude/projects/*/memory/` 디렉토리 **쓰기 금지**.
 - 메모리 갱신은 maestro만 담당 (race 회피, `11-multi-session-runbook.md §1-2`).
+- **로드 범위** (자기 actor 디렉토리만 집중 — 2026-05-24 #1004 디렉토리 분리):
+  - sub-agent 본인이 자기 룰을 명시 Read 하려면 다음 디렉토리만 본다:
+    - `common/` — 모든 actor 공통 (10건, autonomous-default / keep-promises / discord-tone-formal 등)
+    - `subagent/` — sub-agent 공통 (5건, no-user-wait / reasoning-chunk-limit / pr-base-develop / npm-install-symlink / stash-drop)
+    - `workflow/` — 코드/도메인 컨벤션 (2건, runbook-spelling / domain-model-§7)
+    - rev 만: 위 3개 + `rev/` (3건, e2e-always / release-gate / develop-grep)
+  - 로드 금지 (다른 actor 룰): `nmae/` (orchestration — nmae 만), `helper/` (사용자 응답 — helper 만), 다른 sub-agent role 특이 항목.
+  - 루트 `MEMORY.md` (index) + `project_*` / `user_*` (핸드오프/상태) 는 sub-agent 도 참고 가능 (read-only).
 
 ### sub-agent 자율 결정 (사용자 없는 것처럼)
 
@@ -515,3 +525,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — §1 "sub-agent 자율 결정 (사용자 없는 것처럼)" 절 추가: 사용자 결정 wait state 금지 (금지 표현 + 결정 책임 순서 명시). watchdog escalation 메시지의 "사용자 확인 필요" → "가시화 알림" 표현 정정 동반 (`bot.py` `CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE`). 트리거: 2026-05-24 사용자 "나는 없다고 생각해야돼 걔네는" (#981). 메모리 [[feedback-sub-agent-no-user-wait]] 영속화.
 - 2026-05-24 — §1 PR session 라벨 부착 의무 절 추가 + §2 helper sub-agent 역할 추가: sub-agent (be/fe/rev/plan/helper) 가 PR 생성 직후 `session:<자기 sub-agent>` 라벨 명시 부착 의무. `.github/workflows/auto-label.yml` 가 backend/only · web/only · tools/우세 · docs/only 추론 fallback (sub-agent 명시 우선). `session:helper` 라벨 신설. 트리거: 머지 43 PR 중 7건 (16%) 만 session 라벨 — 36건 누락. 사용자 정정 "각 PR이 무슨 agent가 작업했는지 라벨 제대로 안 붙어있어?" (이슈 #1002).
 - 2026-05-24 — 본 문서 actor 범위 명시화 (#1004): Actor TOC 섹션 추가 — 본 문서 = sub-agent actor (be/fe/rev/plan + helper-launched) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 로 분리. 메모리 frontmatter `metadata.actor` 추가 (nmae/helper/subagent/rev/common/workflow). 사용자: "nmae helper subagent 들이 각자 지켜야할 규칙이 다를텐데 이걸 하나에 담으려해서 그런 거 아니야 — 진행하고 분리한 문서대로 적용해".
+- 2026-05-24 — 메모리 actor 디렉토리 분리 (#1004 후속): 메모리 파일 44건이 `~/.claude/projects/-home-mobruji-mobruji/memory/` 단일 디렉토리에서 `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/` 6개 actor 디렉토리로 이동. Actor TOC 표 "메모리 actor 매칭" 컬럼 → 디렉토리 경로 명시. §1 "메모리 보호 + 로드 범위" 절 신설 — sub-agent 가 자기 actor 디렉토리만 명시 Read 하도록 가이드. MEMORY.md index 도 디렉토리 경로 갱신. CLAUDE.md §15 메모리 path 동기화. 트리거: 사용자 "메모리를 actor만 명시하지말고 아예 문서 자체를 분리해야 너가 너꺼에만 집중해서 읽지" (2026-05-24).
