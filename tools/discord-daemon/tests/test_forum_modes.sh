@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+# test_forum_modes.sh — discord-reply.sh forum mode bash e2e 테스트 (#17, 2026-05-24).
+#
+# 배경 (사용자 #17 forum 전환 wave):
+#   directive-board / per-cycle 채널을 Discord GUILD_FORUM type 으로 신설.
+#   discord-reply.sh 에 --forum-post / --forum-comment / --forum-edit /
+#   --forum-retag mode 도입. 본 테스트는 외부 Discord REST 호출을 fake curl 로
+#   대체해 URL + method + payload 캡처 후 routing / tag lookup / payload shape
+#   검증.
+#
+# 거울 룰: test_cycle_channel_routing.py (Python unittest) 와 동일 캡처 패턴,
+#         bash 단독 작성으로 Python 의존 회피 (운영 호스트 어디서나 실행).
+#
+# 종료코드: 모든 케이스 pass → 0. 임의 케이스 fail → 1.
+
+set -uo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/discord-reply.sh"
+if [[ ! -x "$SCRIPT_PATH" ]]; then
+  chmod +x "$SCRIPT_PATH" 2>/dev/null || true
+fi
+
+PASS=0
+FAIL=0
+FAIL_NAMES=()
+
+# fake curl 작성 — GET (tag lookup) 와 POST/PATCH (action) 둘 다 대응.
+# GET /channels/{forum_id} → available_tags 응답.
+# 그 외 (POST/PATCH) → URL/METHOD/PAYLOAD 캡처 + {"id":"thread-123"} stub 응답.
+_write_fake_curl() {
+  local tmpdir="$1"
+  local capture="$2"
+  local available_tags_json="$3"   # JSON array literal (e.g. '[{"id":"tag-A","name":"대기"}]')
+  cat > "$tmpdir/curl" <<EOF
+#!/usr/bin/env bash
+# Captures: each invocation appends "<METHOD> <URL> <PAYLOAD>" line to $capture.
+# GET responses: forum metadata with available_tags.
+# Other responses: {"id": "thread-123"} + status 200.
+METHOD="GET"
+URL=""
+PAYLOAD=""
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    -X) shift; METHOD="\$1";;
+    -d) shift; PAYLOAD="\$1";;
+    -w) shift;;  # discard format spec
+    -H) shift;;  # discard header
+    -sS) ;;
+    http*) URL="\$1";;
+  esac
+  shift
+done
+printf '%s %s %s\n' "\$METHOD" "\$URL" "\$PAYLOAD" >> $capture
+if [[ "\$METHOD" == "GET" ]]; then
+  printf '{"id":"forum-stub","available_tags":${available_tags_json}}\n200'
+else
+  printf '{"id":"thread-123"}\n200'
+fi
+EOF
+  chmod +x "$tmpdir/curl"
+}
+
+_write_env() {
+  local tmpdir="$1"; shift
+  local env_path="$tmpdir/test.env"
+  {
+    echo "DISCORD_BOT_TOKEN=stub"
+    echo "DISCORD_RETRY_MAX=1"
+    echo "DISCORD_RETRY_BASE_SEC=0"
+    echo "MOBRUJI_CHANNEL_ID=42"
+    echo "DIRECTIVE_BOARD_FORUM_ID=forum-directive"
+    echo "BE_FORUM_ID=forum-be"
+    echo "FE_FORUM_ID=forum-fe"
+    echo "REV_FORUM_ID=forum-rev"
+    echo "PLAN_FORUM_ID=forum-plan"
+  } > "$env_path"
+  printf '%s' "$env_path"
+}
+
+_run() {
+  local tmpdir="$1"; shift
+  local env_path="$1"; shift
+  PATH="$tmpdir:$PATH" \
+    DISCORD_DAEMON_ENV_PATH="$env_path" \
+    LAST_USER_MSG_ID_FILE="$tmpdir/nonexistent-last.txt" \
+    HELPER_TARGET_FILE="$tmpdir/nonexistent-target.txt" \
+    HELPER_QUEUE_FILE="$tmpdir/nonexistent-queue.jsonl" \
+    HELPER_THREAD_FILE="$tmpdir/nonexistent-thread.txt" \
+    LAUNCH_THREAD_FILE="$tmpdir/nonexistent-launch.txt" \
+    bash "$SCRIPT_PATH" "$@"
+}
+
+_assert() {
+  local name="$1"
+  local condition="$2"
+  if eval "$condition"; then
+    PASS=$((PASS + 1))
+    echo "  PASS: $name"
+  else
+    FAIL=$((FAIL + 1))
+    FAIL_NAMES+=("$name")
+    echo "  FAIL: $name (조건: $condition)"
+  fi
+}
+
+# ── case 1: --forum-post directive "테스트" "진행" "본문" → thread 생성 ────────
+case1_forum_post_directive() {
+  echo "[case1] --forum-post directive 정상 라우팅"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" \
+    '[{"id":"tag-1","name":"진행"},{"id":"tag-2","name":"완료"}]'
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+
+  local stdout
+  stdout=$(_run "$tmpdir" "$env_path" \
+    --forum-post directive "테스트 제목" "진행" "본문 내용" 2>/dev/null)
+  local rc=$?
+
+  _assert "case1 returncode 0" "[[ $rc -eq 0 ]]"
+  _assert "case1 stdout = thread-123" "[[ '$stdout' == 'thread-123' ]]"
+  _assert "case1 GET forum-directive 호출" \
+    "grep -q '^GET https://discord.com/api/v10/channels/forum-directive ' $capture"
+  _assert "case1 POST forum-directive/threads 호출" \
+    "grep -q '^POST https://discord.com/api/v10/channels/forum-directive/threads ' $capture"
+  _assert "case1 payload 안 applied_tags = tag-1" \
+    "grep -q 'applied_tags' $capture && grep -q 'tag-1' $capture"
+  _assert "case1 payload 안 name = 테스트 제목" "grep -q '테스트 제목' $capture"
+}
+
+# ── case 2: --forum-comment <thread_id> "댓글" → POST messages ────────────────
+case2_forum_comment() {
+  echo "[case2] --forum-comment thread 안 댓글"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" '[]'
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+
+  _run "$tmpdir" "$env_path" --forum-comment thread-456 "댓글 본문" >/dev/null 2>&1
+  local rc=$?
+
+  _assert "case2 returncode 0" "[[ $rc -eq 0 ]]"
+  _assert "case2 POST thread-456/messages" \
+    "grep -q '^POST https://discord.com/api/v10/channels/thread-456/messages ' $capture"
+  _assert "case2 GET 호출 없음 (tag lookup 없음)" "! grep -q '^GET ' $capture"
+}
+
+# ── case 3: --forum-edit <thread_id> "새 본문" → PATCH messages/{id} ──────────
+case3_forum_edit() {
+  echo "[case3] --forum-edit thread starter 본문 PATCH"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" '[]'
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+
+  _run "$tmpdir" "$env_path" --forum-edit thread-789 "수정된 본문" >/dev/null 2>&1
+  local rc=$?
+
+  _assert "case3 returncode 0" "[[ $rc -eq 0 ]]"
+  _assert "case3 PATCH thread-789/messages/thread-789 (starter == thread)" \
+    "grep -q '^PATCH https://discord.com/api/v10/channels/thread-789/messages/thread-789 ' $capture"
+  _assert "case3 payload 안 수정된 본문" "grep -q '수정된 본문' $capture"
+}
+
+# ── case 4: --forum-retag <thread_id> directive "완료" → PATCH thread ─────────
+case4_forum_retag() {
+  echo "[case4] --forum-retag applied_tags 갱신"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" \
+    '[{"id":"tag-done","name":"완료"},{"id":"tag-todo","name":"대기"}]'
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+
+  _run "$tmpdir" "$env_path" --forum-retag thread-555 directive "완료" >/dev/null 2>&1
+  local rc=$?
+
+  _assert "case4 returncode 0" "[[ $rc -eq 0 ]]"
+  _assert "case4 GET forum-directive (tag lookup)" \
+    "grep -q '^GET https://discord.com/api/v10/channels/forum-directive ' $capture"
+  _assert "case4 PATCH thread-555 (속성 갱신)" \
+    "grep -q '^PATCH https://discord.com/api/v10/channels/thread-555 ' $capture"
+  _assert "case4 payload 안 applied_tags=tag-done" \
+    "grep -q 'tag-done' $capture"
+}
+
+# ── case 5: 미지원 forum_env → 명시 에러 ─────────────────────────────────────
+case5_unknown_forum_env() {
+  echo "[case5] 미지원 forum_env → 명시 에러"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" '[]'
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+
+  local stderr
+  stderr=$(_run "$tmpdir" "$env_path" \
+    --forum-post infra "제목" "진행" "본문" 2>&1 >/dev/null)
+  local rc=$?
+
+  _assert "case5 returncode != 0" "[[ $rc -ne 0 ]]"
+  _assert "case5 stderr 안 forum_env 메시지" \
+    "echo '$stderr' | grep -q 'forum_env'"
+  _assert "case5 push 호출 0건" "! grep -q '^POST ' $capture"
+}
+
+# ── case 6: 미지원 tag_name → 명시 에러 ──────────────────────────────────────
+case6_unknown_tag() {
+  echo "[case6] 미지원 tag_name → 명시 에러"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" \
+    '[{"id":"tag-1","name":"진행"}]'
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+
+  local stderr
+  stderr=$(_run "$tmpdir" "$env_path" \
+    --forum-post be "제목" "존재하지않는태그" "본문" 2>&1 >/dev/null)
+  local rc=$?
+
+  _assert "case6 returncode != 0" "[[ $rc -ne 0 ]]"
+  _assert "case6 stderr 안 tag 메시지" \
+    "echo '$stderr' | grep -q '미지원'"
+  _assert "case6 POST threads 호출 없음" "! grep -q '/threads' $capture"
+}
+
+# ── case 7: *_FORUM_ID 미설정 → 명시 에러 ───────────────────────────────────
+case7_forum_id_unset() {
+  echo "[case7] BE_FORUM_ID 미설정 → 명시 에러 (silent fallback 금지)"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local capture="$tmpdir/capture.txt"
+  : > "$capture"
+  _write_fake_curl "$tmpdir" "$capture" '[]'
+  # BE_FORUM_ID 만 빈 값.
+  local env_path="$tmpdir/test.env"
+  {
+    echo "DISCORD_BOT_TOKEN=stub"
+    echo "MOBRUJI_CHANNEL_ID=42"
+    echo "BE_FORUM_ID="
+  } > "$env_path"
+
+  local stderr
+  stderr=$(_run "$tmpdir" "$env_path" \
+    --forum-post be "제목" "진행" "본문" 2>&1 >/dev/null)
+  local rc=$?
+
+  _assert "case7 returncode != 0" "[[ $rc -ne 0 ]]"
+  _assert "case7 stderr 안 BE_FORUM_ID 안내" \
+    "echo '$stderr' | grep -q 'BE_FORUM_ID'"
+}
+
+# ── case 8: 인자 부족 ─────────────────────────────────────────────────────────
+case8_missing_args() {
+  echo "[case8] --forum-post 인자 부족 → 에러"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+  _write_fake_curl "$tmpdir" "$tmpdir/cap.txt" '[]'
+
+  local stderr
+  stderr=$(_run "$tmpdir" "$env_path" --forum-post directive "title" 2>&1 >/dev/null)
+  local rc=$?
+  _assert "case8 returncode != 0" "[[ $rc -ne 0 ]]"
+  _assert "case8 stderr 사용법 안내" \
+    "echo '$stderr' | grep -q -- '--forum-post'"
+}
+
+# ── 실행 ────────────────────────────────────────────────────────────────────────
+echo "== discord-reply.sh forum mode 테스트 =="
+case1_forum_post_directive
+case2_forum_comment
+case3_forum_edit
+case4_forum_retag
+case5_unknown_forum_env
+case6_unknown_tag
+case7_forum_id_unset
+case8_missing_args
+
+echo
+echo "결과: PASS=$PASS FAIL=$FAIL"
+if [[ $FAIL -gt 0 ]]; then
+  echo "실패 케이스:"
+  for n in "${FAIL_NAMES[@]}"; do
+    echo "  - $n"
+  done
+  exit 1
+fi
+exit 0

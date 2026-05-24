@@ -79,6 +79,30 @@
 #         → 관련 룰: CLAUDE.md §11-8 [[feedback-nmae-status-channel]]
 #                   [[feedback-helper-relay-scope]] 거울 룰.
 #
+#   6) forum modes (#17 사용자 forum 전환 wave, 2026-05-24):
+#       discord-reply.sh --forum-post <forum_env> "<title>" "<tag_name>" "<body>"
+#       discord-reply.sh --forum-comment <thread_id> "<body>"
+#       discord-reply.sh --forum-edit <thread_id> "<new_body>"
+#       discord-reply.sh --forum-retag <thread_id> <forum_env> "<new_tag_name>"
+#         → forum_env: directive | be | fe | rev | plan → 해당 *_FORUM_ID env lookup.
+#         → tag_name: 해당 forum 의 available_tags name (예: "대기" / "진행" / "완료").
+#           GET /channels/{forum_id} 응답의 available_tags 에서 name → id 변환.
+#         → --forum-post: POST /channels/{forum_id}/threads (name + applied_tags +
+#           message.content). 생성된 thread_id 를 stdout 으로 출력 (호출자가
+#           후속 --forum-comment / --forum-edit / --forum-retag 에 사용).
+#         → --forum-comment: POST /channels/{thread_id}/messages (forum thread 안
+#           일반 댓글).
+#         → --forum-edit: PATCH /channels/{thread_id}/messages/{thread_id} 로
+#           starter message 본문 갱신. Discord forum 사양: forum thread 의
+#           starter message id == thread id.
+#         → --forum-retag: PATCH /channels/{thread_id} 의 applied_tags 만 갱신.
+#         → 미지원 forum_env 또는 미지원 tag_name → 명시 에러 (silent skip 금지 —
+#           forum 라우팅이 실패한 사실을 호출자에게 알린다).
+#         → 모든 forum 모드 자동 NO_REPLY=1 (forum thread 는 사용자 메시지에
+#           reply 가 의미 없음).
+#         → 관련 룰: CLAUDE.md §11-9 [[feedback-nmae-forum-channel-enforce]]
+#                   [[feedback-nmae-per-cycle-channel]] [[feedback-nmae-directive-board-update-flow]]
+#
 #   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
 #         → thread_id resolve 우선순위 (높음 → 낮음):
@@ -185,6 +209,18 @@ FE_CHANNEL_VALUE=$(read_env_value FE_CHANNEL_ID || true)
 REV_CHANNEL_VALUE=$(read_env_value REV_CHANNEL_ID || true)
 PLAN_CHANNEL_VALUE=$(read_env_value PLAN_CHANNEL_ID || true)
 
+# Forum 채널 env (#17 사용자 forum 전환 wave, 2026-05-24) — `--forum-post`,
+# `--forum-comment`, `--forum-edit`, `--forum-retag` mode 의 forum_env 인자가
+# 참조. directive-board / be / fe / rev / plan 5 forum 채널.
+# 미설정 시 명시 에러 (silent fallback 금지 — forum 전환 의도 무력화 방지).
+# Discord forum 채널 = GUILD_FORUM type (15). 각 forum 안에 thread 가 post 단위로
+# 생성되며 thread 안에 messages + applied_tags 가 붙는다.
+DIRECTIVE_BOARD_FORUM_VALUE=$(read_env_value DIRECTIVE_BOARD_FORUM_ID || true)
+BE_FORUM_VALUE=$(read_env_value BE_FORUM_ID || true)
+FE_FORUM_VALUE=$(read_env_value FE_FORUM_ID || true)
+REV_FORUM_VALUE=$(read_env_value REV_FORUM_ID || true)
+PLAN_FORUM_VALUE=$(read_env_value PLAN_FORUM_ID || true)
+
 CHANNEL="$MOBRUJI_CHANNEL_VALUE"
 if [[ -z "$CHANNEL" ]]; then
   CHANNEL="$DIGEST_CHANNEL_VALUE"
@@ -269,6 +305,12 @@ CHANNEL_OVERRIDE=""
 # DIGEST_CHANNEL_ID 로 fallback + stderr deprecation warning. NO_REPLY 자동 1.
 # 우선순위: --channel <id> > --cycle-channel <name> > --status-channel > default.
 CYCLE_CHANNEL=""
+# Forum mode 인자 (#17, 2026-05-24).
+# --forum-post / --forum-retag 의 forum_env: directive | be | fe | rev | plan.
+# --forum-post 의 title (thread name) + tag (available_tags name).
+FORUM_ENV=""
+FORUM_TITLE=""
+FORUM_TAG=""
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
@@ -278,6 +320,10 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
+  echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan> \"<title>\" \"<tag>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-comment <thread_id> \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-edit <thread_id> \"<new_body>\"" >&2
+  echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan> \"<new_tag>\"" >&2
   exit 1
 fi
 
@@ -423,6 +469,61 @@ case "$1" in
       exit 1
     fi
     MSG="$2"
+    ;;
+  --forum-post)
+    # #17 forum 전환 wave (2026-05-24).
+    # --forum-post <forum_env> "<title>" "<tag_name>" "<body>"
+    # forum_env: directive | be | fe | rev | plan → *_FORUM_ID lookup.
+    # tag_name: 해당 forum 의 available_tags name → tag_id 변환.
+    MODE="forum-post"
+    if [[ $# -lt 5 ]]; then
+      echo "discord-reply.sh: --forum-post <forum_env> \"<title>\" \"<tag>\" \"<body>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    FORUM_ENV="$2"
+    FORUM_TITLE="$3"
+    FORUM_TAG="$4"
+    MSG="$5"
+    NO_REPLY=1
+    ;;
+  --forum-comment)
+    # #17 — forum thread 안 댓글 (POST /channels/{thread_id}/messages).
+    MODE="forum-comment"
+    if [[ $# -lt 3 ]]; then
+      echo "discord-reply.sh: --forum-comment <thread_id> \"<body>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    THREAD_ID="$2"
+    MSG="$3"
+    NO_REPLY=1
+    ;;
+  --forum-edit)
+    # #17 — forum thread starter message 본문 PATCH.
+    # Discord 사양: forum thread 의 starter message id == thread id.
+    # PATCH /channels/{thread_id}/messages/{thread_id}.
+    MODE="forum-edit"
+    if [[ $# -lt 3 ]]; then
+      echo "discord-reply.sh: --forum-edit <thread_id> \"<new_body>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    THREAD_ID="$2"
+    MSG="$3"
+    NO_REPLY=1
+    ;;
+  --forum-retag)
+    # #17 — forum thread applied_tags 갱신.
+    # PATCH /channels/{thread_id} with body { applied_tags: [<tag_id>] }.
+    MODE="forum-retag"
+    if [[ $# -lt 4 ]]; then
+      echo "discord-reply.sh: --forum-retag <thread_id> <forum_env> \"<new_tag>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    THREAD_ID="$2"
+    FORUM_ENV="$3"
+    FORUM_TAG="$4"
+    # body 인자는 retag 에선 사용하지 않으나 MSG 빈값 가드 우회용 placeholder.
+    MSG="(retag)"
+    NO_REPLY=1
     ;;
   --*)
     echo "discord-reply.sh: 알 수 없는 옵션 $1" >&2
@@ -704,6 +805,117 @@ atomic_write_thread_file() {
   mv "$tmp" "$thread_file"
 }
 
+# ─── forum helpers (#17, 2026-05-24) ─────────────────────────────────────────
+
+# forum_env 이름 (directive | be | fe | rev | plan) → *_FORUM_ID env 값 resolve.
+# 미설정 또는 미지원 이름 → 명시 에러 (silent fallback 금지).
+resolve_forum_id() {
+  local forum_env="$1"
+  local forum_id=""
+  case "$forum_env" in
+    directive) forum_id="$DIRECTIVE_BOARD_FORUM_VALUE" ;;
+    be)        forum_id="$BE_FORUM_VALUE" ;;
+    fe)        forum_id="$FE_FORUM_VALUE" ;;
+    rev)       forum_id="$REV_FORUM_VALUE" ;;
+    plan)      forum_id="$PLAN_FORUM_VALUE" ;;
+    *)
+      echo "discord-reply.sh: 알 수 없는 forum_env \"$forum_env\" — directive|be|fe|rev|plan 중 하나여야 합니다" >&2
+      return 1
+      ;;
+  esac
+  if [[ -z "$forum_id" ]]; then
+    local env_key
+    env_key=$(echo "$forum_env" | tr '[:lower:]' '[:upper:]')
+    if [[ "$forum_env" == "directive" ]]; then
+      env_key="DIRECTIVE_BOARD"
+    fi
+    echo "discord-reply.sh: ${env_key}_FORUM_ID 미설정 — .env 에 forum channel id 추가 후 재시도하세요" >&2
+    return 1
+  fi
+  printf '%s' "$forum_id"
+}
+
+# forum 의 available_tags name → id lookup.
+# GET /channels/{forum_id} 응답의 available_tags 배열에서 name 일치 entry 의 id 반환.
+# 미지원 tag_name → 명시 에러 (silent skip 금지).
+resolve_forum_tag_id() {
+  local forum_id="$1"
+  local tag_name="$2"
+  local response tag_id
+  response=$(curl -sS -X GET \
+    "https://discord.com/api/v10/channels/${forum_id}" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  local status payload
+  status="${response##*$'\n'}"
+  payload="${response%$'\n'*}"
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: forum channel fetch 실패 (forum_id=$forum_id, status=$status)" >&2
+    echo "$payload" >&2
+    return 1
+  fi
+  tag_id=$(printf '%s' "$payload" \
+    | jq -r --arg n "$tag_name" \
+        '.available_tags[]? | select(.name == $n) | .id' \
+    | head -1)
+  if [[ -z "$tag_id" || "$tag_id" == "null" ]]; then
+    local available
+    available=$(printf '%s' "$payload" \
+      | jq -r '[.available_tags[]?.name] | join(", ")')
+    echo "discord-reply.sh: forum tag \"$tag_name\" 미지원 (forum_id=$forum_id, available: $available)" >&2
+    return 1
+  fi
+  printf '%s' "$tag_id"
+}
+
+# forum thread 생성 — POST /channels/{forum_id}/threads.
+# body: { name, applied_tags: [<tag_id>], message: { content } }.
+forum_create_thread() {
+  local forum_id="$1"
+  local name="$2"
+  local tag_id="$3"
+  local content="$4"
+  local body
+  body=$(jq -nc \
+    --arg n "$name" \
+    --arg t "$tag_id" \
+    --arg c "$content" \
+    '{
+      name: $n,
+      applied_tags: [$t],
+      message: { content: $c },
+      auto_archive_duration: 1440
+    }')
+  discord_curl_with_retry POST \
+    "https://discord.com/api/v10/channels/${forum_id}/threads" \
+    "$body"
+}
+
+# forum thread starter message 본문 PATCH.
+# Discord 사양: forum thread 의 starter message id == thread id.
+# PATCH /channels/{thread_id}/messages/{thread_id}.
+forum_edit_starter() {
+  local thread_id="$1"
+  local content="$2"
+  local body
+  body=$(jq -nc --arg c "$content" '{content: $c}')
+  discord_curl_with_retry PATCH \
+    "https://discord.com/api/v10/channels/${thread_id}/messages/${thread_id}" \
+    "$body"
+}
+
+# forum thread applied_tags 만 PATCH — PATCH /channels/{thread_id}.
+# 다른 thread 속성 (name 등) 은 건드리지 않음.
+forum_retag_thread() {
+  local thread_id="$1"
+  local tag_id="$2"
+  local body
+  body=$(jq -nc --arg t "$tag_id" '{applied_tags: [$t]}')
+  discord_curl_with_retry PATCH \
+    "https://discord.com/api/v10/channels/${thread_id}" \
+    "$body"
+}
+
 # ─── mode 실행 ────────────────────────────────────────────────────────────────
 
 case "$MODE" in
@@ -833,5 +1045,41 @@ case "$MODE" in
       echo "discord-reply.sh: auto-thread push 실패 (thread_id=$AUTO_THREAD_ID, source=$AUTO_THREAD_SOURCE, 만료/삭제 추정) — skip" >&2
       exit 0
     fi
+    ;;
+
+  forum-post)
+    # #17 forum 전환 (2026-05-24).
+    # forum_env → *_FORUM_ID resolve → forum 의 available_tags 에서 tag_id lookup →
+    # POST /channels/{forum_id}/threads. stdout 으로 생성된 thread_id 출력.
+    FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
+    TAG_ID=$(resolve_forum_tag_id "$FORUM_ID" "$FORUM_TAG")
+    THREAD_RESPONSE=$(forum_create_thread "$FORUM_ID" "$FORUM_TITLE" "$TAG_ID" "$MSG")
+    NEW_THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$NEW_THREAD_ID" ]]; then
+      echo "discord-reply.sh: forum thread 생성 실패 (forum=$FORUM_ENV, title=$FORUM_TITLE)" >&2
+      echo "$THREAD_RESPONSE" >&2
+      exit 1
+    fi
+    printf '%s\n' "$NEW_THREAD_ID"
+    ;;
+
+  forum-comment)
+    # #17 — forum thread 안 일반 댓글.
+    # POST /channels/{thread_id}/messages — post_thread_message 재사용 가능.
+    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
+    post_thread_message "$THREAD_ID" "$PAYLOAD"
+    ;;
+
+  forum-edit)
+    # #17 — forum thread starter message 본문 PATCH.
+    forum_edit_starter "$THREAD_ID" "$MSG"
+    ;;
+
+  forum-retag)
+    # #17 — forum thread applied_tags 갱신.
+    # FORUM_ENV (forum 이름) 로 forum_id resolve → tag_name → tag_id → PATCH thread.
+    FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
+    TAG_ID=$(resolve_forum_tag_id "$FORUM_ID" "$FORUM_TAG")
+    forum_retag_thread "$THREAD_ID" "$TAG_ID"
     ;;
 esac
