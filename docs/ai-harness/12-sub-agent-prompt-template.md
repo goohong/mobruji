@@ -61,7 +61,7 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 | 단계 | 명령 | 의미 |
 |---|---|---|
 | 1 | 백로그 후보 1개 선정 (이슈 / PR follow-up / docs drift) | 위반 시: 그냥 inject 무시 = 무한 loop |
-| 2 | `bash /home/mobruji/mobruji/tools/cycle-status/update.sh <ws> set-active --title "<선정 후보 한 줄>"` | cycle-status.json `in_progress` 채워 다음 polling 에서 idle 분류 탈출 |
+| 2 | `bash /home/mobruji/mobruji/tools/cycle-status/update.sh <ws> set-active --title "<선정 후보 한 줄>"` <br>(권장: `bash /home/mobruji/mobruji/tools/agent-launch-wrapper.sh <ws> --title "<선정 후보 한 줄>"` — set-active + launch 안내 한 번에, #1008) | cycle-status.json `in_progress` 채워 다음 polling 에서 idle 분류 탈출 |
 | 3 | `Agent` tool 로 sub-agent launch (worktree=`/home/mobruji/mobruji-<ws>`) | 실제 작업 위임. prompt 첫 줄 §1 워크트리 격리 규약 |
 | 4 | `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <선정 후보>"` | 사용자 가시성 + cycle-status.json digest 업데이트 |
 
