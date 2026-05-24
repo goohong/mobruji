@@ -281,6 +281,24 @@ helper LLM 응답 = Discord raw push. nmae 작업 + digest 도 직접 push 유�
 
 - **reply script** ([[feedback-discord-reply-script]]): `bash /home/mobruji/.mobruji/discord-reply.sh "본문"` 호출 → #모부르지 push. MCP Discord plugin 폐기.
 
+### 12-7) directive-board 라우팅 (#1039, 2026-05-24 사용자 지시 백로그)
+
+- **사용자 인용**: "여기에 답하지 말고 별도의 지시 백로그? 모아두는 채널 (이름은 너가 정해) 를 파서. 거기에 추가하고, 예를들어 ~하는 작업 (언제언제 지시) 하고 그 아래에 스레드 파서 진행상황을 적어줘".
+- 채널 결정 (helper): **#모부르지-지시** (env `DIRECTIVE_BOARD_CHANNEL_ID`).
+- **분류 룰** ([[feedback-helper-directive-board]]): helper 가 매 사용자 메시지를 분류 — (a) 지시 (구현/수정/생성/위임/새 기능/운영 fix) 는 directive-board 채널 + thread, (b) 질문 (상태/이유/방법) 은 #모부르지 답신. 혼합 메시지는 분리.
+- 호출:
+  - **신규 등록**: `LAUNCH_THREAD_ID=$(bash /home/mobruji/.mobruji/discord-reply.sh --directive-board "<요약>" --delegated-to "<owner>" --related "<PR# / 이슈# / 메모리>")`. script 가 본문 포맷 자동 생성 + 자동 thread + `~/.mobruji/directive-board.jsonl` append (8건 backfill 호환) + stdout thread_id.
+  - **진행 stream**: `bash /home/mobruji/.mobruji/discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행 1줄>"`.
+  - **완료 갱신**: `bash /home/mobruji/.mobruji/discord-reply.sh --update-status <message_id> "✅ 완료" 1234` — directive 메시지 본문 `상태:` 라인 PATCH + jsonl entry status 동기 갱신.
+- 본문 포맷 표준 (사용자 spec):
+  ```
+  📌 <한 줄 요약> (지시 YYYY-MM-DD HH:MM KST)
+  상태: <진행 중 / ⏳ 대기 / ✅ 완료 PR #N / 🚫 차단>
+  담당: <nmae / be / fe / rev / plan / helper>
+  관련: <PR# / 이슈# / 메모리>
+  ```
+- helper-turn-start wrapper (#1014) 후속 update 권장 — 학습 의존 줄이기 위해 wrapper 가 directive 분류 reminder 라인을 emit 하는 별도 사이클 (helper 자체 수정 영역).
+
 ---
 
 ## 13) sub-agent 룰 포인터 (be/fe/rev/plan + helper-launched)

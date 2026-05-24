@@ -73,6 +73,39 @@
 #         → 관련 룰: CLAUDE.md §11-8 [[feedback-nmae-status-channel]]
 #                   [[feedback-helper-relay-scope]] 거울 룰.
 #
+#   5b) directive-board routing (#1039, 2026-05-24 — 사용자 지시 백로그 채널):
+#       discord-reply.sh --directive-board "<요약>" \
+#                        --delegated-to "<owner>" \
+#                        --related "<PR# / 이슈# / 메모리>"
+#         → 채널을 DIRECTIVE_BOARD_CHANNEL_ID 로 강제 override.
+#           기본 채널 (#모부르지) 으로 사용자 지시가 흘러가면 후속 추적이
+#           어려워지므로, 신규 지시는 본 모드를 통해 별도 directive-board 채널
+#           (#모부르지-지시) 으로 박제. DIRECTIVE_BOARD_CHANNEL_ID 미설정 시
+#           graceful fallback (MOBRUJI_CHANNEL_ID + stderr warning) — 사고
+#           가시화는 유지하되 silent 누락 방지.
+#         → 본문 포맷 표준 자동 생성 (사용자 spec, 2026-05-24):
+#             📌 <한 줄 요약> (지시 YYYY-MM-DD HH:MM KST)
+#             상태: <진행 중 / ⏳ 대기 / ✅ 완료 PR #N / 🚫 차단>
+#             담당: <owner>
+#             관련: <related>
+#         → POST 후 자동 thread 생성 (Discord REST
+#           `POST /channels/{ch}/messages/{msg_id}/threads`) — 진행 추적용.
+#         → thread_id + message_id 를 `~/.mobruji/directive-board.jsonl` 에
+#           append (`{ts, summary, status, owner, related, message_id, thread_id}`
+#           형식 — 기존 8건 backfill 호환).
+#         → stdout 으로 thread_id 만 출력 (helper / sub-agent 가 후속 milestone
+#           push 에 활용).
+#         → --status, --ts 옵션으로 초기 상태/타임스탬프 override 가능.
+#         → status push 와 동일하게 자동 NO_REPLY 강제.
+#
+#   5c) directive 상태 갱신 (#1039):
+#       discord-reply.sh --update-status <message_id> "<new_status>" [pr_number]
+#         → directive-board 메시지 본문 PATCH (`상태:` 라인만 갱신).
+#         → `~/.mobruji/directive-board.jsonl` 해당 entry status 도 갱신
+#           (jq stream rewrite — atomic temp file + mv).
+#         → 채널은 DIRECTIVE_BOARD_CHANNEL_ID 로 강제 (미설정 시 graceful
+#           fallback + warning).
+#
 #   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
 #         → thread_id resolve 우선순위 (높음 → 낮음):
@@ -170,6 +203,10 @@ fi
 MOBRUJI_CHANNEL_VALUE=$(read_env_value MOBRUJI_CHANNEL_ID || true)
 DIGEST_CHANNEL_VALUE=$(read_env_value DIGEST_CHANNEL_ID || true)
 NOTIFY_CHANNEL_VALUE=$(read_env_value NOTIFY_CHANNEL_ID || true)
+# #1039 (2026-05-24) — 사용자 지시 백로그 채널 (#모부르지-지시).
+# --directive-board / --update-status mode 가 채널을 본 값으로 강제 override.
+# env 또는 .env 어느 쪽이든 설정 가능 (env 가 우선 — bot.py / wrapper 와 동일 패턴).
+DIRECTIVE_BOARD_CHANNEL_VALUE="${DIRECTIVE_BOARD_CHANNEL_ID:-$(read_env_value DIRECTIVE_BOARD_CHANNEL_ID || true)}"
 
 CHANNEL="$MOBRUJI_CHANNEL_VALUE"
 if [[ -z "$CHANNEL" ]]; then
@@ -250,6 +287,12 @@ STATUS_CHANNEL=0
 # --channel <id>: 임의 채널 id 로 직접 override. 일반 wrapper 작성용.
 # --status-channel 보다 우선 (명시 > 의미). reply 자동 disable 동일.
 CHANNEL_OVERRIDE=""
+# --directive-board / --update-status (#1039) — 사용자 지시 백로그 채널.
+DIRECTIVE_BOARD=0
+DIRECTIVE_DELEGATED_TO=""
+DIRECTIVE_RELATED=""
+DIRECTIVE_STATUS_OVERRIDE=""
+DIRECTIVE_TS_OVERRIDE=""
 
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
@@ -259,6 +302,8 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
+  echo "  discord-reply.sh --directive-board \"<요약>\" --delegated-to \"<owner>\" --related \"<...>\" [--status \"<...>\"] [--ts \"YYYY-MM-DD HH:MM KST\"]" >&2
+  echo "  discord-reply.sh --update-status <message_id> \"<new_status>\" [pr_number]" >&2
   exit 1
 fi
 
@@ -304,6 +349,8 @@ done
 # 채널 override 적용 (mode dispatch 이전 — start_thread_from_message 등 모든
 # 헬퍼가 동일 $CHANNEL 을 보고 호출하기 때문).
 # 우선순위: --channel <id> > --status-channel > default ($CHANNEL 위에서 resolve)
+# (directive-board / update-status 의 채널 override 는 mode dispatch 뒤에 별도 처리 —
+#  argparse 후 MODE 가 결정된 시점에 수행해야 하므로 본 chain 에 끼우지 않음.)
 if [[ -n "$CHANNEL_OVERRIDE" ]]; then
   CHANNEL="$CHANNEL_OVERRIDE"
 elif [[ "$STATUS_CHANNEL" -eq 1 ]]; then
@@ -361,6 +408,88 @@ case "$1" in
     fi
     MSG="$2"
     ;;
+  --directive-board)
+    # #1039 (2026-05-24) — 사용자 지시 백로그 채널 POST + thread 자동 생성.
+    # 채널을 DIRECTIVE_BOARD_CHANNEL_ID 로 강제. reply 자동 disable.
+    # 추가 인자 (--delegated-to / --related / --status / --ts) 를 처리해
+    # 본문 포맷 표준 자동 생성.
+    MODE="directive-board"
+    DIRECTIVE_BOARD=1
+    NO_REPLY=1
+    if [[ $# -lt 2 ]]; then
+      echo "discord-reply.sh: --directive-board 뒤에 요약이 필요합니다" >&2
+      exit 1
+    fi
+    MSG="$2"
+    shift 2
+    # 이어지는 옵션 파싱 (순서 자유).
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --delegated-to)
+          if [[ $# -lt 2 ]]; then
+            echo "discord-reply.sh: --delegated-to 뒤에 owner 가 필요합니다" >&2
+            exit 1
+          fi
+          DIRECTIVE_DELEGATED_TO="$2"
+          shift 2
+          ;;
+        --related)
+          if [[ $# -lt 2 ]]; then
+            echo "discord-reply.sh: --related 뒤에 관련 정보가 필요합니다" >&2
+            exit 1
+          fi
+          DIRECTIVE_RELATED="$2"
+          shift 2
+          ;;
+        --status)
+          if [[ $# -lt 2 ]]; then
+            echo "discord-reply.sh: --status 뒤에 상태 값이 필요합니다" >&2
+            exit 1
+          fi
+          DIRECTIVE_STATUS_OVERRIDE="$2"
+          shift 2
+          ;;
+        --ts)
+          if [[ $# -lt 2 ]]; then
+            echo "discord-reply.sh: --ts 뒤에 타임스탬프 값이 필요합니다" >&2
+            exit 1
+          fi
+          DIRECTIVE_TS_OVERRIDE="$2"
+          shift 2
+          ;;
+        *)
+          echo "discord-reply.sh: --directive-board 알 수 없는 옵션 $1" >&2
+          exit 1
+          ;;
+      esac
+    done
+    # 필수 인자 검증 — owner / related 누락 시 즉시 에러 (사용자 spec).
+    if [[ -z "$DIRECTIVE_DELEGATED_TO" ]]; then
+      echo "discord-reply.sh: --directive-board 는 --delegated-to <owner> 가 필요합니다" >&2
+      exit 1
+    fi
+    if [[ -z "$DIRECTIVE_RELATED" ]]; then
+      echo "discord-reply.sh: --directive-board 는 --related <PR# / 이슈#> 가 필요합니다" >&2
+      exit 1
+    fi
+    ;;
+  --update-status)
+    # #1039 — directive-board 메시지 본문 PATCH + jsonl entry update.
+    # 채널은 DIRECTIVE_BOARD_CHANNEL_ID 로 강제.
+    MODE="update-status"
+    NO_REPLY=1
+    if [[ $# -lt 3 ]]; then
+      echo "discord-reply.sh: --update-status <message_id> \"<new_status>\" [pr_number] 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    # message_id 는 THREAD_ID 변수에 (재사용 — 의미상 message_id 지만 별도 변수
+    # 신설 회피).
+    THREAD_ID="$2"
+    MSG="$3"
+    if [[ $# -ge 4 ]]; then
+      DIRECTIVE_RELATED="$4"  # 선택 PR number — body 에 추가.
+    fi
+    ;;
   --*)
     echo "discord-reply.sh: 알 수 없는 옵션 $1" >&2
     exit 1
@@ -370,6 +499,19 @@ case "$1" in
     MSG="$1"
     ;;
 esac
+
+# #1039 — directive-board / update-status mode 는 모드 dispatch 뒤 채널 강제.
+# DIRECTIVE_BOARD_CHANNEL_ID 미설정 시 graceful fallback (MOBRUJI) + stderr warning.
+# silent leak 방지 측면에서 명시적 에러를 고려했으나, 본 모드는 사용자 가시화가
+# 1차 목적이라 누락 시에도 #모부르지 로 가는 편이 채널 silent miss 보다 낫다는
+# 판단 (.env 누락 발견 즉시 운영자가 fix).
+if [[ "$MODE" == "directive-board" || "$MODE" == "update-status" ]]; then
+  if [[ -n "$DIRECTIVE_BOARD_CHANNEL_VALUE" ]]; then
+    CHANNEL="$DIRECTIVE_BOARD_CHANNEL_VALUE"
+  else
+    echo "discord-reply.sh: DIRECTIVE_BOARD_CHANNEL_ID 미설정 — MOBRUJI_CHANNEL_ID 로 fallback (.env 보강 필요)" >&2
+  fi
+fi
 
 if [[ -z "$MSG" ]]; then
   echo "discord-reply.sh: 빈 메시지 — 호출 의도 확인 필요" >&2
@@ -770,5 +912,133 @@ case "$MODE" in
       echo "discord-reply.sh: auto-thread push 실패 (thread_id=$AUTO_THREAD_ID, source=$AUTO_THREAD_SOURCE, 만료/삭제 추정) — skip" >&2
       exit 0
     fi
+    ;;
+
+  directive-board)
+    # #1039 — 사용자 지시 백로그 채널 POST + thread 자동 생성 + jsonl append.
+    # 채널은 위 channel override 단계에서 DIRECTIVE_BOARD_CHANNEL_VALUE 로 강제됨.
+    #
+    # 1) 본문 포맷 표준 자동 생성.
+    if [[ -n "$DIRECTIVE_TS_OVERRIDE" ]]; then
+      DIRECTIVE_TS="$DIRECTIVE_TS_OVERRIDE"
+    else
+      # KST = UTC+9. 외부 TZ env 의존 없이 명시적으로 KST 시각 생성.
+      DIRECTIVE_TS=$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')
+    fi
+    if [[ -n "$DIRECTIVE_STATUS_OVERRIDE" ]]; then
+      DIRECTIVE_STATUS="$DIRECTIVE_STATUS_OVERRIDE"
+    else
+      DIRECTIVE_STATUS="진행 중"
+    fi
+    DIRECTIVE_BODY=$(printf '📌 %s (지시 %s)\n상태: %s\n담당: %s\n관련: %s' \
+      "$MSG" "$DIRECTIVE_TS" "$DIRECTIVE_STATUS" \
+      "$DIRECTIVE_DELEGATED_TO" "$DIRECTIVE_RELATED")
+
+    # 2) 메시지 POST. directive-board push 는 reply 강제 disable.
+    DIRECTIVE_PAYLOAD=$(jq -nc --arg c "$DIRECTIVE_BODY" '{content: $c}')
+    DIRECTIVE_RESPONSE=$(post_channel_message "$DIRECTIVE_PAYLOAD")
+    DIRECTIVE_MSG_ID=$(echo "$DIRECTIVE_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$DIRECTIVE_MSG_ID" ]]; then
+      echo "discord-reply.sh: directive-board push 실패 (message_id 누락)" >&2
+      echo "$DIRECTIVE_RESPONSE" >&2
+      exit 1
+    fi
+
+    # 3) thread 자동 생성. 이름 = 요약 첫 THREAD_NAME_MAX_LEN 자.
+    DIRECTIVE_SHORT=$(printf '%s' "$MSG" | tr '\n' ' ' | cut -c1-${THREAD_NAME_MAX_LEN})
+    DIRECTIVE_THREAD_RESPONSE=$(start_thread_from_message \
+      "$DIRECTIVE_MSG_ID" "$DIRECTIVE_SHORT")
+    DIRECTIVE_THREAD_ID=$(echo "$DIRECTIVE_THREAD_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$DIRECTIVE_THREAD_ID" ]]; then
+      # 메시지는 push 됐으니 jsonl 에는 thread_id 를 message_id 로 fallback
+      # (기존 backfill 8건도 둘이 같은 값 — directive 본문 자체가 thread root).
+      echo "discord-reply.sh: directive-board thread 생성 실패 (메시지 자체는 push 됨, msg_id=${DIRECTIVE_MSG_ID})" >&2
+      echo "$DIRECTIVE_THREAD_RESPONSE" >&2
+      DIRECTIVE_THREAD_ID="$DIRECTIVE_MSG_ID"
+    fi
+
+    # 4) ~/.mobruji/directive-board.jsonl append.
+    #    기존 8건 backfill 과 호환 (같은 키 집합).
+    DIRECTIVE_BOARD_FILE="${DIRECTIVE_BOARD_FILE:-${HOME:-/tmp}/.mobruji/directive-board.jsonl}"
+    mkdir -p "$(dirname "$DIRECTIVE_BOARD_FILE")"
+    jq -nc \
+      --arg ts "$DIRECTIVE_TS" \
+      --arg summary "$MSG" \
+      --arg status "$DIRECTIVE_STATUS" \
+      --arg owner "$DIRECTIVE_DELEGATED_TO" \
+      --arg related "$DIRECTIVE_RELATED" \
+      --arg msg_id "$DIRECTIVE_MSG_ID" \
+      --arg thread_id "$DIRECTIVE_THREAD_ID" \
+      '{ts: $ts, summary: $summary, status: $status, owner: $owner,
+        related: $related, message_id: $msg_id, thread_id: $thread_id}' \
+      >> "$DIRECTIVE_BOARD_FILE"
+
+    # 5) stdout 으로 thread_id 만 출력 (helper / sub-agent 가 후속 milestone push 에 사용).
+    printf '%s\n' "$DIRECTIVE_THREAD_ID"
+    ;;
+
+  update-status)
+    # #1039 — directive-board 메시지 본문 PATCH + jsonl entry status update.
+    # 채널은 위 override 단계에서 DIRECTIVE_BOARD_CHANNEL_VALUE 로 강제됨.
+    #
+    # 1) 기존 메시지 GET 으로 본문 read.
+    GET_RESPONSE=$(curl -sS -X GET \
+      "https://discord.com/api/v10/channels/${CHANNEL}/messages/${THREAD_ID}" \
+      -H "Authorization: Bot ${TOKEN}" 2>/dev/null || true)
+    EXISTING_CONTENT=$(echo "$GET_RESPONSE" | jq -r '.content // empty')
+    if [[ -z "$EXISTING_CONTENT" ]]; then
+      echo "discord-reply.sh: --update-status — message_id=${THREAD_ID} 메시지 본문 read 실패" >&2
+      echo "$GET_RESPONSE" >&2
+      exit 1
+    fi
+
+    # 2) "상태:" 라인을 새 상태로 교체. PR number 가 있으면 ` PR #N` suffix.
+    if [[ -n "$DIRECTIVE_RELATED" ]]; then
+      NEW_STATUS_LINE="상태: ${MSG} PR #${DIRECTIVE_RELATED}"
+    else
+      NEW_STATUS_LINE="상태: ${MSG}"
+    fi
+    # awk 로 첫 매치 라인만 교체 (안전 — sed escape 회피).
+    NEW_CONTENT=$(printf '%s' "$EXISTING_CONTENT" \
+      | awk -v new="$NEW_STATUS_LINE" '
+          BEGIN { replaced = 0 }
+          /^상태:/ && replaced == 0 { print new; replaced = 1; next }
+          { print }
+        ')
+
+    # 3) PATCH.
+    PATCH_PAYLOAD=$(jq -nc --arg c "$NEW_CONTENT" '{content: $c}')
+    PATCH_RESPONSE=$(discord_curl_with_retry PATCH \
+      "https://discord.com/api/v10/channels/${CHANNEL}/messages/${THREAD_ID}" \
+      "$PATCH_PAYLOAD")
+    PATCH_ID=$(echo "$PATCH_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$PATCH_ID" ]]; then
+      echo "discord-reply.sh: --update-status PATCH 실패" >&2
+      echo "$PATCH_RESPONSE" >&2
+      exit 1
+    fi
+
+    # 4) jsonl entry status 갱신 (atomic temp file + mv).
+    DIRECTIVE_BOARD_FILE="${DIRECTIVE_BOARD_FILE:-${HOME:-/tmp}/.mobruji/directive-board.jsonl}"
+    if [[ -r "$DIRECTIVE_BOARD_FILE" ]]; then
+      JSONL_TMP=$(mktemp "${DIRECTIVE_BOARD_FILE}.XXXXXX")
+      # jq stream — message_id 일치 entry 의 status 만 갱신.
+      jq -c --arg mid "$THREAD_ID" --arg new "$NEW_STATUS_LINE" '
+          if .message_id == $mid
+            then .status = ($new | sub("^상태: "; ""))
+            else .
+          end
+        ' "$DIRECTIVE_BOARD_FILE" > "$JSONL_TMP" 2>/dev/null || true
+      if [[ -s "$JSONL_TMP" ]]; then
+        mv "$JSONL_TMP" "$DIRECTIVE_BOARD_FILE"
+      else
+        rm -f "$JSONL_TMP"
+        echo "discord-reply.sh: --update-status — directive-board.jsonl 갱신 실패 (Discord PATCH 는 성공)" >&2
+      fi
+    else
+      echo "discord-reply.sh: --update-status — $DIRECTIVE_BOARD_FILE 없음, jsonl 갱신 skip (Discord PATCH 는 성공)" >&2
+    fi
+
+    printf '%s\n' "$PATCH_ID"
     ;;
 esac
