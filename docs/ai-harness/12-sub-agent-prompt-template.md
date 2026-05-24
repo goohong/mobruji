@@ -3,6 +3,23 @@
 > maestro(`mobruji` 워크트리)이 be/fe/rev/plan/helper 서브에이전트를 `Agent` 도구로 launch할 때 매번 반복되는 공통 룰을 코드화한 문서.
 > sub-agent prompt에 매번 300+ 줄을 박지 말고, **이 문서를 참조하라**고만 적는다.
 
+## Actor TOC (2026-05-24 #1004 룰 actor 분리)
+
+본 문서는 **sub-agent actor** (be/fe/rev/plan + helper-launched 일회성) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 참조.
+
+| Section | 대상 actor | 메모리 actor 매칭 |
+|---|---|---|
+| §1 공통 룰 | 모든 sub-agent (be/fe/rev/plan + helper-launched) | `subagent` |
+| §2-be | be sub-agent | `subagent` + be 특이 |
+| §2-fe | fe sub-agent | `subagent` + fe 특이 |
+| §2-rev | rev sub-agent (3단계 e2e + 큐) | `rev` |
+| §2-plan | plan sub-agent | `subagent` + plan 특이 |
+| §3 prompt 예시 | nmae | — |
+| §4 완료 보고 양식 | 모든 sub-agent | `subagent` |
+| §5 안티패턴 | 모든 sub-agent | `subagent` |
+
+**§1 워크트리/launch 대응 절차**는 nmae 가 sub-agent launch 시점에 필요한 부분도 포함. sub-agent 본인은 §1 워크트리 격리 / 워크트리 lock / reasoning 5분 / 메모리 보호 / 자율 결정 / cycle-status.json 보호 / hook 우회 금지 / 보호 영역 라벨 / 기획·이슈 등록 / PR 표준 / 라벨 점검 / 완료 보고 만 적용. **nmae 항시 가동 / watchdog inject 대응** 은 nmae 룰 (`CLAUDE.md §11`).
+
 ## 사용법
 
 maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는다:
@@ -497,3 +514,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — §1 cycle-status.json 보호 절 추가: sub-agent 가 `~/.mobruji/cycle-status.json` 직접 수정 금지, `tools/cycle-status/update.sh` 헬퍼 경유. 4-way 룰 sync audit (#973) 발견 — 기존엔 nmae 만 인지, sub-agent prompt 룰에 부재.
 - 2026-05-24 — §1 "sub-agent 자율 결정 (사용자 없는 것처럼)" 절 추가: 사용자 결정 wait state 금지 (금지 표현 + 결정 책임 순서 명시). watchdog escalation 메시지의 "사용자 확인 필요" → "가시화 알림" 표현 정정 동반 (`bot.py` `CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE`). 트리거: 2026-05-24 사용자 "나는 없다고 생각해야돼 걔네는" (#981). 메모리 [[feedback-sub-agent-no-user-wait]] 영속화.
 - 2026-05-24 — §1 PR session 라벨 부착 의무 절 추가 + §2 helper sub-agent 역할 추가: sub-agent (be/fe/rev/plan/helper) 가 PR 생성 직후 `session:<자기 sub-agent>` 라벨 명시 부착 의무. `.github/workflows/auto-label.yml` 가 backend/only · web/only · tools/우세 · docs/only 추론 fallback (sub-agent 명시 우선). `session:helper` 라벨 신설. 트리거: 머지 43 PR 중 7건 (16%) 만 session 라벨 — 36건 누락. 사용자 정정 "각 PR이 무슨 agent가 작업했는지 라벨 제대로 안 붙어있어?" (이슈 #1002).
+- 2026-05-24 — 본 문서 actor 범위 명시화 (#1004): Actor TOC 섹션 추가 — 본 문서 = sub-agent actor (be/fe/rev/plan + helper-launched) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 로 분리. 메모리 frontmatter `metadata.actor` 추가 (nmae/helper/subagent/rev/common/workflow). 사용자: "nmae helper subagent 들이 각자 지켜야할 규칙이 다를텐데 이걸 하나에 담으려해서 그런 거 아니야 — 진행하고 분리한 문서대로 적용해".
