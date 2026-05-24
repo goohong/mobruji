@@ -23,6 +23,7 @@
 - `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스
 - `docs/ai-harness/14-discord-notify-setup.md`: Discord webhook/bot 셋업 및 토큰 관리
 - `docs/ai-harness/15-discord-message-templates.md`: Discord 메시지 템플릿 + 양방향 명령 syntax
+- `docs/ai-harness/16-memory-vs-code-enforcement.md`: 룰 학습 의존 ↓ — "왜" 는 메모리 / "어떻게" 는 코드 (hook / wrapper / workflow / test) 책임 분리 + 결정 트리 + 패턴 카탈로그
 
 > `09-notion-api-spec.md`는 추후 Notion API 명세 DB 연동 시 추가.
 
@@ -48,6 +49,7 @@
   - `0015-hosting-stack.md` — 호스팅 스택
   - `0016-maestro-context-percent-estimation.md` — maestro context 사용률 추정
   - `0017-spring-boot-eol-strategy.md` — Spring Boot 3.5 EOL 대응 (3.6 라인 채택, proposed)
+  - `0018-design-tokens.md` — 디자인 토큰 (color/typography/spacing/radius/shadow/motion) — UI/UX 부활 4단계 (`docs/features/ui-ux-redesign.md`)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
 - `docs/runbooks/`: 운영 런북 (로컬 환경 가동 등)
   - `local-3tier-setup.md` — MySQL + Spring Boot + Next.js 로컬 3-tier 가동 가이드 (rev QA 기본 환경)
