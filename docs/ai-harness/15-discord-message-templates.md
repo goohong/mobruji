@@ -137,8 +137,80 @@ a / b / c           # 다지선다
   - 또는 텍스트 파일 첨부 (`files=["/tmp/long.txt"]`)
 - **mention/링크**: 길이 산정에 포함.
 
+## §8 Forum 채널 강제 (#17 사용자 forum 전환 wave, 2026-05-24)
+
+directive-board / per-cycle 채널을 Discord **GUILD_FORUM type 으로 전환**. 기존 텍스트 채널은 deprecated, 신규 directive 등록 / 사이클 launch 알림은 **forum thread (post) 단위**로 작성한다.
+
+### 8-1) 5 forum 채널 매핑
+
+| forum_env | 채널 이름 | env 변수 | 사용 시점 |
+|---|---|---|---|
+| `directive` | #모부르지-지시-forum | `DIRECTIVE_BOARD_FORUM_ID` | helper 가 사용자 지시를 directive 로 등록 / 상태 PATCH |
+| `be` | #모부르지-be-forum | `BE_FORUM_ID` | be sub-agent launch / milestone / 완료 |
+| `fe` | #모부르지-fe-forum | `FE_FORUM_ID` | fe sub-agent launch / milestone / 완료 |
+| `rev` | #모부르지-rev-forum | `REV_FORUM_ID` | rev sub-agent launch / milestone / 완료 |
+| `plan` | #모부르지-plan-forum | `PLAN_FORUM_ID` | plan sub-agent launch / milestone / 완료 |
+
+### 8-2) 4 forum mode
+
+`discord-reply.sh` 가 제공하는 forum mode (silent fallback 없음 — *_FORUM_ID 미설정 시 명시 에러):
+
+| mode | 사용법 | 동작 |
+|---|---|---|
+| `--forum-post` | `--forum-post <env> "<title>" "<tag>" "<body>"` | POST `/channels/{forum_id}/threads` — thread 신설. stdout = thread_id |
+| `--forum-comment` | `--forum-comment <thread_id> "<body>"` | POST `/channels/{thread_id}/messages` — thread 안 댓글 |
+| `--forum-edit` | `--forum-edit <thread_id> "<new_body>"` | PATCH `/channels/{thread_id}/messages/{thread_id}` — starter 본문 갱신 (Discord 사양: forum thread starter message id == thread id) |
+| `--forum-retag` | `--forum-retag <thread_id> <env> "<new_tag>"` | PATCH `/channels/{thread_id}` `applied_tags` — 태그만 갱신 |
+
+### 8-3) 상태 전이 (태그) 표준
+
+forum thread 의 `applied_tags` 가 상태를 표현한다. 상태 변경 시 `--forum-retag` 호출 의무:
+
+| 단계 | 태그 | 진입 시점 |
+|---|---|---|
+| 대기 | `대기` | 신규 directive / launch 등록 (thread 생성 직후) |
+| 진행 | `진행` | sub-agent 실행 시작 / PR open |
+| 완료 | `완료` | PR 머지 / 사이클 완료 |
+| 차단 | `차단` | 의존성 대기 / 사용자 결정 필요 |
+
+### 8-4) 운영자 절차 (forum 신설 시)
+
+1. Discord UI 에서 forum 채널 생성 후 `available_tags` 추가 (위 4 태그 최소).
+2. `.env` 에 `<ENV>_FORUM_ID=<채널 id>` 추가 (5 keys).
+3. discord-daemon 재시작 — `on_ready` 로그에 `forum channels: directive=... be=... ...` 가시화.
+4. 기존 텍스트 채널 in-flight 마이그레이션 cleanup 후 deprecated 라벨 부착.
+
+### 8-5) 도입 예시 흐름 (be 사이클 launch)
+
+```bash
+# nmae 가 be sub-agent launch 직전:
+THREAD_ID=$(bash /home/mobruji/.mobruji/discord-reply.sh \
+  --forum-post be "be #1234 RestAssured 추가" "대기" "PR #1234 위임 — 시나리오 3건 추가 예정")
+
+# sub-agent 실행 시작 → 진행 태그로 전이:
+bash /home/mobruji/.mobruji/discord-reply.sh \
+  --forum-retag "$THREAD_ID" be "진행"
+
+# milestone push:
+bash /home/mobruji/.mobruji/discord-reply.sh \
+  --forum-comment "$THREAD_ID" "🔄 RestAssured 시나리오 3건 추가 + 로컬 green"
+
+# 완료 시:
+bash /home/mobruji/.mobruji/discord-reply.sh \
+  --forum-retag "$THREAD_ID" be "완료"
+```
+
+### 8-6) 의존 / 후속 작업
+
+- **helper-turn-start.sh / agent-launch-wrapper.sh** — forum mode 인식 (별 sub-agent 진행 중, 본 PR 미포함).
+- **cron digest signature** — `directive forum 대기 카운트` 추가 (be sub-agent 후속 PR).
+- **directive_board_sync_loop (P11)** — jsonl `forum_thread_id` 인식 + forum 본문 PATCH 자동화 (본 PR 범위 외).
+
+관련 룰: `CLAUDE.md §11-9` + 메모리 `[[feedback-nmae-forum-channel-enforce]]` `[[feedback-nmae-per-cycle-channel]]` `[[feedback-nmae-directive-board-update-flow]]`.
+
 ## §7 변경 이력
 
 | 일자 | 변경 | PR |
 |---|---|---|
 | 2026-05-21 | 최초 작성 (카테고리 3종 + 명령 syntax 정의) | #175 |
+| 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | _본 PR_ |

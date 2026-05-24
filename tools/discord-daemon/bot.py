@@ -351,6 +351,25 @@ def load_env() -> dict[str, str]:
             env[_key] = _raw.strip()
         else:
             env[_key] = ""
+
+    # Forum 채널 (#17 사용자 forum 전환 wave, 2026-05-24) — directive-board /
+    # per-cycle 채널이 GUILD_FORUM type 으로 신설. discord-reply.sh 의
+    # `--forum-post|--forum-comment|--forum-edit|--forum-retag` mode 가 .env 에서
+    # 직접 read 하지만, bot.py 도 on_ready 로그 / 향후 directive_board_sync_loop
+    # forum 확장 (jsonl forum_thread_id 인식) 진입점으로 env dict 에 보존.
+    # 미설정 시 빈 문자열 (라우팅 책임은 discord-reply.sh — silent fallback 금지).
+    for _forum in (
+        "DIRECTIVE_BOARD_FORUM_ID",
+        "BE_FORUM_ID",
+        "FE_FORUM_ID",
+        "REV_FORUM_ID",
+        "PLAN_FORUM_ID",
+    ):
+        _raw = os.environ.get(_forum)
+        if _raw is not None and _raw.strip():
+            env[_forum] = _raw.strip()
+        else:
+            env[_forum] = ""
     env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
         "CONTEXT_AUTO_CLEAR_ENABLED", CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED
     )
@@ -2673,6 +2692,31 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         "plan": _parse_cycle_channel("PLAN"),
     }
 
+    # Forum 채널 (#17, 2026-05-24) — on_ready 로그용. 0 = unset.
+    # bot.py 가 본 값을 라우팅에 직접 쓰진 않으나 (discord-reply.sh 가 .env
+    # 직접 read), 운영자가 5 forum 채널 설정을 의도했는지 가시화.
+    def _parse_forum_channel(env_key: str) -> int:
+        raw = env.get(env_key, "")
+        if not raw:
+            return 0
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning(
+                "%s 가 정수 아님(%r) — forum routing disabled",
+                env_key,
+                raw,
+            )
+            return 0
+
+    forum_channel_ids = {
+        "directive": _parse_forum_channel("DIRECTIVE_BOARD_FORUM_ID"),
+        "be": _parse_forum_channel("BE_FORUM_ID"),
+        "fe": _parse_forum_channel("FE_FORUM_ID"),
+        "rev": _parse_forum_channel("REV_FORUM_ID"),
+        "plan": _parse_forum_channel("PLAN_FORUM_ID"),
+    }
+
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
     claude_bin = env["CLAUDE_BIN"]
@@ -2837,6 +2881,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             cycle_channel_ids["fe"] or "unset",
             cycle_channel_ids["rev"] or "unset",
             cycle_channel_ids["plan"] or "unset",
+        )
+        # #17 (2026-05-24) forum 채널 가시화. 0 = unset.
+        # directive-board / per-cycle 채널 = forum 강제 (텍스트 채널 deprecated).
+        logger.info(
+            "forum channels: directive=%s be=%s fe=%s rev=%s plan=%s (0 = unset)",
+            forum_channel_ids["directive"] or "unset",
+            forum_channel_ids["be"] or "unset",
+            forum_channel_ids["fe"] or "unset",
+            forum_channel_ids["rev"] or "unset",
+            forum_channel_ids["plan"] or "unset",
         )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
             # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
