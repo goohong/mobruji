@@ -104,15 +104,67 @@ jobs:
               );
             }
 
-            // Session label inference from file paths.
-            // PR이 backend/** 만 건드리면 session:backend, web/** 만 건드리면 session:frontend.
-            // 혼합(infra/docs 등)이면 라벨 없음 — 스크립트가 부여한 라벨이 우선되거나 사람이 판단.
+            // Session label inference (#1002 — fallback for sub-agent missed cases).
+            //
+            // 우선순위:
+            //   1. sub-agent 가 PR 생성 시 직접 박은 session:* 라벨 → 그대로 유지 (auto-label은 추가 안 함)
+            //   2. 파일 경로 기반 추론 fallback (아래)
+            //
+            // sub-agent 명시 부착이 default — 이 fallback 은 누락 안전망. 상세:
+            //   docs/ai-harness/12-sub-agent-prompt-template.md §1 PR session 라벨 부착 의무.
+            //
+            // 사용자 정정 (2026-05-24, 이슈 #1002):
+            //   "각 PR이 무슨 agent가 작업했는지 라벨 제대로 안 붙어있어?"
+            //   머지 43 PR 중 7건 (16%) 만 session 라벨 — 36건 누락.
+            //
+            // 분류 룰 (위에서 아래로, 첫 매칭에서 종료):
+            //   - PR 에 이미 session:* 라벨 있음 → skip (sub-agent 명시 부착 우선)
+            //   - 파일 전부 backend/** → session:backend
+            //   - 파일 전부 web/** → session:frontend
+            //   - 파일이 tools/** 포함 (helper sub-agent 가 다루는 영역) → session:helper
+            //   - 파일이 docs/** / CLAUDE.md / *.md 만 (코드 변경 없음) → session:plan
+            //   - 파일이 .github/** / scripts/** 만 (인프라 only) → session:plan
+            //   - 그 외 혼합 → 라벨 없음 (사람 판단)
+            const existingSessionLabel = [...labels].some(l => l.startsWith('session:'))
+              || (pr.labels || []).some(l => {
+                  const name = typeof l === 'string' ? l : l.name;
+                  return name && name.startsWith('session:');
+                });
             const fileNames = files.data.map(f => f.filename);
-            if (fileNames.length > 0) {
+            if (!existingSessionLabel && fileNames.length > 0) {
               const allBackend = fileNames.every(f => f.startsWith('backend/'));
               const allWeb = fileNames.every(f => f.startsWith('web/'));
-              if (allBackend) labels.add('session:backend');
-              else if (allWeb) labels.add('session:frontend');
+              const hasTools = fileNames.some(f => f.startsWith('tools/'));
+              const isDocsOnly = fileNames.every(f =>
+                f.startsWith('docs/')
+                || f === 'CLAUDE.md'
+                || f === 'AGENTS.md'
+                || f === 'README.md'
+                || f.endsWith('.md')
+              );
+              const isInfraOnly = fileNames.every(f =>
+                f.startsWith('.github/')
+                || f.startsWith('scripts/')
+              );
+              if (allBackend) {
+                labels.add('session:backend');
+                core.notice('session inferred: backend (files all under backend/)');
+              } else if (allWeb) {
+                labels.add('session:frontend');
+                core.notice('session inferred: frontend (files all under web/)');
+              } else if (hasTools) {
+                // tools/ 는 helper / nmae 가 관리. helper sub-agent 가 가장 흔히 건드림.
+                labels.add('session:helper');
+                core.notice('session inferred: helper (files include tools/)');
+              } else if (isDocsOnly) {
+                labels.add('session:plan');
+                core.notice('session inferred: plan (docs-only)');
+              } else if (isInfraOnly) {
+                labels.add('session:plan');
+                core.notice('session inferred: plan (infra-only — .github/ or scripts/)');
+              } else {
+                core.notice('session not inferred (mixed file paths) — sub-agent should add session:* explicitly');
+              }
             }
 
             const toAdd = [...labels];
