@@ -38,7 +38,7 @@ maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는
 - 작업 완료 보고 전 검증 의무: PR 머지 후 CI green 확인 / daemon 변경 후 journal 확인 / file 변경 후 read back.
 - 검증 실패 시 root cause 추론 + alternative path 시도. "되었겠지" 금지.
 - 보고에 검증 결과 명시. 미검증 사항은 "(검증 못함 — alternative path 필요)" 명시.
-- 상세: `CLAUDE.md §15` + 메모리 `feedback-verify-and-iterate`. 사용자 2026-05-24 강조 "되었겠거니 하지말고 가능한 방법으로 검증".
+- 상세: `CLAUDE.md §16` + 메모리 `feedback-verify-and-iterate`. 사용자 2026-05-24 강조 "되었겠거니 하지말고 가능한 방법으로 검증".
 
 ### 워크트리 격리
 - prompt 첫 명령으로 `cd <워크트리 절대경로>` 실행. maestro(`mobruji`), 다른 세션(`mobruji-be`/`mobruji-fe`/`mobruji-rev`/`mobruji-plan`) **절대 건드리지 마**.
