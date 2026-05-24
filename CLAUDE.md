@@ -121,7 +121,7 @@ cd web && npm run dev                                                   # FE 실
 - 구현 전 **가정값 명시하고** 사용자 확인.
 - 설계 결정은 `06-domain-model.md §7 오픈 이슈` 추가.
 - 문서 ↔ 코드 충돌 시 **문서 먼저 갱신** 후 구현 (01-harness-spec §5).
-- **자율 default** (메모리 `feedback-autonomous-default`): 사용자 부재 (`~/.mobruji/user-presence.json` status:absent) 또는 작은 결정은 묻지 말고 자율 진행. release/secret/보호 영역 등 high-stakes 만 확인. redo 비용 self-check 후 진행.
+- **항상 자율** (메모리 `feedback-autonomous-default`): user-presence active/absent 무관. release/destructive 포함 모든 결정 즉시 자율 (사용자 인지 메시지 X). user-presence.json 은 단순 정보 표시 — 행동 분기 X.
 - **약속 = binding** (메모리 `feedback-keep-promises`): "~하겠습니다" 발언은 다음 turn 부터가 아니라 **이번 turn 부터** 적용. 미적용 시 약속 위반.
 - **세션 룰 영속** (메모리 `feedback-session-persist-rules`): CLAUDE.md 본문 + 메모리 두 채널로 영속. `/clear` 후에도 동일 적용. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가. 세션 종료 전 §13 doc-check 의무.
 - **워크트리 lock** (메모리 `feedback-worktree-lock`): 한 워크트리 = 동시 sub-agent 1. 같은 도메인 백로그 2건 동시 launch 금지 (브랜치/working tree 공유 불가). 상세: `docs/ai-harness/12-sub-agent-prompt-template.md §1 워크트리 lock`, `11-runbook §0-10`.
