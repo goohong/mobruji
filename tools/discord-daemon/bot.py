@@ -34,6 +34,18 @@ from zoneinfo import ZoneInfo
 import discord
 from dotenv import load_dotenv
 
+from claude_usage_tracker import (
+    DEFAULT_DAILY_LIMIT as CLAUDE_DAILY_TOKEN_LIMIT_DEFAULT,
+    DEFAULT_PROJECTS_ROOT as CLAUDE_USAGE_PROJECTS_ROOT_DEFAULT,
+    DEFAULT_STATE_PATH as CLAUDE_USAGE_STATE_PATH_DEFAULT,
+    DEFAULT_WEEKLY_LIMIT as CLAUDE_WEEKLY_TOKEN_LIMIT_DEFAULT,
+    format_threshold_message,
+    read_state as claude_usage_read_state,
+    scan_usage as claude_usage_scan,
+    update_and_detect_thresholds as claude_usage_update_and_detect,
+    write_state as claude_usage_write_state,
+)
+
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
 INBOX_FILE_MODE: Final[int] = 0o600
@@ -247,6 +259,13 @@ REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE: Final[str] = (
 # gh CLI 실행 timeout (#1008). 네트워크 hang 시 loop block 방어.
 REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS: Final[int] = 30
 
+# --- Claude API usage tracker (#1020) ---
+# spec: 이슈 #1020. tracker 모듈은 `claude_usage_tracker.py` 분리.
+CLAUDE_USAGE_LOOP_DEFAULT_ENABLED: Final[str] = "1"
+CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
+# boot warmup — 다른 loop 와 stagger.
+CLAUDE_USAGE_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 120
+
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
 
@@ -295,6 +314,14 @@ def load_env() -> dict[str, str]:
         else:
             digest_channel_raw = env["MOBRUJI_CHANNEL_ID"]
     env["DIGEST_CHANNEL_ID"] = digest_channel_raw
+    # ALERT_CHANNEL_ID (#1020) — cycle idle / future-ts ERROR / escalation 알림 1차 채널.
+    # 부재 시 DIGEST_CHANNEL_ID → MOBRUJI_CHANNEL_ID 순 fallback (load 시 결정).
+    # 빈 문자열(env 파일 자리만 있는 경우) 도 미설정으로 간주.
+    alert_channel_raw = os.environ.get("ALERT_CHANNEL_ID")
+    if alert_channel_raw is not None and alert_channel_raw.strip():
+        env["ALERT_CHANNEL_ID"] = alert_channel_raw.strip()
+    else:
+        env["ALERT_CHANNEL_ID"] = env["DIGEST_CHANNEL_ID"]
     env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
         "CONTEXT_AUTO_CLEAR_ENABLED", CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED
     )
@@ -367,6 +394,30 @@ def load_env() -> dict[str, str]:
     env["REV_POST_MERGE_AUDIT_INJECT_TARGET"] = os.environ.get(
         "REV_POST_MERGE_AUDIT_INJECT_TARGET",
         REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
+    )
+    # Claude API usage tracker (#1020).
+    env["CLAUDE_USAGE_LOOP"] = os.environ.get(
+        "CLAUDE_USAGE_LOOP", CLAUDE_USAGE_LOOP_DEFAULT_ENABLED
+    )
+    env["CLAUDE_USAGE_INTERVAL_SECONDS"] = os.environ.get(
+        "CLAUDE_USAGE_INTERVAL_SECONDS",
+        str(CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS),
+    )
+    env["CLAUDE_DAILY_TOKEN_LIMIT"] = os.environ.get(
+        "CLAUDE_DAILY_TOKEN_LIMIT", str(CLAUDE_DAILY_TOKEN_LIMIT_DEFAULT)
+    )
+    env["CLAUDE_WEEKLY_TOKEN_LIMIT"] = os.environ.get(
+        "CLAUDE_WEEKLY_TOKEN_LIMIT", str(CLAUDE_WEEKLY_TOKEN_LIMIT_DEFAULT)
+    )
+    env["CLAUDE_USAGE_PROJECTS_ROOT"] = os.path.expanduser(
+        os.environ.get(
+            "CLAUDE_USAGE_PROJECTS_ROOT", str(CLAUDE_USAGE_PROJECTS_ROOT_DEFAULT)
+        )
+    )
+    env["CLAUDE_USAGE_STATE_PATH"] = os.path.expanduser(
+        os.environ.get(
+            "CLAUDE_USAGE_STATE_PATH", str(CLAUDE_USAGE_STATE_PATH_DEFAULT)
+        )
     )
     return env
 
@@ -2250,6 +2301,106 @@ async def rev_post_merge_audit_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Claude API usage tracker loop (#1020)
+# spec: 이슈 #1020 — `claude_usage_tracker.py` 모듈 + asyncio loop.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def claude_usage_watch_loop(
+    client: "discord.Client",
+    alert_channel_id: int,
+    *,
+    projects_root: Path,
+    state_path: Path,
+    daily_limit: int = CLAUDE_DAILY_TOKEN_LIMIT_DEFAULT,
+    weekly_limit: int = CLAUDE_WEEKLY_TOKEN_LIMIT_DEFAULT,
+    poll_interval: int = CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS,
+    initial_delay: int = CLAUDE_USAGE_DEFAULT_INITIAL_DELAY_SECONDS,
+) -> None:
+    """주기적으로 Claude usage 를 scan + state 갱신 + threshold push.
+
+    spec: 이슈 #1020.
+
+    동작:
+      1. ``initial_delay`` 초 warmup 후 polling 시작.
+      2. ``poll_interval`` 초마다:
+         a. ``claude_usage_scan(projects_root, daily/weekly_limit)`` 호출.
+         b. ``claude_usage_read_state(state_path)`` 로 기존 state 로드.
+         c. ``claude_usage_update_and_detect`` 로 자정/월요일 reset + 10% bucket
+            새 진입 events 산출.
+         d. ``claude_usage_write_state`` 로 atomic write.
+         e. events 마다 ALERT_CHANNEL_ID 에 push (``format_threshold_message``).
+      3. graceful skip — scan/state/push 실패는 warning 1회 후 다음 iter 재시도.
+      4. ``poll_interval <= 0`` 이면 disabled (테스트 용).
+
+    asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
+    """
+    if poll_interval <= 0:
+        logger.info("claude_usage_watch_loop disabled (poll_interval<=0)")
+        return
+
+    await asyncio.sleep(initial_delay)
+    missing_channel_warned = False
+
+    while True:
+        try:
+            snapshot = claude_usage_scan(
+                projects_root=projects_root,
+                daily_limit=daily_limit,
+                weekly_limit=weekly_limit,
+            )
+            state = claude_usage_read_state(
+                state_path,
+                daily_limit=daily_limit,
+                weekly_limit=weekly_limit,
+            )
+            new_state, events = claude_usage_update_and_detect(state, snapshot)
+            # limit 변경 반영.
+            new_state.setdefault("limits", {})["daily"] = daily_limit
+            new_state["limits"]["weekly"] = weekly_limit
+            claude_usage_write_state(new_state, state_path)
+            logger.info(
+                "claude_usage scan: daily=%d/%d (%d%%) weekly=%d/%d (%d%%) events=%d",
+                snapshot.daily_tokens,
+                daily_limit,
+                snapshot.daily_pct,
+                snapshot.weekly_tokens,
+                weekly_limit,
+                snapshot.weekly_pct,
+                len(events),
+            )
+
+            if events:
+                channel = client.get_channel(alert_channel_id)
+                if channel is None:
+                    if not missing_channel_warned:
+                        logger.warning(
+                            "claude_usage_watch_loop: ALERT channel 부재 — skip (channel_id=%s)",
+                            alert_channel_id,
+                        )
+                        missing_channel_warned = True
+                else:
+                    missing_channel_warned = False
+                    for event in events:
+                        msg = format_threshold_message(
+                            event,
+                            daily_limit=daily_limit,
+                            weekly_limit=weekly_limit,
+                        )
+                        await send_with_retry(channel, content=msg)
+                        logger.info(
+                            "claude_usage threshold push: kind=%s bucket=%d%%",
+                            event.kind,
+                            event.bucket_pct,
+                        )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("claude_usage_watch_loop iter 실패: %s", exc)
+        await asyncio.sleep(poll_interval)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Discord client
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2279,6 +2430,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             target_channel_id,
         )
         digest_channel_id = target_channel_id
+
+    # ALERT_CHANNEL_ID (#1020) — cycle idle / future-ts ERROR / escalation 등
+    # "알림" 류 push 1차 채널. fallback: ALERT_CHANNEL_ID → DIGEST_CHANNEL_ID →
+    # MOBRUJI_CHANNEL_ID. load_env 가 ALERT_CHANNEL_ID 부재 시 이미 DIGEST 로
+    # fallback 처리. 정수 parsing 실패 시 digest 로 한번 더 fallback.
+    alert_raw = env.get("ALERT_CHANNEL_ID", str(digest_channel_id))
+    try:
+        alert_channel_id = int(alert_raw)
+    except ValueError:
+        logger.warning(
+            "ALERT_CHANNEL_ID 가 정수 아님(%r) — digest 채널(%d)로 fallback",
+            alert_raw,
+            digest_channel_id,
+        )
+        alert_channel_id = digest_channel_id
 
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
@@ -2331,16 +2497,19 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     cycle_reason_required = (
         env.get("CYCLE_REASON_REQUIRED", CYCLE_REASON_REQUIRED_DEFAULT) == "1"
     )
-    cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(digest_channel_id))
+    # (#1020) watchdog idle / future-ts ERROR push 채널 — ALERT_CHANNEL_ID 1차.
+    # CYCLE_NOTIFY_CHANNEL_ID env 명시되면 그것 우선 (운영 override 가능). 부재 시
+    # alert_channel_id 사용 (= ALERT_CHANNEL_ID → DIGEST → MOBRUJI fallback 체인).
+    cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(alert_channel_id))
     try:
         cycle_notify_channel_id = int(cycle_notify_raw)
     except ValueError:
         logger.warning(
-            "CYCLE_NOTIFY_CHANNEL_ID 정수 아님(%r) — digest_channel_id(%d) fallback",
+            "CYCLE_NOTIFY_CHANNEL_ID 정수 아님(%r) — alert_channel_id(%d) fallback",
             cycle_notify_raw,
-            digest_channel_id,
+            alert_channel_id,
         )
-        cycle_notify_channel_id = digest_channel_id
+        cycle_notify_channel_id = alert_channel_id
     # (#972) escalation env — threshold + debounce 정수 파싱 + 사용자 채널.
     cycle_escalation_threshold = _resolve_int_env(
         "CYCLE_INJECT_ESCALATION_THRESHOLD",
@@ -2351,10 +2520,11 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT,
         allow_zero=False,
     )
-    # escalation push 채널 = MOBRUJI_CHANNEL_ID (사용자 채널). notify 와 분리 의무
-    # (#972) — watchdog 일반 알림은 NOTIFY (운영 진단용), escalation 은 사용자 본
-    # 채널 — 깜깜이 방지.
-    cycle_escalation_channel_id: int | None = target_channel_id
+    # escalation push 채널 (#972 → #1020) — ALERT_CHANNEL_ID 로 통합.
+    # 이전: MOBRUJI_CHANNEL_ID 직접 push 로 사용자 채널 노이즈 발생.
+    # 변경: ALERT_CHANNEL_ID 가 별 채널 (#모부르지-알림) 로 분리되어 사용자
+    # 본 채널 (#모부르지) 오염 없이 가시화 가능.
+    cycle_escalation_channel_id: int | None = alert_channel_id
 
     # rev post-merge audit loop (#1008) — env 해석.
     rev_post_merge_audit_enabled = (
@@ -2369,6 +2539,34 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     rev_post_merge_audit_inject_target = env.get(
         "REV_POST_MERGE_AUDIT_INJECT_TARGET",
         REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
+    )
+
+    # Claude API usage tracker (#1020) — env 해석.
+    claude_usage_loop_enabled = (
+        env.get("CLAUDE_USAGE_LOOP", CLAUDE_USAGE_LOOP_DEFAULT_ENABLED) == "1"
+    )
+    claude_usage_interval = _resolve_int_env(
+        "CLAUDE_USAGE_INTERVAL_SECONDS",
+        CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    claude_daily_limit = _resolve_int_env(
+        "CLAUDE_DAILY_TOKEN_LIMIT",
+        CLAUDE_DAILY_TOKEN_LIMIT_DEFAULT,
+        allow_zero=False,
+    )
+    claude_weekly_limit = _resolve_int_env(
+        "CLAUDE_WEEKLY_TOKEN_LIMIT",
+        CLAUDE_WEEKLY_TOKEN_LIMIT_DEFAULT,
+        allow_zero=False,
+    )
+    claude_usage_projects_root = Path(
+        env.get(
+            "CLAUDE_USAGE_PROJECTS_ROOT", str(CLAUDE_USAGE_PROJECTS_ROOT_DEFAULT)
+        )
+    )
+    claude_usage_state_path = Path(
+        env.get("CLAUDE_USAGE_STATE_PATH", str(CLAUDE_USAGE_STATE_PATH_DEFAULT))
     )
 
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
@@ -2386,10 +2584,11 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s allowed=%d digest_enabled=%s auto_ack=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s alert=%s allowed=%d digest_enabled=%s auto_ack=%s",
             client.user,
             target_channel_id,
             digest_channel_id,
+            alert_channel_id,
             len(allowed_user_ids),
             digest_enabled,
             bot_auto_ack_enabled,
@@ -2517,6 +2716,36 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info(
                 "rev_post_merge_audit_loop disabled (REV_POST_MERGE_AUDIT_LOOP=0)"
             )
+
+        # Claude API usage tracker loop (#1020).
+        # 10% bucket 도달 시 ALERT_CHANNEL_ID 로 push, atomic state write 로 dedup.
+        if claude_usage_loop_enabled and not hasattr(
+            client, "_claude_usage_task_started"
+        ):
+            client._claude_usage_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                claude_usage_watch_loop(
+                    client,
+                    alert_channel_id,
+                    projects_root=claude_usage_projects_root,
+                    state_path=claude_usage_state_path,
+                    daily_limit=claude_daily_limit,
+                    weekly_limit=claude_weekly_limit,
+                    poll_interval=claude_usage_interval,
+                )
+            )
+            logger.info(
+                "claude_usage_watch_loop launched: alert_channel=%d interval=%ds "
+                "daily_limit=%d weekly_limit=%d projects_root=%s state_path=%s",
+                alert_channel_id,
+                claude_usage_interval,
+                claude_daily_limit,
+                claude_weekly_limit,
+                claude_usage_projects_root,
+                claude_usage_state_path,
+            )
+        elif not claude_usage_loop_enabled:
+            logger.info("claude_usage_watch_loop disabled (CLAUDE_USAGE_LOOP=0)")
 
     @client.event
     async def on_message(message: discord.Message) -> None:
