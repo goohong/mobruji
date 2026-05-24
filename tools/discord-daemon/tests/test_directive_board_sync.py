@@ -159,10 +159,12 @@ class StateTest(unittest.TestCase):
     def test_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmpd:
             path = Path(tmpd) / "state.json"
+            # 신규 schema (#1068): mismatch_count 필드 포함.
             state = {
                 "1507983360562303209": {
                     "last_updated_kst": "2026-05-24 15:00 KST",
                     "status": "ok",
+                    "mismatch_count": 0,
                 }
             }
             dbs.write_state(state, path)
@@ -170,6 +172,28 @@ class StateTest(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, dbs.STATE_FILE_MODE)
             loaded = dbs.read_state(path)
             self.assertEqual(loaded, state)
+
+    def test_backward_compat_missing_mismatch_count(self) -> None:
+        """기존 state 파일 (mismatch_count 누락) 도 graceful 로 0 default (#1068)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            path = Path(tmpd) / "state.json"
+            # 기존 schema (mismatch_count 누락) — backward-compat.
+            path.write_text(
+                json.dumps(
+                    {
+                        "entries": {
+                            "M1": {
+                                "last_updated_kst": "T1",
+                                "status": "ok",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loaded = dbs.read_state(path)
+            self.assertEqual(loaded["M1"]["mismatch_count"], 0)
+            self.assertEqual(loaded["M1"]["status"], "ok")
 
     def test_missing_file_returns_empty(self) -> None:
         self.assertEqual(
@@ -495,6 +519,308 @@ class SyncOnceTest(unittest.TestCase):
             # state 미갱신.
             self.assertFalse(state.exists())
 
+    def test_404_repeated_marks_stale_after_threshold(self) -> None:
+        """404 가 임계 (3회) 이상 연속이면 status='stale' + 영구 skip (#1068)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        "last_updated_kst": "T1",
+                        "summary": "deleted",
+                    }
+                ],
+            )
+
+            patch_call_count = {"n": 0}
+
+            def patch_404(ch, mid, body):
+                patch_call_count["n"] += 1
+                return dbs.PatchResult(
+                    status_code=404, ok=False, mismatch=True
+                )
+
+            # 3회 sync_once 호출 — 매번 같은 jsonl, 404 누적.
+            for i in range(dbs.MISMATCH_STALE_THRESHOLD):
+                dbs.sync_once(
+                    channel_id="C",
+                    token="x",
+                    jsonl_path=jsonl,
+                    state_path=state,
+                    patch_func=patch_404,
+                    min_interval_seconds=0,
+                )
+            loaded = dbs.read_state(state)
+            self.assertEqual(loaded["M1"]["status"], "stale")
+            self.assertEqual(
+                loaded["M1"]["mismatch_count"], dbs.MISMATCH_STALE_THRESHOLD
+            )
+
+            # 4회째 호출 — PATCH 호출 안 됨 (영구 skip).
+            patch_call_count["n"] = 0
+            result = dbs.sync_once(
+                channel_id="C",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_404,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(patch_call_count["n"], 0)
+            self.assertEqual(result.stale, 1)
+            self.assertEqual(result.mismatched, 0)
+
+    def test_stale_entry_resets_on_last_updated_change(self) -> None:
+        """stale 후 jsonl 의 last_updated_kst 가 변경되면 mismatch_count 리셋 + 재시도 (#1068)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        "last_updated_kst": "T1",
+                        "summary": "a",
+                    }
+                ],
+            )
+
+            def patch_404(ch, mid, body):
+                return dbs.PatchResult(
+                    status_code=404, ok=False, mismatch=True
+                )
+
+            # 3 회 404 → stale.
+            for _ in range(dbs.MISMATCH_STALE_THRESHOLD):
+                dbs.sync_once(
+                    channel_id="C",
+                    token="x",
+                    jsonl_path=jsonl,
+                    state_path=state,
+                    patch_func=patch_404,
+                    min_interval_seconds=0,
+                )
+            self.assertEqual(dbs.read_state(state)["M1"]["status"], "stale")
+
+            # jsonl 수정 — last_updated_kst 갱신 (사용자 직접 jsonl PR 또는
+            # DIRECTIVE_AUTO_RECREATE 후속 작업으로 message_id 갱신 시뮬레이션).
+            _write_jsonl(
+                jsonl,
+                [
+                    {
+                        "message_id": "M1",
+                        "last_updated_kst": "T2",
+                        "summary": "a updated",
+                    }
+                ],
+            )
+
+            calls = []
+
+            def patch_ok(ch, mid, body):
+                calls.append(mid)
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            result = dbs.sync_once(
+                channel_id="C",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_ok,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(result.patched, 1)
+            self.assertEqual(calls, ["M1"])
+            loaded = dbs.read_state(state)
+            self.assertEqual(loaded["M1"]["status"], "ok")
+            self.assertEqual(loaded["M1"]["mismatch_count"], 0)
+
+    def test_min_interval_between_patches(self) -> None:
+        """sync_once 가 PATCH 호출 사이 minimum delay sleep 호출 (#1068)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        "last_updated_kst": "T1",
+                        "summary": "a",
+                    },
+                    {
+                        "message_id": "M2",
+                        "last_updated_kst": "T1",
+                        "summary": "b",
+                    },
+                    {
+                        "message_id": "M3",
+                        "last_updated_kst": "T1",
+                        "summary": "c",
+                    },
+                ],
+            )
+
+            def patch_ok(ch, mid, body):
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            sleep_calls: list[float] = []
+
+            def fake_sleep(seconds: float) -> None:
+                sleep_calls.append(seconds)
+
+            result = dbs.sync_once(
+                channel_id="C",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_ok,
+                min_interval_seconds=0.5,
+                sleep_func=fake_sleep,
+            )
+            self.assertEqual(result.patched, 3)
+            # PATCH 3건 → sleep 2건 (호출 사이).
+            self.assertEqual(len(sleep_calls), 2)
+            self.assertEqual(sleep_calls, [0.5, 0.5])
+
+    def test_min_interval_zero_disables_sleep(self) -> None:
+        """min_interval_seconds=0 이면 sleep 호출 없음 (테스트 + 후방호환)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        "last_updated_kst": "T1",
+                        "summary": "a",
+                    },
+                    {
+                        "message_id": "M2",
+                        "last_updated_kst": "T1",
+                        "summary": "b",
+                    },
+                ],
+            )
+
+            def patch_ok(ch, mid, body):
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            sleep_calls: list[float] = []
+
+            dbs.sync_once(
+                channel_id="C",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_ok,
+                min_interval_seconds=0,
+                sleep_func=lambda s: sleep_calls.append(s),
+            )
+            self.assertEqual(sleep_calls, [])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# patch_message 429 retry (requests-level)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class FakeResponse:
+    """requests.Response stub — patch_message 단위 테스트 용."""
+
+    def __init__(
+        self,
+        status_code: int,
+        body: dict | None = None,
+        headers: dict | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self._body = body or {}
+        self.headers = headers or {}
+        self.text = json.dumps(self._body) if body else ""
+
+    def json(self) -> dict:
+        return self._body
+
+
+class FakeSession:
+    """requests.Session stub — patch 시퀀스 응답."""
+
+    def __init__(self, responses: list[FakeResponse]) -> None:
+        self._responses = list(responses)
+        self.call_count = 0
+
+    def patch(self, url, headers=None, json=None, timeout=None):
+        self.call_count += 1
+        if not self._responses:
+            raise RuntimeError("FakeSession: response queue empty")
+        return self._responses.pop(0)
+
+
+class PatchMessage429RetryTest(unittest.TestCase):
+    def test_429_then_200_retry_succeeds(self) -> None:
+        """429 1회 후 200 — retry 로 성공 + ok=True (#1068)."""
+        session = FakeSession(
+            [
+                FakeResponse(429, body={"retry_after": 0.01}),
+                FakeResponse(200, body={}),
+            ]
+        )
+        with mock.patch.object(dbs.time, "sleep") as fake_sleep:
+            result = dbs.patch_message(
+                "C", "M1", "body", token="x", session=session
+            )
+        self.assertTrue(result.ok)
+        self.assertFalse(result.rate_limited)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(session.call_count, 2)
+        fake_sleep.assert_called()  # retry_after sleep 1회.
+
+    def test_429_retry_exhausted_returns_rate_limited(self) -> None:
+        """429 가 max_retries+1 회 연속이면 rate_limited=True (#1068)."""
+        session = FakeSession(
+            [FakeResponse(429, body={"retry_after": 0.01}) for _ in range(10)]
+        )
+        with mock.patch.object(dbs.time, "sleep"):
+            result = dbs.patch_message(
+                "C",
+                "M1",
+                "body",
+                token="x",
+                session=session,
+                max_retries=2,
+            )
+        self.assertFalse(result.ok)
+        self.assertTrue(result.rate_limited)
+        self.assertEqual(result.status_code, 429)
+        # max_retries=2 → 총 3회 호출 (초기 1 + retry 2).
+        self.assertEqual(session.call_count, 3)
+
+    def test_404_no_retry(self) -> None:
+        """404 는 retry 없이 mismatch=True 즉시 반환 (#1068 기존 동작 보존)."""
+        session = FakeSession([FakeResponse(404, body={})])
+        result = dbs.patch_message(
+            "C", "M1", "body", token="x", session=session
+        )
+        self.assertFalse(result.ok)
+        self.assertTrue(result.mismatch)
+        self.assertFalse(result.rate_limited)
+        self.assertEqual(session.call_count, 1)
+
+    def test_500_no_retry(self) -> None:
+        """5xx 는 retry 없이 ok=False 반환 (loop 가 다음 iter 재시도)."""
+        session = FakeSession([FakeResponse(500, body={})])
+        result = dbs.patch_message(
+            "C", "M1", "body", token="x", session=session
+        )
+        self.assertFalse(result.ok)
+        self.assertFalse(result.mismatch)
+        self.assertFalse(result.rate_limited)
+        self.assertEqual(session.call_count, 1)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # directive_board_summary
@@ -506,9 +832,21 @@ class SummaryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpd:
             state_path = Path(tmpd) / "state.json"
             state = {
-                "M1": {"last_updated_kst": "T1", "status": "ok"},
-                "M2": {"last_updated_kst": "T2", "status": "ok"},
-                "M3": {"last_updated_kst": "T3", "status": "mismatch"},
+                "M1": {
+                    "last_updated_kst": "T1",
+                    "status": "ok",
+                    "mismatch_count": 0,
+                },
+                "M2": {
+                    "last_updated_kst": "T2",
+                    "status": "ok",
+                    "mismatch_count": 0,
+                },
+                "M3": {
+                    "last_updated_kst": "T3",
+                    "status": "mismatch",
+                    "mismatch_count": 1,
+                },
             }
             dbs.write_state(state, state_path)
             summary = dbs.directive_board_summary(state_path)
@@ -516,6 +854,37 @@ class SummaryTest(unittest.TestCase):
             self.assertEqual(summary["ok"], 2)
             self.assertEqual(summary["mismatch"], 1)
             self.assertEqual(summary["mismatch_ids"], ["M3"])
+            self.assertEqual(summary["stale"], 0)
+            self.assertEqual(summary["stale_ids"], [])
+
+    def test_counts_with_stale(self) -> None:
+        """stale 카운트가 summary 에 포함되어야 함 (#1068)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            state_path = Path(tmpd) / "state.json"
+            state = {
+                "M1": {
+                    "last_updated_kst": "T1",
+                    "status": "ok",
+                    "mismatch_count": 0,
+                },
+                "M2": {
+                    "last_updated_kst": "T2",
+                    "status": "stale",
+                    "mismatch_count": 3,
+                },
+                "M3": {
+                    "last_updated_kst": "T3",
+                    "status": "stale",
+                    "mismatch_count": 5,
+                },
+            }
+            dbs.write_state(state, state_path)
+            summary = dbs.directive_board_summary(state_path)
+            self.assertEqual(summary["total"], 3)
+            self.assertEqual(summary["ok"], 1)
+            self.assertEqual(summary["mismatch"], 0)
+            self.assertEqual(summary["stale"], 2)
+            self.assertEqual(sorted(summary["stale_ids"]), ["M2", "M3"])
 
     def test_missing_file_returns_zero(self) -> None:
         summary = dbs.directive_board_summary(
@@ -525,6 +894,8 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(summary["ok"], 0)
         self.assertEqual(summary["mismatch"], 0)
         self.assertEqual(summary["mismatch_ids"], [])
+        self.assertEqual(summary["stale"], 0)
+        self.assertEqual(summary["stale_ids"], [])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

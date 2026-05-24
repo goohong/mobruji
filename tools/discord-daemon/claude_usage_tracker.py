@@ -182,14 +182,19 @@ def scan_usage(
 
     for jsonl_path in _iter_jsonl_files(projects_root):
         try:
-            with jsonl_path.open("r", encoding="utf-8") as handle:
+            # utf-8 graceful (#1068, 이슈 #1065): 손상된 binary log 가 섞일 수 있어
+            # errors="replace" 로 line-level skip + 라인별 utf-8 decode error 도
+            # 흡수. 이전엔 file 단위 raise → loop iter 실패.
+            with jsonl_path.open(
+                "r", encoding="utf-8", errors="replace"
+            ) as handle:
                 for line in handle:
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         record = json.loads(line)
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
                     if not isinstance(record, dict):
                         continue
@@ -215,8 +220,14 @@ def scan_usage(
                         daily_tokens += tokens
                     if record_week == this_week:
                         weekly_tokens += tokens
-        except OSError as exc:
-            logger.warning("claude_usage scan: %s read 실패: %s", jsonl_path, exc)
+        except (OSError, UnicodeDecodeError) as exc:
+            # OSError: 권한 부재 등 / UnicodeDecodeError: errors="replace" 우회 후에도
+            # open 단계 (메타데이터 손상) 에서 raise 되는 극단 케이스.
+            logger.warning(
+                "claude_usage scan: %s read 실패 (graceful skip): %s",
+                jsonl_path,
+                exc,
+            )
             continue
 
     daily_pct = compute_pct(daily_tokens, daily_limit)
