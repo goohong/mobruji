@@ -32,6 +32,12 @@ import io.restassured.RestAssured;
 @ActiveProfiles("test")
 class VoiceRangeHistoryIntegrationTest {
 
+    // #948: VoiceRangeCreateRequest.sessionId @Pattern(UUIDv4) 적용 — fixture 는 UUIDv4 로 통일.
+    private static final String SESSION_A = "550e8400-e29b-41d4-a716-446655448701";
+    private static final String SESSION_B = "550e8400-e29b-41d4-a716-446655448702";
+    private static final String SESSION_HISTORY_ASC = "550e8400-e29b-41d4-a716-446655448703";
+    private static final String SESSION_NONE = "550e8400-e29b-41d4-a716-446655448704";
+
     @LocalServerPort
     private int port;
 
@@ -51,7 +57,7 @@ class VoiceRangeHistoryIntegrationTest {
     @Test
     @DisplayName("E2E: 같은 sessionId로 측정 3회 → history 3건을 measuredAt ASC 로 응답")
     void e2e_history_returnsThreeSnapshotsInAscOrder() {
-        final String sessionId = "e2e-history-asc";
+        final String sessionId = SESSION_HISTORY_ASC;
 
         // given: 3회 측정 (POST 1회 + PUT 2회) — voice_range 1건 + snapshot 3건 누적
         postVoiceRange(sessionId, 48, 69, "OCTAVE_PICK");
@@ -85,9 +91,9 @@ class VoiceRangeHistoryIntegrationTest {
     @DisplayName("E2E: snapshot 없는 sessionId → 200 + 빈 배열 (인증 통과 시)")
     void e2e_history_unknownSession_returnsEmptyList() {
         given()
-                .header("X-Session-Id", "no-such-session")
+                .header("X-Session-Id", SESSION_NONE)
                 .when()
-                .get("/api/v1/sessions/{sessionId}/voice-range-history", "no-such-session")
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", SESSION_NONE)
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("voiceRangeSnapshotResponses", hasSize(0));
@@ -96,13 +102,13 @@ class VoiceRangeHistoryIntegrationTest {
     @Test
     @DisplayName("E2E: 다른 sessionId의 snapshot은 응답에 포함되지 않는다")
     void e2e_history_isolatedBySessionId() {
-        postVoiceRange("session-A", 48, 69, "OCTAVE_PICK");
-        postVoiceRange("session-B", 55, 78, "SELF_REPORT");
+        postVoiceRange(SESSION_A, 48, 69, "OCTAVE_PICK");
+        postVoiceRange(SESSION_B, 55, 78, "SELF_REPORT");
 
         given()
-                .header("X-Session-Id", "session-A")
+                .header("X-Session-Id", SESSION_A)
                 .when()
-                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", SESSION_A)
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("voiceRangeSnapshotResponses", hasSize(1))
@@ -114,7 +120,7 @@ class VoiceRangeHistoryIntegrationTest {
     void e2e_history_missingHeader_returns401() {
         given()
                 .when()
-                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", SESSION_A)
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
@@ -122,12 +128,12 @@ class VoiceRangeHistoryIntegrationTest {
     @Test
     @DisplayName("E2E (#238): X-Session-Id 헤더가 path sessionId 와 다르면 → 401")
     void e2e_history_mismatchedHeader_returns401() {
-        postVoiceRange("session-A", 48, 69, "OCTAVE_PICK");
+        postVoiceRange(SESSION_A, 48, 69, "OCTAVE_PICK");
 
         given()
-                .header("X-Session-Id", "session-B")
+                .header("X-Session-Id", SESSION_B)
                 .when()
-                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", SESSION_A)
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
@@ -138,7 +144,7 @@ class VoiceRangeHistoryIntegrationTest {
         given()
                 .header("X-Session-Id", "")
                 .when()
-                .get("/api/v1/sessions/{sessionId}/voice-range-history", "session-A")
+                .get("/api/v1/sessions/{sessionId}/voice-range-history", SESSION_A)
                 .then()
                 .statusCode(HttpStatus.UNAUTHORIZED.value());
     }
