@@ -88,6 +88,11 @@ DIGEST_HEARTBEAT_SECONDS: Final[int] = 60 * 60  # delta 없어도 1h 1회는 pus
 DISCORD_SEND_RETRY_MAX: Final[int] = 3
 DISCORD_SEND_RETRY_BASE_SEC: Final[float] = 1.0
 DEFAULT_CYCLE_STATUS_PATH: Final[str] = os.path.expanduser("~/.mobruji/cycle-status.json")
+# cycle counter — KST 자정 기준 sub-agent 별 누적 cycle 횟수 (사용자 요청 #996).
+# update.py set-active 시 ++ 누적. digest embed 가 read 해서 한 줄 추가 push.
+DEFAULT_CYCLE_COUNTER_PATH: Final[str] = os.path.expanduser(
+    "~/.mobruji/cycle-counter.json"
+)
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
 CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
 # digest 본문 timestamp — 사용자 요청 #811. Discord 가 보여주는 시각이 클라이언트
@@ -267,6 +272,10 @@ def load_env() -> dict[str, str]:
     env["TMUX_PANE_TARGET"] = singular_value or CONTEXT_AUTO_CLEAR_DEFAULT_PANE
     env["CYCLE_STATUS_PATH"] = os.path.expanduser(
         os.environ.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
+    )
+    # cycle counter (#996) — KST 자정 기준 sub-agent 별 누적 cycle 횟수.
+    env["CYCLE_COUNTER_PATH"] = os.path.expanduser(
+        os.environ.get("CYCLE_COUNTER_PATH", DEFAULT_CYCLE_COUNTER_PATH)
     )
     env["BOT_AUTO_ACK"] = os.environ.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED)
     # nmae cycle watchdog (#941, spec: docs/features/nmae-cycle-watchdog.md)
@@ -700,6 +709,49 @@ def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
         return None
 
 
+def read_cycle_counts(path: str = DEFAULT_CYCLE_COUNTER_PATH) -> dict | None:
+    """`~/.mobruji/cycle-counter.json` 을 읽어 dict 로 반환합니다 (#996).
+
+    update.py 가 set-active 호출마다 ``counts[ws] += 1`` 갱신, KST 자정 경계
+    감지 시 0 reset. digest embed 가 read 해서 한 줄 추가.
+
+    스키마:
+        {"date": "YYYY-MM-DD", "counts": {"be": int, "fe": int, "rev": int, "plan": int}}
+
+    동작:
+        - 파일 부재 / JSON 깨짐 / dict 아님 → None (graceful skip).
+        - date 가 오늘(KST) 와 다르면 카운트 무효로 보고 모두 0 반환 (lazy reset).
+          (디스크 갱신은 update.py 의 set-active 시점에서 처리.)
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("cycle-counter.json 읽기 실패: path=%s err=%s", path, exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    today_str = datetime.now(CYCLE_DIGEST_TZ).strftime("%Y-%m-%d")
+    counts_raw = data.get("counts")
+    if data.get("date") == today_str and isinstance(counts_raw, dict):
+        normalized: dict[str, int] = {}
+        for ws in CYCLE_DIGEST_WORKSPACES:
+            value = counts_raw.get(ws)
+            normalized[ws] = value if isinstance(value, int) and value >= 0 else 0
+        return {"date": today_str, "counts": normalized}
+    # 날짜 바뀜 — 자정 경과 후 첫 read. 카운트는 모두 0 으로 표시.
+    return {"date": today_str, "counts": {ws: 0 for ws in CYCLE_DIGEST_WORKSPACES}}
+
+
+def _format_cycle_counter_line(counts: dict[str, int]) -> str:
+    """digest embed field value 한 줄 — ``be=12 / fe=8 / rev=15 / plan=4``."""
+    parts = [f"{ws}={counts.get(ws, 0)}" for ws in CYCLE_DIGEST_WORKSPACES]
+    return " / ".join(parts)
+
+
 def _format_in_progress(raw: object) -> str:
     """`in_progress` 필드를 한 줄 label 로 변환합니다.
 
@@ -755,6 +807,7 @@ def format_cycle_digest(
     now: datetime | None = None,
     *,
     interval_seconds: int | None = None,
+    cycle_counts: dict | None = None,
 ) -> tuple["discord.Embed", str]:
     """4 워크트리(be/fe/rev/plan) digest 를 Discord Embed 로 빌드합니다.
 
@@ -766,6 +819,9 @@ def format_cycle_digest(
         now: 헤더 timestamp 산출 기준 시각. 기본값 None → 호출 시점 KST.
             테스트 deterministic 용으로만 외부 주입.
         interval_seconds: footer 에 ``interval=Ns`` 명시. None 이면 footer 생략.
+        cycle_counts: ``read_cycle_counts()`` 반환 dict (#996). None 이면 cycles
+            field 생략 — 파일 부재 graceful skip. 스키마:
+            ``{"date": "YYYY-MM-DD", "counts": {"be": N, "fe": N, "rev": N, "plan": N}}``.
 
     Returns:
         (embed, signature) 튜플.
@@ -779,12 +835,18 @@ def format_cycle_digest(
         fields      : be/fe/rev/plan 4 개 (inline=False), 각:
                         name  = "🛠 be" (워크트리별 emoji)
                         value = "진행: ...\\n최근: ..." (2 줄)
+                       + (cycle_counts 주어진 경우) "⏱ Cycles (today KST)" 1 개:
+                        value = "be=N / fe=N / rev=N / plan=N"
         footer.text : f"interval={N}s" (interval_seconds 주어진 경우)
         timestamp   : ``now`` (KST). Discord 클라이언트 locale 로 footer 옆에 렌더.
 
     스키마 누락/타입 이상 시 해당 필드만 "idle" / "없음" 으로 대체합니다.
     cycle-status.json 자체 읽기 실패 시 (status=None) description 에 fallback
     한 줄 추가, signature="unavailable" 반환.
+
+    cycle_counts 는 signature 에 포함하지 않습니다 — 카운트 증가 마다 delta push
+    가 발생하면 noise 증폭. heartbeat 호흡 (#기본 1h) 으로 최신 카운트 자연 갱신.
+    단 ``date`` 는 signature 에 포함하여 자정 경계 (rollover) 시 즉시 push.
     """
     if now is None:
         now = datetime.now(CYCLE_DIGEST_TZ)
@@ -804,6 +866,7 @@ def format_cycle_digest(
             f"{timestamp_text}\n(cycle-status.json 읽기 실패 — 본진 갱신 대기)"
         )
         embed.color = CYCLE_DIGEST_COLOR_IDLE
+        _maybe_add_cycle_counts_field(embed, cycle_counts)
         if interval_seconds is not None:
             embed.set_footer(text=f"interval={interval_seconds}s")
         return embed, "unavailable"
@@ -852,11 +915,44 @@ def format_cycle_digest(
         embed.add_field(name=field_name, value=field_value, inline=False)
 
     embed.color = CYCLE_DIGEST_COLOR_ACTIVE if any_active else CYCLE_DIGEST_COLOR_IDLE
+    _maybe_add_cycle_counts_field(embed, cycle_counts)
     if interval_seconds is not None:
         embed.set_footer(text=f"interval={interval_seconds}s")
 
+    # cycle_counts 의 date 만 signature 에 포함 — 자정 경계에서 즉시 push 트리거.
+    # counts 자체는 noise 회피 위해 제외 (heartbeat 호흡으로 자연 갱신).
+    if isinstance(cycle_counts, dict):
+        date_part = cycle_counts.get("date")
+        if isinstance(date_part, str) and date_part:
+            sig_parts.append(f"cycles-date={date_part}")
+
     signature = "||".join(sig_parts)
     return embed, signature
+
+
+def _maybe_add_cycle_counts_field(
+    embed: "discord.Embed", cycle_counts: dict | None
+) -> None:
+    """``cycle_counts`` dict 가 valid 하면 embed 에 cycles field 1개 추가합니다 (#996).
+
+    None / dict 아님 / counts 키 누락 / 모든 카운트 0 + counter 부재 → skip.
+    counts 키만 있으면 0 값도 표시 (사용자가 활동 0 확인 가능).
+    """
+    if not isinstance(cycle_counts, dict):
+        return
+    counts = cycle_counts.get("counts")
+    if not isinstance(counts, dict):
+        return
+    normalized: dict[str, int] = {}
+    for ws in CYCLE_DIGEST_WORKSPACES:
+        value = counts.get(ws)
+        normalized[ws] = value if isinstance(value, int) and value >= 0 else 0
+    line = _format_cycle_counter_line(normalized)
+    embed.add_field(
+        name="⏱ Cycles (today KST)",
+        value=line,
+        inline=False,
+    )
 
 
 def resolve_digest_interval(env_value: str | None) -> int:
@@ -980,6 +1076,7 @@ async def digest_loop(
     heartbeat_seconds: int = DIGEST_HEARTBEAT_SECONDS,
     time_source=time.monotonic,
     cycle_status_path: str = DEFAULT_CYCLE_STATUS_PATH,
+    cycle_counter_path: str = DEFAULT_CYCLE_COUNTER_PATH,
 ) -> None:
     """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push 합니다.
 
@@ -1004,8 +1101,11 @@ async def digest_loop(
                 logger.warning("digest: channel_id=%s 찾을 수 없음 — skip 후 재시도", channel_id)
             else:
                 status = read_cycle_status(cycle_status_path)
+                cycle_counts = read_cycle_counts(cycle_counter_path)
                 embed, signature = format_cycle_digest(
-                    status, interval_seconds=interval
+                    status,
+                    interval_seconds=interval,
+                    cycle_counts=cycle_counts,
                 )
                 now_ts = time_source()
                 should_push = False
@@ -1879,6 +1979,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     digest_enabled = env.get("DIGEST_ENABLED", "1") == "1"
     digest_interval = resolve_digest_interval(env.get("DIGEST_INTERVAL_SECONDS"))
     cycle_status_path = env.get("CYCLE_STATUS_PATH", DEFAULT_CYCLE_STATUS_PATH)
+    cycle_counter_path = env.get("CYCLE_COUNTER_PATH", DEFAULT_CYCLE_COUNTER_PATH)
 
     bot_auto_ack_enabled = (
         env.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED) == "1"
@@ -1979,14 +2080,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     notify_channel_id,
                     interval=digest_interval,
                     cycle_status_path=cycle_status_path,
+                    cycle_counter_path=cycle_counter_path,
                 )
             )
             logger.info(
-                "digest_loop launched: channel=%d interval=%ds heartbeat=%ds path=%s",
+                "digest_loop launched: channel=%d interval=%ds heartbeat=%ds status=%s counter=%s",
                 notify_channel_id,
                 digest_interval,
                 DIGEST_HEARTBEAT_SECONDS,
                 cycle_status_path,
+                cycle_counter_path,
             )
 
         # context auto-clear loop (spec §5-2, #809 → #855 multi-pane → #910 G-4).
