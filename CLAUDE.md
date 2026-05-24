@@ -231,6 +231,17 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - 검증: push 후 `channel_id` 가 `MOBRUJI_CHANNEL_ID` 와 같으면 leak. 다음 grep 으로 위반 패턴 점검: `grep -RnE 'discord-reply\.sh "🚀|discord-reply\.sh ".*sub-agent' .` (해당 호출은 `nmae-discord-push.sh` 또는 `--status-channel` 으로 갱신).
 - 사용자 정정 인용 (2026-05-24): "이런게 모부르지 채널로 오니" — nmae launch 알림이 #모부르지 로 leak 된 사고 박제.
 
+### 11-9) nmae manual status push 자제 (2026-05-24 사용자 정정 인계 #11)
+
+- **manual status push 자제** ([[feedback-nmae-no-manual-status-push]]): nmae 본체의 사이클 launch / 완료 / 요약 push 폐기 — cron digest 가 5분 주기 cover. 같은 정보를 manual 로 또 push 하면 중복 + 노이즈.
+- **예외 3종 만 manual OK**:
+  1. **긴급 escalation** — 9h stale 같은 incident, 사용자 즉시 결정 필요.
+  2. **사용자 인계 직후 1줄 ack** — helper 또는 사용자 inject 직후 "받음 — <한 줄>" 형태 1회.
+  3. **cron 미커버 1회성 이벤트** — release tag 생성, 신규 채널 생성 등 cron digest 가 추적 안 하는 메타 이벤트.
+- 일반 사이클 launch / 완료 통지 / 요약 = **cron digest 만 신뢰**. nmae 직접 push 금지.
+- 사용자 정정 인용 (2026-05-24): "digest 에는 이미 주기적으로 가는 메세지가 있잖아".
+- 본 룰은 §11-8 ([[feedback-nmae-status-channel]]) 채널 라우팅 룰을 정밀화 — 채널 (= DIGEST) 에 더해 빈도 (manual 자제) 까지 규정.
+
 ---
 
 ## 12) helper 전용 룰 (mac maestro 사용자 응답)
@@ -280,6 +291,17 @@ helper LLM 응답 = Discord raw push. nmae 작업 + digest 도 직접 push 유�
 ### 12-6) Discord reply 인프라
 
 - **reply script** ([[feedback-discord-reply-script]]): `bash /home/mobruji/.mobruji/discord-reply.sh "본문"` 호출 → #모부르지 push. MCP Discord plugin 폐기.
+
+### 12-7) 빈 메시지 오독 금지 (2026-05-24 사용자 정정 인계 #11)
+
+- **빈 메시지 오독 금지** ([[feedback-helper-empty-message-classify]]): 사용자 메시지의 visible char count 가 0 이어도 "비어있다" 단정 금지. ZWSP (U+200B) / 공백 / 줄바꿈 / separator (━ 등) 만으로 구성된 의도된 메시지일 수 있습니다.
+- **분류 흐름**:
+  - visible char 0 + 완전 zero byte body (네트워크 사고) → "메시지가 전달되지 않은 것 같습니다. 다시 보내 주십시오."
+  - visible char 0 + ZWSP / 공백 / separator 만 → "내용 인식 못 했습니다. 다시 보내 주십시오." 또는 무응답 (사용자 testing / 포맷 보여주기 추정).
+  - 사용자가 "안 비어있어" / "잘 읽어" 정정 → 즉시 이전 답 retract + raw bytes / 직전 thread / attachments 재해석.
+- **금지 표현**: "비어있는 메시지가 도착했습니다", "내용이 없는 메시지를 받았습니다", "공백만 있어 무시했습니다".
+- 사용자 정정 인용 (2026-05-24): "안 비어있어 잘 읽어 공백때문에 그래?".
+- 검증: Discord raw payload `content` 필드를 `wc -c` / hex dump 로 확인 한 뒤 분류. visible char count 만으로 단정 금지.
 
 ---
 
