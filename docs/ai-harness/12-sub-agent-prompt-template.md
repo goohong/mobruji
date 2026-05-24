@@ -197,35 +197,38 @@ gh pr create --base develop --title "..." --label "type:feat,scope:infra,ai-gene
 
 **부착 안 하면**: digest cycle counter 분류 부정확 + Projects v2 보드 Session field 누락 + 사용자가 "어떤 sub-agent 가 작업한 PR" 인지 트래킹 불가.
 
-### Discord thread 진행 stream (`LAUNCH_THREAD_ID` env, #1011)
+### Discord thread 진행 stream (`--auto-thread` + file passthrough, #1011 + #1021)
 
-helper/nmae 본체가 sub-agent launch 시점에 `discord-reply.sh --auto-ack-thread "🚀 sub-agent launch: <description>"` 으로 thread 를 미리 만들고 stdout 으로 받은 thread_id 를 launch prompt 안에 다음 형식으로 전달할 수 있다:
+helper/nmae 본체가 sub-agent launch 시점에 `discord-reply.sh --auto-ack-thread "🚀 sub-agent launch: <description>"` 으로 thread 를 미리 만든다. 해당 호출은 thread_id 를 stdout 출력 + `~/.mobruji/last-launch-thread.txt` 에 atomic write (#1021).
 
+**sub-agent 권장 호출** (file 자동 read — hallucination 우회):
+
+```bash
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "[milestone] <짧은 진행 1줄>"
 ```
-LAUNCH_THREAD_ID=<19자리 snowflake>
-```
 
-sub-agent 는 prompt 안에 `LAUNCH_THREAD_ID=<id>` 환경변수가 **명시되어 있으면** 다음 milestone 마다 해당 thread 에 push 의무:
+`--auto-thread` 는 thread_id 를 다음 우선순위로 resolve:
 
+1. `LAUNCH_THREAD_ID` 환경변수 (helper/nmae 가 prompt 에 명시 시)
+2. `~/.mobruji/last-launch-thread.txt` (helper/nmae 가 launch 직전 atomic write — #1021)
+3. `~/.mobruji/helper-current-thread.txt` (helper turn-level thread fallback)
+
+milestone 후보 (모두 thread 에 push 의무):
 - 이슈 등록 / 브랜치 생성 / 첫 commit / push / PR 생성 / PR 머지 / daemon 재시작 / 검증 통과 / 완료 보고
 
-표준 호출:
+최종 보고:
 
 ```bash
-bash /home/mobruji/.mobruji/discord-reply.sh --thread "$LAUNCH_THREAD_ID" "[milestone] <짧은 진행 1줄>"
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "✅ done: PR #<N> <한 줄 요약>"
 ```
 
-최종 보고는:
-
-```bash
-bash /home/mobruji/.mobruji/discord-reply.sh --thread "$LAUNCH_THREAD_ID" "✅ done: PR #<N> <한 줄 요약>"
-```
+**대안 (명시적 thread_id)**: `LAUNCH_THREAD_ID` env 가 prompt 에 명시되어 있고 sub-agent 가 직접 지정하고 싶다면 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` 도 가능. 다만 helper LLM 의 thread_id hallucination 사고 ([[feedback-helper-launch-thread-file-passthrough]], #1021) 우회 차원에서 `--auto-thread` 가 default 권장.
 
 **원칙**:
 - main 채널 (`#모부르지`) 으로 직접 push 는 최종 보고 1건 또는 0건으로 제한. 진행 milestone 은 모두 thread 안.
-- `LAUNCH_THREAD_ID` 환경변수가 **없으면** 본 절차 skip (thread push 안 함). prompt 에 명시 안 한 helper/nmae 본체의 의도 존중.
-- thread 만료 (24h auto-archive) / 삭제 시 `--thread` 호출이 4xx 반환할 수 있음. sub-agent turn 깨지지 않게 명령 실패는 무시하고 진행 (helper-current-thread.txt 의 `--auto-thread` graceful skip 패턴과 동일).
-- helper-current-thread.txt 단일 파일은 helper turn-level (사용자 1 메시지당) thread 용. `LAUNCH_THREAD_ID` 는 sub-agent launch 1건당 별도 thread — 두 채널 독립.
+- `--auto-thread` chain 이 모두 실패하면 (env / file 둘 다 없거나 invalid) graceful skip — sub-agent turn 안 깨짐.
+- thread 만료 (24h auto-archive) / 삭제 시 호출이 4xx 반환할 수 있음. sub-agent turn 깨지지 않게 명령 실패는 무시하고 진행.
+- helper-current-thread.txt 단일 파일은 helper turn-level (사용자 1 메시지당) thread 용. `last-launch-thread.txt` 는 sub-agent launch 1건당 별도 thread — 두 채널 독립.
 
 **효과**: helper turn 안에서 sub-agent N 개 launch 시 thread 도 N 개. 어떤 sub-agent 의 진행인지 명시적 구분. main 채널 noise 없이 사용자 가시성 ↑.
 

@@ -195,5 +195,149 @@ class AutoAckThreadCachesThreadIdTests(unittest.TestCase):
             self.assertEqual(target.read_text(), "9999888877776666\n")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# --auto-thread fallback chain (#1021 launch thread file passthrough)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AutoThreadFallbackChainTests(unittest.TestCase):
+    """``--auto-thread`` resolve chain 우선순위 검증 (#1021).
+
+    우선순위 (높음 → 낮음):
+        1. ``LAUNCH_THREAD_ID`` env (sub-agent inherit)
+        2. ``LAUNCH_THREAD_FILE`` (~/.mobruji/last-launch-thread.txt)
+        3. ``HELPER_THREAD_FILE`` (~/.mobruji/helper-current-thread.txt)
+
+    각 소스 snowflake (17–20 digit) 검증 → 실패 시 다음 fallback.
+    실제 REST 호출은 우회하기 위해 invalid snowflake 만 넣어 skip 경로 확인 +
+    각 소스가 stderr 메시지에 reflect 되는지로 chain 진행 단계를 식별.
+    """
+
+    def _run(
+        self,
+        *,
+        launch_env: str | None = None,
+        launch_file_content: str | None = None,
+        helper_file_content: str | None = None,
+        invalid_helper: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        """auto-thread 호출. 각 소스 옵션:
+
+        - launch_env: LAUNCH_THREAD_ID 환경변수 값 (None 이면 unset)
+        - launch_file_content: LAUNCH_THREAD_FILE 내용 (None 이면 파일 미존재)
+        - helper_file_content: HELPER_THREAD_FILE 내용 (None 이면 파일 미존재)
+        - invalid_helper: True 면 helper file 도 invalid 값 — 모든 fallback 실패
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            envfile = Path(tmpdir) / ".env"
+            envfile.write_text(
+                "DISCORD_BOT_TOKEN=dummy-token\n"
+                "MOBRUJI_CHANNEL_ID=123\n"
+            )
+            launch_file = Path(tmpdir) / "last-launch-thread.txt"
+            helper_file = Path(tmpdir) / "helper-current-thread.txt"
+            if launch_file_content is not None:
+                launch_file.write_text(launch_file_content)
+            if helper_file_content is not None:
+                helper_file.write_text(helper_file_content)
+            env: dict[str, str] = {
+                "DISCORD_DAEMON_ENV_PATH": str(envfile),
+                "LAUNCH_THREAD_FILE": str(launch_file),
+                "HELPER_THREAD_FILE": str(helper_file),
+                "PATH": "/usr/bin:/bin",
+            }
+            if launch_env is not None:
+                env["LAUNCH_THREAD_ID"] = launch_env
+            return subprocess.run(
+                ["bash", str(SCRIPT_PATH), "--auto-thread", "milestone"],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+    def test_invalid_env_falls_through_to_file(self) -> None:
+        """LAUNCH_THREAD_ID env 가 invalid (짧은 정수) 면 파일 fallback 으로 진행.
+
+        env 값이 4 자리 → validate_snowflake 실패 → stderr 에 "LAUNCH_THREAD_ID env"
+        label 포함. 그 후 launch file (역시 invalid) 시도 → stderr 에 launch file
+        path label 포함. 마지막 helper file 미존재 → skip 메시지.
+        """
+        result = self._run(launch_env="9999", launch_file_content="invalid-id\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LAUNCH_THREAD_ID env", result.stderr)
+        self.assertIn("last-launch-thread.txt", result.stderr)
+        self.assertIn("auto-thread skip", result.stderr)
+
+    def test_launch_file_used_when_env_missing(self) -> None:
+        """env 없고 launch file 만 invalid → launch file label 이 stderr 에 나옴.
+
+        chain 이 launch file 까지 도달했음을 입증.
+        """
+        result = self._run(launch_file_content="bad-id\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("last-launch-thread.txt", result.stderr)
+        # env 는 unset 이므로 env label 은 stderr 에 안 나옴.
+        self.assertNotIn("LAUNCH_THREAD_ID env", result.stderr)
+
+    def test_helper_file_used_when_launch_missing(self) -> None:
+        """env / launch file 둘 다 없을 때 helper file 로 fallback.
+
+        helper file 은 기존 호환을 위해 lenient (snowflake 검증 X). 실제 Discord
+        REST 호출은 stub 안 됐으므로 비-2xx 응답 → "auto-thread push 실패" 경로
+        도달. 핵심은 chain 이 helper file 까지 도달했음 입증 (재시도 메시지 포함).
+        """
+        result = self._run(helper_file_content="not-a-snowflake\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # helper file 까지 도달 → push 실패 분기 (실제 호출 stub 안 됨 → 404 등).
+        # stderr 에 push 실패 또는 retry 메시지가 보이면 chain 진입 입증.
+        self.assertTrue(
+            "auto-thread push 실패" in result.stderr
+            or "retry" in result.stderr.lower(),
+            f"helper file fallback chain 미진입: stderr={result.stderr}",
+        )
+
+    def test_all_sources_missing_skips(self) -> None:
+        """env / launch file / helper file 모두 없으면 skip (helper file 없음 메시지)."""
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("auto-thread skip", result.stderr)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --auto-ack-thread 가 LAUNCH_THREAD_FILE 도 함께 atomic write 하는지 (#1021)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AutoAckThreadWritesLaunchFileTests(unittest.TestCase):
+    """``--auto-ack-thread`` 가 thread_id 를 HELPER + LAUNCH 두 파일에 동시 write.
+
+    구현: ack mode 안 atomic_write_thread_file 호출 2회 (HELPER_THREAD_FILE +
+    LAUNCH_THREAD_FILE). 실제 REST 호출은 우회하기 어려우므로 script 자체에서
+    두 파일 경로 변수가 모두 atomic_write_thread_file 호출 대상에 포함되는지
+    텍스트 기반으로 검증.
+    """
+
+    def test_script_writes_both_files_in_ack_mode(self) -> None:
+        script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        # ack mode block 안에서 두 변수 모두 atomic write 의 인자로 등장해야 함.
+        self.assertIn(
+            'atomic_write_thread_file "$NEW_THREAD_ID" "$HELPER_THREAD_FILE"',
+            script_text,
+        )
+        self.assertIn(
+            'atomic_write_thread_file "$NEW_THREAD_ID" "$LAUNCH_THREAD_FILE"',
+            script_text,
+        )
+
+    def test_launch_thread_file_default_path(self) -> None:
+        """LAUNCH_THREAD_FILE default = ~/.mobruji/last-launch-thread.txt."""
+        script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            'LAUNCH_THREAD_FILE="${LAUNCH_THREAD_FILE:-${HOME:-/tmp}/.mobruji/last-launch-thread.txt}"',
+            script_text,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
