@@ -32,7 +32,7 @@ mac maestro(mmae) 종료 후 사용자가 **폰 Discord 만으로 mobruji 운영
   ↓ Discord Gateway WebSocket
 NCP bot.py (Python, discord.py)  — 이슈 #807 단순화본
   ├─ 사용자 메시지 → tmux send-keys → helper session (TMUX_SESSION_NAME=helper)
-  └─ cycle-status.json digest cron → NOTIFY_CHANNEL_ID push (be/fe/rev/plan 4 워크트리)
+  └─ cycle-status.json digest cron → DIGEST_CHANNEL_ID push (be/fe/rev/plan 4 워크트리) [#1019 rename — 기존 NOTIFY_CHANNEL_ID backward-compat]
         ↓
    NCP tmux session "helper" (claude CLI, bypass permissions)
       ├─ 자체 답 → ~/.mobruji/discord-reply.sh "<msg>" → Discord REST API 로 직접 push
@@ -149,7 +149,7 @@ tmux_send_payload(env["TMUX_TARGET_PANE"], user_msg)
 ```
 
 - helper 응답은 helper 측에서 별도 스크립트 `~/.mobruji/discord-reply.sh "<msg>"` 로 Discord REST API 에 직접 push (bot.py 안에 응답 watcher 없음). spec: [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md), 룰 요지: [`CLAUDE.md` §11-pre](../../CLAUDE.md).
-- nmae digest 보고는 bot.py 의 cycle-status.json digest cron 이 `~/.mobruji/cycle-status.json` 을 polling 해서 `NOTIFY_CHANNEL_ID` 채널에 push (helper/maestro 가 status JSON 을 갱신).
+- nmae digest 보고는 bot.py 의 cycle-status.json digest cron 이 `~/.mobruji/cycle-status.json` 을 polling 해서 `DIGEST_CHANNEL_ID` 채널에 push (#1019 rename — 기존 `NOTIFY_CHANNEL_ID` 도 backward-compat 으로 fallback 인식. helper/maestro 가 status JSON 을 갱신).
 - 본 spec 의 §4-2/§4-3 옛 의사 코드 (`USER_TARGET_TMUX`, `pipe-pane` 분기, `DIGEST_CHANNEL_ID` 별 채널 watcher) 는 **현재 구현되지 않은 미래 모델**이며, 이슈 #807 단순화로 의도적으로 폐기됐다. 향후 다시 도입 시 본 런북을 갱신한다 (spec status: `implementing`).
 
 ### 4-3) `.env` 키 (실 운영)
@@ -163,13 +163,13 @@ tmux_send_payload(env["TMUX_TARGET_PANE"], user_msg)
 | `TMUX_SESSION_NAME` | 옵션 (기본 `helper`) | 사용자 메시지 routing 대상 세션 |
 | `TMUX_TARGET_PANE`  | 옵션 (기본 `helper:0.0`) | tmux send-keys target |
 | `CLAUDE_BIN`        | 옵션 (기본 `claude`)    | tmux 세션 부트 시 실행 명령 |
-| `NOTIFY_CHANNEL_ID` | 옵션 (기본 = `MOBRUJI_CHANNEL_ID`) | digest cron 전용 채널 |
+| `DIGEST_CHANNEL_ID` | 옵션 (기본 = `MOBRUJI_CHANNEL_ID`) | digest cron 전용 채널. #1019 rename — 기존 `NOTIFY_CHANNEL_ID` 도 backward-compat 으로 fallback 인식 (deprecation warning 1회). |
 | `DIGEST_ENABLED`    | 옵션 (기본 `1`) | cycle-status digest cron on/off |
 | `CYCLE_STATUS_PATH` | 옵션 (기본 `~/.mobruji/cycle-status.json`) | digest 입력 JSON |
 | `DEDUP_LEDGER_PATH` | 옵션 | SQLite dedup ledger |
 | `GITHUB_PAT` / `GITHUB_REPO` | 옵션 | repository_dispatch fallback |
 
-옛 spec 의 `USER_TARGET_TMUX`, `HELPER_PIPE_PANE_PATH`, `NMAE_PIPE_PANE_PATH`, `DIGEST_CHANNEL_ID` 는 현재 bot.py 가 인식하지 않는다. helper/nmae 채널 분리는 `NOTIFY_CHANNEL_ID` (digest 전용) 와 `MOBRUJI_CHANNEL_ID` (사용자 양방향) 로 갈음한다.
+옛 spec 의 `USER_TARGET_TMUX`, `HELPER_PIPE_PANE_PATH`, `NMAE_PIPE_PANE_PATH` 는 현재 bot.py 가 인식하지 않는다. helper/nmae 채널 분리는 `DIGEST_CHANNEL_ID` (digest 전용, #1019 에서 기존 `NOTIFY_CHANNEL_ID` 를 rename — backward-compat 인식) 와 `MOBRUJI_CHANNEL_ID` (사용자 양방향) 로 갈음한다.
 
 ## 5) 검증 시나리오
 
@@ -228,7 +228,7 @@ tmux_send_payload(env["TMUX_TARGET_PANE"], user_msg)
 - [ ] mobruji repo clone + 워크트리 4개 (be/fe/rev/plan)
 - [ ] nmae credentials (.credentials.json) — OAuth 1회 또는 기존 NCP에서 scp
 - [ ] helper credentials 복사 (multi-device 또는 별 OAuth)
-- [ ] bot.py 환경 변수 셋업 (.env, §4-3 표 참조): 필수 — `DISCORD_BOT_TOKEN`, `ALLOWED_USER_IDS`, `MOBRUJI_CHANNEL_ID`. 권장 — `TMUX_SESSION_NAME=helper`, `TMUX_TARGET_PANE=helper:0.0`, `NOTIFY_CHANNEL_ID=<digest 별 채널>`
+- [ ] bot.py 환경 변수 셋업 (.env, §4-3 표 참조): 필수 — `DISCORD_BOT_TOKEN`, `ALLOWED_USER_IDS`, `MOBRUJI_CHANNEL_ID`. 권장 — `TMUX_SESSION_NAME=helper`, `TMUX_TARGET_PANE=helper:0.0`, `DIGEST_CHANNEL_ID=<digest 별 채널>` (#1019 rename — 기존 `NOTIFY_CHANNEL_ID` 도 backward-compat)
 - [ ] systemd unit — 현재 적용 2개 (`mobruji-maestro.service`, `mobruji-discord-bridge.service`). helper 자동 가동을 원하면 `mobruji-helper.service` 추가 (§3-4 보호 영역, 사람 사후 리뷰). 미적용 시 §3-4 대안 절차로 ad-hoc 가동.
 - [ ] 디스크 확장 (Phase 4 dev container 가동 시 추가 필요)
 - [ ] GitHub Secrets 3건 (`NCP_SSH_HOST`, `NCP_SSH_USER`, `NCP_SSH_KEY`) — CD workflow용

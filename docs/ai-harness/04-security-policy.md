@@ -64,10 +64,10 @@ PR title / open issue title 등이 cycle digest 에 노출될 때 `@everyone` / 
 | env | 용도 | 비고 |
 | --- | --- | --- |
 | `MOBRUJI_CHANNEL_ID` | #모부르지. **사용자 응답 전용** (helper/maestro → 사용자). | `discord-reply.sh` 기본 송신 채널. |
-| `NOTIFY_CHANNEL_ID` | #알림. **cycle digest 전용**. | 미설정 시 `MOBRUJI_CHANNEL_ID` fallback (단일 채널 운영). |
+| `DIGEST_CHANNEL_ID` | #알림. **cycle digest 전용**. | 미설정 시 `MOBRUJI_CHANNEL_ID` fallback (단일 채널 운영). #1019 에서 기존 `NOTIFY_CHANNEL_ID` 를 rename — 기존 이름은 backward-compat 으로 fallback 인식 (deprecation warning 1회). |
 
-- 두 채널을 분리 운영할 때 `NOTIFY_CHANNEL_ID` 를 반드시 명시한다. fallback 인지 않고 운영하면 digest 가 사용자 응답 채널에 섞여 push 된다.
-- `discord-reply.sh` 가 사용자 응답을 NOTIFY 채널로 보내지 않도록 `MOBRUJI_CHANNEL_ID` 우선순위를 유지한다 (`discord-reply.sh:48-56` 참조).
+- 두 채널을 분리 운영할 때 `DIGEST_CHANNEL_ID` 를 반드시 명시한다. fallback 인지 않고 운영하면 digest 가 사용자 응답 채널에 섞여 push 된다.
+- `discord-reply.sh` 가 사용자 응답을 digest 채널로 보내지 않도록 `MOBRUJI_CHANNEL_ID` 우선순위를 유지한다 (`discord-reply.sh:48-56` 참조).
 
 ### 7-4) cycle-status.json 보안
 `~/.mobruji/cycle-status.json` 은 nmae 4 워크트리 (be/fe/rev/plan) 상태를 bot.py digest 가 읽는 호스트 로컬 파일이다.

@@ -290,7 +290,7 @@ class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -347,7 +347,7 @@ class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -389,7 +389,7 @@ class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -415,7 +415,7 @@ class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(broken),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -441,7 +441,7 @@ class CycleIdleWatchLoopTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(
                 bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path="/tmp/none.json",
                     inject_target="mobruji:0.0",
                     threshold_minutes=0,
@@ -557,7 +557,7 @@ class CycleStrictRelaunchTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -604,7 +604,7 @@ class CycleStrictRelaunchTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -664,7 +664,7 @@ class CycleDiscordReasonPushTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -711,7 +711,7 @@ class CycleDiscordReasonPushTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -832,7 +832,7 @@ class CycleFutureTimestampDiscordPushTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -885,7 +885,7 @@ class CycleFutureTimestampDiscordPushTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=222,
+                    digest_channel_id=222,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -973,7 +973,7 @@ class CycleEscalationTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=111,
+                    digest_channel_id=111,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -1024,7 +1024,7 @@ class CycleEscalationTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=111,
+                    digest_channel_id=111,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -1099,7 +1099,7 @@ class CycleEscalationTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=111,
+                    digest_channel_id=111,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,
@@ -1138,7 +1138,7 @@ class CycleEscalationTest(unittest.IsolatedAsyncioTestCase):
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
                 coro = bot.cycle_idle_watch_loop(
                     client,
-                    notify_channel_id=111,
+                    digest_channel_id=111,
                     cycle_status_path=str(status_path),
                     inject_target="mobruji:0.0",
                     threshold_minutes=10,

@@ -173,7 +173,7 @@ class OnMessageDedupOrderTests(unittest.TestCase):
         "DISCORD_BOT_TOKEN": "t",
         "ALLOWED_USER_IDS": "111",
         "MOBRUJI_CHANNEL_ID": "999",
-        "NOTIFY_CHANNEL_ID": "999",
+        "DIGEST_CHANNEL_ID": "999",
         "TMUX_SESSION_NAME": "helper",
         "TMUX_TARGET_PANE": "helper:0.0",
         "CLAUDE_BIN": "claude",
