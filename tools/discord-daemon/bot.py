@@ -45,6 +45,12 @@ from claude_usage_tracker import (
     update_and_detect_thresholds as claude_usage_update_and_detect,
     write_state as claude_usage_write_state,
 )
+from directive_board_sync import (
+    DEFAULT_JSONL_PATH as DIRECTIVE_BOARD_JSONL_PATH_DEFAULT,
+    DEFAULT_STATE_PATH as DIRECTIVE_BOARD_STATE_PATH_DEFAULT,
+    directive_board_summary,
+    sync_once as directive_board_sync_once,
+)
 
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
@@ -281,6 +287,16 @@ CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
 # boot warmup — 다른 loop 와 stagger.
 CLAUDE_USAGE_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 120
 
+# --- directive-board auto-PATCH (#P11) ---
+# spec: 이슈 #P11. 사용자 P0 사고 (2026-05-24) — helper backfill 후 8 directive
+# 본문이 stale (PR 머지/상태 변경 후 Discord PATCH 누락). loop 가 5분 polling
+# 으로 jsonl ↔ Discord 비교 + 변경 발견 시 자동 PATCH.
+# 모듈 분리: `directive_board_sync.py`.
+DIRECTIVE_BOARD_SYNC_DEFAULT_ENABLED: Final[str] = "1"
+DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
+# boot warmup — 다른 loop 와 stagger (digest 60s, claude_usage 120s 사이).
+DIRECTIVE_BOARD_SYNC_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 150
+
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
 
@@ -474,6 +490,27 @@ def load_env() -> dict[str, str]:
     env["CLAUDE_USAGE_STATE_PATH"] = os.path.expanduser(
         os.environ.get(
             "CLAUDE_USAGE_STATE_PATH", str(CLAUDE_USAGE_STATE_PATH_DEFAULT)
+        )
+    )
+    # directive-board auto-PATCH (#P11).
+    env["DIRECTIVE_BOARD_SYNC_ENABLED"] = os.environ.get(
+        "DIRECTIVE_BOARD_SYNC_ENABLED", DIRECTIVE_BOARD_SYNC_DEFAULT_ENABLED
+    )
+    env["DIRECTIVE_BOARD_SYNC_INTERVAL"] = os.environ.get(
+        "DIRECTIVE_BOARD_SYNC_INTERVAL",
+        str(DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS),
+    )
+    env["DIRECTIVE_BOARD_CHANNEL_ID"] = os.environ.get(
+        "DIRECTIVE_BOARD_CHANNEL_ID", ""
+    )
+    env["DIRECTIVE_BOARD_JSONL_PATH"] = os.path.expanduser(
+        os.environ.get(
+            "DIRECTIVE_BOARD_JSONL_PATH", str(DIRECTIVE_BOARD_JSONL_PATH_DEFAULT)
+        )
+    )
+    env["DIRECTIVE_BOARD_STATE_PATH"] = os.path.expanduser(
+        os.environ.get(
+            "DIRECTIVE_BOARD_STATE_PATH", str(DIRECTIVE_BOARD_STATE_PATH_DEFAULT)
         )
     )
     return env
@@ -976,6 +1013,7 @@ def format_cycle_digest(
     *,
     interval_seconds: int | None = None,
     cycle_counts: dict | None = None,
+    directive_summary: dict | None = None,
 ) -> tuple["discord.Embed", str]:
     """4 워크트리(be/fe/rev/plan) digest 를 Discord Embed 로 빌드합니다.
 
@@ -1035,9 +1073,13 @@ def format_cycle_digest(
         )
         embed.color = CYCLE_DIGEST_COLOR_IDLE
         _maybe_add_cycle_counts_field(embed, cycle_counts)
+        directive_sig = _maybe_add_directive_board_field(embed, directive_summary)
         if interval_seconds is not None:
             embed.set_footer(text=f"interval={interval_seconds}s")
-        return embed, "unavailable"
+        signature = "unavailable"
+        if directive_sig:
+            signature = f"{signature}||{directive_sig}"
+        return embed, signature
 
     sig_parts: list[str] = []
     any_active = False
@@ -1084,6 +1126,7 @@ def format_cycle_digest(
 
     embed.color = CYCLE_DIGEST_COLOR_ACTIVE if any_active else CYCLE_DIGEST_COLOR_IDLE
     _maybe_add_cycle_counts_field(embed, cycle_counts)
+    directive_sig = _maybe_add_directive_board_field(embed, directive_summary)
     if interval_seconds is not None:
         embed.set_footer(text=f"interval={interval_seconds}s")
 
@@ -1093,6 +1136,11 @@ def format_cycle_digest(
         date_part = cycle_counts.get("date")
         if isinstance(date_part, str) and date_part:
             sig_parts.append(f"cycles-date={date_part}")
+
+    # directive-board mismatch 카운트는 signature 에 포함 — mismatch 발생/회복
+    # 시 즉시 사용자에게 가시화 push (P11 사용자 P0 사고 fix).
+    if directive_sig:
+        sig_parts.append(directive_sig)
 
     signature = "||".join(sig_parts)
     return embed, signature
@@ -1121,6 +1169,42 @@ def _maybe_add_cycle_counts_field(
         value=line,
         inline=False,
     )
+
+
+def _maybe_add_directive_board_field(
+    embed: "discord.Embed", directive_summary: dict | None
+) -> str | None:
+    """``directive_summary`` dict 가 valid 하면 embed 에 directive-board field 추가 (#P11).
+
+    Args:
+        embed: target embed.
+        directive_summary: ``{"total": N, "ok": M, "mismatch": K, "mismatch_ids": [...]}``
+            (``directive_board_summary()`` 반환). None/dict 아님 → skip.
+
+    Returns:
+        signature fragment 문자열 (``"directives=ok/mis/total"``) 또는 None.
+        signature 에 포함하면 mismatch 발생/회복 시 즉시 delta push.
+    """
+    if not isinstance(directive_summary, dict):
+        return None
+    total = directive_summary.get("total")
+    ok_count = directive_summary.get("ok")
+    mismatch_count = directive_summary.get("mismatch")
+    if not isinstance(total, int) or not isinstance(ok_count, int) or not isinstance(
+        mismatch_count, int
+    ):
+        return None
+    if total <= 0:
+        return None
+    if mismatch_count > 0:
+        name = "📌 지시 보드 (mismatch)"
+        value = f"동기화 OK {ok_count} / 누락 {mismatch_count} / 전체 {total}"
+    else:
+        name = "📌 지시 보드"
+        value = f"동기화 OK {ok_count} / 전체 {total}"
+    value = _truncate_field_line(value)
+    embed.add_field(name=name, value=value, inline=False)
+    return f"directives={ok_count}/{mismatch_count}/{total}"
 
 
 def resolve_digest_interval(env_value: str | None) -> int:
@@ -1245,6 +1329,7 @@ async def digest_loop(
     time_source=time.monotonic,
     cycle_status_path: str = DEFAULT_CYCLE_STATUS_PATH,
     cycle_counter_path: str = DEFAULT_CYCLE_COUNTER_PATH,
+    directive_board_state_path: Path | None = None,
 ) -> None:
     """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push 합니다.
 
@@ -1270,10 +1355,23 @@ async def digest_loop(
             else:
                 status = read_cycle_status(cycle_status_path)
                 cycle_counts = read_cycle_counts(cycle_counter_path)
+                directive_summary: dict | None = None
+                if directive_board_state_path is not None:
+                    try:
+                        directive_summary = directive_board_summary(
+                            directive_board_state_path
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "directive_board_summary 실패 (digest 진행 — fallback None): %s",
+                            exc,
+                        )
+                        directive_summary = None
                 embed, signature = format_cycle_digest(
                     status,
                     interval_seconds=interval,
                     cycle_counts=cycle_counts,
+                    directive_summary=directive_summary,
                 )
                 now_ts = time_source()
                 should_push = False
@@ -2621,6 +2719,79 @@ async def claude_usage_watch_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# directive-board auto-PATCH loop (#P11)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def directive_board_sync_loop(
+    client: "discord.Client",
+    *,
+    channel_id: str,
+    token: str,
+    jsonl_path: Path,
+    state_path: Path,
+    poll_interval: int = DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS,
+    initial_delay: int = DIRECTIVE_BOARD_SYNC_DEFAULT_INITIAL_DELAY_SECONDS,
+) -> None:
+    """directive-board.jsonl ↔ Discord 자동 동기화 loop (#P11).
+
+    배경 (사용자 P0 사고, 2026-05-24):
+        helper backfill 후 8 directive 본문이 stale. PR 머지/상태 변경 후에도
+        Discord 측 PATCH 가 manual 이라 갱신 누락. 사용자 정정: "모부르지-지시
+        들은 그냥 계속 진행 중인가? 진행 상황에 변동이 없네".
+
+    동작:
+        1. ``initial_delay`` 초 warmup 후 polling 시작.
+        2. ``poll_interval`` 초마다 ``directive_board_sync_once`` 호출 —
+           jsonl 의 각 entry 별 ``last_updated_kst`` 가 state 와 다르면
+           Discord REST API PATCH /channels/{ch}/messages/{msg_id} 호출.
+        3. 404 (메시지 삭제) → mismatch 카운트 누적, state status="mismatch".
+        4. graceful — 모든 예외는 warning 로그 후 다음 iter 재시도.
+        5. ``poll_interval <= 0`` 이면 disabled (테스트 용).
+        6. ``channel_id`` 비어 있으면 즉시 return (env 미설정).
+
+    asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
+    """
+    if poll_interval <= 0:
+        logger.info("directive_board_sync_loop disabled (poll_interval<=0)")
+        return
+    if not channel_id or not channel_id.strip():
+        logger.info(
+            "directive_board_sync_loop disabled (DIRECTIVE_BOARD_CHANNEL_ID 미설정)"
+        )
+        return
+    if not token:
+        logger.warning(
+            "directive_board_sync_loop disabled — DISCORD_BOT_TOKEN 부재 (호출자 검증 누락)"
+        )
+        return
+
+    await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            result = directive_board_sync_once(
+                channel_id=channel_id,
+                token=token,
+                jsonl_path=jsonl_path,
+                state_path=state_path,
+            )
+            logger.info(
+                "directive_board_sync_loop: scanned=%d patched=%d skipped=%d "
+                "mismatched=%d errors=%d",
+                result.scanned,
+                result.patched,
+                result.skipped,
+                result.mismatched,
+                result.errors,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("directive_board_sync_loop iter 실패: %s", exc)
+        await asyncio.sleep(poll_interval)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Discord client
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2850,6 +3021,30 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         env.get("CLAUDE_USAGE_STATE_PATH", str(CLAUDE_USAGE_STATE_PATH_DEFAULT))
     )
 
+    # directive-board auto-PATCH (#P11) — env 해석.
+    directive_board_sync_enabled = (
+        env.get(
+            "DIRECTIVE_BOARD_SYNC_ENABLED", DIRECTIVE_BOARD_SYNC_DEFAULT_ENABLED
+        )
+        == "1"
+    )
+    directive_board_sync_interval = _resolve_int_env(
+        "DIRECTIVE_BOARD_SYNC_INTERVAL",
+        DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    directive_board_channel_id = env.get("DIRECTIVE_BOARD_CHANNEL_ID", "").strip()
+    directive_board_jsonl_path = Path(
+        env.get(
+            "DIRECTIVE_BOARD_JSONL_PATH", str(DIRECTIVE_BOARD_JSONL_PATH_DEFAULT)
+        )
+    )
+    directive_board_state_path = Path(
+        env.get(
+            "DIRECTIVE_BOARD_STATE_PATH", str(DIRECTIVE_BOARD_STATE_PATH_DEFAULT)
+        )
+    )
+
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
         env.get("CONTEXT_CLEAR_TRIGGER_PCT"),
@@ -2902,6 +3097,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     interval=digest_interval,
                     cycle_status_path=cycle_status_path,
                     cycle_counter_path=cycle_counter_path,
+                    directive_board_state_path=directive_board_state_path,
                 )
             )
             logger.info(
@@ -3049,6 +3245,40 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
         elif not claude_usage_loop_enabled:
             logger.info("claude_usage_watch_loop disabled (CLAUDE_USAGE_LOOP=0)")
+
+        # directive-board auto-PATCH loop (#P11) — 사용자 P0 사고 fix.
+        # 5분 polling, jsonl ↔ Discord 비교 + 자동 PATCH.
+        if directive_board_sync_enabled and not hasattr(
+            client, "_directive_board_sync_task_started"
+        ):
+            if not directive_board_channel_id:
+                logger.warning(
+                    "directive_board_sync_loop skip — DIRECTIVE_BOARD_CHANNEL_ID 미설정 (.env 확인 필요)"
+                )
+            else:
+                client._directive_board_sync_task_started = True  # type: ignore[attr-defined]
+                client.loop.create_task(
+                    directive_board_sync_loop(
+                        client,
+                        channel_id=directive_board_channel_id,
+                        token=env["DISCORD_BOT_TOKEN"],
+                        jsonl_path=directive_board_jsonl_path,
+                        state_path=directive_board_state_path,
+                        poll_interval=directive_board_sync_interval,
+                    )
+                )
+                logger.info(
+                    "directive_board_sync_loop launched: channel=%s interval=%ds "
+                    "jsonl=%s state=%s",
+                    directive_board_channel_id,
+                    directive_board_sync_interval,
+                    directive_board_jsonl_path,
+                    directive_board_state_path,
+                )
+        elif not directive_board_sync_enabled:
+            logger.info(
+                "directive_board_sync_loop disabled (DIRECTIVE_BOARD_SYNC_ENABLED=0)"
+            )
 
     @client.event
     async def on_message(message: discord.Message) -> None:
