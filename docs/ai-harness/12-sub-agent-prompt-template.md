@@ -197,6 +197,38 @@ gh pr create --base develop --title "..." --label "type:feat,scope:infra,ai-gene
 
 **부착 안 하면**: digest cycle counter 분류 부정확 + Projects v2 보드 Session field 누락 + 사용자가 "어떤 sub-agent 가 작업한 PR" 인지 트래킹 불가.
 
+### Discord thread 진행 stream (`LAUNCH_THREAD_ID` env, #1011)
+
+helper/nmae 본체가 sub-agent launch 시점에 `discord-reply.sh --auto-ack-thread "🚀 sub-agent launch: <description>"` 으로 thread 를 미리 만들고 stdout 으로 받은 thread_id 를 launch prompt 안에 다음 형식으로 전달할 수 있다:
+
+```
+LAUNCH_THREAD_ID=<19자리 snowflake>
+```
+
+sub-agent 는 prompt 안에 `LAUNCH_THREAD_ID=<id>` 환경변수가 **명시되어 있으면** 다음 milestone 마다 해당 thread 에 push 의무:
+
+- 이슈 등록 / 브랜치 생성 / 첫 commit / push / PR 생성 / PR 머지 / daemon 재시작 / 검증 통과 / 완료 보고
+
+표준 호출:
+
+```bash
+bash /home/mobruji/.mobruji/discord-reply.sh --thread "$LAUNCH_THREAD_ID" "[milestone] <짧은 진행 1줄>"
+```
+
+최종 보고는:
+
+```bash
+bash /home/mobruji/.mobruji/discord-reply.sh --thread "$LAUNCH_THREAD_ID" "✅ done: PR #<N> <한 줄 요약>"
+```
+
+**원칙**:
+- main 채널 (`#모부르지`) 으로 직접 push 는 최종 보고 1건 또는 0건으로 제한. 진행 milestone 은 모두 thread 안.
+- `LAUNCH_THREAD_ID` 환경변수가 **없으면** 본 절차 skip (thread push 안 함). prompt 에 명시 안 한 helper/nmae 본체의 의도 존중.
+- thread 만료 (24h auto-archive) / 삭제 시 `--thread` 호출이 4xx 반환할 수 있음. sub-agent turn 깨지지 않게 명령 실패는 무시하고 진행 (helper-current-thread.txt 의 `--auto-thread` graceful skip 패턴과 동일).
+- helper-current-thread.txt 단일 파일은 helper turn-level (사용자 1 메시지당) thread 용. `LAUNCH_THREAD_ID` 는 sub-agent launch 1건당 별도 thread — 두 채널 독립.
+
+**효과**: helper turn 안에서 sub-agent N 개 launch 시 thread 도 N 개. 어떤 sub-agent 의 진행인지 명시적 구분. main 채널 noise 없이 사용자 가시성 ↑.
+
 ### 완료 보고 형식
 sub-agent가 maestro에 회신할 때 다음을 포함:
 - PR URL + mergeable 상태
@@ -526,3 +558,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — §1 PR session 라벨 부착 의무 절 추가 + §2 helper sub-agent 역할 추가: sub-agent (be/fe/rev/plan/helper) 가 PR 생성 직후 `session:<자기 sub-agent>` 라벨 명시 부착 의무. `.github/workflows/auto-label.yml` 가 backend/only · web/only · tools/우세 · docs/only 추론 fallback (sub-agent 명시 우선). `session:helper` 라벨 신설. 트리거: 머지 43 PR 중 7건 (16%) 만 session 라벨 — 36건 누락. 사용자 정정 "각 PR이 무슨 agent가 작업했는지 라벨 제대로 안 붙어있어?" (이슈 #1002).
 - 2026-05-24 — 본 문서 actor 범위 명시화 (#1004): Actor TOC 섹션 추가 — 본 문서 = sub-agent actor (be/fe/rev/plan + helper-launched) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 로 분리. 메모리 frontmatter `metadata.actor` 추가 (nmae/helper/subagent/rev/common/workflow). 사용자: "nmae helper subagent 들이 각자 지켜야할 규칙이 다를텐데 이걸 하나에 담으려해서 그런 거 아니야 — 진행하고 분리한 문서대로 적용해".
 - 2026-05-24 — 메모리 actor 디렉토리 분리 (#1004 후속): 메모리 파일 44건이 `~/.claude/projects/-home-mobruji-mobruji/memory/` 단일 디렉토리에서 `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/` 6개 actor 디렉토리로 이동. Actor TOC 표 "메모리 actor 매칭" 컬럼 → 디렉토리 경로 명시. §1 "메모리 보호 + 로드 범위" 절 신설 — sub-agent 가 자기 actor 디렉토리만 명시 Read 하도록 가이드. MEMORY.md index 도 디렉토리 경로 갱신. CLAUDE.md §15 메모리 path 동기화. 트리거: 사용자 "메모리를 actor만 명시하지말고 아예 문서 자체를 분리해야 너가 너꺼에만 집중해서 읽지" (2026-05-24).
+- 2026-05-24 — §1 "Discord thread 진행 stream (`LAUNCH_THREAD_ID` env)" 절 추가 (#1011): helper/nmae 본체가 `--auto-ack-thread` 로 사전에 만든 thread_id 를 launch prompt 안에 `LAUNCH_THREAD_ID=<id>` env 로 전달하면 sub-agent 는 milestone 마다 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` push 의무. main 채널 noise 없이 sub-agent 별 진행 stream 확보. helper turn-level (`helper-current-thread.txt` / `--auto-thread`) 와 독립 채널.
