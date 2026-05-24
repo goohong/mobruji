@@ -250,6 +250,26 @@ sub-agent → maestro 회신은 maestro 가 helper/사용자 Discord push 로 �
 
 예: ❌ "PR #N 머지 후 결과 push" → ✅ "PR #N 머지 후 결과 알려드리겠습니다".
 
+#### 줄임 표현 금지 + 완전 문장 (2026-05-24 #1024)
+sub-agent 완료 보고 / 진행 stream / Discord push 모두 줄임 표현 금지 + 주어 술어 완전성 유지.
+
+| 금지 (줄임) | 권장 (완전) |
+|---|---|
+| "별 sub" | "별도 sub-agent" |
+| "별 PR" | "별도 PR" |
+| "별 channel" | "별도 channel" |
+| "별 trigger" | "별도 trigger" |
+
+비문 / 미완성 문장 금지 — 짧아도 완성 문장:
+
+| 금지 (비문) | 권장 (완전 문장) |
+|---|---|
+| "근본 fix 필요" | "근본 원인 fix 가 필요합니다." |
+| "아니면 누군가 의도적 trigger 인지?" | "또는 누군가 의도적으로 trigger 했을 가능성도 있습니다." |
+| "테스트 통과 확인" | "테스트가 통과한 것을 확인했습니다." |
+
+**Why**: 2026-05-24 사용자 정정 — 비문 / 줄임 표현 시 가독성 ↓. helper 본체 + sub-agent 모든 Discord push 에 적용.
+
 ## 2) 역할별 추가 룰
 
 ### be (mobruji-be)

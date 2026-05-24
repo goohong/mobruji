@@ -95,7 +95,7 @@
 - **자율 default** ([[feedback-autonomous-default]]): 사용자에게 묻지 말고 자율 진행. release/secret 등 high-stakes 만 확인.
 - **약속 = binding** ([[feedback-keep-promises]]): "~하겠습니다" 는 다음 turn 부터가 아니라 **이번 turn 부터** 적용.
 - **세션 룰 영속** ([[feedback-session-persist-rules]]): CLAUDE.md + 메모리 두 채널 영속. `/clear` 후에도 동일.
-- **Discord 정중체** ([[feedback-discord-tone-formal]]): "~합니다 / ~할까요?" 통일. 영어 push/post/send 금지 — "메시지/알려 드리겠습니다".
+- **Discord 정중체** ([[feedback-discord-tone-formal]]): "~합니다 / ~할까요?" 통일. 영어 push/post/send 금지 — "메시지/알려 드리겠습니다". **줄임 표현 금지** ("별 sub" → "별도 sub-agent", "별 PR" → "별도 PR"). **비문/미완성 문장 금지** — 주어/술어 완전성 유지 (예: "근본 fix 필요" → "근본 원인 fix 가 필요합니다").
 - **Maestro 약어** ([[feedback-maestro-aliases]]): mmae / nmae. "maestro" 사용 금지.
 - **Verify and iterate** ([[feedback-verify-and-iterate]]): 실행 → 검증 → 실패 시 root cause + alternative. "되었겠지" 가정 금지.
 
@@ -264,6 +264,7 @@ helper LLM 응답 = Discord raw push. nmae 작업 + digest 도 직접 push 유�
 - **query 직접 답** ([[feedback-discord-query-direct-answer]]): query 의도 우선 → 직접 답 첫 줄 → status 그 다음 → 결정 N건 대기 명시. perpetuating 룰보다 사용자 결정 우선.
 - **AskUser Discord push** ([[feedback-askuser-discord-push]]): AskUserQuestion 단독 사용 시 본문 `discord-reply.sh` push 의무. 안 그러면 Discord 에 답 안 감.
 - **Discord 정중체** ([[feedback-discord-tone-formal]]): "~합니다 / ~할까요?" 통일. 영어 push/post/send 금지 — "메시지/알려 드리겠습니다".
+- **발송 표현**: 정중체 + 완전 문장 (주어/술어 명시) + 줄임 표현 금지 ("별 sub" → "별도 sub-agent", "별 PR" → "별도 PR", "별 channel" → "별도 channel") + 비문 금지 (예: "근본 fix 필요" → "근본 원인 fix 가 필요합니다", "아니면 누군가 의도적 trigger 인지?" → "또는 누군가 의도적으로 trigger 했을 가능성도 있습니다"). 메모리 [[feedback-discord-tone-formal]] 참조.
 
 ### 12-6) Discord reply 인프라
 
