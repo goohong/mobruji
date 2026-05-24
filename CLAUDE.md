@@ -218,3 +218,32 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - 위반 시 timestamp 가 잘못된 timezone (예: KST 시각을 Z suffix 로) 들어가면 watchdog detect 차단 — 핵심 회귀 사례.
 - `validate.sh` 가 매 update 후 sanity 검증 — fail 시 (a) 절차 위반 또는 (b) 시스템 시각 문제. 둘 중 어떤 경우든 즉시 root cause 조사.
 - bot.py `detect_idle_worktrees` 도 future timestamp 발견 시 ERROR 로그 + Discord push (#971) — 사용자 즉시 가시화.
+
+## 15) 검증 의무 (모든 helper/sub-agent)
+
+**사용자 2026-05-24 명시**: "항상 어떤 작업을 하면 되었겠거니 하지말고 가능한 방법으로 검증하고 안됐을 시 과정을 통해 추론해서 다른 방법으로 해결해".
+
+### 룰
+- 모든 작업 = (1) 실행 → (2) **검증** → (3) 실패 시 root cause 추론 → (4) alternative path
+- "되었겠지" / "머지됐으니 OK" / "deploy 했으니 작동" 가정 금지
+
+### 검증 방법 (작업 종류별)
+| 작업 | 검증 |
+|---|---|
+| daemon 변경 (bot.py) | 재시작 + `sudo journalctl -u <service> -n 30` 으로 새 로그 확인 |
+| file 변경 (cycle-status.json, 메모리 등) | `cat` read back + `grep` 으로 핵심 키 확인 |
+| PR 머지 | CI green + deploy 반영 + 동작 sanity check (예: discord-reply.sh 새 mode 호출) |
+| 룰 변경 (메모리, CLAUDE.md) | 다음 helper turn 또는 다음 sub-agent launch 에서 룰 적용되는지 확인 |
+| Discord push | response payload `type:19` reply 확인 + 사용자 채널 가시 |
+
+### 실패 시 추론 절차
+1. 어느 단계 실패: 생성 / 전달 / read / process / output ?
+2. 가설 1-2개 (most likely first)
+3. alternative path 1개 시도
+4. 검증 → 성공 까지 반복
+
+### 위반 예시 (피해야 함)
+- "PR 머지 + daemon 재시작 했으니 작동" → journal 미확인 → 실제 silent 실패
+- "cycle-counter init 했으니 digest 표시" → daemon read back 미검증 → 표시 안 됨
+
+관련: `feedback-verify-and-iterate` / `feedback-autonomous-default` / `feedback-keep-promises` / `feedback-session-close-doc-check`
