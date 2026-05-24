@@ -216,6 +216,21 @@ CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE: Final[str] = (
     "in_progress 여전히 NULL. 자율 처리 진행 중 (조치 무관)"
 )
 
+# STALE_ACTIVE (P3a remediation, #1015 follow-up) — `in_progress` 가 set 됐는데
+# `started_at` 이 임계치보다 오래된 경우. sub-agent freeze 또는 nmae 완료 통지
+# 처리 누락 추정. 기존 idle 검출 (in_progress=null) 만으로는 detect 못 했음 —
+# 9h stale incident root cause 의 Layer 2 fix.
+# 임계치 default 60분 — sub-agent 평균 cycle 보다 길게 잡아 false-positive 회피.
+STALE_ACTIVE_ENABLED_DEFAULT: Final[str] = "1"
+STALE_ACTIVE_THRESHOLD_DEFAULT_MIN: Final[int] = 60
+# tmux inject prompt 템플릿. {date}/{workspaces}/{summary} 치환.
+CYCLE_STALE_ACTIVE_INJECT_TEMPLATE: Final[str] = (
+    "[watchdog STALE_ACTIVE {date}] cycle-status.json in_progress 가 set 됐는데 "
+    "started_at 이 임계치 초과 — {workspaces}. {summary}. "
+    "sub-agent freeze 또는 nmae 완료 통지 처리 누락 추정. "
+    "즉시 sub-agent 상태 확인 후 set-idle (완료 시) 또는 재 launch 결정."
+)
+
 # rev e2e 단계 2 (post-merge) 자동 trigger (#1008, spec: docs/features/rev-e2e-3-stages.md §3-2).
 # 5분 polling — develop 머지된 PR 중 `rev-post-merge-pass` 라벨 없는 항목을
 # gh CLI 로 발굴해 nmae tmux pane 에 audit launch 알림 inject + Discord push.
@@ -355,6 +370,15 @@ def load_env() -> dict[str, str]:
     env["CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS"] = os.environ.get(
         "CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS",
         str(CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT),
+    )
+    # STALE_ACTIVE (P3a remediation, #1015 follow-up) — in_progress.started_at
+    # 이 임계치보다 오래된 워크트리 검출. sub-agent freeze 또는 nmae 완료 통지
+    # 처리 누락 추정.
+    env["STALE_ACTIVE_ENABLED"] = os.environ.get(
+        "STALE_ACTIVE_ENABLED", STALE_ACTIVE_ENABLED_DEFAULT
+    )
+    env["STALE_ACTIVE_THRESHOLD_MIN"] = os.environ.get(
+        "STALE_ACTIVE_THRESHOLD_MIN", str(STALE_ACTIVE_THRESHOLD_DEFAULT_MIN)
     )
     # rev e2e 단계 2 post-merge audit loop (#1008)
     env["REV_POST_MERGE_AUDIT_LOOP"] = os.environ.get(
@@ -1567,6 +1591,8 @@ def detect_idle_worktrees(
     threshold_minutes: int,
     now: datetime,
     workspaces: list[str] | tuple[str, ...] = ("be", "fe", "rev", "plan"),
+    stale_active_enabled: bool = False,
+    stale_active_threshold_minutes: int = STALE_ACTIVE_THRESHOLD_DEFAULT_MIN,
 ) -> list[dict]:
     """4 워크트리(be/fe/rev/plan) idle 판정 결과 list 반환.
 
@@ -1575,24 +1601,43 @@ def detect_idle_worktrees(
         ``last_completed.completed_at`` 이 ``now - threshold_minutes`` 보다
         오래됨 (또는 last_completed 부재 / completed_at 부재 / 파싱 실패).
 
+    STALE_ACTIVE 정의 (P3a remediation, #1015 follow-up):
+        ``stale_active_enabled=True`` 이고 ``in_progress`` 가 dict 형식이며
+        ``in_progress.started_at`` 이 ``now - stale_active_threshold_minutes`` 보다
+        오래된 경우. sub-agent freeze 또는 nmae 완료 통지 처리 누락 추정.
+        이 경우 idle 와 동일하게 list 에 포함하되 ``is_stale_active=True``
+        flag 와 ``started_at`` (datetime) / ``stale_title`` 을 함께 반환.
+
     Returns:
-        idle 워크트리 dict 의 list. 각 dict 키:
+        idle 또는 stale_active 워크트리 dict 의 list. 각 dict 키:
             ``workspace`` (str) — be/fe/rev/plan 등
             ``last_completed_title`` (str) — last_completed.title 또는 "없음"
             ``last_completed_at`` (datetime|None) — 파싱된 시각 또는 None
-        idle 0건이면 빈 list.
+            ``note`` (str|None) — entry.note (idle 분기만 유효)
+            ``idle_since`` (str|None) — entry.idle_since 원본 문자열
+            ``is_future`` (bool) — last_completed.completed_at 미래 timestamp
+            ``is_stale_active`` (bool) — STALE_ACTIVE 분기 여부 (#1015 follow-up)
+            ``started_at`` (datetime|None) — STALE_ACTIVE 일 때 in_progress.started_at
+            ``stale_title`` (str|None) — STALE_ACTIVE 일 때 in_progress.title
+        idle/stale 0건이면 빈 list.
 
     Args:
         status: cycle-status.json dict 또는 None. None 이면 빈 list (alert 안 함
-            — 파일 부재는 별 alert path).
+            — 파일 부재는 별도 alert path).
         threshold_minutes: idle 임계 분. 0 이면 모든 비-in-progress 가 idle.
         now: 현재 시각 (aware datetime). 테스트 deterministic 용.
         workspaces: 검사할 워크트리 list.
+        stale_active_enabled: STALE_ACTIVE 검출 활성화. False (default) 면 기존
+            idle 만 검출 — 후방호환. True 면 in_progress.started_at 임계 검사
+            추가 (#1015 follow-up P3a remediation).
+        stale_active_threshold_minutes: STALE_ACTIVE 임계 분. 0 이면 모든 active
+            워크트리가 stale 로 분류됨 (테스트 용).
     """
     if not isinstance(status, dict):
         return []
 
     cutoff_seconds = threshold_minutes * 60
+    stale_cutoff_seconds = stale_active_threshold_minutes * 60
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
@@ -1608,6 +1653,9 @@ def detect_idle_worktrees(
                 "note": None,
                 "idle_since": None,
                 "is_future": False,
+                "is_stale_active": False,
+                "started_at": None,
+                "stale_title": None,
             })
             continue
         in_progress_raw = entry.get("in_progress")
@@ -1617,6 +1665,38 @@ def detect_idle_worktrees(
         elif isinstance(in_progress_raw, str) and in_progress_raw.strip():
             is_active = True
         if is_active:
+            # STALE_ACTIVE 분기 (#1015 follow-up) — in_progress.started_at 이
+            # 임계치보다 오래된 경우 sub-agent freeze 추정. dict 형식만 분석
+            # 가능 (legacy str 형식엔 started_at 없음 — silent skip).
+            if (
+                stale_active_enabled
+                and isinstance(in_progress_raw, dict)
+            ):
+                started_at = _parse_iso_datetime(
+                    in_progress_raw.get("started_at")
+                )
+                if started_at is not None:
+                    elapsed_started = (now - started_at).total_seconds()
+                    # 미래 started_at (clock skew / KST hand-edit) — silent skip.
+                    # is_future flag 와 동일 family 의 신뢰 못 함 케이스.
+                    if elapsed_started > stale_cutoff_seconds:
+                        title_raw = in_progress_raw.get("title")
+                        stale_title = (
+                            title_raw.strip()
+                            if isinstance(title_raw, str) and title_raw.strip()
+                            else "제목 없음"
+                        )
+                        idle.append({
+                            "workspace": ws,
+                            "last_completed_title": "없음",
+                            "last_completed_at": None,
+                            "note": None,
+                            "idle_since": None,
+                            "is_future": False,
+                            "is_stale_active": True,
+                            "started_at": started_at,
+                            "stale_title": stale_title,
+                        })
             continue
 
         last_completed = entry.get("last_completed")
@@ -1647,6 +1727,9 @@ def detect_idle_worktrees(
                 "note": note_text,
                 "idle_since": idle_since_text,
                 "is_future": False,
+                "is_stale_active": False,
+                "started_at": None,
+                "stale_title": None,
             })
             continue
 
@@ -1671,6 +1754,9 @@ def detect_idle_worktrees(
                 "note": note_text,
                 "idle_since": idle_since_text,
                 "is_future": True,
+                "is_stale_active": False,
+                "started_at": None,
+                "stale_title": None,
             })
             continue
         if elapsed > cutoff_seconds:
@@ -1681,6 +1767,9 @@ def detect_idle_worktrees(
                 "note": note_text,
                 "idle_since": idle_since_text,
                 "is_future": False,
+                "is_stale_active": False,
+                "started_at": None,
+                "stale_title": None,
             })
     return idle
 
@@ -1726,6 +1815,59 @@ def _format_workspace_reason_line(entry: dict) -> str:
     return f"- {ws}: IDLE ({reason_text})"
 
 
+def _format_elapsed_h_m(seconds: float) -> str:
+    """초 → "Xh Ym" 단축 표기. 1h 미만은 "Ym" (분 정수)."""
+    total_minutes = int(seconds // 60)
+    if total_minutes < 60:
+        return f"{total_minutes}m"
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours}h{minutes}m"
+
+
+def _format_stale_active_reason_line(entry: dict, *, now: datetime) -> str:
+    """Discord push 용 STALE_ACTIVE 워크트리 1줄.
+
+    예: "- be: STALE_ACTIVE started_at=2026-05-23T18:52:00+00:00 (9h0m ago) — sub-agent freeze 또는 nmae 완료 통지 처리 누락 추정"
+    """
+    ws = entry.get("workspace", "?")
+    started_at = entry.get("started_at")
+    if started_at is None:
+        return (
+            f"- {ws}: STALE_ACTIVE started_at=? — sub-agent freeze 또는 nmae 완료 "
+            "통지 처리 누락 추정"
+        )
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    elapsed_seconds = max(0.0, (now - started_at).total_seconds())
+    elapsed_label = _format_elapsed_h_m(elapsed_seconds)
+    return (
+        f"- {ws}: STALE_ACTIVE (started_at={started_at.isoformat()}, "
+        f"{elapsed_label} ago) — sub-agent freeze 또는 nmae 완료 통지 처리 누락 추정"
+    )
+
+
+def _format_stale_active_summary(entries: list[dict], *, now: datetime) -> str:
+    """tmux inject prompt 의 ``{summary}`` 부분 빌드 (STALE_ACTIVE 용).
+
+    각 워크트리 별 "<ws>: started_at=<iso> (<elapsed> ago)" 콤마 join.
+    """
+    parts: list[str] = []
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    for entry in entries:
+        ws = entry.get("workspace", "?")
+        started_at = entry.get("started_at")
+        if started_at is None:
+            parts.append(f"started_at[{ws}]=?")
+            continue
+        elapsed_seconds = max(0.0, (now - started_at).total_seconds())
+        elapsed_label = _format_elapsed_h_m(elapsed_seconds)
+        parts.append(
+            f"started_at[{ws}]={started_at.isoformat()} ({elapsed_label} ago)"
+        )
+    return " / ".join(parts) if parts else "started_at: 없음"
+
+
 async def cycle_idle_watch_loop(
     client: "discord.Client",
     digest_channel_id: int,
@@ -1741,6 +1883,8 @@ async def cycle_idle_watch_loop(
     escalation_debounce_seconds: int = CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT,
     escalation_channel_id: int | None = None,
     future_ts_debounce_seconds: int = CYCLE_FUTURE_TS_PUSH_DEBOUNCE_SECONDS,
+    stale_active_enabled: bool = False,
+    stale_active_threshold_minutes: int = STALE_ACTIVE_THRESHOLD_DEFAULT_MIN,
     time_source=time.monotonic,
     now_provider=lambda: datetime.now(timezone.utc),
 ) -> None:
@@ -1773,6 +1917,11 @@ async def cycle_idle_watch_loop(
         escalation_debounce_seconds: 같은 워크트리 escalate push 사이 최소 간격.
         escalation_channel_id: 사용자 직접 push 채널 (MOBRUJI_CHANNEL_ID).
             None 이면 escalation 비활성 (graceful — 환경 미설정 시 silent).
+        stale_active_enabled: STALE_ACTIVE 검출 활성화 (#1015 follow-up P3a remediation).
+            False (default) 면 기존 idle 만 검출 — 후방호환.
+        stale_active_threshold_minutes: STALE_ACTIVE 임계 분 (default 60).
+            ``in_progress.started_at`` 이 이 임계치보다 오래되면 sub-agent freeze
+            추정으로 idle 와 동일 inject + Discord push + escalation 카운트 누적.
         time_source: debounce 비교용 monotonic 시각 source. 테스트 stub.
         now_provider: idle 판정용 wall-clock provider (aware datetime).
     """
@@ -1811,12 +1960,17 @@ async def cycle_idle_watch_loop(
                 threshold_minutes=threshold_minutes,
                 now=now_provider(),
                 workspaces=workspaces,
+                stale_active_enabled=stale_active_enabled,
+                stale_active_threshold_minutes=stale_active_threshold_minutes,
             )
             # #969 — 매 iter INFO log (observability). idle=0 이어도 loop alive 확인.
+            # #1015 follow-up — stale_active 카운트 별도 expose.
+            stale_count = sum(1 for e in idle_all if e.get("is_stale_active"))
             logger.info(
-                "cycle_idle_watch_loop: detect summary checked=%d idle=%d (workspaces=%s)",
+                "cycle_idle_watch_loop: detect summary checked=%d idle=%d stale_active=%d (workspaces=%s)",
                 len(workspaces),
-                len(idle_all),
+                len(idle_all) - stale_count,
+                stale_count,
                 ",".join(e["workspace"] for e in idle_all) or "none",
             )
             # (#972) escalation counter 리셋 — 이번 iter 에 idle 아닌 워크트리는
@@ -1893,14 +2047,25 @@ async def cycle_idle_watch_loop(
                 continue
             missing_session_warned = False
 
-            # STRICT 분류 (#956) — reason_required=True 이고 note 미명시인 idle.
+            # #1015 follow-up — STALE_ACTIVE 분리. idle 와 동일 처리 경로지만
+            # inject template 와 Discord push 라벨이 다름 (sub-agent freeze 추정
+            # 메시지). escalation 카운트는 idle 와 합산 (같은 워크트리 무응답 가시화).
+            fresh_stale_active = [
+                entry for entry in fresh_idle if entry.get("is_stale_active")
+            ]
+            fresh_idle_regular = [
+                entry for entry in fresh_idle if not entry.get("is_stale_active")
+            ]
+
+            # STRICT 분류 (#956) — reason_required=True 이고 note 미명시인 regular idle.
             # STRICT 이면 별 prompt (즉시 launch + note 기록 의무 명시) inject.
+            # STALE_ACTIVE 는 STRICT 분류 대상 아님 — 별도 template 처리.
             strict_idle = [
-                entry for entry in fresh_idle
+                entry for entry in fresh_idle_regular
                 if reason_required and not entry.get("note")
             ]
             soft_idle = [
-                entry for entry in fresh_idle if entry not in strict_idle
+                entry for entry in fresh_idle_regular if entry not in strict_idle
             ]
 
             workspaces_label = ", ".join(e["workspace"] for e in fresh_idle)
@@ -1924,6 +2089,17 @@ async def cycle_idle_watch_loop(
                     summary=soft_summary,
                 )
                 tmux_inject_text(inject_target, soft_text)
+            if fresh_stale_active:
+                stale_label = ", ".join(e["workspace"] for e in fresh_stale_active)
+                stale_summary = _format_stale_active_summary(
+                    fresh_stale_active, now=now_provider()
+                )
+                stale_text = CYCLE_STALE_ACTIVE_INJECT_TEMPLATE.format(
+                    date=today,
+                    workspaces=stale_label,
+                    summary=stale_summary,
+                )
+                tmux_inject_text(inject_target, stale_text)
 
             channel = client.get_channel(digest_channel_id)
             if channel is None:
@@ -1935,16 +2111,27 @@ async def cycle_idle_watch_loop(
                     missing_channel_warned = True
             else:
                 missing_channel_warned = False
+                idle_regular_count = len(fresh_idle_regular)
+                stale_count = len(fresh_stale_active)
+                header_parts: list[str] = []
+                if idle_regular_count:
+                    header_parts.append(f"{idle_regular_count} 워크트리 idle")
+                if stale_count:
+                    header_parts.append(f"{stale_count} 워크트리 STALE_ACTIVE")
                 lines: list[str] = [
-                    f"⚠️ nmae watchdog — {len(fresh_idle)} 워크트리 idle"
+                    "⚠️ nmae watchdog — " + " / ".join(header_parts)
                 ]
                 if strict_idle:
                     lines.append(
                         f"STRICT relaunch ({len(strict_idle)}): "
                         + ", ".join(e["workspace"] for e in strict_idle)
                     )
-                for entry in fresh_idle:
+                for entry in fresh_idle_regular:
                     lines.append(_format_workspace_reason_line(entry))
+                for entry in fresh_stale_active:
+                    lines.append(
+                        _format_stale_active_reason_line(entry, now=now_provider())
+                    )
                 lines.append("→ nmae 에 알림 inject 완료")
                 discord_text = "\n".join(lines)
                 await send_with_retry(channel, content=discord_text)
@@ -2356,6 +2543,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     # 채널 — 깜깜이 방지.
     cycle_escalation_channel_id: int | None = target_channel_id
 
+    # STALE_ACTIVE (#1015 follow-up P3a remediation) — env 해석.
+    cycle_stale_active_enabled = (
+        env.get("STALE_ACTIVE_ENABLED", STALE_ACTIVE_ENABLED_DEFAULT) == "1"
+    )
+    cycle_stale_active_threshold_minutes = _resolve_int_env(
+        "STALE_ACTIVE_THRESHOLD_MIN",
+        STALE_ACTIVE_THRESHOLD_DEFAULT_MIN,
+        allow_zero=False,
+    )
+
     # rev post-merge audit loop (#1008) — env 해석.
     rev_post_merge_audit_enabled = (
         env.get("REV_POST_MERGE_AUDIT_LOOP", REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED)
@@ -2475,10 +2672,12 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     escalation_threshold=cycle_escalation_threshold,
                     escalation_debounce_seconds=cycle_escalation_debounce,
                     escalation_channel_id=cycle_escalation_channel_id,
+                    stale_active_enabled=cycle_stale_active_enabled,
+                    stale_active_threshold_minutes=cycle_stale_active_threshold_minutes,
                 )
             )
             logger.info(
-                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s reason_required=%s escalation=(threshold=%d debounce=%ds channel=%s)",
+                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s reason_required=%s escalation=(threshold=%d debounce=%ds channel=%s) stale_active=(enabled=%s threshold=%dmin)",
                 cycle_notify_channel_id,
                 cycle_idle_poll_interval,
                 cycle_idle_threshold_minutes,
@@ -2488,6 +2687,8 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 cycle_escalation_threshold,
                 cycle_escalation_debounce,
                 cycle_escalation_channel_id,
+                cycle_stale_active_enabled,
+                cycle_stale_active_threshold_minutes,
             )
         elif not cycle_idle_watch_enabled:
             logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
