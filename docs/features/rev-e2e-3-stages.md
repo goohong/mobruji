@@ -69,10 +69,23 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 
 ## 6. 마이그레이션 / rollout
 - phase 1: 단계 1 (PR 머지 전) 만 — 즉시
-- phase 2: 단계 2 (사후) — 1 사이클 후
+- phase 2: 단계 2 (사후) — 1 사이클 후 (#1008 자동 trigger loop 도입 완료)
 - phase 3: 단계 3 (release 후) — release v0.4.0 부터
 
 ## 7. 관련
-- 이슈 #882, #879 (원인 PR #851)
+- 이슈 #882, #879 (원인 PR #851), #1008 (단계 2 자동 trigger)
 - 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]] [[feedback-role-expansion]]
 - 다음 plan 사이클에서 §5 구현 PR 시퀀스 작성
+
+## 8. 단계 2 자동 trigger 구현 (#1008)
+
+`bot.py` 의 `rev_post_merge_audit_loop` (5분 polling) 이 단계 2 후보 PR 을 발굴해
+nmae tmux pane 에 audit launch 알림을 inject 한다.
+
+- 후보 발굴: `gh pr list --state merged --base develop --search 'merged:>1h ago -label:rev-post-merge-pass'`
+- inject: `[rev e2e post-merge] PR #N 단계 2 audit launch — develop deploy 후 시나리오 재실행`
+- debounce: PR 별 15분 (반복 inject 차단)
+- nmae 책임: 단계 2 통과 시 `rev-post-merge-pass` 라벨 부여 (이후 polling 에서 제외)
+- env: `REV_POST_MERGE_AUDIT_LOOP=1` (default), `REV_POST_MERGE_AUDIT_INTERVAL_SECONDS=300`,
+  `REV_POST_MERGE_AUDIT_INJECT_TARGET=mobruji:0.0`
+- 단순화: gh CLI 실패 / 후보 0 / tmux 부재 시 graceful skip — 데몬 영구 dead 방어

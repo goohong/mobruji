@@ -216,6 +216,37 @@ CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE: Final[str] = (
     "in_progress 여전히 NULL. 자율 처리 진행 중 (조치 무관)"
 )
 
+# rev e2e 단계 2 (post-merge) 자동 trigger (#1008, spec: docs/features/rev-e2e-3-stages.md §3-2).
+# 5분 polling — develop 머지된 PR 중 `rev-post-merge-pass` 라벨 없는 항목을
+# gh CLI 로 발굴해 nmae tmux pane 에 audit launch 알림 inject + Discord push.
+# 동일 PR 반복 inject 방지를 위해 in-process debounce (기본 15분).
+REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED: Final[str] = "1"
+REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
+REV_POST_MERGE_AUDIT_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 90  # boot warmup
+REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET: Final[str] = "mobruji:0.0"
+# 동일 PR 재 inject 차단 — nmae 가 라벨 부여하기까지 polling 사이클 사이의
+# 중복 방지. 15분이면 단계 2 audit 시작/완료를 기다리기엔 충분.
+REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
+# debounce cache 사이즈 cap — 메모리 누수 방지 (LRU 비슷한 단순 cap).
+REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
+# gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
+# 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
+REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "1h"
+# label 조회 시 사용할 label 이름 — rev sub-agent 가 단계 2 통과 시 부여.
+REV_POST_MERGE_PASS_LABEL: Final[str] = "rev-post-merge-pass"
+# inject prompt template — {pr_numbers} 콤마 join.
+REV_POST_MERGE_AUDIT_INJECT_TEMPLATE: Final[str] = (
+    "[rev e2e post-merge] PR {pr_numbers} 단계 2 audit launch — "
+    "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-3-stages.md §3-2). "
+    "rev 단계 2 pass 시 라벨 `rev-post-merge-pass` 부여."
+)
+# Discord push template.
+REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE: Final[str] = (
+    "🔍 rev post-merge audit trigger — PR {pr_numbers} (단계 2 nmae inject)"
+)
+# gh CLI 실행 timeout (#1008). 네트워크 hang 시 loop block 방어.
+REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS: Final[int] = 30
+
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
 
@@ -307,6 +338,18 @@ def load_env() -> dict[str, str]:
     env["CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS"] = os.environ.get(
         "CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS",
         str(CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT),
+    )
+    # rev e2e 단계 2 post-merge audit loop (#1008)
+    env["REV_POST_MERGE_AUDIT_LOOP"] = os.environ.get(
+        "REV_POST_MERGE_AUDIT_LOOP", REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED
+    )
+    env["REV_POST_MERGE_AUDIT_INTERVAL_SECONDS"] = os.environ.get(
+        "REV_POST_MERGE_AUDIT_INTERVAL_SECONDS",
+        str(REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS),
+    )
+    env["REV_POST_MERGE_AUDIT_INJECT_TARGET"] = os.environ.get(
+        "REV_POST_MERGE_AUDIT_INJECT_TARGET",
+        REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
     )
     return env
 
@@ -1944,6 +1987,252 @@ async def cycle_idle_watch_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# rev e2e 단계 2 (post-merge) 자동 trigger (#1008)
+# spec: docs/features/rev-e2e-3-stages.md §3-2
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def fetch_rev_post_merge_candidates(
+    *,
+    pass_label: str = REV_POST_MERGE_PASS_LABEL,
+    search_window: str = REV_POST_MERGE_AUDIT_SEARCH_WINDOW,
+    timeout_seconds: int = REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS,
+    runner=subprocess.run,
+) -> list[int]:
+    """develop 머지된 PR 중 단계 2 audit 필요한 PR 번호 리스트를 반환합니다.
+
+    `gh pr list --state merged --base develop --search 'merged:>{window} ago -label:{pass_label}'`
+    을 호출해 JSON 으로 결과를 받습니다. 호출 실패 / parse fail 은 빈 리스트로
+    graceful fallback (호출부 loop 가 다음 iter 에서 재시도).
+
+    Args:
+        pass_label: 단계 2 통과 라벨 (rev sub-agent 가 부여). 이 라벨이 부재한
+            PR 만 후보로 잡힙니다.
+        search_window: gh CLI `merged:>${X} ago` 윈도우 — 너무 오래된 머지는
+            polling 부담만 누적되므로 1시간만 본다 (단계 2 deploy 후 audit 끝났을
+            시각). 외부 override 가능.
+        timeout_seconds: gh CLI 호출 timeout. 네트워크 hang 시 loop block 방어.
+        runner: ``subprocess.run`` 호환 콜러블. 테스트 stub 용.
+
+    Returns:
+        PR 번호 (int) 리스트. 호출 실패 시 빈 리스트.
+    """
+    search_expr = f"merged:>{search_window} ago -label:{pass_label}"
+    cmd = [
+        "gh",
+        "pr",
+        "list",
+        "--state",
+        "merged",
+        "--base",
+        "develop",
+        "--search",
+        search_expr,
+        "--json",
+        "number,title,mergedAt",
+        "--limit",
+        "30",
+    ]
+    try:
+        result = runner(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("rev post-merge audit: gh pr list 실행 실패: %s", exc)
+        return []
+    if result.returncode != 0:
+        logger.warning(
+            "rev post-merge audit: gh pr list rc=%d stderr=%s",
+            result.returncode,
+            truncate_for_log(result.stderr or ""),
+        )
+        return []
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("rev post-merge audit: JSON 파싱 실패: %s", exc)
+        return []
+    if not isinstance(payload, list):
+        return []
+    pr_numbers: list[int] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        number = entry.get("number")
+        if isinstance(number, int) and number > 0:
+            pr_numbers.append(number)
+    return pr_numbers
+
+
+def filter_debounced_prs(
+    candidates: list[int],
+    last_inject_at: dict[int, float],
+    *,
+    now_monotonic: float,
+    debounce_seconds: int = REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS,
+    max_entries: int = REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES,
+) -> list[int]:
+    """후보 리스트에서 debounce window 내 재진입 PR 을 제거합니다.
+
+    `last_inject_at` 은 PR 번호 → 직전 inject monotonic 시각. ``debounce_seconds``
+    이내면 재 inject 금지. 호출 측에서 fresh 결과로 ``last_inject_at`` 을 갱신합니다.
+
+    cache 사이즈 cap (``max_entries``) — 오래된 entry 를 단순 truncate (FIFO).
+    """
+    fresh: list[int] = []
+    for pr in candidates:
+        last = last_inject_at.get(pr)
+        if last is None or (now_monotonic - last) >= debounce_seconds:
+            fresh.append(pr)
+    # cache 사이즈 cap — 오래된 entry 제거 (단순 N개 유지).
+    if len(last_inject_at) > max_entries:
+        # 가장 오래된 N - max_entries 개 제거.
+        sorted_items = sorted(last_inject_at.items(), key=lambda kv: kv[1])
+        to_remove = len(last_inject_at) - max_entries
+        for key, _ in sorted_items[:to_remove]:
+            last_inject_at.pop(key, None)
+    return fresh
+
+
+def format_rev_post_merge_inject(pr_numbers: list[int]) -> str:
+    """tmux inject prompt 빌드 — PR 번호 #N,#M 형식 콤마 join."""
+    joined = ",".join(f"#{n}" for n in pr_numbers)
+    return REV_POST_MERGE_AUDIT_INJECT_TEMPLATE.format(pr_numbers=joined)
+
+
+def format_rev_post_merge_discord(pr_numbers: list[int]) -> str:
+    """Discord push 메시지 빌드."""
+    joined = ",".join(f"#{n}" for n in pr_numbers)
+    return REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE.format(pr_numbers=joined)
+
+
+async def rev_post_merge_audit_loop(
+    client: "discord.Client",
+    notify_channel_id: int,
+    *,
+    inject_target: str = REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
+    poll_interval: int = REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS,
+    initial_delay: int = REV_POST_MERGE_AUDIT_DEFAULT_INITIAL_DELAY_SECONDS,
+    debounce_seconds: int = REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS,
+    pass_label: str = REV_POST_MERGE_PASS_LABEL,
+    search_window: str = REV_POST_MERGE_AUDIT_SEARCH_WINDOW,
+    candidate_fetcher=None,
+    time_source=time.monotonic,
+) -> None:
+    """5분 polling — develop 머지된 PR 단계 2 audit 자동 trigger (#1008).
+
+    spec: docs/features/rev-e2e-3-stages.md §3-2.
+
+    동작:
+      1. ``initial_delay`` 초 warmup 후 polling 시작.
+      2. ``poll_interval`` 초마다 `gh pr list ... -label:rev-post-merge-pass` 호출.
+      3. 후보 PR ≥ 1 → debounce 적용 후 fresh PR 만 추출.
+      4. fresh ≥ 1:
+         - nmae tmux pane (``inject_target``) 에 inject (단계 2 audit launch 알림).
+         - Discord ``notify_channel_id`` 에 push.
+         - 각 fresh PR `last_inject_at` 갱신.
+      5. graceful skip — gh CLI 실패 / fresh 없음 / tmux 부재 / Discord channel 부재 시
+         warn 1회 + 다음 iter 재시도.
+      6. ``poll_interval <= 0`` 이면 disabled — 즉시 return (테스트 용).
+
+    asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
+
+    Args:
+        candidate_fetcher: ``() -> list[int]`` 콜러블. None 이면 기본
+            ``fetch_rev_post_merge_candidates`` 사용. 테스트 stub 진입점.
+        time_source: monotonic 시각 source. 테스트 stub.
+    """
+    if poll_interval <= 0:
+        logger.info("rev_post_merge_audit_loop disabled (poll_interval<=0)")
+        return
+
+    inject_session = inject_target.split(":", 1)[0]
+    last_inject_at: dict[int, float] = {}
+    missing_session_warned = False
+    missing_channel_warned = False
+
+    if candidate_fetcher is None:
+        def _default_fetcher() -> list[int]:
+            return fetch_rev_post_merge_candidates(
+                pass_label=pass_label,
+                search_window=search_window,
+            )
+        candidate_fetcher = _default_fetcher
+
+    await asyncio.sleep(initial_delay)
+
+    while True:
+        try:
+            candidates = candidate_fetcher()
+            if not candidates:
+                logger.debug("rev post-merge audit: 후보 0 — skip")
+                await asyncio.sleep(poll_interval)
+                continue
+            mono_now = time_source()
+            fresh = filter_debounced_prs(
+                candidates,
+                last_inject_at,
+                now_monotonic=mono_now,
+                debounce_seconds=debounce_seconds,
+            )
+            if not fresh:
+                logger.debug(
+                    "rev post-merge audit: 모든 후보 debounce 적중 — skip (n=%d)",
+                    len(candidates),
+                )
+                await asyncio.sleep(poll_interval)
+                continue
+
+            if not tmux_has_session(inject_session):
+                if not missing_session_warned:
+                    logger.warning(
+                        "rev post-merge audit: tmux session 부재 — skip (target=%s)",
+                        inject_target,
+                    )
+                    missing_session_warned = True
+                await asyncio.sleep(poll_interval)
+                continue
+            missing_session_warned = False
+
+            inject_msg = format_rev_post_merge_inject(fresh)
+            tmux_inject_text(inject_target, inject_msg)
+
+            channel = client.get_channel(notify_channel_id)
+            if channel is None:
+                if not missing_channel_warned:
+                    logger.warning(
+                        "rev post-merge audit: Discord channel 부재 — push skip (channel_id=%s)",
+                        notify_channel_id,
+                    )
+                    missing_channel_warned = True
+            else:
+                missing_channel_warned = False
+                await send_with_retry(
+                    channel, content=format_rev_post_merge_discord(fresh)
+                )
+
+            for pr in fresh:
+                last_inject_at[pr] = mono_now
+            logger.info(
+                "rev_post_merge_audit_loop: inject fresh=%s candidates=%d",
+                ",".join(f"#{n}" for n in fresh),
+                len(candidates),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rev_post_merge_audit_loop iter 실패: %s", exc)
+        await asyncio.sleep(poll_interval)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Discord client
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2047,6 +2336,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     # (#972) — watchdog 일반 알림은 NOTIFY (운영 진단용), escalation 은 사용자 본
     # 채널 — 깜깜이 방지.
     cycle_escalation_channel_id: int | None = target_channel_id
+
+    # rev post-merge audit loop (#1008) — env 해석.
+    rev_post_merge_audit_enabled = (
+        env.get("REV_POST_MERGE_AUDIT_LOOP", REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED)
+        == "1"
+    )
+    rev_post_merge_audit_interval = _resolve_int_env(
+        "REV_POST_MERGE_AUDIT_INTERVAL_SECONDS",
+        REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    rev_post_merge_audit_inject_target = env.get(
+        "REV_POST_MERGE_AUDIT_INJECT_TARGET",
+        REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
+    )
 
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
@@ -2168,6 +2472,32 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
         elif not cycle_idle_watch_enabled:
             logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
+
+        # rev e2e 단계 2 (post-merge) 자동 trigger (#1008).
+        # 5분 polling — develop 머지된 PR 단계 2 audit 자동 launch.
+        # spec: docs/features/rev-e2e-3-stages.md §3-2.
+        if rev_post_merge_audit_enabled and not hasattr(
+            client, "_rev_post_merge_audit_task_started"
+        ):
+            client._rev_post_merge_audit_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                rev_post_merge_audit_loop(
+                    client,
+                    notify_channel_id,
+                    inject_target=rev_post_merge_audit_inject_target,
+                    poll_interval=rev_post_merge_audit_interval,
+                )
+            )
+            logger.info(
+                "rev_post_merge_audit_loop launched: channel=%d interval=%ds target=%s",
+                notify_channel_id,
+                rev_post_merge_audit_interval,
+                rev_post_merge_audit_inject_target,
+            )
+        elif not rev_post_merge_audit_enabled:
+            logger.info(
+                "rev_post_merge_audit_loop disabled (REV_POST_MERGE_AUDIT_LOOP=0)"
+            )
 
     @client.event
     async def on_message(message: discord.Message) -> None:
