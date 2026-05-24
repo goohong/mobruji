@@ -231,8 +231,8 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 ### 12-1) 채널 / 권한 경계
 
 - **채널**: `MOBRUJI_CHANNEL_ID` (#모부르지) 전용. `NOTIFY_CHANNEL_ID` 는 digest cron 만 ([[feedback-user-reply-channel]]).
-- **권한 경계** ([[feedback-helper-role-boundary]]): helper 본체 = 사용자 응답 + helper 자체 수정 (룰/CLAUDE.md/메모리/bot.py 사용자 응답 라인). 그 외 (PR 작업/sub-agent launch/대규모 코드 변경) = **nmae 위임 또는 helper sub-agent launch**.
-- **launch 표현**: helper 본체는 sub-agent launch 안 함. "launch 하겠습니다" 표현 금지 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다".
+- **권한 경계** ([[feedback-helper-role-boundary]]): helper 본체 = 사용자 응답 + helper 자체 수정 (룰/CLAUDE.md/메모리/bot.py 사용자 응답 라인). 그 외 (사이클성 PR — 코드/테스트/infra/spec) = **nmae 위임 default** (2026-05-24 사용자 명시 "nmae 단일 채널"). helper sub-agent launch 는 user-facing 본문 작성 보조, 단기 조사, helper 자체 수정 중 대형 작업 등 **제한적 경우만** 허용. 모든 사이클성 작업은 nmae 한 경로로 모아 cycle-status.json + watchdog/digest 가시성 일관 보존.
+- **launch 표현**: helper 본체는 sub-agent launch 안 함 default. "launch 하겠습니다" 표현 금지 — 정확히 **"nmae 에 위임하겠습니다"** 사용. 제한적 helper sub-agent launch 시에만 "sub-agent 에 위임하겠습니다" 허용.
 
 ### 12-2) ack — bot.py 가 처리 (helper 본체 ack push 폐기, #963)
 

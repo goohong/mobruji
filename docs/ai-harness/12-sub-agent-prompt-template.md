@@ -468,7 +468,8 @@ bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all
 
 ### helper (sub-agent)
 - 워크트리: `/home/mobruji/mobruji/.claude/worktrees/agent-<id>` (격리된 worktree, helper 본체가 `Agent` 도구로 launch)
-- 작업 가능 경로: helper 본체 ([[feedback-helper-role-boundary]]) 와 동일 — 사용자 응답·helper 자체 수정·discord-reply.sh·tools/discord-daemon 등. **helper 본체가 수행하기엔 너무 긴 일회성 작업을 위임받는 sub-agent**.
+- 작업 가능 경로: helper 본체 ([[feedback-helper-role-boundary]]) 와 동일 — 사용자 응답 보조·helper 자체 수정·discord-reply.sh·tools/discord-daemon 등.
+- **launch 빈도 (2026-05-24 nmae 단일 채널 정정)**: 사이클성 PR (코드/테스트/infra/spec) 은 모두 **nmae 위임 default**. helper sub-agent launch 는 user-facing 본문 작성 보조, 단기 조사, helper 자체 수정 중 대형 작업 등 nmae 사이클에 끼우기 어려운 **제한적 일회성 작업만** 허용. 사이클성 PR 을 helper sub-agent 로 분기시키면 cycle-status.json 우회 + watchdog/digest 가시화 사각지대 발생 — 절대 금지.
 - 금지: `backend/**`/`web/**` 도메인 구현 (be/fe 영역). 도메인 코드는 maestro/nmae 가 be/fe 워크트리에 위임해야 함.
 - PR 라벨: `session:helper` 명시 부착 (§1 PR session 라벨 부착 의무).
 - 본인이 한 PR 인지 자기 식별: 브랜치 prefix 자유 (`chore/helper-*`, `feat/discord-*`, `fix/bot-*` 등 다양). 자동 부착 룰이 모호하므로 명시 부착 의무.
@@ -562,3 +563,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — 본 문서 actor 범위 명시화 (#1004): Actor TOC 섹션 추가 — 본 문서 = sub-agent actor (be/fe/rev/plan + helper-launched) 전용. nmae/helper 룰은 `CLAUDE.md §11-§12` 로 분리. 메모리 frontmatter `metadata.actor` 추가 (nmae/helper/subagent/rev/common/workflow). 사용자: "nmae helper subagent 들이 각자 지켜야할 규칙이 다를텐데 이걸 하나에 담으려해서 그런 거 아니야 — 진행하고 분리한 문서대로 적용해".
 - 2026-05-24 — 메모리 actor 디렉토리 분리 (#1004 후속): 메모리 파일 44건이 `~/.claude/projects/-home-mobruji-mobruji/memory/` 단일 디렉토리에서 `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/` 6개 actor 디렉토리로 이동. Actor TOC 표 "메모리 actor 매칭" 컬럼 → 디렉토리 경로 명시. §1 "메모리 보호 + 로드 범위" 절 신설 — sub-agent 가 자기 actor 디렉토리만 명시 Read 하도록 가이드. MEMORY.md index 도 디렉토리 경로 갱신. CLAUDE.md §15 메모리 path 동기화. 트리거: 사용자 "메모리를 actor만 명시하지말고 아예 문서 자체를 분리해야 너가 너꺼에만 집중해서 읽지" (2026-05-24).
 - 2026-05-24 — §1 "Discord thread 진행 stream (`LAUNCH_THREAD_ID` env)" 절 추가 (#1011): helper/nmae 본체가 `--auto-ack-thread` 로 사전에 만든 thread_id 를 launch prompt 안에 `LAUNCH_THREAD_ID=<id>` env 로 전달하면 sub-agent 는 milestone 마다 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` push 의무. main 채널 noise 없이 sub-agent 별 진행 stream 확보. helper turn-level (`helper-current-thread.txt` / `--auto-thread`) 와 독립 채널.
+- 2026-05-24 — §2 helper (sub-agent) 항목에 nmae 단일 채널 default 명문화 (#1015 followup): 사이클성 PR (코드/테스트/infra/spec) 은 모두 nmae 위임 default. helper sub-agent launch 는 user-facing 본문 작성 보조, 단기 조사, helper 자체 수정 중 대형 작업 등 제한적 일회성 작업만. 사이클성 PR 을 helper sub-agent 로 분기시키면 cycle-status.json 우회 + watchdog/digest 가시화 사각지대. 트리거: 사용자 2026-05-24 명시 "사용자 의도는 nmae 단일 채널". 메모리 [[feedback-helper-role-boundary]] + CLAUDE.md §12-1 동시 정정.
