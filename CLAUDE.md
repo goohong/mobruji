@@ -246,6 +246,11 @@ bot.py `on_message` 가 사용자 메시지 받자마자 1초 generic auto-ack (
 3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문
 4. **(선택) thread 생성** — 장시간 작업 (위임/조사/PR) 일 때만 `discord-reply.sh --auto-ack-thread "🔍 작업 시작 — <한 줄>"` ([[feedback-helper-thread-usage]]). thread_id 를 `~/.mobruji/helper-current-thread.txt` 저장. milestone 마다 `--auto-thread "<진행 1줄>"` stream. 단순 즉답이면 skip.
 5. **처리** — (a) 직접 / (b) nmae·sub-agent 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push
+   - (b) sub-agent launch 시 **per-launch thread 생성 + env 전달** ([[feedback-helper-subagent-launch-thread]], #1011): helper turn 안에서 sub-agent N 개 launch 하면 각 launch 마다 별 thread 를 만들어 sub-agent 가 자기 진행을 stream 한다.
+     1. launch prompt 작성 직전: `LAUNCH_THREAD_ID=$(bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack-thread "🚀 sub-agent launch: <description>")`
+     2. `Agent` tool prompt 본문 첫 줄에 `LAUNCH_THREAD_ID=<id>` env 명시 (sub-agent 가 milestone 마다 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` 호출하도록)
+     3. sub-agent 완료 보고 받으면 helper 본체가 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "✅ 완료: <한 줄>"` 추가 push
+   - 본 룰은 helper turn-level `helper-current-thread.txt` (step 4) 와 **독립 채널** — sub-agent launch 별 thread 는 자기 thread_id 받아 단일 파일 race condition 회피. 상세 sub-agent 측 룰: `docs/ai-harness/12-sub-agent-prompt-template.md §1 Discord thread 진행 stream`.
 6. **본답 push + queue done + 검증** — 본답은 `━━━━━━━━━━━━━━━` 구분선 시작 ([[feedback-helper-discord-newline]] — discord-reply.sh 본답 모드 자동 ZWSP+\n prepend). **자동 reply** ([[feedback-helper-discord-reply-to]]): bot.py 가 `last-user-msg-id.txt` 캐시 + `discord-reply.sh` bare body 모드가 자동 `message_reference` payload 빌드 (#946). 명시적 disable: `--no-reply`. push 후 message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. thread 생성했다면 마지막 `--auto-thread "[done]"` push.
 
 ### 12-4) helper 응답 = Discord raw push ([[feedback-helper-discord-raw]])
