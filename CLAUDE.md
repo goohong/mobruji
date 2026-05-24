@@ -42,7 +42,7 @@
 - `docs/features/` — Feature Spec
 - `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션
 - `tools/cycle-status/` — nmae 가 cycle-status.json 갱신 시 호출하는 헬퍼 (`update.sh` / `validate.sh`)
-- `tools/agent-launch-wrapper.sh` — sub-agent launch 직전 set-active + launch prompt emit (학습 의존 ↓, #1008)
+- `tools/agent-launch-wrapper.sh` — sub-agent launch 직전 set-active + launch prompt emit + per-cycle 채널 launch 알림/thread 자동 push (학습 의존 ↓, #1008 + B2 2026-05-24)
 - `tools/discord-daemon/helper-turn-start.sh` — helper 본체 매 turn 첫 명령 (target freeze + cycle-status 요약 + queue 표시, 학습 의존 ↓, #1014)
 - `tools/rev-queue/` — rev sub-agent 매 사이클 첫 액션 `rev-queue.sh all`
 
@@ -175,7 +175,7 @@ inject 받으면 **다음 turn 시작 즉시** 4단계 순서대로 수행 (누�
 | 단계 | 명령 | 의미 |
 |---|---|---|
 | 1 | 백로그 후보 1개 선정 | 위반 시: 그냥 inject 무시 = 무한 loop |
-| 2 | `bash tools/cycle-status/update.sh <ws> set-active --title "<후보>"` <br>(권장: `bash tools/agent-launch-wrapper.sh <ws> --title "<후보>"` — set-active + launch 안내 한 번에, #1008) | cycle-status.json `in_progress` 채워 idle 분류 탈출 |
+| 2 | `bash tools/cycle-status/update.sh <ws> set-active --title "<후보>"` <br>(권장: `bash tools/agent-launch-wrapper.sh <ws> --title "<후보>"` — set-active + launch 안내 + per-cycle 채널 launch 알림/thread 자동 push 한 번에, #1008 + B2) | cycle-status.json `in_progress` 채워 idle 분류 탈출 + cycle 채널 가시화 |
 | 3 | `Agent` tool 로 sub-agent launch (worktree=`/home/mobruji/mobruji-<ws>`) | 실제 작업 위임 |
 | 4 | `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <후보>"` | 사용자 가시성 |
 
