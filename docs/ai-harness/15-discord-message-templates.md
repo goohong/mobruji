@@ -15,6 +15,52 @@
   3. **maestro 직접 (양방향 채팅)** — 사용자와의 인터랙티브 메시지 (§2-3)
 - **목적**: 일관된 시각 형식으로 (a) 사용자가 모바일에서 한 눈에 상태 파악, (b) maestro이 fetch 시 명령을 안정적으로 인식.
 
+## §1-1 채널 매핑 + 카테고리 (2026-05-24 per-cycle 분리)
+
+사용자 정정 (2026-05-24) 후 사이클 별 채널 신설. Discord 사이드바 카테고리는 3 그룹.
+
+### 카테고리 그룹
+
+| 카테고리 | 의미 | 멤버 채널 |
+|---|---|---|
+| 💬 대화 | 사용자 ↔ helper 양방향 + directive-board | #모부르지 / #모부르지-지시 |
+| 🤖 사이클 | be/fe/rev/plan 사이클 status push 전용 | #모부르지-be / -fe / -rev / -plan |
+| 📊 종합 | cron digest + cross-cycle alert + 알림 | #모부르지-digest / -알림 / -alert |
+
+### 채널 ↔ env 매핑
+
+| 채널 이름 | env 변수 | channel id | 사용 시점 |
+|---|---|---|---|
+| #모부르지 | `MOBRUJI_CHANNEL_ID` | 1506925497651560458 | 사용자 ↔ helper 양방향. bot auto-ack + helper 본답 + AskUser push |
+| #모부르지-지시 | `DIRECTIVE_BOARD_CHANNEL_ID` | (별도 신설) | 사용자 지시 directive-board. `--directive-board` mode (§helper-directive-board) |
+| #모부르지-be | `BE_CHANNEL_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
+| #모부르지-fe | `FE_CHANNEL_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
+| #모부르지-rev | `REV_CHANNEL_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 3단계 e2e 진행 |
+| #모부르지-plan | `PLAN_CHANNEL_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
+| #모부르지-digest | `DIGEST_CHANNEL_ID` | 1507617571384328312 | cron digest 본체 (5분 주기 4 사이클 aggregate) + cross-cycle decision |
+| #모부르지-알림 / -alert | `ALERT_CHANNEL_ID` | (별도) | cycle idle / future-ts ERROR / Claude usage 임계 |
+
+### actor 별 채널 사용 룰
+
+- **nmae 본체**:
+  - sub-agent launch / 완료 / milestone → 해당 cycle channel (BE/FE/REV/PLAN).
+  - cross-cycle / 종합 → DIGEST.
+  - 알림 / escalation → ALERT.
+  - #모부르지 leak 금지 (사용자 응답 전용).
+- **sub-agent (be/fe/rev/plan)**:
+  - 자기 cycle channel 의 thread (`LAUNCH_THREAD_ID`) 에 milestone stream.
+  - 다른 cycle channel push 금지.
+- **helper 본체**:
+  - 사용자 ↔ helper 양방향 #모부르지 (MOBRUJI).
+  - 사용자 지시 등록 #모부르지-지시 (DIRECTIVE_BOARD).
+  - 사이클 별 채널 직접 push 금지 (per-cycle 거울 룰, CLAUDE.md §12-1).
+- **bot.py (cron / watchdog / sync_loop)**:
+  - digest 5분 주기 → DIGEST.
+  - cycle idle / future-ts ERROR → ALERT (fallback DIGEST → MOBRUJI).
+  - directive_board mismatch → cron digest 한 줄 + (잔존 시) ALERT.
+
+상세 룰: 메모리 [[feedback-nmae-per-cycle-channel]] / CLAUDE.md §11-9.
+
 ## §2 메시지 카테고리
 
 ### 2-1) 즉시 이벤트 push (webhook)

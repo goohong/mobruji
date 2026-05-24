@@ -242,6 +242,29 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - 사용자 정정 인용 (2026-05-24): "digest 에는 이미 주기적으로 가는 메세지가 있잖아".
 - 본 룰은 §11-8 ([[feedback-nmae-status-channel]]) 채널 라우팅 룰을 정밀화 — 채널 (= DIGEST) 에 더해 빈도 (manual 자제) 까지 규정.
 
+### 11-10) per-cycle channel 라우팅 (2026-05-24 사이클 별 채널 분리)
+
+- **사이클 별 채널 라우팅** ([[feedback-nmae-per-cycle-channel]]): sub-agent launch / 완료 / milestone / audit 알림 = 해당 cycle 의 전용 채널. DIGEST_CHANNEL_ID 로 묶지 않는다.
+- **채널 매핑** (.env):
+  - be → `BE_CHANNEL_ID=1507987421831233648` (#모부르지-be)
+  - fe → `FE_CHANNEL_ID=1507987424884691015` (#모부르지-fe)
+  - rev → `REV_CHANNEL_ID=1507987428005380106` (#모부르지-rev)
+  - plan → `PLAN_CHANNEL_ID=1507987431331201154` (#모부르지-plan)
+  - 종합 → `DIGEST_CHANNEL_ID=1507617571384328312` (#모부르지-digest, cron + 4 사이클 aggregate 전용)
+- **카테고리** (Discord 사이드바 3 그룹): 💬 대화 / 🤖 사이클 / 📊 종합.
+- **nmae sub-agent launch 시점**: cycle channel 에 첫 알림 push + thread 생성 (`LAUNCH_THREAD_ID`). sub-agent 가 그 thread 안 milestone stream. §11-9 manual 자제 룰의 예외 2 (사용자 인계 직후 1줄 ack) 와 일치하지만, 사이클 별 채널로 분기되는 점에서 정밀화.
+- **종합 채널 사용 시점**: cron digest 본체 / 4 사이클 aggregate / cross-cycle alert 만.
+- **거울 룰**: helper 본체는 사이클 별 채널 알림 자체 push 금지 — §12-1 helper-relay-scope 룰 거울.
+- 사용자 정정 인용 (2026-05-24): "나는 plan채널 be채널 fe채널 뭐 이렇게 다 따로파라고 지시했는데 왜 digest채널에" — generic DIGEST 묶음 처리 사고 박제.
+
+### 11-11) directive-board update flow (2026-05-24 stale 본문 박제)
+
+- **jsonl = source of truth (SoT)** ([[feedback-nmae-directive-board-update-flow]]): `~/.mobruji/directive-board.jsonl` 의 각 entry status 가 단일 진실. Discord 채널 #모부르지-지시 의 메시지 본문은 그 view.
+- **상태 전이 시 즉시 PATCH 의무**: 작업자 (helper / nmae / sub-agent 누구든) 가 PR 머지 / 차단 / 완료 / 재할당 만든 직후 같은 turn 안에 (1) jsonl entry status 갱신 (2) `bash /home/mobruji/.mobruji/discord-reply.sh --update-status <message_id> "<status>" [<pr>]` 호출 (PR #1042 mode) 둘 다 수행.
+- **수동 Discord 본문 edit 금지** — Discord UI 손 수정은 desync. 반드시 `--update-status` mode.
+- **자동화 보조**: bot.py `directive_board_sync_loop` (PR #1041 후속 P11 automation be sub-agent 진행 중) 가 5분 polling 으로 jsonl ↔ Discord 비교 + 자동 PATCH. mismatch 잔존 시 cron digest 에 `directive_board_mismatch=N` 한 줄 표시 (사용자 가시).
+- 사용자 정정 인용 (2026-05-24): "진행상황 변동 없네" — directive-board 본문 stale 사고 박제.
+
 ---
 
 ## 12) helper 전용 룰 (mac maestro 사용자 응답)
@@ -255,6 +278,7 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - **권한 경계** ([[feedback-helper-role-boundary]]): helper 본체 = 사용자 응답 + helper 자체 수정 (룰/CLAUDE.md/메모리/bot.py 사용자 응답 라인). 그 외 (PR 작업/sub-agent launch/대규모 코드 변경) = **nmae 위임 또는 helper sub-agent launch**.
 - **launch 표현**: helper 본체는 sub-agent launch 안 함. "launch 하겠습니다" 표현 금지 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다".
 - **보고/relay 범위** ([[feedback-helper-relay-scope]]): helper 가 만들 thread / Discord push = (a) 사용자가 helper 에 직접 지시한 작업 진행 / (b) helper 가 직접 launch 한 sub-agent stream (`LAUNCH_THREAD_ID`, #1011) — 이 2종만 허용. **nmae 가 launch 한 be/fe/rev/plan sub-agent 디테일 (PR 번호 / milestone / audit) relay 금지** — 그 채널은 nmae 가 직접 송신한다. helper 가 사용자에게 보고할 때는 사용자 지시사항 진행 여부와 막힌 점만 포함하고, nmae 사이클 디테일은 묶어 한 줄 (예: "nmae 가 N건 사이클 진행 중") 이상으로 풀지 않는다.
+- **사이클 별 채널 알림 금지** (per-cycle channel 거울 룰, §11-10 [[feedback-nmae-per-cycle-channel]] 짝): helper 본체는 #모부르지-be / -fe / -rev / -plan 등 사이클 별 채널에 직접 push 하지 않는다. 사이클 별 알림은 nmae / sub-agent 가 직접 cycle channel 사용. helper 가 nmae 의 사이클 진행을 자기 turn 에서 cycle channel 로 옮겨 쓰는 행위는 본 룰 위반.
 
 ### 12-2) ack — bot.py 가 처리 (helper 본체 ack push 폐기, #963)
 
