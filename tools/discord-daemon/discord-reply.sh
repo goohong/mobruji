@@ -119,19 +119,44 @@ fi
 # env 값 추출 헬퍼 — KEY 받아 값 1줄 echo. 따옴표 / CRLF 모두 strip 해서
 # Windows 에서 편집된 .env (CRLF) 도 안전하게 받는다. head -1 로 같은 키
 # 중복 정의 시 첫 줄만.
+#
+# 사고 가드 (#1025 후속, 2026-05-24):
+#   PR #1025 (NOTIFY → DIGEST rename) 머지 후 production .env 에 신규 키
+#   DIGEST_CHANNEL_ID 가 미설정 → `grep -E "^DIGEST_CHANNEL_ID="` 가 no-match
+#   → exit 1 → set -euo pipefail + command substitution 안에서 즉시 스크립트
+#   전체 종료. helper 본답 push 자체가 silent fail. 사용자 "정신 없니" 사고
+#   root cause.
+#
+#   PR #1036 (status-channel) 은 호출자 측에 `|| true` 외부 가드를 도입했으나,
+#   호출자마다 일일이 붙여야 하고 누락 시 동일 사고 재발 (예: TOKEN 호출은
+#   원래 `|| true` 없었음). 본 PR 은 함수 안으로 가드를 이동해 영구 안전화.
+#   기존 호출자 `|| true` 패턴은 멱등하게 호환 (중복 graceful — 무해).
+#
+#   if-then: grep no-match 일 때 pipeline 전체가 fail 로 평가되지 않게 if
+#   조건 안에서 평가. line 변수가 빈 채로 남으면 빈 문자열 출력 후 종료 0.
+#   호출자는 비-빈 문자열 검사만 하면 됨.
 read_env_value() {
   local key="$1"
-  grep -E "^${key}=" "$ENV_PATH" \
-    | head -1 \
-    | cut -d= -f2- \
-    | tr -d '\r' \
-    | tr -d '"' \
-    | tr -d "'"
+  local line=""
+  # grep -E "^KEY=" 가 no-match 면 exit 1 — `if` 조건 안이라 set -e 무력화.
+  # 2>/dev/null: ENV_PATH 가 갑자기 사라지는 race / 권한 문제도 graceful.
+  if line=$(grep -E "^${key}=" "$ENV_PATH" 2>/dev/null | head -1); then
+    printf '%s' "$line" \
+      | cut -d= -f2- \
+      | tr -d '\r' \
+      | tr -d '"' \
+      | tr -d "'"
+  fi
+  # 함수 종료 시 implicit return 0 — 호출자는 비-빈 문자열 검사만 하면 됨.
 }
 
+# TOKEN 호출 — 함수 자체가 graceful 이라 `|| true` 불필요. 빈 값 zero-check 만.
+# (기존 TOKEN 호출은 `|| true` 가 없었음 — DISCORD_BOT_TOKEN 키 부재 시 set -e
+#  로 즉시 죽고 line 아래 명시 에러 메시지가 출력되지 않는 latent bug. 본 fix
+#  로 영구 해결.)
 TOKEN=$(read_env_value DISCORD_BOT_TOKEN)
 if [[ -z "$TOKEN" ]]; then
-  echo "discord-reply.sh: DISCORD_BOT_TOKEN 비어 있음" >&2
+  echo "discord-reply.sh: DISCORD_BOT_TOKEN 비어 있음 ($ENV_PATH 확인)" >&2
   exit 1
 fi
 
