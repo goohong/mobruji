@@ -32,14 +32,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import {
-  QueryClient,
-  QueryClientProvider,
-  type QueryClientConfig,
-} from "@tanstack/react-query";
-import { createElement, type PropsWithChildren } from "react";
 
 import { ApiError } from "@/lib/api/client";
+import {
+  createDeferred,
+  makeQueryClient,
+  makeWrapper,
+} from "@/lib/test-helpers/race-helpers";
 import { useLikesStore } from "@/store/likes";
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useSessionStore } from "@/store/session";
@@ -75,43 +74,9 @@ const toggleBookmarkMock = vi.mocked(toggleBookmark);
 
 const TEST_SONG_ID = 4242;
 
-/**
- * 각 케이스용 QueryClient 를 새로 만들어 retry 를 끈다. 기본 retry=3 이면
- * 401 케이스에서 onError 가 즉시 트리거되지 않아 fake timer 가 의도와 어긋난다.
- */
-function makeQueryClient(): QueryClient {
-  const config: QueryClientConfig = {
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  };
-  return new QueryClient(config);
-}
-
-function makeWrapper(client: QueryClient) {
-  return function Wrapper({ children }: PropsWithChildren) {
-    return createElement(QueryClientProvider, { client }, children);
-  };
-}
-
-/**
- * mutationFn 이 resolve 되기 전까지 안에 머무를 수 있는 deferred 도우미.
- * race / unmount 케이스에서 "응답 도착 시점" 을 우리가 직접 통제한다.
- */
-function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason: unknown) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+// QueryClient / Wrapper / Deferred helper 는 `@/lib/test-helpers/race-helpers` 단일
+// 소스 (PR #1057 refactor) — 기본 default 가 queries/mutations 양쪽 retry=false +
+// retryDelay=0 이라 401 케이스에서 onError 가 즉시 트리거된다.
 
 beforeEach(() => {
   vi.useFakeTimers();

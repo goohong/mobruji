@@ -53,7 +53,6 @@
 
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   cleanup,
@@ -67,6 +66,11 @@ import RecommendPage from "./page";
 import { ApiError } from "@/lib/api/client";
 import { createRecommendation } from "@/lib/api/recommendation";
 import { readVoiceRange } from "@/lib/api/voice-range";
+import {
+  createDeferred,
+  makeQueryClient,
+  makeWrapper,
+} from "@/lib/test-helpers/race-helpers";
 
 const { sessionMock, historyMock } = await vi.hoisted(async () => {
   const sessionHelper = await import(
@@ -207,37 +211,13 @@ function triggerIntersection() {
   }
 }
 
-/**
- * 외부 컨트롤 deferred Promise — PR #1045 / PR #993 / PR #989 동일 패턴.
- * inflight 상태를 임의 길이로 유지해서 race / unmount / 더블 트리거 시나리오를 검증.
- */
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-} {
-  let resolveFn: (value: T) => void = () => undefined;
-  let rejectFn: (error: unknown) => void = () => undefined;
-  const promise = new Promise<T>((res, rej) => {
-    resolveFn = res;
-    rejectFn = rej;
-  });
-  return { promise, resolve: resolveFn, reject: rejectFn };
-}
-
+// deferred / renderWithQueryClient 는 `@/lib/test-helpers/race-helpers` 단일 소스
+// (PR #1057 refactor). 401 payload 는 본 파일이 `{ error: "AUTH" }` 를 의도한
+// 케이스로 likes/bookmarks 의 `{ error: "UNAUTHORIZED" }` 와 의미가 달라 helper 의
+// unauthorizedError 는 사용하지 않고 호출 측에서 `new ApiError(...)` 그대로 빌드.
 function renderWithQueryClient(ui: ReactNode) {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-  function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-  }
-  return render(ui, { wrapper: Wrapper });
+  const client = makeQueryClient();
+  return render(ui, { wrapper: makeWrapper(client) });
 }
 
 /**
@@ -305,7 +285,7 @@ describe("/recommend 페이지 race / 401 / unmount 가드 (PR #1045 후속)", (
     readVoiceRangeMock.mockResolvedValue(defaultVoiceRange("sess-double", 1));
 
     // 1차 페이지는 즉시 응답, 2차 페이지는 deferred 로 inflight 유지.
-    const nextPageDeferred = deferred<ReturnType<typeof buildResponseWithSongIds>>();
+    const nextPageDeferred = createDeferred<ReturnType<typeof buildResponseWithSongIds>>();
     createRecommendationMock
       .mockResolvedValueOnce(buildResponseWithSongIds(1, [10, 20]))
       .mockImplementationOnce(() => nextPageDeferred.promise);
@@ -355,7 +335,7 @@ describe("/recommend 페이지 race / 401 / unmount 가드 (PR #1045 후속)", (
     sessionMock.set({ sessionId: "sess-busy", voiceRangeId: 2 });
     readVoiceRangeMock.mockResolvedValue(defaultVoiceRange("sess-busy", 2));
 
-    const nextDeferred = deferred<ReturnType<typeof buildResponseWithSongIds>>();
+    const nextDeferred = createDeferred<ReturnType<typeof buildResponseWithSongIds>>();
     createRecommendationMock
       .mockResolvedValueOnce(buildResponseWithSongIds(1, [11]))
       .mockImplementationOnce(() => nextDeferred.promise);
@@ -465,7 +445,7 @@ describe("/recommend 페이지 race / 401 / unmount 가드 (PR #1045 후속)", (
     );
 
     const firstDeferred =
-      deferred<ReturnType<typeof buildResponseWithSongIds>>();
+      createDeferred<ReturnType<typeof buildResponseWithSongIds>>();
     createRecommendationMock.mockImplementationOnce(
       () => firstDeferred.promise,
     );
@@ -511,7 +491,7 @@ describe("/recommend 페이지 race / 401 / unmount 가드 (PR #1045 후속)", (
     );
 
     const nextDeferred =
-      deferred<ReturnType<typeof buildResponseWithSongIds>>();
+      createDeferred<ReturnType<typeof buildResponseWithSongIds>>();
     createRecommendationMock
       .mockResolvedValueOnce(buildResponseWithSongIds(1, [201]))
       .mockImplementationOnce(() => nextDeferred.promise);

@@ -37,15 +37,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import {
-  QueryClient,
-  QueryClientProvider,
-  useQuery,
-  type QueryClientConfig,
-} from "@tanstack/react-query";
-import { createElement, type PropsWithChildren } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
+import {
+  createDeferred,
+  makeQueryClient,
+  makeWrapper,
+} from "@/lib/test-helpers/race-helpers";
 
 // API client 를 mock — 실제 fetch 발생 시 happy-dom 환경에서 noise / wall-clock
 // 변동성이 race 검증을 흐린다. 본 테스트 범위는 React Query 동작이지 fetch 가 아님.
@@ -64,48 +63,11 @@ const readVoiceRangeHistoryMock = vi.mocked(readVoiceRangeHistory);
 
 const TEST_SESSION_ID = "sess-race-guard";
 
-/**
- * 각 테스트마다 새 QueryClient — retry 가 1 이면 401 케이스에서 1.2s 백오프 후 재시도가
- * 발생해 race 검증과 fake timer 결합이 어려워진다. 본 테스트는 retry: 0 으로 단순화하고,
- * "retry 가 0 회 호출되는지" 자체를 검증해 본 페이지의 retry: 1 정책 위반은 별도 page
- * test 책임으로 둔다.
- */
-function makeQueryClient(): QueryClient {
-  // retry: 1 + retryDelay: 0 — hook 본체의 retry: 1 정책을 그대로 reflect 하면서
-  // 401 케이스 의 wall-clock 을 0 으로 압축. default retryDelay (지수 백오프 1000ms+)
-  // 가 적용되면 waitFor default timeout(1000ms) 안에 isError 가 true 가 되지 않는다.
-  // 본 테스트는 retry "횟수" 검증이 목표 — wall-clock 은 비관심.
-  const config: QueryClientConfig = {
-    defaultOptions: {
-      queries: { retry: false, retryDelay: 0 },
-      mutations: { retry: false },
-    },
-  };
-  return new QueryClient(config);
-}
-
-function makeWrapper(client: QueryClient) {
-  return function Wrapper({ children }: PropsWithChildren) {
-    return createElement(QueryClientProvider, { client }, children);
-  };
-}
-
-/**
- * mutationFn / queryFn 응답 시점을 테스트가 직접 통제할 수 있게 하는 deferred.
- */
-function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (reason: unknown) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+// QueryClient / Wrapper / Deferred helper 는 `@/lib/test-helpers/race-helpers` 단일
+// 소스 (PR #1057 refactor). default 가 queries.retry=false + queries.retryDelay=0 +
+// mutations.retry=false — race 친화. 호출 측이 hook 의 retry: 1 정책 자체를 검증하고
+// 싶다면 makeQueryClient({ defaultOptions: { queries: { retry: 1, retryDelay: 0 } } })
+// 로 override 가능.
 
 /**
  * HistoryPage 의 useQuery 호출 시그니처를 그대로 모사하는 helper hook.
