@@ -4,7 +4,8 @@ name: Auto Set Session on Project
 #
 # 매핑 룰 (2026-05-21 본진 일괄 분류 패턴과 동일):
 #   1) 라벨 session:backend|frontend|review|plan 우선 → 해당 Session
-#   2) 라벨 없으면 — 폴백:
+#   2) 라벨 session:helper → infra (보드 Session field 에 helper 옵션 없음 — infra 로 흡수, 2026-05-24 #1002)
+#   3) 라벨 없으면 — 폴백:
 #      - PR 제목 prefix "release:" → release
 #      - 라벨 scope:web → frontend
 #      - 라벨 scope:song|voice|recommendation|user|feedback → backend
@@ -116,6 +117,13 @@ jobs:
             if (labels.includes('session:plan')) {
               core.setOutput('option_id', options.plan);
               core.setOutput('reason', 'label session:plan');
+              return;
+            }
+            if (labels.includes('session:helper')) {
+              // 보드 Session field 에 helper 옵션 없음 — infra 로 흡수.
+              // 별도 helper 옵션을 추가하려면 보드에서 신설 후 OPTION_HELPER env 추가.
+              core.setOutput('option_id', options.infra);
+              core.setOutput('reason', 'label session:helper → infra (no helper option on board)');
               return;
             }
 

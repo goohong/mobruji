@@ -1,6 +1,6 @@
 # Sub-Agent Prompt Template
 
-> maestro(`mobruji` 워크트리)이 be/fe/rev/plan 서브에이전트를 `Agent` 도구로 launch할 때 매번 반복되는 공통 룰을 코드화한 문서.
+> maestro(`mobruji` 워크트리)이 be/fe/rev/plan/helper 서브에이전트를 `Agent` 도구로 launch할 때 매번 반복되는 공통 룰을 코드화한 문서.
 > sub-agent prompt에 매번 300+ 줄을 박지 말고, **이 문서를 참조하라**고만 적는다.
 
 ## 사용법
@@ -8,7 +8,7 @@
 maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는다:
 
 ```
-공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.
+공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan|helper>.
 ```
 
 그 외 prompt 본문은 **이번 사이클 한정 작업 지시**(이슈 번호/구체 요구사항/완료 조건)만 담는다.
@@ -138,9 +138,37 @@ gh pr ready <PR번호>   # draft → ready for review
 - [ ] `scope:*` 라벨 1개
 - [ ] `ai-generated` + `ai:claude` 라벨
 - [ ] 보호 영역 변경 시 `needs-human-review`
-- [ ] (해당 세션) `session:backend|frontend|review`
+- [ ] **`session:<자기 sub-agent>` 라벨 명시 부착** — 아래 §PR session 라벨 부착 의무 참조
 
 상세: `CLAUDE.md §7-2 PR 생성 직후`.
+
+### PR session 라벨 부착 의무 (2026-05-24, #1002)
+
+**문제**: 2026-05-24 사용자 정정 — 머지 43 PR 중 session 라벨 부착 7건 (16%). `.github/workflows/auto-label.yml` 가 `backend/` only / `web/` only 만 파일 경로로 추론, 그 외 (infra/docs/tools) 는 sub-agent 가 직접 부착해야 함.
+
+**룰**: 모든 sub-agent 가 PR 생성 직후 자기 sub-agent 정체를 label 로 명시한다.
+
+| sub-agent 역할 | 부착할 session 라벨 |
+|---|---|
+| be sub-agent | `session:backend` |
+| fe sub-agent | `session:frontend` |
+| rev sub-agent | `session:review` |
+| plan sub-agent | `session:plan` |
+| helper sub-agent | `session:helper` |
+
+표준 명령 (PR 생성 직후 1회):
+```bash
+gh pr edit <N> --add-label session:<be|fe|rev|plan|helper>
+```
+
+또는 `gh pr create --label` 호출 시 함께 부여 (PR 생성과 동시에 박는 게 가장 안전):
+```bash
+gh pr create --base develop --title "..." --label "type:feat,scope:infra,ai-generated,ai:claude,session:helper" --body "..."
+```
+
+**워크플로우 자동 부착 (fallback)**: `.github/workflows/auto-label.yml` 가 파일 경로 기반으로 자동 부착하지만 (`backend/` only → `session:backend`, `web/` only → `session:frontend`, `tools/` 우세 → `session:helper`, `docs/` only → `session:plan`), **sub-agent 명시 부착이 우선**이며 fallback 은 누락 안전망에 가깝다. helper sub-agent 가 `tools/` + `docs/` 혼합 PR 작성 시처럼 추론 모호한 경우 명시 부착 필수.
+
+**부착 안 하면**: digest cycle counter 분류 부정확 + Projects v2 보드 Session field 누락 + 사용자가 "어떤 sub-agent 가 작업한 PR" 인지 트래킹 불가.
 
 ### 완료 보고 형식
 sub-agent가 maestro에 회신할 때 다음을 포함:
@@ -376,6 +404,13 @@ bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all
 - 금지: `backend/**`/`web/**` 구현 코드 (구현은 be/fe 담당)
 - ADR/spec 작성 시 `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md` 규약 준수
 
+### helper (sub-agent)
+- 워크트리: `/home/mobruji/mobruji/.claude/worktrees/agent-<id>` (격리된 worktree, helper 본체가 `Agent` 도구로 launch)
+- 작업 가능 경로: helper 본체 ([[feedback-helper-role-boundary]]) 와 동일 — 사용자 응답·helper 자체 수정·discord-reply.sh·tools/discord-daemon 등. **helper 본체가 수행하기엔 너무 긴 일회성 작업을 위임받는 sub-agent**.
+- 금지: `backend/**`/`web/**` 도메인 구현 (be/fe 영역). 도메인 코드는 maestro/nmae 가 be/fe 워크트리에 위임해야 함.
+- PR 라벨: `session:helper` 명시 부착 (§1 PR session 라벨 부착 의무).
+- 본인이 한 PR 인지 자기 식별: 브랜치 prefix 자유 (`chore/helper-*`, `feat/discord-*`, `fix/bot-*` 등 다양). 자동 부착 룰이 모호하므로 명시 부착 의무.
+
 ## 3) maestro sub-agent launch 시 prompt 예시
 
 좋은 예시:
@@ -461,3 +496,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — §1 nmae watchdog inject 대응 의무 절차 추가: inject 받으면 (1) 백로그 선정 → (2) `update.sh set-active` → (3) Agent launch → (4) Discord push 4단계 순서 명문화. escalation 임계 명시 (3회 연속 inject + in_progress NULL → MOBRUJI_CHANNEL_ID 사용자 직접 push). 트리거: watchdog detect 정상이나 nmae 가 inject 받고 행동 안 함 → 무한 idle inject loop (이슈 #972).
 - 2026-05-24 — §1 cycle-status.json 보호 절 추가: sub-agent 가 `~/.mobruji/cycle-status.json` 직접 수정 금지, `tools/cycle-status/update.sh` 헬퍼 경유. 4-way 룰 sync audit (#973) 발견 — 기존엔 nmae 만 인지, sub-agent prompt 룰에 부재.
 - 2026-05-24 — §1 "sub-agent 자율 결정 (사용자 없는 것처럼)" 절 추가: 사용자 결정 wait state 금지 (금지 표현 + 결정 책임 순서 명시). watchdog escalation 메시지의 "사용자 확인 필요" → "가시화 알림" 표현 정정 동반 (`bot.py` `CYCLE_INJECT_ESCALATION_MESSAGE_TEMPLATE`). 트리거: 2026-05-24 사용자 "나는 없다고 생각해야돼 걔네는" (#981). 메모리 [[feedback-sub-agent-no-user-wait]] 영속화.
+- 2026-05-24 — §1 PR session 라벨 부착 의무 절 추가 + §2 helper sub-agent 역할 추가: sub-agent (be/fe/rev/plan/helper) 가 PR 생성 직후 `session:<자기 sub-agent>` 라벨 명시 부착 의무. `.github/workflows/auto-label.yml` 가 backend/only · web/only · tools/우세 · docs/only 추론 fallback (sub-agent 명시 우선). `session:helper` 라벨 신설. 트리거: 머지 43 PR 중 7건 (16%) 만 session 라벨 — 36건 누락. 사용자 정정 "각 PR이 무슨 agent가 작업했는지 라벨 제대로 안 붙어있어?" (이슈 #1002).
