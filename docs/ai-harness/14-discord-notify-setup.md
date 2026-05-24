@@ -157,7 +157,62 @@ GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 �
 
 지금은 push만으로도 "사용자가 외출 중 사이클 진행을 인지하고 귀가 후 결정"하는 흐름이 가능하다.
 
-## 9) maestro 사이클 트레일 push 룰
+## 9) `.env.example` ↔ production `.env` 동기화 절차
+
+### 9-1) 왜 필요한가 (2026-05-24 PR #1025 사고 박제)
+
+PR #1025 (`chore(infra): NOTIFY_CHANNEL_ID → DIGEST_CHANNEL_ID env rename`) 머지 시 `.env.example` 에는 `DIGEST_CHANNEL_ID=` 키가 추가됐으나 NCP production `.env` (`/home/mobruji/mobruji/tools/discord-daemon/.env`) 에는 동기화되지 않아 다음 silent fail 발생:
+
+- `discord-reply.sh` 가 `DIGEST_CHANNEL_ID` 미존재 + fallback chain 미작동 경로로 exit 1
+- helper 본체가 Discord 채널로 본답을 push 하지 못함
+- 사용자는 결과를 받지 못하고 "정신 없니" 사고로 root cause 확인 요청
+
+PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 운영자 액션이며, 누락 시 daemon/스크립트가 **silent 하게 실패**한다. 따라서 `.env*` 변경 PR 머지 직후 동기화는 **의무 절차**다.
+
+### 9-2) 운영자 동기화 체크리스트 (`.env*` 변경 PR 머지 직후)
+
+1. NCP 호스트로 SSH 접속 후 워크트리 이동:
+   ```bash
+   cd /home/mobruji/mobruji
+   git fetch origin && git checkout develop && git pull --ff-only
+   ```
+2. `.env.example` vs production `.env` diff 확인:
+   ```bash
+   diff /home/mobruji/mobruji/tools/discord-daemon/.env.example \
+        /home/mobruji/mobruji/tools/discord-daemon/.env
+   ```
+3. 신규/rename 된 키만 production `.env` 에 추가 (실제 값은 운영 plan 따라 채움. 비밀 값은 secret 저장소에서 가져옴).
+4. daemon 재시작:
+   ```bash
+   sudo systemctl restart mobruji-discord-bridge
+   ```
+5. 신규 env 인식 확인 (반드시 read-back 검증, 가정 금지 — `CLAUDE.md §16`):
+   ```bash
+   sudo journalctl -u mobruji-discord-bridge -n 30 --no-pager
+   ```
+   - 신규 키 관련 log 라인 (예: `digest_loop launched: channel=...`) 존재 확인.
+   - 누락 시 `.env` 값 / 권한 / typo / fallback 로그 순으로 root cause 추적.
+
+### 9-3) 예외 — secret 키는 manual 입력
+
+- `DISCORD_BOT_TOKEN` 등 시크릿 키는 **automation 금지** (자동 diff 알림에도 값 포함 금지).
+- 운영자가 secret 저장소 (1Password / NCP secret 등) 에서 직접 복사·붙여넣기.
+- 시크릿 키가 추가/rotation 된 PR 은 `needs-human-review` 라벨 + 본문에 운영자 액션 명시 의무.
+
+### 9-4) drift 자동 감지 후보 (다음 사이클)
+
+운영자 수동 동기화 까먹기 방지를 위한 자동화 후보 (본 문서 §9-2/9-3 은 docs SoT, 자동화 구현은 별도 사이클):
+
+| 옵션 | 위치 | 트리거 | 동작 |
+|---|---|---|---|
+| GitHub Actions | `.github/workflows/env-drift-check.yml` (신규) | `.env.example` 변경 PR 머지 직후 | 운영자에게 Discord push ("동기화 필요 — diff 첨부") |
+| daemon boot diff | `tools/discord-daemon/check_env_drift.py` (신규) | bot.py on_ready 또는 주기 polling | `.env.example` vs `.env` diff 신규 키 발견 시 DIGEST 채널 push |
+
+값 자체는 절대 push 금지 — **키 이름과 누락 여부만** push. PR #1025 같은 rename 사고는 키 이름 diff 만으로도 충분히 감지 가능.
+
+본 문서는 docs sync 만 다루며, 자동화 PR 은 be/infra 사이클에서 별도 issue + spec 발의 후 진행.
+
+## 10) maestro 사이클 트레일 push 룰
 
 이 문서는 **이벤트 → webhook → 채널** 흐름을 정형화한다. 그 위에 **maestro가 자기 사이클을 GitHub events로 expose하는 의무 룰**은 `docs/features/discord-status-push.md` 에서 다룬다. 두 문서 관계:
 
