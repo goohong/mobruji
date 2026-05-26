@@ -67,6 +67,9 @@ ADR-0019 + `event-action-mapping.md` 결정의 실행 plan. 사용자 strategic 
 | 1.3 | discord-reply.sh utf-8 graceful — bash heredoc 안 한글 encoding 사고 가드 | fix(infra): discord-reply.sh utf-8 fallback (현 forum-post 에서 한글 깨짐 사례) | helper |
 | 1.4 | GitHub `pull_request.closed && merged` webhook → bot.py /webhook endpoint → event 5 즉시 trigger (5분 race → 5초) | feat(infra): GitHub webhook listener for pr_merged (event 5 realtime) | be |
 | 1.5 | `clear-pre-hook.sh` 구현 (PR #1066 spec) — directive 대기 0건 check + handoff template auto-write | feat(infra): clear-pre-hook implementation (event 8 enforce) | helper |
+| 1.6 | **자동 머지 + stale escalation + cycle backlog forum thread** — 사용자 정정 (2026-05-26): `reviewed:claude` PR 머지 누락 / CONFLICTING 2일+ stale / 백로그 forum 미사용. 5 hook 묶음 (`auto-merge-on-rev-pass.yml` + `stale-pr-watch.yml` + `discord-reply.sh --cycle-backlog-upsert` + `tools/cycle-backlog/upsert.sh` + `agent-launch-wrapper.sh --refresh-backlog` + `rev-stage2-post-merge.yml`) | feat(infra): cycle-backlog + auto-merge + stale escalation 5 hook | helper |
+
+상세 spec: `docs/features/cycle-backlog-and-auto-merge-hooks.md`.
 
 **검증 (단계 1 e2e)**:
 - 사용자 directive 메시지 1건 보내 → 5초 내 forum-post + jsonl 등록 자동 확인 (stopwatch).

@@ -1,0 +1,92 @@
+name: Rev Stage 2 Post-Merge Audit Queue
+
+# PR 머지 (develop base) 직후 rev sub-agent 의 단계 2 audit 큐에 추가.
+#
+# 배경 (2026-05-26 사용자 정정):
+#   "관리가 안되면 머지 후에 rev 가 리뷰하지도 않을 거 같은데" — 머지 후 rev 단계 2
+#   audit 가 학습 의존 → 누락. rev sub-agent 가 매 사이클 첫 액션으로
+#   `tools/rev-queue/rev-queue.sh stage2` 호출 룰 ([[feedback-rev-e2e-always]]) 는
+#   이미 있지만, 머지 시점에 명시적으로 stage2.jsonl 에 append 하는 source 가 없음 →
+#   본 hook 이 그 source 역할.
+#
+# 트리거:
+#   - pull_request: closed (base=develop) — 머지/cancel 모두 잡고 merged 체크.
+#
+# 동작:
+#   - merged=true 인 PR 만 처리.
+#   - PR 번호 / merge_commit_sha / merged_at / labels 를 GITHUB_OUTPUT 으로 expose.
+#   - rev sub-agent 가 `rev-queue.sh stage2` 호출 시 GitHub API 로 base=develop +
+#     merged + 라벨 `rev-post-merge-pass` 없는 PR 목록을 산출 — 본 workflow 는
+#     append 시점을 표시하는 *알림* + summary 역할 (실제 큐 산출은 rev-queue.sh).
+#   - 옵션: DISCORD_WEBHOOK_REV_STAGE2 secret 있으면 #모부르지-rev 채널에
+#     "stage 2 audit 큐 추가 — PR #N" push.
+#   - bot.py `rev_post_merge_audit_loop` (기존) 가 1h interval polling 으로 같은
+#     기능 cover — 본 workflow 는 *즉시성* 보강 (머지 직후 push).
+#
+# 라벨 보호:
+#   - 본 workflow 는 .github/workflows/** 보호 영역 → 신설 PR 은
+#     `needs-human-review` 라벨 필수.
+#
+# 관련:
+#   - 메모리 [[feedback-rev-e2e-always]]
+#   - tools/rev-queue/rev-queue.sh stage2
+#   - bot.py rev_post_merge_audit_loop (이미 있음)
+#   - 사용자 정정 (2026-05-26 12:24 KST)
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: read
+  contents: read
+  issues: write
+
+jobs:
+  enqueue:
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const prNum = pr?.number;
+            const sha = pr?.merge_commit_sha;
+            const mergedAt = pr?.merged_at;
+            const labels = (pr?.labels || []).map(l => l.name);
+
+            core.info(`PR #${prNum} merged at ${mergedAt} (sha=${sha?.slice(0,7)})`);
+            core.info(`Labels: ${labels.join(', ')}`);
+
+            // 이미 rev-post-merge-pass 라벨 있으면 skip — 재머지/duplicate run 회피.
+            if (labels.includes('rev-post-merge-pass')) {
+              core.info('rev-post-merge-pass 라벨 이미 있음 — skip');
+              return;
+            }
+
+            // 알림 코멘트 — 사용자 가시 + rev sub-agent 가 다음 사이클에서 잡음.
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNum,
+                body:
+                  `📋 rev stage 2 audit 큐에 추가됨 (auto, 머지 직후).\n\n` +
+                  `다음 rev 사이클이 \`tools/rev-queue/rev-queue.sh stage2\` 호출 시 잡아냄.\n` +
+                  `통과 시 \`rev-post-merge-pass\` 라벨 부착됩니다.\n\n` +
+                  `workflow: \`${context.workflow}\` (run #${context.runId})`,
+              });
+            } catch (e) {
+              core.warning(`코멘트 추가 실패: ${e.message}`);
+            }
+
+            await core.summary
+              .addHeading('Rev Stage 2 Post-Merge Audit Queue')
+              .addRaw(`PR: #${prNum}\n\n`)
+              .addRaw(`merged_at: \`${mergedAt}\`\n\n`)
+              .addRaw(`labels: \`${labels.join(', ')}\`\n\n`)
+              .addRaw('rev sub-agent 가 다음 사이클에 stage2 큐에서 본 PR 을 잡아 audit 수행.\n')
+              .write();

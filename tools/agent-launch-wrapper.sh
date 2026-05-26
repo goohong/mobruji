@@ -21,7 +21,16 @@
 #   tools/agent-launch-wrapper.sh <worktree> --title "..." [--task "..."] \
 #       [--description "..."] \
 #       [--echo-prompt "Agent 도구 launch 시 사용할 prompt 본문"] \
-#       [--no-cycle-push]
+#       [--no-cycle-push] \
+#       [--refresh-backlog]
+#
+# --refresh-backlog (2026-05-26 사용자 정정 박제):
+#   launch 직전 `tools/cycle-backlog/upsert.sh <worktree>` 호출 → cycle forum 의
+#   `[BACKLOG] <worktree>` thread 를 GitHub PR/issue 기반 markdown 으로 upsert.
+#   sub-agent 가 launch 시점에 자기 cycle 의 백로그 thread 를 보고 작업 안 까먹게
+#   하는 핵심 hook. graceful — wrapper 의 실패가 wrapper 자체 fail 시키지 않음
+#   (Agent launch 자체가 우선). CYCLE_BACKLOG_REFRESH_DEFAULT=1 env 면
+#   --refresh-backlog 가 default ON.
 #
 # 흐름:
 #   1) `tools/cycle-status/update.sh <worktree> set-active --title "..." [--task "..."]`
@@ -73,7 +82,8 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: agent-launch-wrapper.sh <worktree> --title "..." [--task "..."] \
-           [--description "..."] [--echo-prompt "..."] [--no-cycle-push]
+           [--description "..."] [--echo-prompt "..."] [--no-cycle-push] \
+           [--refresh-backlog | --no-refresh-backlog]
 
   <worktree>            be | fe | rev | plan
   --title TEXT          cycle-status.json in_progress.title 로 기록 (필수).
@@ -81,11 +91,14 @@ usage: agent-launch-wrapper.sh <worktree> --title "..." [--task "..."] \
   --description TEXT    선택. 채널 launch 알림 본문 (부재 시 title 사용).
   --echo-prompt TEXT    선택. 본문을 stdout 으로 emit (nmae 가 Agent 도구 prompt 로 사용).
   --no-cycle-push       per-cycle 채널 push 단계 skip (테스트 / 채널 미설정 환경).
+  --refresh-backlog     launch 직전 tools/cycle-backlog/upsert.sh 호출 (graceful).
+  --no-refresh-backlog  CYCLE_BACKLOG_REFRESH_DEFAULT=1 일 때 본 호출만 skip.
 
 환경:
-  CYCLE_STATUS_PATH         (default: ~/.mobruji/cycle-status.json)
-  DISCORD_REPLY_SH          (default: ~/.mobruji/discord-reply.sh)
-  AGENT_LAUNCH_NO_DISCORD=1 push 단계 완전 skip (--no-cycle-push 와 동등)
+  CYCLE_STATUS_PATH               (default: ~/.mobruji/cycle-status.json)
+  DISCORD_REPLY_SH                (default: ~/.mobruji/discord-reply.sh)
+  AGENT_LAUNCH_NO_DISCORD=1       push 단계 완전 skip (--no-cycle-push 와 동등)
+  CYCLE_BACKLOG_REFRESH_DEFAULT=1 --refresh-backlog default ON
 USAGE
   exit 2
 }
@@ -110,6 +123,7 @@ TASK=""
 DESCRIPTION=""
 ECHO_PROMPT=""
 NO_CYCLE_PUSH=0
+REFRESH_BACKLOG="${CYCLE_BACKLOG_REFRESH_DEFAULT:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -131,6 +145,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-cycle-push)
       NO_CYCLE_PUSH=1
+      ;;
+    --refresh-backlog)
+      REFRESH_BACKLOG=1
+      ;;
+    --no-refresh-backlog)
+      REFRESH_BACKLOG=0
       ;;
     -h|--help)
       usage
@@ -166,6 +186,28 @@ fi
 if ! "$UPDATE_SH" "${UPDATE_ARGS[@]}" >&2; then
   echo "ERROR: cycle-status update.sh 호출 실패 — Agent launch 차단" >&2
   exit 4
+fi
+
+# ─── (선택) cycle 백로그 refresh — 2026-05-26 사용자 정정 박제 ───────────────
+#
+# 사용자: "각 agent 가 자기 계획이 있어야지. 백로그 보면서 작업 안 까먹고 다
+# 진행하고." → launch 직전 backlog forum thread 를 GitHub 상태 기반으로 upsert.
+# sub-agent 가 launch 즉시 자기 cycle 의 backlog thread 를 보고 시작.
+#
+# graceful: backlog upsert 실패는 wrapper fail 시키지 않음 — Agent launch 가 우선.
+if [[ "$REFRESH_BACKLOG" -eq 1 ]]; then
+  BACKLOG_SH="$SCRIPT_DIR/cycle-backlog/upsert.sh"
+  if [[ -x "$BACKLOG_SH" ]]; then
+    if BACKLOG_THREAD_ID=$("$BACKLOG_SH" "$WORKTREE" 2>/dev/null); then
+      if [[ -n "$BACKLOG_THREAD_ID" ]]; then
+        echo "agent-launch-wrapper.sh: backlog upsert OK (worktree=$WORKTREE, thread=$BACKLOG_THREAD_ID)" >&2
+      fi
+    else
+      echo "agent-launch-wrapper.sh: backlog upsert 실패 (graceful — Agent launch 진행)" >&2
+    fi
+  else
+    echo "agent-launch-wrapper.sh: $BACKLOG_SH 실행 불가 — backlog refresh skip" >&2
+  fi
 fi
 
 # ─── stdout: prompt / confirm 한 줄 (기존 호환) ─────────────────────────────
