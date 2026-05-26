@@ -439,3 +439,36 @@ helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또�
 - "cycle-counter init 했으니 digest 표시" → daemon read back 미검증 → 표시 안 됨
 
 관련: [[feedback-verify-and-iterate]] [[feedback-autonomous-default]] [[feedback-keep-promises]] [[feedback-session-close-doc-check]]
+
+## 17) Evidence-based root cause (모든 actor — common)
+
+**사용자 2026-05-26 명시**: 사용자가 trigger 한 작업을 시작할 때 **결과 추정 X**. 기록 / 히스토리(git / 메모리 / Discord / journal / PR / queue / tmux pane)를 먼저 분석해 root cause 를 확정한 뒤 작업한다. "메모리 또 박제" 같은 학습 의존 핑계 금지.
+
+### 룰
+- 사용자 trigger → (1) **evidence 수집** → (2) root cause 확정 → (3) 작업.
+- "아마 …일 것" / "보통 …이니" / "지난 번에 …였으니" 같은 추정 첫 답 금지.
+- 같은 사고가 두 번째면 박제 만으로 끝내지 않고 **강제 메커니즘** (hook / wrapper / system prompt) 까지 같이 제안.
+
+### Evidence 수집 채널 (작업 trigger 별)
+
+| trigger | 우선 채널 |
+|---|---|
+| "왜 안 됨" / "방금 …이 망가짐" | journal (`sudo journalctl -u <svc> --since "10 min ago"`) → PR head commit → git log |
+| "사이클이 멈췄음" / "사이클 idle" | `~/.mobruji/cycle-status.json` → `tools/cycle-status/validate.sh` → tmux capture-pane → cron digest |
+| "메시지 못 받음" / "Discord 안 옴" | `~/.mobruji/helper-queue.jsonl` → bot.py journal → discord-reply.sh stdout → `last-user-msg-id.txt` |
+| 룰 변경 요청 | 관련 메모리 file → CLAUDE.md 섹션 → `docs/ai-harness/` / `docs/features/` |
+| 머지 사고 / 회귀 | `git log --oneline -20` + `git show <sha>` + PR rev 코멘트 |
+
+### 위반 예시 (피해야 함)
+- 사용자 "사이클 멈췄음" → "메모리 박제 했으니 다음부터 안 멈출 거예요" (추정 + 학습 의존)
+- 사용자 "PR 못 봤음" → "Discord push 했으니 봤겠죠" (`discord-reply.sh` stdout 미확인)
+- 사용자 "같은 사고 또 발생" → "한 번 더 박제" (강제 메커니즘 제안 누락)
+
+### 메커니즘 단 우선순위 (반복 사고일 때)
+1. system prompt append (sub-agent / helper)
+2. hook (PreToolUse / PostToolUse / Stop)
+3. wrapper script (호출 강제 우회 시 graceful warning)
+4. cron digest 가시화
+5. 메모리 / CLAUDE.md (보조 학습)
+
+관련: [[feedback-evidence-based-root-cause]] [[feedback-verify-and-iterate]] [[feedback-session-persist-rules]]
