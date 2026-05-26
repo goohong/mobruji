@@ -68,6 +68,16 @@ class DirectiveEntry:
     """directive-board.jsonl 1 라인.
 
     필드 누락 / 타입 이상 시 ``parse_directive_line`` 가 None 반환.
+
+    Attributes:
+        thread_id: forum thread snowflake. directive-board 가 forum channel 로
+            전환된 후 (2026-05-24 #17) 모든 entry 가 forum thread starter 이며
+            ``thread_id == message_id`` 가 일반적. PATCH route 가
+            ``/channels/{thread_id}/messages/{thread_id}`` (text channel 시절
+            ``/channels/{board_ch}/messages/{msg_id}`` 와 다름). 빈 문자열이면
+            legacy text channel entry — 호환을 위해 board channel route 사용
+            (#1122 박제 사유: 기존 sync 가 board channel route 로 forum 메시지를
+            PATCH 시도 → 404 무한 반복 → 36 entry 영구 stale 사고).
     """
 
     message_id: str
@@ -77,6 +87,7 @@ class DirectiveEntry:
     owner: str
     related: str
     last_updated_kst: str
+    thread_id: str = ""
 
 
 @dataclass
@@ -133,6 +144,7 @@ def parse_directive_line(line: str) -> DirectiveEntry | None:
         owner=_str_field("owner"),
         related=_str_field("related"),
         last_updated_kst=last_updated.strip(),
+        thread_id=_str_field("thread_id"),
     )
 
 
@@ -193,6 +205,11 @@ def read_state(path: Path) -> dict[str, dict[str, Any]]:
             record["mismatch_count"] = mc
         else:
             record["mismatch_count"] = 0
+        # route_channel_id (#1122) — forum thread route 추적. 옵션 (legacy state
+        # 호환 — 누락 시 None 으로 처리해 route_changed 자동 detect 진입).
+        rc = info.get("route_channel_id")
+        if isinstance(rc, str) and rc.strip():
+            record["route_channel_id"] = rc.strip()
         out[mid] = record
     return out
 
@@ -470,6 +487,7 @@ def sync_once(
         prev = state.get(entry.message_id)
         prev_last = prev.get("last_updated_kst") if prev else None
         prev_status = prev.get("status") if prev else None
+        prev_route_ch = prev.get("route_channel_id") if prev else None
         prev_mismatch_count_raw = prev.get("mismatch_count") if prev else 0
         prev_mismatch_count = (
             prev_mismatch_count_raw
@@ -477,12 +495,47 @@ def sync_once(
             else 0
         )
 
-        # skip — unchanged + previously synced ok.
-        if prev_last == entry.last_updated_kst and prev_status == "ok":
+        # forum-aware PATCH route 결정 (#1122):
+        # - thread_id 가 jsonl 에 있으면 forum thread starter PATCH route:
+        #   PATCH /channels/{thread_id}/messages/{thread_id}
+        # - 빈 문자열이면 legacy text channel route:
+        #   PATCH /channels/{board_channel_id}/messages/{message_id}
+        #
+        # Discord forum 사양: forum thread 의 starter message id == thread id.
+        # 따라서 route channel 은 board channel 이 아니라 thread itself (Discord
+        # 가 thread 를 channel snowflake 처럼 취급).
+        route_channel_id = entry.thread_id if entry.thread_id else channel_id
+
+        # route 가 변경됐는데 prev_status 가 "stale" 이면 → 새 route 로 재시도
+        # 가능성 — counter reset (#1122 사용자 P0 사고 회복 path).
+        # 박제 사유: directive-board 가 forum 채널로 전환 (2026-05-24 #17) 된 후
+        # 기존 sync 가 board channel route 로 PATCH 시도 → 모든 entry 404 →
+        # 36 entry 가 영구 "stale" 마킹 → 사용자 가시화 진행 상황 stuck.
+        # 새 route (thread_id) 로 retry 하기 위해 stale→mismatch (0) 강제.
+        route_changed = (
+            prev_route_ch is not None and prev_route_ch != route_channel_id
+        )
+        if route_changed and prev_status == "stale":
+            logger.info(
+                "directive route change detected msg_id=%s prev_route=%s "
+                "new_route=%s — stale → retry 시도",
+                entry.message_id,
+                prev_route_ch,
+                route_channel_id,
+            )
+            prev_status = None  # 재시도 진입을 위해 stale skip 해제.
+            prev_mismatch_count = 0
+
+        # skip — unchanged + previously synced ok + same route.
+        if (
+            prev_last == entry.last_updated_kst
+            and prev_status == "ok"
+            and not route_changed
+        ):
             result.skipped += 1
             continue
 
-        # skip — unchanged + previously stale (#1068 영구 skip).
+        # skip — unchanged + previously stale + same route (#1068 영구 skip).
         if prev_last == entry.last_updated_kst and prev_status == "stale":
             result.stale += 1
             continue
@@ -494,7 +547,7 @@ def sync_once(
             sleeper(min_interval_seconds)
 
         try:
-            patch_res = actor(channel_id, entry.message_id, body)
+            patch_res = actor(route_channel_id, entry.message_id, body)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "directive PATCH actor 예외 msg_id=%s exc=%s",
@@ -511,6 +564,7 @@ def sync_once(
                 "last_updated_kst": entry.last_updated_kst,
                 "status": "ok",
                 "mismatch_count": 0,
+                "route_channel_id": route_channel_id,
             }
             result.patched += 1
         elif patch_res.mismatch:
@@ -526,19 +580,22 @@ def sync_once(
                     "last_updated_kst": entry.last_updated_kst,
                     "status": "stale",
                     "mismatch_count": counter,
+                    "route_channel_id": route_channel_id,
                 }
                 result.stale += 1
                 logger.warning(
                     "directive PATCH stale 영구 skip msg_id=%s mismatch_count=%d "
-                    "— DIRECTIVE_AUTO_RECREATE 또는 jsonl 수동 조치 필요",
+                    "route_channel=%s — DIRECTIVE_AUTO_RECREATE 또는 jsonl 수동 조치 필요",
                     entry.message_id,
                     counter,
+                    route_channel_id,
                 )
             else:
                 new_state[entry.message_id] = {
                     "last_updated_kst": entry.last_updated_kst,
                     "status": "mismatch",
                     "mismatch_count": counter,
+                    "route_channel_id": route_channel_id,
                 }
                 result.mismatched += 1
                 result.mismatched_ids.append(entry.message_id)

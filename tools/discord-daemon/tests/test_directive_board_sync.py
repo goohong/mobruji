@@ -90,6 +90,36 @@ class ParseDirectiveLineTest(unittest.TestCase):
         self.assertIsNone(dbs.parse_directive_line(""))
         self.assertIsNone(dbs.parse_directive_line("   "))
 
+    def test_thread_id_parsed_when_present(self) -> None:
+        """forum entry — thread_id 필드 파싱 (#1122).
+
+        forum thread starter PATCH route 의 채널 식별자.
+        """
+        line = json.dumps(
+            {
+                "message_id": "1507983360562303209",
+                "thread_id": "1507983360562303209",
+                "last_updated_kst": "2026-05-26 12:00 KST",
+                "summary": "forum entry",
+            }
+        )
+        entry = dbs.parse_directive_line(line)
+        assert entry is not None
+        self.assertEqual(entry.thread_id, "1507983360562303209")
+
+    def test_thread_id_defaults_empty_when_absent(self) -> None:
+        """legacy text channel entry — thread_id 누락 시 빈 문자열 default."""
+        line = json.dumps(
+            {
+                "message_id": "M1",
+                "last_updated_kst": "T1",
+                "summary": "legacy",
+            }
+        )
+        entry = dbs.parse_directive_line(line)
+        assert entry is not None
+        self.assertEqual(entry.thread_id, "")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # read_directive_board
@@ -721,6 +751,212 @@ class SyncOnceTest(unittest.TestCase):
                 sleep_func=lambda s: sleep_calls.append(s),
             )
             self.assertEqual(sleep_calls, [])
+
+    def test_forum_thread_uses_thread_id_as_route(self) -> None:
+        """jsonl entry 에 thread_id 가 있으면 PATCH route 가 thread_id 사용 (#1122).
+
+        Discord forum thread starter PATCH route:
+            PATCH /channels/{thread_id}/messages/{thread_id}
+
+        text channel route (board_channel_id) 와 다르며, 기존 sync 가 board
+        channel route 로 forum starter 를 PATCH 시도해 404 무한 반복 → 36 entry
+        영구 stale 사고 박제.
+        """
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "1507983360562303209",
+                        "thread_id": "1507983360562303209",
+                        "last_updated_kst": "2026-05-26 12:00 KST",
+                        "summary": "forum thread entry",
+                    },
+                ],
+            )
+
+            captured_routes: list[str] = []
+
+            def fake_patch(ch, mid, body):
+                captured_routes.append(ch)
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            result = dbs.sync_once(
+                channel_id="BOARD_CH_777",  # board channel — 사용 안 돼야 함.
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=fake_patch,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(result.patched, 1)
+            # route 가 board channel 이 아니라 thread_id 여야 한다.
+            self.assertEqual(captured_routes, ["1507983360562303209"])
+            loaded = dbs.read_state(state)
+            self.assertEqual(
+                loaded["1507983360562303209"]["route_channel_id"],
+                "1507983360562303209",
+            )
+
+    def test_legacy_text_entry_uses_board_channel_route(self) -> None:
+        """jsonl entry 에 thread_id 가 비어 있으면 board channel route 사용 (legacy)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        # thread_id 없음 — legacy text channel entry.
+                        "last_updated_kst": "T1",
+                        "summary": "legacy text",
+                    },
+                ],
+            )
+
+            captured_routes: list[str] = []
+
+            def fake_patch(ch, mid, body):
+                captured_routes.append(ch)
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            dbs.sync_once(
+                channel_id="BOARD_CH_777",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=fake_patch,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(captured_routes, ["BOARD_CH_777"])
+
+    def test_stale_entry_resets_on_route_change(self) -> None:
+        """route 가 변경되면 stale → retry 자동 해제 (#1122 사고 회복 path).
+
+        시나리오: directive-board 가 forum channel 로 전환 (#17, 2026-05-24) 된
+        후 기존 sync 가 board channel route 로 PATCH 시도 → 모든 entry 404 →
+        영구 stale. 본 PR 이 thread_id route 로 자동 전환할 때 stale 도 강제로
+        retry 진입 가능해야 함.
+        """
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        # 초기에 thread_id 없는 jsonl — board channel route.
+                        "last_updated_kst": "T1",
+                        "summary": "a",
+                    }
+                ],
+            )
+
+            def patch_404(ch, mid, body):
+                return dbs.PatchResult(
+                    status_code=404, ok=False, mismatch=True
+                )
+
+            # 1) 3회 sync_once 호출 — 매번 같은 jsonl, 404 누적 → stale.
+            for _ in range(dbs.MISMATCH_STALE_THRESHOLD):
+                dbs.sync_once(
+                    channel_id="BOARD_CH",
+                    token="x",
+                    jsonl_path=jsonl,
+                    state_path=state,
+                    patch_func=patch_404,
+                    min_interval_seconds=0,
+                )
+            self.assertEqual(dbs.read_state(state)["M1"]["status"], "stale")
+
+            # 2) jsonl 갱신 — thread_id 추가 (forum 전환 시뮬레이션).
+            #    last_updated_kst 는 그대로 (사용자가 jsonl 본문은 안 건드림).
+            _write_jsonl(
+                jsonl,
+                [
+                    {
+                        "message_id": "M1",
+                        "thread_id": "FORUM_THREAD_M1",
+                        "last_updated_kst": "T1",
+                        "summary": "a",
+                    }
+                ],
+            )
+
+            calls: list[tuple[str, str]] = []
+
+            def patch_ok(ch, mid, body):
+                calls.append((ch, mid))
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            # 3) route 변경 detect → stale 자동 해제 + 새 route 로 PATCH 호출.
+            result = dbs.sync_once(
+                channel_id="BOARD_CH",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_ok,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(result.patched, 1)
+            self.assertEqual(calls, [("FORUM_THREAD_M1", "M1")])
+            loaded = dbs.read_state(state)
+            self.assertEqual(loaded["M1"]["status"], "ok")
+            self.assertEqual(
+                loaded["M1"]["route_channel_id"], "FORUM_THREAD_M1"
+            )
+
+    def test_ok_state_skips_when_route_unchanged(self) -> None:
+        """state 가 ok + route 동일 + last_updated 동일 → skip (no PATCH)."""
+        with tempfile.TemporaryDirectory() as tmpd:
+            jsonl, state = self._setup(
+                tmpd,
+                [
+                    {
+                        "message_id": "M1",
+                        "thread_id": "T1_FORUM",
+                        "last_updated_kst": "T1",
+                        "summary": "x",
+                    }
+                ],
+            )
+
+            calls: list[str] = []
+
+            def patch_ok(ch, mid, body):
+                calls.append(ch)
+                return dbs.PatchResult(
+                    status_code=200, ok=True, mismatch=False
+                )
+
+            # 1st run — patch once.
+            dbs.sync_once(
+                channel_id="C",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_ok,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(calls, ["T1_FORUM"])
+            calls.clear()
+
+            # 2nd run — same jsonl, same route → skip.
+            result = dbs.sync_once(
+                channel_id="C",
+                token="x",
+                jsonl_path=jsonl,
+                state_path=state,
+                patch_func=patch_ok,
+                min_interval_seconds=0,
+            )
+            self.assertEqual(result.skipped, 1)
+            self.assertEqual(result.patched, 0)
+            self.assertEqual(calls, [])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
