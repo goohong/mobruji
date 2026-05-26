@@ -1,3 +1,14 @@
+---
+feature: Agent Role Enforcement
+slug: agent-role-enforcement
+status: approved
+owner: plan
+scope: infra
+related_issues: [1124]
+related_prs: [1129, 1135]
+last_reviewed: 2026-05-26
+---
+
 # Agent Role Enforcement — system prompt 강제 메커니즘
 
 > Status: active
