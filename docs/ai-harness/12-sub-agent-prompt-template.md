@@ -281,6 +281,17 @@ sub-agent가 maestro에 회신할 때 다음을 포함:
 - 품질 게이트 통과 여부
 - 보호 영역 변경 여부 + `needs-human-review` 부착 여부
 
+### directive board event-driven sync (#1129)
+sub-agent 가 directive 작업 완료 보고 직전 다음 호출 의무 (`docs/features/directive-board-event-driven-redesign.md` §3 (c)):
+
+```bash
+bash ~/.mobruji/directive_status.sh <directive_id_or_thread_id> completed [pr_url]
+```
+
+본 호출은 jsonl entry status → `완료` + Discord forum 태그 retag + message body update PR URL 포함 을 atomic 으로 수행한다. polling sync_loop 폐기 (#1129) 후 actor 직접 책임. 누락 시 다음 wrapper 실행 시점에 visible warning 발생.
+
+작업 종류가 directive 가 아닌 (단순 사이클 후속 백로그) 경우는 본 호출 skip.
+
 ### 보고 정중체 표현 (helper/사용자 도달 가능)
 sub-agent → maestro 회신은 maestro 가 helper/사용자 Discord push 로 전달될 수 있다. 영어 동사 `push` / `post` / `send` 사용 금지 — 한국어 정중체 사용 ([[feedback-discord-tone-formal]] §발송 표현).
 

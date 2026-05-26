@@ -258,13 +258,23 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - **거울 룰**: helper 본체는 사이클 별 채널 알림 자체 push 금지 — §12-1 helper-relay-scope 룰 거울.
 - 사용자 정정 인용 (2026-05-24): "나는 plan채널 be채널 fe채널 뭐 이렇게 다 따로파라고 지시했는데 왜 digest채널에" — generic DIGEST 묶음 처리 사고 박제.
 
-### 11-11) directive-board update flow (2026-05-24 stale 본문 박제)
+### 11-11) directive-board update flow (2026-05-26 #1129 event-driven 재설계)
 
-- **jsonl = source of truth (SoT)** ([[feedback-nmae-directive-board-update-flow]]): `~/.mobruji/directive-board.jsonl` 의 각 entry status 가 단일 진실. Discord 채널 #모부르지-지시 의 메시지 본문은 그 view.
-- **상태 전이 시 즉시 PATCH 의무**: 작업자 (helper / nmae / sub-agent 누구든) 가 PR 머지 / 차단 / 완료 / 재할당 만든 직후 같은 turn 안에 (1) jsonl entry status 갱신 (2) `bash /home/mobruji/.mobruji/discord-reply.sh --update-status <message_id> "<status>" [<pr>]` 호출 (PR #1042 mode) 둘 다 수행.
-- **수동 Discord 본문 edit 금지** — Discord UI 손 수정은 desync. 반드시 `--update-status` mode.
-- **자동화 보조**: bot.py `directive_board_sync_loop` (PR #1041 후속 P11 automation be sub-agent 진행 중) 가 5분 polling 으로 jsonl ↔ Discord 비교 + 자동 PATCH. mismatch 잔존 시 cron digest 에 `directive_board_mismatch=N` 한 줄 표시 (사용자 가시).
+- **jsonl = source of truth (SoT)** ([[feedback-nmae-directive-board-update-flow]]): `~/.mobruji/directive-board.jsonl` 의 각 entry status 가 단일 진실. Discord 채널 #모부르지-지시 의 메시지 본문 / forum 태그는 그 view.
+- **트리거 3 시점 actor atomic 호출** (사용자 16:21-24 directive — polling sync_loop 폐기, 상세: `docs/features/directive-board-event-driven-redesign.md`):
+
+| 시점 | 호출 | actor |
+|---|---|---|
+| (a) 지시 발생 — directive 분류 시 | `bash ~/.mobruji/directive_append.sh <msg_id> "<title>" [pr_url]` (jsonl append + forum-post atomic) | bot.py `on_message` / helper / nmae |
+| (b) 위임 — sub-agent launch | `bash ~/.mobruji/directive_status.sh <id> in_progress [pr_url]` (jsonl + forum-retag + update-status atomic) | nmae / helper / `agent-launch-wrapper.sh` 강제 |
+| (c) 완료 — sub-agent 완료 보고 / PR 머지 | `bash ~/.mobruji/directive_status.sh <id> completed [pr_url]` | sub-agent (`12-sub-agent-prompt-template.md` 강제) / nmae |
+
+- **수동 Discord 본문 edit 금지** — Discord UI 손 수정은 desync. 반드시 헬퍼 호출.
+- **폐기 (#1129)**: bot.py `directive_board_sync_loop` / `directive_status_sync_loop` 함수 + `~/.mobruji/directive-board-sync.json` 캐시 + cron digest `directive_board_mismatch=N` 한 줄. polling sync 자체가 desync 원인 (사용자 2026-05-26 정정: 자동 PATCH 불완전 + 5분 latency).
+- **누락 검출**: `helper-turn-start.sh` (helper) + `agent-launch-wrapper.sh` (sub-agent launch) wrapper 가 turn / launch 시작 시점에 `directive-board.jsonl` 최근 N=20 entry status ↔ Discord forum 태그 비교 + mismatch 발견 시 stdout visible warning. actor 가 warning 보고 즉시 정정 호출.
+- 1회성 sweep (잔존 mismatch 정리) 는 `docs/features/directive-jsonl-mismatch-sweep.md` PR 에서 별도 처리.
 - 사용자 정정 인용 (2026-05-24): "진행상황 변동 없네" — directive-board 본문 stale 사고 박제.
+- 사용자 정정 인용 (2026-05-26 16:21-24): "polling sync 폐기 — event-driven 재설계, bot.py = dumb conduit, desync 0 목표".
 
 ---
 
@@ -300,7 +310,7 @@ bot.py `on_message` 가 사용자 메시지 받자마자 1초 generic auto-ack (
 2. **target msg freeze** (#987) — `cp ~/.mobruji/last-user-msg-id.txt ~/.mobruji/helper-current-target.txt`. turn 시작 시점 target msg id freeze ([[feedback-helper-reply-target-freeze]]). **wrapper (#1014) 가 자동 수행** — 명시적 호출은 불필요하지만 wrapper 미사용 시 폴백.
 3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문
 4. **(선택) thread 생성** — 장시간 작업 (위임/조사/PR) 일 때만 `discord-reply.sh --auto-ack-thread "🔍 작업 시작 — <한 줄>"` ([[feedback-helper-thread-usage]]). thread_id 를 `~/.mobruji/helper-current-thread.txt` 저장. milestone 마다 `--auto-thread "<진행 1줄>"` stream. 단순 즉답이면 skip.
-5. **처리** — (a) 직접 / (b) nmae·sub-agent 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push
+5. **처리** — (a) 직접 / (b) nmae·sub-agent 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` + `bash ~/.mobruji/directive_status.sh <id> in_progress` (event-driven directive sync, #1129. `agent-launch-wrapper.sh` 가 자동이지만 wrapper 미사용 폴백 명시) / (c) 자체 답 push
    - (b) sub-agent launch 시 **per-launch thread 생성 + 파일 passthrough** ([[feedback-helper-subagent-launch-thread]], #1011 + [[feedback-helper-launch-thread-file-passthrough]], #1021): helper turn 안에서 sub-agent N 개 launch 하면 각 launch 마다 별 thread 를 만들어 sub-agent 가 자기 진행을 stream 한다.
      1. launch prompt 작성 직전: `bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack-thread "🚀 sub-agent launch: <description>"` 호출. 본 script 는 stdout 으로 thread_id 출력 + `~/.mobruji/last-launch-thread.txt` 에 atomic write (#1021).
      2. `Agent` tool prompt 본문에 **thread_id 값을 hardcode 하지 말 것** (#1021 — LLM hallucination 우회). 대신 "milestone 마다 `bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread \"<진행>\"` 호출 (자동으로 `~/.mobruji/last-launch-thread.txt` read)" 만 명시. sub-agent 가 spawn 시점에 helper 가 직전 write 한 파일을 읽어 정확한 thread 에 push.
