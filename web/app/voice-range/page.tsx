@@ -100,17 +100,36 @@ export default function VoiceRangePage() {
       : mutation.error.message
     : null;
 
+  /*
+   * ADR-0018 단계 4 PR 3 — /voice-range 페이지 토큰 swap (homepage PR #1137 패턴).
+   *
+   * swap 한 요소 (first-paint 핵심):
+   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
+   *  2) h1 / 부제 : text-zinc-900 dark:text-zinc-50, text-zinc-600 dark:text-zinc-400 → tokens
+   *  3) auto / manual 카드 2개 : bg-white ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800
+   *     rounded-2xl shadow-sm → tokens (--bg-base / --border / --radius-lg / --shadow-sm)
+   *  4) auto CTA Link : bg-zinc-900 ... dark:bg-zinc-50 → brand-500/600 + shadow-brand
+   *  5) section heading h2 (각 1건) : text-zinc-900 dark:text-zinc-50 → --text-primary
+   *
+   * 미swap (후속 PR 양보):
+   *  - NoteSelect 내부 border / focus 색 (스타일 변경 없이 토큰 매핑 부재)
+   *  - role="alert" 에러 텍스트의 text-red-600 dark:text-red-400 → --danger 토큰 매핑 후속.
+   *  - <Button /> 컴포넌트 — 별도 컴포넌트라 본 페이지 범위 밖.
+   *
+   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
+   * `dark:` prefix 제거.
+   */
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Step 1
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             내 음역대를 알려주세요
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="text-sm text-[var(--text-secondary)]">
             부를 수 있는 가장 낮은 음과 가장 높은 음을 골라주세요. 잘 모르겠다면
             기본값(C3 ~ A4)으로 두고 진행해도 됩니다.
           </p>
@@ -118,20 +137,20 @@ export default function VoiceRangePage() {
 
         <section
           aria-labelledby="voice-range-auto-cta-heading"
-          className="flex flex-col gap-3 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-6 shadow-[var(--shadow-sm)] ring-1 ring-[var(--border)]"
         >
           <h2
             id="voice-range-auto-cta-heading"
-            className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+            className="text-base font-semibold text-[var(--text-primary)]"
           >
             🎤 마이크로 자동 측정
           </h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="text-sm text-[var(--text-secondary)]">
             마이크에 직접 노래를 부르면 최저음/최고음을 자동으로 잡아드려요.
           </p>
           <Link
             href="/voice-range/auto"
-            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--brand-500)] px-6 text-base font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
           >
             자동으로 측정하기
           </Link>
@@ -144,18 +163,18 @@ export default function VoiceRangePage() {
           <div className="space-y-1">
             <h2
               id="voice-range-manual-heading"
-              className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+              className="text-base font-semibold text-[var(--text-primary)]"
             >
               직접 선택
             </h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <p className="text-sm text-[var(--text-secondary)]">
               이미 음역대를 알고 있다면 아래에서 직접 골라주세요.
             </p>
           </div>
 
           <form
             onSubmit={handleSubmit}
-            className="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+            className="flex flex-col gap-6 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-6 shadow-[var(--shadow-sm)] ring-1 ring-[var(--border)]"
           >
             <NoteSelect
               label="최저음"
