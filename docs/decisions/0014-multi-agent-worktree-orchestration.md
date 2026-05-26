@@ -14,7 +14,7 @@ deciders: [@goohong]
 ## Decision
 다중 AI 운영의 default를 다음으로 고정한다:
 
-1. **5 워크트리 구조**: maestro(`mobruji`) 1개 + sub-agent 워크트리 4개(`mobruji-be`, `mobruji-fe`, `mobruji-rev`, `mobruji-plan`). sub-agent 워크트리는 모두 detached HEAD로 둔다 (develop은 maestro 점유).
+1. **4 sub-agent 워크트리 (be/fe/rev/plan) + maestro 오케스트레이션 1개**: 총 5개 워크트리로 구성된다 — maestro(`mobruji`) 1개 + sub-agent 워크트리 4개(`mobruji-be`, `mobruji-fe`, `mobruji-rev`, `mobruji-plan`). sub-agent 워크트리는 모두 detached HEAD로 둔다 (develop은 maestro 점유). ADR-0021 의 "4 워크트리" 표현은 본 ADR 의 sub-agent 워크트리 4개와 같은 의미이며, maestro 워크트리를 합치면 5개가 된다.
 2. **단일 오케스트레이터**: maestro Claude 세션 하나가 `Agent` 도구로 sub-agent를 background 가동한다(`run_in_background: true`). 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
 3. **항시 가동 룰**: maestro는 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상 유지**한다. 1개 완료 통지가 들어오면 같은 워크트리에 즉시 다음 백로그를 launch한다 (워크트리 lock: 동시 2 sub-agent 금지). 백로그 고갈 시에는 즉시 idle로 두지 않고 **발굴 메타 단계**(메모리 §How-to §3 기준 — 직전 사이클 follow-up·rev 코멘트·spec drift·테스트 누락 등 후보 탐색 → 가치 점검 → 새 이슈 등록)를 거쳐 다음 사이클로 연결한다.
 4. **maestro 작업 default = 메타**: maestro는 spec/ADR/메모리/orchestration만 default. 코드/테스트/문서 본문 작성은 sub-agent 위임 (maestro가 직접 하면 4 워크트리 중 하나가 idle).
@@ -55,3 +55,9 @@ deciders: [@goohong]
 - 메모리: `feedback-orchestration-pattern`, `feedback-keep-4-cycles-active`, `feedback-sub-agent-launch-mandatory`, `feedback-worktree-lock`, `feedback-reasoning-chunk-limit`, `feedback-npm-install-symlink-swap`, `feedback-autonomous-wake-pattern`, `project-plan-session-active`, `project-multi-session-setup`, `project-session-handoff-2026-05-23-v4`
 - PR #397, #398 — §11 5워크트리 + 항시 가동 룰 도입
 - PR (본 ADR 신설 PR) — §10 동기화 + ADR-0014 결번 채움
+- ADR-0021 (재확인, docs/decisions/0021-worktree-count-evaluation.md) — 워크트리 개수 평가 + 옵션 A 채택 박제
+
+## 변경 이력
+
+- 2026-05-23 — 최초 작성 (5 워크트리 + maestro 오케스트레이션 default 고정).
+- 2026-05-26 — ADR-0021 cross-ref 추가 + 워크트리 카운트 어휘 통일 ("4 sub-agent 워크트리 + maestro 1개" 풀어쓰기, 의미 동일).
