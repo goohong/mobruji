@@ -122,6 +122,7 @@ def _make_fake_message(
     message.channel = mock.MagicMock()
     message.channel.id = channel_id
     message.channel.send = mock.AsyncMock()
+    message.add_reaction = mock.AsyncMock()
     message.author = mock.MagicMock()
     message.author.id = author_id
     message.author.bot = is_bot
@@ -144,8 +145,14 @@ def _get_on_message_handler(client: object) -> object:
 class BotAutoAckTests(unittest.TestCase):
     """on_message 가 BOT_AUTO_ACK 토글에 따라 generic ack 를 push 하는지 검증."""
 
-    def _build_env(self, *, auto_ack: str = "1") -> dict[str, str]:
-        return {
+    def _build_env(
+        self,
+        *,
+        auto_ack: str = "1",
+        auto_ack_mode: str | None = None,
+        auto_ack_emoji: str | None = None,
+    ) -> dict[str, str]:
+        env: dict[str, str] = {
             "DISCORD_BOT_TOKEN": "t",
             "ALLOWED_USER_IDS": "111",
             "MOBRUJI_CHANNEL_ID": "999",
@@ -163,6 +170,11 @@ class BotAutoAckTests(unittest.TestCase):
             "CONTEXT_CLEAR_TRIGGER_PCT": "95",
             "CONTEXT_CLEAR_HYSTERESIS_PCT": "80",
         }
+        if auto_ack_mode is not None:
+            env["BOT_AUTO_ACK_MODE"] = auto_ack_mode
+        if auto_ack_emoji is not None:
+            env["BOT_AUTO_ACK_EMOJI"] = auto_ack_emoji
+        return env
 
     def _run_handler(
         self,
@@ -210,13 +222,15 @@ class BotAutoAckTests(unittest.TestCase):
             asyncio.run(handler(message))
         return message
 
-    def test_auto_ack_enabled_pushes_generic_ack(self) -> None:
-        env = self._build_env(auto_ack="1")
+    def test_auto_ack_mode_text_pushes_generic_ack(self) -> None:
+        # mode 명시 = text → 기존 채팅 ack push (legacy 경로 회귀 가드).
+        env = self._build_env(auto_ack="1", auto_ack_mode="text")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=1
         )
         self._run_handler(env, message)
         message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
+        message.add_reaction.assert_not_awaited()
 
     def test_auto_ack_disabled_skips_push(self) -> None:
         env = self._build_env(auto_ack="0")
@@ -225,25 +239,66 @@ class BotAutoAckTests(unittest.TestCase):
         )
         self._run_handler(env, message)
         message.channel.send.assert_not_awaited()
+        message.add_reaction.assert_not_awaited()
 
-    def test_auto_ack_default_is_enabled(self) -> None:
+    def test_auto_ack_default_mode_is_reaction(self) -> None:
+        # BOT_AUTO_ACK_MODE 미명시 → default=reaction. channel.send 안 호출, add_reaction 호출.
         env = self._build_env()
-        env.pop("BOT_AUTO_ACK")
-        # build_client 가 env.get("BOT_AUTO_ACK", default) 로 가져가므로
-        # key 미존재 시 default ("1") 로 enabled 여야 함.
-        env["BOT_AUTO_ACK"] = bot.BOT_AUTO_ACK_DEFAULT_ENABLED
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=3
         )
         self._run_handler(env, message)
+        message.channel.send.assert_not_awaited()
+        message.add_reaction.assert_awaited_once_with(
+            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
+        )
+
+    def test_auto_ack_mode_both_pushes_reaction_and_text(self) -> None:
+        env = self._build_env(auto_ack="1", auto_ack_mode="both")
+        message = _make_fake_message(
+            content="hello", channel_id=999, author_id=111, message_id=4
+        )
+        self._run_handler(env, message)
+        message.add_reaction.assert_awaited_once_with(
+            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
+        )
         message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
+
+    def test_auto_ack_emoji_override(self) -> None:
+        env = self._build_env(auto_ack_emoji="🔥")
+        message = _make_fake_message(
+            content="hello", channel_id=999, author_id=111, message_id=5
+        )
+        self._run_handler(env, message)
+        message.add_reaction.assert_awaited_once_with("🔥")
+
+    def test_auto_ack_unknown_mode_falls_back_to_default(self) -> None:
+        env = self._build_env(auto_ack_mode="invalid")
+        message = _make_fake_message(
+            content="hello", channel_id=999, author_id=111, message_id=6
+        )
+        self._run_handler(env, message)
+        # invalid → default(reaction) fallback. add_reaction 만 호출.
+        message.add_reaction.assert_awaited_once_with(
+            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
+        )
+        message.channel.send.assert_not_awaited()
+
+    def test_auto_ack_default_constants(self) -> None:
+        # default mode = reaction / 기본 emoji = 👀 — env 가 비어도 본 상수가 적용된다.
+        self.assertEqual(bot.BOT_AUTO_ACK_MODE_DEFAULT, "reaction")
+        self.assertEqual(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "👀")
+        self.assertIn("text", bot.BOT_AUTO_ACK_MODES_ALLOWED)
+        self.assertIn("reaction", bot.BOT_AUTO_ACK_MODES_ALLOWED)
+        self.assertIn("both", bot.BOT_AUTO_ACK_MODES_ALLOWED)
 
     def test_auto_ack_text_v2_phrasing_guard(self) -> None:
         """BOT_AUTO_ACK_TEXT 문구 회귀 가드 (이슈 #943 v2).
 
         사용자 정정 (2026-05-24): helper-nmae 협업 관계 표현 필수.
         '🤖 helper bot' prefix + 'nmae 상태 확인' 두 substring 모두 포함해야 한다.
-        문구 자체 변경 시 본 가드 갱신 후 진행.
+        문구 자체 변경 시 본 가드 갱신 후 진행. text mode 가 살아 있는 한 본
+        가드는 유효 — reaction mode 가 default 가 되어도 text 경로 회귀 보호.
         """
         self.assertIn("🤖 helper bot", bot.BOT_AUTO_ACK_TEXT)
         self.assertIn("nmae 상태 확인", bot.BOT_AUTO_ACK_TEXT)

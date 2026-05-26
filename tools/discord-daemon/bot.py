@@ -66,6 +66,12 @@ DEDUP_GC_INTERVAL_SECONDS: Final[int] = 60 * 60  # 1h
 # #807 에서 제거됐던 것 부활. helper 측 구체 ack 와 직렬로 보이게 됨.
 BOT_AUTO_ACK_DEFAULT_ENABLED: Final[str] = "1"
 BOT_AUTO_ACK_TEXT: Final[str] = "🤖 helper bot 수신 — helper 가 nmae 상태 확인 중. 곧 답변드립니다."
+# Mode = text / reaction / both. default=reaction (2026-05-26 사용자 정정).
+# Why: 별도 채팅 ack 1건 + 본답 1건 = 2 메시지가 채널 두 줄을 차지해 가독성 ↓.
+# reaction 모드는 사용자 메시지에 emoji 만 붙이고 채팅은 본답 1건만 노출.
+BOT_AUTO_ACK_MODE_DEFAULT: Final[str] = "reaction"
+BOT_AUTO_ACK_EMOJI_DEFAULT: Final[str] = "👀"
+BOT_AUTO_ACK_MODES_ALLOWED: Final[tuple[str, ...]] = ("text", "reaction", "both")
 
 # reply.referenced_message forwarding (#880) — 사용자 Discord "답장" 으로 보낸 메시지가
 # 어떤 메시지에 대한 답장인지 helper 가 알 수 있도록 prefix.
@@ -3372,6 +3378,20 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     bot_auto_ack_enabled = (
         env.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED) == "1"
     )
+    bot_auto_ack_mode_raw = env.get(
+        "BOT_AUTO_ACK_MODE", BOT_AUTO_ACK_MODE_DEFAULT
+    ).strip().lower()
+    if bot_auto_ack_mode_raw not in BOT_AUTO_ACK_MODES_ALLOWED:
+        logger.warning(
+            "BOT_AUTO_ACK_MODE 알 수 없는 값(%r) — %r 로 fallback",
+            bot_auto_ack_mode_raw,
+            BOT_AUTO_ACK_MODE_DEFAULT,
+        )
+        bot_auto_ack_mode_raw = BOT_AUTO_ACK_MODE_DEFAULT
+    bot_auto_ack_mode = bot_auto_ack_mode_raw
+    bot_auto_ack_emoji = env.get(
+        "BOT_AUTO_ACK_EMOJI", BOT_AUTO_ACK_EMOJI_DEFAULT
+    )
 
     # cycle watchdog (#941) — env 해석.
     cycle_idle_watch_enabled = (
@@ -3575,7 +3595,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s alert=%s allowed=%d digest_enabled=%s auto_ack=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s alert=%s allowed=%d digest_enabled=%s auto_ack=%s auto_ack_mode=%s auto_ack_emoji=%s",
             client.user,
             target_channel_id,
             digest_channel_id,
@@ -3583,6 +3603,8 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             len(allowed_user_ids),
             digest_enabled,
             bot_auto_ack_enabled,
+            bot_auto_ack_mode,
+            bot_auto_ack_emoji,
         )
         # P12 (2026-05-24) per-cycle 채널 가시화. 0 = unset (DIGEST fallback).
         logger.info(
@@ -3884,29 +3906,44 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         write_last_user_msg_id(message_id)
 
         # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
-        # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
-        # ack] → [thread stream...] → [helper 본답] 순.
-        # #807 에서 제거됐던 것 부활. BOT_AUTO_ACK=false 면 legacy 동작.
-        # #1026: success 시에도 INFO log — journal 만 보고도 송신 여부 확인 가능
-        # 하도록. 이전에는 실패 시에만 warning 이 남아 "정상 송신 vs silent drop"
-        # 분간이 불가능했음 (사용자가 "안 왔다" 정정 → helper 가 root cause 잘못
-        # 짚어 sub-agent launch 2회 발생). 실패 path 도 exc_info=True 로 traceback
-        # 보존 + message_id 같이.
+        # latency 5+초 깜깜이 해소.
+        # mode=reaction (default, 2026-05-26): 사용자 메시지에 👀 emoji reaction
+        #   → 별도 채팅 메시지 0, 본답만 1건 노출.
+        # mode=text: 기존 "🤖 helper bot ..." 채팅 push.
+        # mode=both: reaction + text 둘 다.
+        # 실패 path 는 exc_info=True 로 traceback 보존 (#1026).
         if bot_auto_ack_enabled:
-            try:
-                ack_msg = await message.channel.send(BOT_AUTO_ACK_TEXT)
-                logger.info(
-                    "bot auto-ack 송신 OK: message_id=%s ack_id=%s",
-                    message_id,
-                    ack_msg.id,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "bot auto-ack 송신 실패: message_id=%s exc=%r",
-                    message_id,
-                    exc,
-                    exc_info=True,
-                )
+            if bot_auto_ack_mode in ("reaction", "both"):
+                try:
+                    await message.add_reaction(bot_auto_ack_emoji)
+                    logger.info(
+                        "bot auto-ack reaction OK: message_id=%s emoji=%s",
+                        message_id,
+                        bot_auto_ack_emoji,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "bot auto-ack reaction 실패: message_id=%s emoji=%s exc=%r",
+                        message_id,
+                        bot_auto_ack_emoji,
+                        exc,
+                        exc_info=True,
+                    )
+            if bot_auto_ack_mode in ("text", "both"):
+                try:
+                    ack_msg = await message.channel.send(BOT_AUTO_ACK_TEXT)
+                    logger.info(
+                        "bot auto-ack 송신 OK: message_id=%s ack_id=%s",
+                        message_id,
+                        ack_msg.id,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "bot auto-ack 송신 실패: message_id=%s exc=%r",
+                        message_id,
+                        exc,
+                        exc_info=True,
+                    )
 
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
