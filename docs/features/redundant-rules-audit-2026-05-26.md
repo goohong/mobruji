@@ -1,3 +1,14 @@
+---
+feature: Redundant Rules Audit (2026-05-26)
+slug: redundant-rules-audit-2026-05-26
+status: draft
+owner: plan
+scope: infra
+related_issues: [1124]
+related_prs: [1129, 1135, 1136]
+last_reviewed: 2026-05-26
+---
+
 # Redundant Rules Audit — 2026-05-26 (#1124)
 
 > Status: audit only — 제거 X
