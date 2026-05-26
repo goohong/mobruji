@@ -1,3 +1,14 @@
+---
+feature: directive board event-driven redesign
+slug: directive-board-event-driven-redesign
+status: approved
+owner: plan
+scope: infra
+related_issues: [1129]
+related_prs: [1140]
+last_reviewed: 2026-05-26
+---
+
 # directive board event-driven 재설계
 
 > 2026-05-26 사용자 16:21-24 directive 박제. directive board 의 jsonl ↔ Discord
