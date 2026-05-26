@@ -349,6 +349,103 @@ BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-0}"
 DISCORD_RETRY_MAX="${DISCORD_RETRY_MAX:-3}"
 DISCORD_RETRY_BASE_SEC="${DISCORD_RETRY_BASE_SEC:-1}"
 
+# ─── 본문 길이 자동 chunk split (#1121, 2026-05-26) ───────────────────────────
+#
+# 배경 (사용자 P1 박제):
+#   Discord REST API 가 message ``content`` 길이 2000자 (UTF-16 code unit) 를
+#   초과하면 50035 (Invalid Form Body) 로 reject. 기존 discord-reply.sh 는
+#   split/retry 없이 그대로 PUSH → helper 본답이 silent fail (사용자 채널에 안
+#   나타남). 사용자 가시성 ↓ + 본답 유실.
+#
+# 본 PR 보정:
+#   1. `split_long_message` 함수가 MSG 를 `DISCORD_CHUNK_LEN` 단위로 자른다.
+#      - newline 경계 우선 (해당 chunk 안 마지막 newline 위치).
+#      - newline 없으면 word boundary (space 마지막) 시도.
+#      - 그것도 없으면 hard cut.
+#      - 각 chunk 앞에 `[N/M]` 마커 prepend (M ≥ 2 일 때만).
+#   2. `apply_chunked_push <send-func> <ctx>` — 1+개 chunk 를 순차 전송. 마지막
+#      chunk 의 REST 응답 (JSON) 을 stdout 으로 반환 (기존 호출자 호환 — msg_id
+#      lookup 가 마지막 chunk 의 id 로 동작).
+#   3. `discord_curl_with_retry` 가 50035 (Invalid Form Body) 응답 감지 시
+#      stderr 명시 ERROR log — 기존엔 4xx 일반 처리로 묻혀 silent.
+#
+# 한도:
+#   - Discord content 최대 2000. 안전 cap 1900 (chunk 마커 `[N/M]` 자리 + UTF-16
+#     scale 여유 — 한글은 UTF-16 1 code unit 이지만 surrogate pair 도 1 char 로
+#     count, 안전 여유 100).
+DISCORD_CHUNK_LEN="${DISCORD_CHUNK_LEN:-1900}"
+
+# split_long_message <body> — chunked array 를 줄 단위 stdout 출력.
+#
+# 출력 형식: 각 chunk 를 NUL (0x00) 으로 구분된 string sequence 로 stdout.
+# 호출자: `while IFS= read -r -d '' chunk; do ...; done < <(split_long_message "$body")`.
+#
+# 단일 chunk 면 마커 prepend 없이 본문 그대로 1개 emit.
+# 다중 chunk 면 각 chunk 앞에 `[1/N] ` ~ `[N/N] ` prepend.
+split_long_message() {
+  local body="$1"
+  local cap="$DISCORD_CHUNK_LEN"
+  local total_len=${#body}
+
+  # short path — cap 이하면 그대로 1 chunk.
+  if (( total_len <= cap )); then
+    printf '%s\0' "$body"
+    return 0
+  fi
+
+  # split 단계: greedy — cap 내 마지막 newline > 마지막 space > hard cut.
+  local chunks=()
+  local remaining="$body"
+  while (( ${#remaining} > cap )); do
+    local head="${remaining:0:cap}"
+    local cut_at=$cap
+
+    # newline 우선.
+    local nl_pos="${head%$'\n'*}"
+    if [[ "$nl_pos" != "$head" ]]; then
+      cut_at=$(( ${#nl_pos} + 1 ))  # newline 자체 포함.
+    else
+      # space 차선.
+      local sp_pos="${head% *}"
+      if [[ "$sp_pos" != "$head" ]]; then
+        cut_at=$(( ${#sp_pos} + 1 ))  # space 자체 포함.
+      fi
+      # 둘 다 없으면 hard cut (cut_at=cap 유지).
+    fi
+
+    chunks+=("${remaining:0:cut_at}")
+    remaining="${remaining:cut_at}"
+  done
+  if [[ -n "$remaining" ]]; then
+    chunks+=("$remaining")
+  fi
+
+  local total_chunks=${#chunks[@]}
+  local i=0
+  for chunk in "${chunks[@]}"; do
+    i=$((i + 1))
+    # 마커 자리는 cap 안에 이미 여유로 확보 (cap=1900, marker 길이 < 12).
+    printf '[%d/%d] %s\0' "$i" "$total_chunks" "$chunk"
+  done
+  return 0
+}
+
+# detect_invalid_form_body <response_payload> — Discord 50035 응답을 stderr 에
+# ERROR log. discord_curl_with_retry 가 4xx return 직전 호출 (silent 차단).
+detect_invalid_form_body() {
+  local payload="$1"
+  local code
+  code=$(printf '%s' "$payload" | jq -r '.code // empty' 2>/dev/null || true)
+  if [[ "$code" == "50035" ]]; then
+    local len_msg
+    len_msg=$(printf '%s' "$payload" \
+      | jq -r '.errors.content._errors[0].message // empty' 2>/dev/null \
+      || true)
+    echo "discord-reply.sh: ERROR Discord 50035 (Invalid Form Body) — content 길이 또는 형식 위반. ${len_msg:-(detail 없음)}" >&2
+    echo "discord-reply.sh: hint — DISCORD_CHUNK_LEN=${DISCORD_CHUNK_LEN} 조정 또는 split_long_message 진입 path 확인." >&2
+  fi
+}
+
 # ─── mode dispatch ────────────────────────────────────────────────────────────
 
 MODE="reply"
@@ -752,7 +849,8 @@ discord_curl_with_retry() {
       continue
     fi
 
-    # 4xx 등 — retry 무의미.
+    # 4xx 등 — retry 무의미. silent fail 차단을 위해 50035 명시 log (#1121).
+    detect_invalid_form_body "$payload"
     printf '%s' "$payload"
     return 1
   done
@@ -768,6 +866,47 @@ post_channel_message() {
   discord_curl_with_retry POST \
     "https://discord.com/api/v10/channels/${CHANNEL}/messages" \
     "$body"
+}
+
+# 본문 길이 ≥ DISCORD_CHUNK_LEN 시 자동 chunk split + 순차 push (#1121).
+#
+# 인자:
+#   $1 = MSG (raw text — payload 빌더가 후속 jq escape)
+#   $2 = REPLY_TO_ID (빈 문자열 = standalone, 첫 chunk 에만 message_reference 적용)
+#
+# stdout: 마지막 chunk 의 REST 응답 (기존 단일 push 호출자가 `.id` lookup 하는
+# 호환성 유지 — 마지막 message_id 가 다음 thread 생성의 anchor 등으로 쓰임).
+# stderr: chunk count + 진행 1줄.
+#
+# 실패 정책:
+#   - 임의 chunk push 실패 시 stderr 에 chunk index 명시 + 함수는 마지막
+#     성공/실패 응답을 그대로 stdout. set -e 호환 위해 명시적 return.
+post_channel_message_chunked() {
+  local msg="$1"
+  local reply_to_id="$2"
+  local last_response=""
+  local chunk_idx=0
+
+  # split_long_message 가 NUL 구분으로 chunk emit.
+  # 단일 chunk (cap 이하) 인 경우도 normalize — 1 chunk 만 emit.
+  while IFS= read -r -d '' chunk; do
+    chunk_idx=$((chunk_idx + 1))
+    local payload
+    if (( chunk_idx == 1 )); then
+      # 첫 chunk 만 reply (message_reference). 후속 chunk 는 standalone — 같은
+      # reference 를 재사용하면 Discord 가 각 chunk 마다 reply 표시 → 사용자
+      # 채널 사이드바 가시성 ↓.
+      payload=$(build_reply_payload "$chunk" "$reply_to_id")
+    else
+      payload=$(jq -nc --arg c "$chunk" '{content: $c}')
+    fi
+    last_response=$(post_channel_message "$payload") || true
+  done < <(split_long_message "$msg")
+
+  if (( chunk_idx > 1 )); then
+    echo "discord-reply.sh: long body chunk split — ${chunk_idx} 메시지로 분할 push (#1121)" >&2
+  fi
+  printf '%s' "$last_response"
 }
 
 # 메시지에서 thread 시작 (해당 메시지 아래에 붙는 thread).
@@ -790,6 +929,34 @@ post_thread_message() {
   discord_curl_with_retry POST \
     "https://discord.com/api/v10/channels/${thread_id}/messages" \
     "$body"
+}
+
+# 본문 길이 ≥ DISCORD_CHUNK_LEN 시 thread 안 chunk split + 순차 push (#1121).
+#
+# 인자: $1 = thread_id, $2 = MSG (raw text)
+# stdout: 마지막 chunk 응답.
+# return: 임의 chunk 실패 시 last call 의 return 그대로.
+post_thread_message_chunked() {
+  local thread_id="$1"
+  local msg="$2"
+  local last_response=""
+  local chunk_idx=0
+  local rc=0
+
+  while IFS= read -r -d '' chunk; do
+    chunk_idx=$((chunk_idx + 1))
+    local payload
+    payload=$(jq -nc --arg c "$chunk" '{content: $c}')
+    if ! last_response=$(post_thread_message "$thread_id" "$payload"); then
+      rc=1
+    fi
+  done < <(split_long_message "$msg")
+
+  if (( chunk_idx > 1 )); then
+    echo "discord-reply.sh: long body chunk split (thread) — ${chunk_idx} 메시지로 분할 push (#1121)" >&2
+  fi
+  printf '%s' "$last_response"
+  return "$rc"
 }
 
 # snowflake 유효성 검사 — 17~20 digit 정수. invalid 면 stderr warning + 빈 출력.
@@ -1310,8 +1477,10 @@ case "$MODE" in
     # 시 REPLY_TO_ID 가 빈 문자열 → writing_hook_start 도 skip (대상 없음).
     writing_hook_start "$REPLY_TO_ID"
 
-    PAYLOAD=$(build_reply_payload "$MSG" "$REPLY_TO_ID")
-    post_channel_message "$PAYLOAD"
+    # #1121 (2026-05-26): 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 chunk split + 순차 push.
+    # 단일 chunk (cap 이하) 인 경우 단일 push 동작과 동일 (split_long_message 가 1개
+    # emit). 다중 chunk 시 첫 chunk 만 reply, 나머지는 standalone — 사이드바 가시성 ↑.
+    post_channel_message_chunked "$MSG" "$REPLY_TO_ID"
 
     # #1095: 본답 push 직후 ✍️ remove — 답 작성 완료 가시화.
     # typing 은 Discord 자체 10초 timeout + 메시지 push 후 자동 종료.
@@ -1363,8 +1532,8 @@ case "$MODE" in
     ;;
 
   thread)
-    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
-    post_thread_message "$THREAD_ID" "$PAYLOAD"
+    # #1121: 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 split + 순차 push (단일 chunk 시 동일).
+    post_thread_message_chunked "$THREAD_ID" "$MSG"
     ;;
 
   auto-thread)
@@ -1418,11 +1587,9 @@ case "$MODE" in
       AUTO_THREAD_SOURCE="$HELPER_THREAD_FILE"
     fi
 
-    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
-    # post_thread_message 의 retry wrapper 가 4xx 면 1 반환. thread 만료 / 삭제
-    # 시 Discord 가 404 — helper turn 깨지지 않게 stderr warning + exit 0 으로
-    # graceful 처리.
-    if ! post_thread_message "$AUTO_THREAD_ID" "$PAYLOAD" >/dev/null; then
+    # #1121: 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 split. post_thread_message_chunked 가
+    # 단일 chunk 시 단일 push 동작 동일. retry wrapper 가 4xx 면 1 반환 — graceful.
+    if ! post_thread_message_chunked "$AUTO_THREAD_ID" "$MSG" >/dev/null; then
       echo "discord-reply.sh: auto-thread push 실패 (thread_id=$AUTO_THREAD_ID, source=$AUTO_THREAD_SOURCE, 만료/삭제 추정) — skip" >&2
       exit 0
     fi
@@ -1463,9 +1630,9 @@ case "$MODE" in
 
   forum-comment)
     # #17 — forum thread 안 일반 댓글.
-    # POST /channels/{thread_id}/messages — post_thread_message 재사용 가능.
-    PAYLOAD=$(jq -nc --arg c "$MSG" '{content: $c}')
-    post_thread_message "$THREAD_ID" "$PAYLOAD"
+    # POST /channels/{thread_id}/messages — post_thread_message_chunked 재사용.
+    # #1121: 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 split + 순차 push.
+    post_thread_message_chunked "$THREAD_ID" "$MSG"
     ;;
 
   forum-edit)
