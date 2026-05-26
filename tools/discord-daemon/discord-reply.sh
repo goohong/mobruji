@@ -81,6 +81,7 @@
 #
 #   6) forum modes (#17 사용자 forum 전환 wave, 2026-05-24):
 #       discord-reply.sh --forum-post <forum_env> "<title>" "<tag_name>" "<body>"
+#       discord-reply.sh --forum-post-auto-tag <forum_env> "<title>" "<body>"   (#1106)
 #       discord-reply.sh --forum-comment <thread_id> "<body>"
 #       discord-reply.sh --forum-edit <thread_id> "<new_body>"
 #       discord-reply.sh --forum-retag <thread_id> <forum_env> "<new_tag_name>"
@@ -90,6 +91,18 @@
 #         → --forum-post: POST /channels/{forum_id}/threads (name + applied_tags +
 #           message.content). 생성된 thread_id 를 stdout 으로 출력 (호출자가
 #           후속 --forum-comment / --forum-edit / --forum-retag 에 사용).
+#         → --forum-post-auto-tag (#1106, 2026-05-26): tag 인자 없이 forum 의
+#           available_tags 에서 fallback chain 자동 선택 후 forum_create_thread
+#           호출. fallback 우선순위:
+#             1) "PR 진행 중"  2) "진행"  3) "spec"  4) "stage 1"  5) "대기"
+#             6) 그 외 첫 번째 available_tags 항목
+#           available_tags 가 비어 있으면 applied_tags 미포함으로 thread 생성
+#           (Discord 가 default tag 없이 post 허용 — forum 설정에 따름).
+#           의도: agent-launch-wrapper.sh 가 cycle 별 tag 매핑을 hardcode 하지
+#           않고 forum 운영자가 tag 를 자유롭게 rename 해도 작동 (사용자 P0
+#           영구 fix — cycle channel silence, 사고: BE/FE/REV/PLAN cycle forum
+#           4개 모두 0 메시지였던 root cause 가 wrapper 의 text-channel API
+#           400 reject).
 #         → --forum-comment: POST /channels/{thread_id}/messages (forum thread 안
 #           일반 댓글).
 #         → --forum-edit: PATCH /channels/{thread_id}/messages/{thread_id} 로
@@ -321,6 +334,7 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan> \"<title>\" \"<tag>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-post-auto-tag <directive|be|fe|rev|plan> \"<title>\" \"<body>\"" >&2
   echo "  discord-reply.sh --forum-comment <thread_id> \"<body>\"" >&2
   echo "  discord-reply.sh --forum-edit <thread_id> \"<new_body>\"" >&2
   echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan> \"<new_tag>\"" >&2
@@ -484,6 +498,22 @@ case "$1" in
     FORUM_TITLE="$3"
     FORUM_TAG="$4"
     MSG="$5"
+    NO_REPLY=1
+    ;;
+  --forum-post-auto-tag)
+    # #1106 (2026-05-26) — cycle channel silence permanent fix.
+    # --forum-post-auto-tag <forum_env> "<title>" "<body>"
+    # tag 인자 없이 forum 의 available_tags 에서 fallback chain 자동 선택.
+    # agent-launch-wrapper.sh 가 본 mode 를 호출 — wrapper 가 cycle 별 tag 매핑
+    # 을 hardcode 하지 않고 forum 운영자가 tag rename 해도 작동.
+    MODE="forum-post-auto-tag"
+    if [[ $# -lt 4 ]]; then
+      echo "discord-reply.sh: --forum-post-auto-tag <forum_env> \"<title>\" \"<body>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    FORUM_ENV="$2"
+    FORUM_TITLE="$3"
+    MSG="$4"
     NO_REPLY=1
     ;;
   --forum-comment)
@@ -870,25 +900,85 @@ resolve_forum_tag_id() {
 
 # forum thread 생성 — POST /channels/{forum_id}/threads.
 # body: { name, applied_tags: [<tag_id>], message: { content } }.
+# tag_id 가 빈 문자열이면 applied_tags 미포함 (#1106 — forum 의 default tag
+# 설정에 따름 / available_tags 가 비어 있는 경우 graceful).
 forum_create_thread() {
   local forum_id="$1"
   local name="$2"
   local tag_id="$3"
   local content="$4"
   local body
-  body=$(jq -nc \
-    --arg n "$name" \
-    --arg t "$tag_id" \
-    --arg c "$content" \
-    '{
-      name: $n,
-      applied_tags: [$t],
-      message: { content: $c },
-      auto_archive_duration: 1440
-    }')
+  if [[ -n "$tag_id" ]]; then
+    body=$(jq -nc \
+      --arg n "$name" \
+      --arg t "$tag_id" \
+      --arg c "$content" \
+      '{
+        name: $n,
+        applied_tags: [$t],
+        message: { content: $c },
+        auto_archive_duration: 1440
+      }')
+  else
+    body=$(jq -nc \
+      --arg n "$name" \
+      --arg c "$content" \
+      '{
+        name: $n,
+        message: { content: $c },
+        auto_archive_duration: 1440
+      }')
+  fi
   discord_curl_with_retry POST \
     "https://discord.com/api/v10/channels/${forum_id}/threads" \
     "$body"
+}
+
+# forum 의 available_tags 에서 fallback chain 자동 선택 (#1106, 2026-05-26).
+# 우선순위 (높음 → 낮음):
+#   1) "PR 진행 중"  2) "진행"  3) "spec"  4) "stage 1"  5) "대기"
+#   6) 그 외 첫 번째 available_tags 항목 (tag 가 존재하는 경우)
+# available_tags 가 비어 있으면 빈 문자열 반환 (호출자가 tag 없이 thread 생성).
+# stdout: tag_id (or empty), stderr: 선택된 tag name (운영자 가시).
+resolve_forum_tag_id_auto() {
+  local forum_id="$1"
+  local response status payload
+  response=$(curl -sS -X GET \
+    "https://discord.com/api/v10/channels/${forum_id}" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  payload="${response%$'\n'*}"
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: forum channel fetch 실패 (forum_id=$forum_id, status=$status)" >&2
+    echo "$payload" >&2
+    return 1
+  fi
+  # fallback chain — 첫 매칭 entry 의 id 반환.
+  local picked_id picked_name
+  picked_id=$(printf '%s' "$payload" | jq -r '
+    (.available_tags // []) as $tags
+    | (
+        ($tags[]? | select(.name == "PR 진행 중") | .id),
+        ($tags[]? | select(.name == "진행") | .id),
+        ($tags[]? | select(.name == "spec") | .id),
+        ($tags[]? | select(.name == "stage 1") | .id),
+        ($tags[]? | select(.name == "대기") | .id),
+        ($tags[0]?.id // empty)
+      )
+    | select(. != null and . != "")
+  ' 2>/dev/null | head -1)
+  if [[ -n "$picked_id" && "$picked_id" != "null" ]]; then
+    picked_name=$(printf '%s' "$payload" | jq -r --arg i "$picked_id" \
+      '(.available_tags // [])[] | select(.id == $i) | .name' \
+      | head -1)
+    echo "discord-reply.sh: --forum-post-auto-tag — tag \"${picked_name}\" 선택 (forum_id=$forum_id)" >&2
+    printf '%s' "$picked_id"
+  else
+    echo "discord-reply.sh: --forum-post-auto-tag — forum (forum_id=$forum_id) 에 available_tags 가 비어 있음, tag 없이 thread 생성" >&2
+    printf ''
+  fi
+  return 0
 }
 
 # forum thread starter message 본문 PATCH.
@@ -1053,6 +1143,23 @@ case "$MODE" in
     # POST /channels/{forum_id}/threads. stdout 으로 생성된 thread_id 출력.
     FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
     TAG_ID=$(resolve_forum_tag_id "$FORUM_ID" "$FORUM_TAG")
+    THREAD_RESPONSE=$(forum_create_thread "$FORUM_ID" "$FORUM_TITLE" "$TAG_ID" "$MSG")
+    NEW_THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$NEW_THREAD_ID" ]]; then
+      echo "discord-reply.sh: forum thread 생성 실패 (forum=$FORUM_ENV, title=$FORUM_TITLE)" >&2
+      echo "$THREAD_RESPONSE" >&2
+      exit 1
+    fi
+    printf '%s\n' "$NEW_THREAD_ID"
+    ;;
+
+  forum-post-auto-tag)
+    # #1106 (2026-05-26) — cycle channel silence permanent fix.
+    # tag 인자 없이 forum 의 available_tags 에서 fallback chain 자동 선택 후
+    # forum_create_thread 호출. agent-launch-wrapper.sh 가 본 mode 를 호출.
+    FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
+    # resolve_forum_tag_id_auto 는 available_tags 비어 있으면 빈 문자열 반환 (graceful).
+    TAG_ID=$(resolve_forum_tag_id_auto "$FORUM_ID")
     THREAD_RESPONSE=$(forum_create_thread "$FORUM_ID" "$FORUM_TITLE" "$TAG_ID" "$MSG")
     NEW_THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id // empty')
     if [[ -z "$NEW_THREAD_ID" ]]; then
