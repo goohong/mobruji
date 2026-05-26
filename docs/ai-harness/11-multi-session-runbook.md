@@ -676,3 +676,29 @@ rm -rf ~/.claude/projects/-Users-goohong-workspace-github-mobruji-be
 ```
 
 영구 셋업이라면 그대로 두고 사용.
+
+## 8) 본진 가볍게 유지 (nmae lightweight orchestration)
+
+사용자 2026-05-26 ~16:00 정정: "동시 사이클 4개 유지. 과부하 대응 = 본진 context 가벼이 유지 + 위임."
+
+### 룰
+- 동시 사이클 수는 **4 (be/fe/rev/plan) 고정**. 과부하 시에도 줄이지 않는다.
+- 본진(nmae) 책임 = **오케스트레이션 only**.
+  - launch / 위임 prompt 작성
+  - 완료 통지 수신 + cycle-status.json 갱신 + 다음 백로그 launch
+  - PR 머지 결정 (가능하면 머지 실행 자체도 sub-agent 위임 또는 cron auto-merge)
+  - cron digest 가 cover 안 하는 1회성 사용자 보고
+- 본진 직접 수행 **금지** — 코드 변경, 길어진 git 작업, gradle/npm 실행, 대량 로그 분석. 이 모두는 sub-agent 또는 helper-launched sub-agent 영역.
+- 본진 context% marker (CLAUDE.md §14) 75% 이상 → 본진 추가 작업 자제 + sub-agent 위임 + 다음 turn `/clear` 후보.
+
+### 왜
+- 본진이 직접 구현하면 1 사이클 turn 이 길어진다 → 다른 3 사이클 launch 가 끊긴다.
+- 본진 context 가 폭증하면 `/clear` 빈도가 늘어나며, `/clear` 직전 doc-check (CLAUDE.md §15) 도 누락 위험이 커진다.
+- 위임은 sub-agent 워크트리 격리 + 코드 변경 트래킹 가능 (PR / git log) 이라 감사 trail 도 확보된다.
+
+### 검증
+- nmae turn 종료 시점에 cycle-status.json 4 워크트리 모두 `in_progress` 또는 `last_completed.completed_at` 이 최근 10 분 안인지 확인.
+- nmae context% marker 가 매 turn 마지막 emit 되고 75% 이상 시 자율 정리 트리거됐는지 확인.
+- cron digest 가 본진 활동 vs sub-agent 활동을 분리 표시하는지 확인 (본진 직접 머지 / 본진 직접 코드 변경 = 위반 후보).
+
+관련: CLAUDE.md §11-5 (4 사이클 동시 launch + 본진 오케스트레이션 only), `docs/features/autonomous-cycle-orchestration.md`.
