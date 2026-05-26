@@ -343,8 +343,212 @@ DIRECTIVE_DETECT_WATCH_DEFAULT_GRACE_COUNT: Final[int] = 5
 # push debounce — 같은 mismatch alarm 이 매 iter 중복 push 안 되도록.
 DIRECTIVE_DETECT_WATCH_DEBOUNCE_SECONDS: Final[int] = 60 * 60  # 1h
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Loop heartbeat hook (#1087, 2026-05-26 사용자 P0 "사이클 절대 멈추면 안 됨")
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 배경: bot.py 의 다수 watchdog loop 가 silent crash (asyncio exception 삼킴 /
+# 무한 await / outer scope crash) 시 detect 불가. 발생 시 무한 idle → 사용자 P0.
+#
+# 구조:
+#   1. 각 loop 가 매 iter 성공 path 마지막에 `record_loop_heartbeat(name)` 호출.
+#      파일 `<heartbeat_dir>/<loop_name>.ts` 에 `<monotonic>\n<iso>\n` atomic write.
+#   2. 신규 `heartbeat_watch_loop` 가 10분 polling — 모든 loop 의 heartbeat 파일이
+#      `expected_interval × multiplier` 초과 stale 이면 DIGEST_CHANNEL_ID push +
+#      logger.error.
+#   3. heartbeat_watch_loop 자체도 자기 heartbeat 기록 — meta detect.
+#
+# graceful — heartbeat 디렉토리 자동 mkdir, write 실패 시 warning 만 (loop 본체
+# 동작에 영향 없음 / 부재 시 stale 로 detect 되어 가시화).
+HEARTBEAT_DIR_DEFAULT: Final[Path] = Path("~/.mobruji/heartbeat").expanduser()
+HEARTBEAT_FILE_MODE: Final[int] = 0o600
+# stale 임계 = expected_interval × multiplier (default 3).
+HEARTBEAT_STALE_MULTIPLIER_DEFAULT: Final[int] = 3
+HEARTBEAT_WATCH_DEFAULT_ENABLED: Final[str] = "1"
+HEARTBEAT_WATCH_DEFAULT_INTERVAL_SECONDS: Final[int] = 600  # 10분
+HEARTBEAT_WATCH_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 180  # boot warmup
+# 동일 loop stale push debounce (1h).
+HEARTBEAT_WATCH_PUSH_DEBOUNCE_SECONDS: Final[int] = 60 * 60
+# loop name → 정상 max iter interval (seconds). stale 임계 = value × multiplier.
+# 본 매핑은 record_loop_heartbeat 호출 위치의 sleep interval 기준.
+# directive_detect_register_watch_loop (#1071) 도 합쳐 8 + 1 = 9 loop 추적.
+LOOP_HEARTBEAT_EXPECTED_INTERVALS: Final[dict[str, int]] = {
+    "digest_loop": DEFAULT_DIGEST_INTERVAL_SECONDS,
+    "context_auto_clear_loop": CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS,
+    "cycle_idle_watch_loop": CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS,
+    "rev_post_merge_audit_loop": REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS,
+    "claude_usage_watch_loop": CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS,
+    "directive_board_sync_loop": DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS,
+    "thread_cleanup_loop": THREAD_CLEANUP_DEFAULT_INTERVAL_SECONDS,
+    "directive_detect_register_watch_loop": (
+        DIRECTIVE_DETECT_WATCH_DEFAULT_INTERVAL_SECONDS
+    ),
+    "heartbeat_watch_loop": HEARTBEAT_WATCH_DEFAULT_INTERVAL_SECONDS,
+}
+
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
+
+
+def _heartbeat_dir() -> Path:
+    """env HEARTBEAT_DIR override 가능. 부재 시 default ~/.mobruji/heartbeat."""
+    raw = os.environ.get("HEARTBEAT_DIR")
+    if raw:
+        return Path(os.path.expanduser(raw))
+    return HEARTBEAT_DIR_DEFAULT
+
+
+def record_loop_heartbeat(
+    name: str,
+    *,
+    heartbeat_dir: Path | None = None,
+    monotonic_source=time.monotonic,
+    wall_source=lambda: datetime.now(timezone.utc),
+) -> bool:
+    """loop iter 성공 후 heartbeat 파일 atomic write.
+
+    파일 경로: ``<heartbeat_dir>/<name>.ts``. 본문은 두 줄:
+        ``<monotonic_seconds>\\n<wall_iso>\\n``
+
+    monotonic 은 stale detect 용 (clock skew 안전), iso 는 사람 디버깅 용.
+
+    실패 시 warning 로그 + ``False`` 반환 — loop 본체 동작에는 영향 없음.
+
+    Args:
+        name: loop name. ``[a-zA-Z0-9_-]`` 만 허용 (path traversal 가드).
+        heartbeat_dir: override (테스트). None 이면 env / default.
+        monotonic_source: monotonic 시각 source (테스트 stub).
+        wall_source: aware datetime source (테스트 stub).
+
+    Returns:
+        write 성공 여부.
+    """
+    if not name or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        logger.warning("record_loop_heartbeat: 잘못된 name=%r — skip", name)
+        return False
+    target_dir = heartbeat_dir if heartbeat_dir is not None else _heartbeat_dir()
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        mono = float(monotonic_source())
+        iso = wall_source().isoformat()
+        path = target_dir / f"{name}.ts"
+        tmp = path.with_suffix(".ts.tmp")
+        body = f"{mono}\n{iso}\n"
+        tmp.write_text(body, encoding="utf-8")
+        try:
+            os.chmod(tmp, HEARTBEAT_FILE_MODE)
+        except OSError:
+            # 권한 변경 실패는 치명적이지 않음 (write 자체는 성공).
+            pass
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        logger.warning("record_loop_heartbeat write 실패 name=%s: %s", name, exc)
+        return False
+
+
+def read_loop_heartbeat(
+    name: str,
+    *,
+    heartbeat_dir: Path | None = None,
+) -> tuple[float, str] | None:
+    """heartbeat 파일을 (monotonic, iso) 로 파싱. 부재 / parse fail → None."""
+    if not name or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        return None
+    target_dir = heartbeat_dir if heartbeat_dir is not None else _heartbeat_dir()
+    path = target_dir / f"{name}.ts"
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    lines = text.strip().splitlines()
+    if not lines:
+        return None
+    try:
+        mono = float(lines[0])
+    except ValueError:
+        return None
+    iso = lines[1] if len(lines) >= 2 else ""
+    return mono, iso
+
+
+def detect_stale_heartbeats(
+    *,
+    expected_intervals: dict[str, int] | None = None,
+    multiplier: int = HEARTBEAT_STALE_MULTIPLIER_DEFAULT,
+    heartbeat_dir: Path | None = None,
+    monotonic_source=time.monotonic,
+) -> list[dict]:
+    """stale loop heartbeat 리스트를 산출합니다.
+
+    각 entry 는 dict 로 다음 키를 포함:
+        - ``name``: loop name
+        - ``expected_interval``: 정상 max iter 초
+        - ``threshold``: stale 판정 임계 초 (= expected × multiplier)
+        - ``age``: 마지막 heartbeat 부터 경과 초 (heartbeat 부재 시 None)
+        - ``last_iso``: 마지막 heartbeat 의 wall iso (부재 시 "")
+        - ``reason``: "missing" (파일 없음) / "stale" (age > threshold)
+
+    multiplier ≤ 0 이면 빈 리스트 (disabled, 테스트 용).
+    """
+    if multiplier <= 0:
+        return []
+    intervals = (
+        expected_intervals
+        if expected_intervals is not None
+        else LOOP_HEARTBEAT_EXPECTED_INTERVALS
+    )
+    now_mono = float(monotonic_source())
+    stale: list[dict] = []
+    for name, expected in intervals.items():
+        threshold = expected * multiplier
+        hb = read_loop_heartbeat(name, heartbeat_dir=heartbeat_dir)
+        if hb is None:
+            stale.append({
+                "name": name,
+                "expected_interval": expected,
+                "threshold": threshold,
+                "age": None,
+                "last_iso": "",
+                "reason": "missing",
+            })
+            continue
+        mono, iso = hb
+        age = now_mono - mono
+        if age > threshold:
+            stale.append({
+                "name": name,
+                "expected_interval": expected,
+                "threshold": threshold,
+                "age": age,
+                "last_iso": iso,
+                "reason": "stale",
+            })
+    return stale
+
+
+def format_heartbeat_stale_message(stale: list[dict]) -> str:
+    """Discord push 본문 빌드 — 사용자 가시 한 줄 요약 + 워크트리 별 상세."""
+    if not stale:
+        return ""
+    header = f"🚨 loop heartbeat stale — {len(stale)}개 loop 응답 없음 (#1087)"
+    lines = [header]
+    for entry in stale:
+        name = entry["name"]
+        reason = entry["reason"]
+        threshold = entry["threshold"]
+        if reason == "missing":
+            lines.append(f"  - {name}: heartbeat 파일 부재 (임계 {threshold}s)")
+        else:
+            age = entry["age"]
+            iso = entry["last_iso"] or "?"
+            lines.append(
+                f"  - {name}: {age:.0f}s 경과 (임계 {threshold}s, 마지막 {iso})"
+            )
+    lines.append("→ daemon 재시작 또는 journalctl 추적 필요")
+    return "\n".join(lines)
 
 
 def load_env() -> dict[str, str]:
@@ -533,6 +737,17 @@ def load_env() -> dict[str, str]:
     )
     env["THREAD_CLEANUP_DELETE"] = os.environ.get(
         "THREAD_CLEANUP_DELETE", THREAD_CLEANUP_DEFAULT_DELETE
+    )
+    # Loop heartbeat watchdog (#1087, 2026-05-26 사용자 P0).
+    env["HEARTBEAT_WATCH_ENABLED"] = os.environ.get(
+        "HEARTBEAT_WATCH_ENABLED", HEARTBEAT_WATCH_DEFAULT_ENABLED
+    )
+    env["HEARTBEAT_WATCH_INTERVAL_SECONDS"] = os.environ.get(
+        "HEARTBEAT_WATCH_INTERVAL_SECONDS",
+        str(HEARTBEAT_WATCH_DEFAULT_INTERVAL_SECONDS),
+    )
+    env["HEARTBEAT_STALE_MULTIPLIER"] = os.environ.get(
+        "HEARTBEAT_STALE_MULTIPLIER", str(HEARTBEAT_STALE_MULTIPLIER_DEFAULT)
     )
     env["REV_POST_MERGE_AUDIT_INJECT_TARGET"] = os.environ.get(
         "REV_POST_MERGE_AUDIT_INJECT_TARGET",
@@ -1493,6 +1708,7 @@ async def digest_loop(
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("digest send 실패: %s", exc)
+        record_loop_heartbeat("digest_loop")
         await asyncio.sleep(interval)
 
 
@@ -1780,6 +1996,7 @@ async def context_auto_clear_loop(
                     )
                     st["debounced"] = True
                     st["awaiting_marker"] = True
+            record_loop_heartbeat("context_auto_clear_loop")
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -2206,6 +2423,7 @@ async def cycle_idle_watch_loop(
     while True:
         try:
             await asyncio.sleep(poll_interval)
+            record_loop_heartbeat("cycle_idle_watch_loop")
             status = parse_cycle_status(cycle_status_path)
             if status is None:
                 if not missing_status_warned:
@@ -2695,6 +2913,7 @@ async def rev_post_merge_audit_loop(
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("rev_post_merge_audit_loop iter 실패: %s", exc)
+        record_loop_heartbeat("rev_post_merge_audit_loop")
         await asyncio.sleep(poll_interval)
 
 
@@ -2795,6 +3014,7 @@ async def claude_usage_watch_loop(
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("claude_usage_watch_loop iter 실패: %s", exc)
+        record_loop_heartbeat("claude_usage_watch_loop")
         await asyncio.sleep(poll_interval)
 
 
@@ -2868,6 +3088,7 @@ async def directive_board_sync_loop(
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("directive_board_sync_loop iter 실패: %s", exc)
+        record_loop_heartbeat("directive_board_sync_loop")
         await asyncio.sleep(poll_interval)
 
 
@@ -2974,7 +3195,120 @@ async def directive_register_watch_loop(
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("directive_register_watch_loop iter 실패: %s", exc)
+        record_loop_heartbeat("directive_detect_register_watch_loop")
         await asyncio.sleep(poll_interval)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Loop heartbeat watchdog (#1087, 2026-05-26 사용자 P0)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def heartbeat_watch_loop(
+    client: "discord.Client",
+    digest_channel_id: int,
+    *,
+    expected_intervals: dict[str, int] | None = None,
+    multiplier: int = HEARTBEAT_STALE_MULTIPLIER_DEFAULT,
+    heartbeat_dir: Path | None = None,
+    poll_interval: int = HEARTBEAT_WATCH_DEFAULT_INTERVAL_SECONDS,
+    initial_delay: int = HEARTBEAT_WATCH_DEFAULT_INITIAL_DELAY_SECONDS,
+    push_debounce_seconds: int = HEARTBEAT_WATCH_PUSH_DEBOUNCE_SECONDS,
+    time_source=time.monotonic,
+    sleeper=asyncio.sleep,
+) -> None:
+    """주기 polling — 다른 watchdog loop 들이 silent crash 시 가시화 (#1087).
+
+    배경 (사용자 P0, 2026-05-26):
+        bot.py 의 watchdog loop (digest / context_auto_clear / cycle_idle_watch
+        / rev_post_merge_audit / claude_usage_watch / directive_board_sync /
+        thread_cleanup / directive_detect_register_watch) 가 asyncio exception
+        삼킴 또는 무한 await 시 silent crash. 발생 시 무한 idle — 사용자 P0
+        ("사이클 절대 멈추면 안 됨") 위반.
+
+    동작:
+        1. ``initial_delay`` 초 warmup 후 polling 시작.
+        2. ``poll_interval`` 초마다:
+           a. ``detect_stale_heartbeats`` 호출 — 각 loop heartbeat 파일이
+              ``expected_interval × multiplier`` 초과 stale 인지 검사.
+           b. stale 발견 시 DIGEST_CHANNEL_ID 에 ``format_heartbeat_stale_message``
+              push (동일 loop 1h debounce).
+           c. ``logger.error`` 도 동시 emit — journalctl 추적 용.
+        3. 자기 heartbeat 도 매 iter 기록 → meta detect (스스로 stale 진단 가능).
+        4. graceful skip — channel 부재 / write 실패 시 warn 후 다음 iter.
+        5. ``poll_interval <= 0`` 이면 disabled (테스트 용).
+
+    asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
+
+    Args:
+        expected_intervals: loop name → 정상 max iter 초 매핑. None 이면
+            ``LOOP_HEARTBEAT_EXPECTED_INTERVALS`` (heartbeat_watch_loop 자체 포함).
+        multiplier: stale 임계 multiplier (default 3).
+        heartbeat_dir: heartbeat 디렉토리 override (테스트). None 이면 env / default.
+        push_debounce_seconds: 동일 loop stale push 재전송 차단 윈도우 (default 1h).
+        time_source: monotonic 시각 source (테스트 stub).
+        sleeper: async sleep 콜러블 (테스트 stub).
+    """
+    if poll_interval <= 0:
+        logger.info("heartbeat_watch_loop disabled (poll_interval<=0)")
+        return
+
+    intervals = (
+        expected_intervals
+        if expected_intervals is not None
+        else dict(LOOP_HEARTBEAT_EXPECTED_INTERVALS)
+    )
+    last_push_at: dict[str, float] = {}
+    missing_channel_warned = False
+
+    await sleeper(initial_delay)
+    while True:
+        try:
+            stale = detect_stale_heartbeats(
+                expected_intervals=intervals,
+                multiplier=multiplier,
+                heartbeat_dir=heartbeat_dir,
+                monotonic_source=time_source,
+            )
+            if stale:
+                mono_now = float(time_source())
+                fresh = []
+                for entry in stale:
+                    last = last_push_at.get(entry["name"])
+                    if last is None or (mono_now - last) >= push_debounce_seconds:
+                        fresh.append(entry)
+                if fresh:
+                    names_label = ", ".join(e["name"] for e in fresh)
+                    logger.error(
+                        "heartbeat_watch_loop: stale 검출 %d loops — %s",
+                        len(fresh),
+                        names_label,
+                    )
+                    channel = client.get_channel(digest_channel_id)
+                    if channel is None:
+                        if not missing_channel_warned:
+                            logger.warning(
+                                "heartbeat_watch_loop: Discord channel 부재 — "
+                                "push skip (channel_id=%s)",
+                                digest_channel_id,
+                            )
+                            missing_channel_warned = True
+                    else:
+                        missing_channel_warned = False
+                        push_text = format_heartbeat_stale_message(fresh)
+                        await send_with_retry(channel, content=push_text)
+                        for entry in fresh:
+                            last_push_at[entry["name"]] = mono_now
+            else:
+                logger.debug("heartbeat_watch_loop: all loops alive")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("heartbeat_watch_loop iter 실패: %s", exc)
+        record_loop_heartbeat(
+            "heartbeat_watch_loop", heartbeat_dir=heartbeat_dir
+        )
+        await sleeper(poll_interval)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3387,6 +3721,7 @@ async def thread_cleanup_loop(
             logger.warning(
                 "thread_cleanup_loop iter=%d 실패: %s", iter_count, exc
             )
+        record_loop_heartbeat("thread_cleanup_loop")
         await sleeper(poll_interval)
 
 
@@ -3711,6 +4046,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         allow_zero=True,
     )
 
+    # Loop heartbeat watchdog (#1087) — env 해석.
+    heartbeat_watch_enabled = (
+        env.get("HEARTBEAT_WATCH_ENABLED", HEARTBEAT_WATCH_DEFAULT_ENABLED) == "1"
+    )
+    heartbeat_watch_interval = _resolve_int_env(
+        "HEARTBEAT_WATCH_INTERVAL_SECONDS",
+        HEARTBEAT_WATCH_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    heartbeat_stale_multiplier = _resolve_int_env(
+        "HEARTBEAT_STALE_MULTIPLIER",
+        HEARTBEAT_STALE_MULTIPLIER_DEFAULT,
+        allow_zero=False,
+    )
+
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
         env.get("CONTEXT_CLEAR_TRIGGER_PCT"),
@@ -4005,6 +4355,33 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not directive_detect_watch_enabled:
             logger.info(
                 "directive_register_watch_loop disabled (DIRECTIVE_DETECT_WATCH_ENABLED=0)"
+            )
+
+        # Loop heartbeat watchdog (#1087, 2026-05-26 사용자 P0).
+        # 다른 watchdog loop 들이 silent crash 시 가시화.
+        if heartbeat_watch_enabled and not hasattr(
+            client, "_heartbeat_watch_task_started"
+        ):
+            client._heartbeat_watch_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                heartbeat_watch_loop(
+                    client,
+                    digest_channel_id,
+                    poll_interval=heartbeat_watch_interval,
+                    multiplier=heartbeat_stale_multiplier,
+                )
+            )
+            logger.info(
+                "heartbeat_watch_loop launched: channel=%d interval=%ds "
+                "multiplier=%d loops=%d",
+                digest_channel_id,
+                heartbeat_watch_interval,
+                heartbeat_stale_multiplier,
+                len(LOOP_HEARTBEAT_EXPECTED_INTERVALS),
+            )
+        elif not heartbeat_watch_enabled:
+            logger.info(
+                "heartbeat_watch_loop disabled (HEARTBEAT_WATCH_ENABLED=0)"
             )
 
     @client.event
