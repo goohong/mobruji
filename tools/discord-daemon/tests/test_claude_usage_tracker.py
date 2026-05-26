@@ -104,6 +104,27 @@ class TestFormatTokenCount(unittest.TestCase):
         self.assertEqual(cut._format_token_count(7_000_000), "7M")
 
 
+class TestDefaultLimits(unittest.TestCase):
+    """Default token limit 회귀 가드 (#1120).
+
+    2026-05-26 사용자 P0 정정 — 기존 default 1M/7M 이 실측 (daily 298M / weekly
+    311M) 의 1/1000 수준 → "100% 초과" 노이즈 5분 마다 반복. 1B/7B raise 후 본
+    테스트가 회귀 가드 — default 가 다시 1M/7M 로 떨어지면 fail.
+    """
+
+    def test_default_daily_limit_at_least_1B(self) -> None:
+        self.assertGreaterEqual(cut.DEFAULT_DAILY_LIMIT, 1_000_000_000)
+
+    def test_default_weekly_limit_at_least_7B(self) -> None:
+        self.assertGreaterEqual(cut.DEFAULT_WEEKLY_LIMIT, 7_000_000_000)
+
+    def test_default_limits_proportional(self) -> None:
+        """주간 한도는 일 한도의 7배 이상이어야 한다 — 1 week = 7 days."""
+        self.assertGreaterEqual(
+            cut.DEFAULT_WEEKLY_LIMIT, cut.DEFAULT_DAILY_LIMIT * 7
+        )
+
+
 class TestComputePct(unittest.TestCase):
     def test_compute_pct_basic(self) -> None:
         self.assertEqual(cut.compute_pct(300_000, 1_000_000), 30)
