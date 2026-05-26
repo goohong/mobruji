@@ -1,3 +1,14 @@
+---
+feature: helper writing marker timing fix
+slug: helper-writing-marker-timing-fix
+status: approved
+owner: plan
+scope: infra
+related_issues: [1128]
+related_prs: [1139]
+last_reviewed: 2026-05-26
+---
+
 # helper writing marker timing fix
 
 > 2026-05-26 사용자 16:21-24 directive 박제. helper 본체 ✍️ reaction marker 가 본답
