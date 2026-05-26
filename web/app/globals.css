@@ -1,4 +1,11 @@
 @import "tailwindcss";
+/*
+ * ADR-0018 design tokens — color / typography / spacing / radius / shadow / motion.
+ * 본 import 는 변수 정의만 추가하며 기존 페이지 코드의 hardcode 값을 swap 하지
+ * 않는다 (회귀 0). 후속 PR (ui-ux-redesign 단계 4 PR 2-9) 가 페이지 별로 점진
+ * 마이그레이션한다.
+ */
+@import "./tokens.css";
 
 /*
  * 이슈 #319 — 다크 모드 수동 토글.
