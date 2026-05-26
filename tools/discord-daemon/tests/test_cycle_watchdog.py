@@ -827,6 +827,12 @@ class CycleFutureTimestampDiscordPushTest(unittest.IsolatedAsyncioTestCase):
             status_path = self._write_status(Path(tmp_dir), status_payload)
             channel = FakeChannel()
             client = FakeClient(channel)
+            # #1084 — time_source fixture 분리. 실제 ``time.monotonic()`` (시스템 boot
+            # 후 경과) 의존 시, 시스템 부팅 1h 이내 환경 (CI sandbox 등) 에서
+            # ``last_future_ts_push_at.get(..., 0.0)`` 와 비교한 차이가 debounce
+            # 3600s 미만 → fresh_future 빈 list → ERROR push 미발사로 flaky fail.
+            # fake monotonic 을 debounce 보다 큰 값으로 고정해 push 경로 결정성 확보.
+            fake_mono = [10000.0]
 
             with mock.patch.object(bot, "tmux_has_session", return_value=True), \
                  mock.patch.object(bot, "tmux_inject_text", return_value=True):
@@ -840,6 +846,7 @@ class CycleFutureTimestampDiscordPushTest(unittest.IsolatedAsyncioTestCase):
                     workspaces=["be", "fe", "rev", "plan"],
                     debounce_seconds=900,
                     future_ts_debounce_seconds=3600,
+                    time_source=lambda: fake_mono[0],
                     now_provider=lambda: now,
                 )
                 await _run_loop_iters(coro, iterations=5)

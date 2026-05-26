@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_EXCLUDED_SONG_IDS, useSessionStore } from "./session";
+import { MAX_EXCLUDED_SONG_IDS, isValidSessionId, useSessionStore } from "./session";
 
 beforeEach(() => {
   // persist middleware에 묶여 있어도 setState로 초기 상태 강제 복원 가능.
@@ -179,6 +179,83 @@ describe("useSessionStore.ensureSessionId fallback (no crypto.randomUUID)", () =
     const second = useSessionStore.getState().ensureSessionId();
 
     expect(first).not.toBe(second);
+  });
+});
+
+/**
+ * Stale localStorage sessionId 회귀 가드 (closes #1105).
+ *
+ * 사고: PR #991 이 `RecommendationCreateRequest` / `LikeToggleRequest` /
+ * `BookmarkToggleRequest` 의 `sessionId` 에 `@Pattern(UUID_V4)` 를 강제하면서
+ * localStorage 에 영속된 legacy format sessionId 가 모두 400 을 유발.
+ * `ensureSessionId()` 가 영속 값을 형식 검증 없이 그대로 반환하던 회귀.
+ */
+describe("useSessionStore.ensureSessionId stale localStorage 가드 (#1105)", () => {
+  it("legacy `sess_<ts>_<rand>` prefix 가 영속돼 있으면 새 UUIDv4 로 재발급한다", () => {
+    const legacy = "sess_lq7k3m_abc12345";
+    useSessionStore.setState({ sessionId: legacy });
+    expect(isValidSessionId(legacy)).toBe(false);
+
+    const fresh = useSessionStore.getState().ensureSessionId();
+    expect(fresh).not.toBe(legacy);
+    expect(isValidSessionId(fresh)).toBe(true);
+    expect(useSessionStore.getState().sessionId).toBe(fresh);
+  });
+
+  it("대문자 hex UUID (BE 소문자 regex 미통과) 도 새로 재발급한다", () => {
+    const uppercase = "ABCDEF12-1234-4ABC-89DE-1234567890AB";
+    useSessionStore.setState({ sessionId: uppercase });
+    expect(isValidSessionId(uppercase)).toBe(false);
+
+    const fresh = useSessionStore.getState().ensureSessionId();
+    expect(fresh).not.toBe(uppercase);
+    expect(isValidSessionId(fresh)).toBe(true);
+  });
+
+  it("이미 valid UUIDv4 (소문자 hex 8-4-4-4-12) 면 그대로 유지한다 (멱등)", () => {
+    const valid = "abcdef12-1234-4abc-89de-1234567890ab";
+    useSessionStore.setState({ sessionId: valid });
+    expect(isValidSessionId(valid)).toBe(true);
+
+    const returned = useSessionStore.getState().ensureSessionId();
+    expect(returned).toBe(valid);
+  });
+
+  it("빈 문자열 / null / 공백 등 falsy 또는 invalid 값은 새로 발급한다", () => {
+    for (const stale of ["", "   ", "not-a-uuid", "12345"]) {
+      useSessionStore.setState({ sessionId: stale });
+      const fresh = useSessionStore.getState().ensureSessionId();
+      expect(isValidSessionId(fresh)).toBe(true);
+      expect(fresh).not.toBe(stale);
+    }
+  });
+});
+
+/**
+ * `crypto` 자체가 없는 환경의 마지막 보루 fallback 도 BE `@Pattern(UUID_V4)`
+ * 호환 형식을 유지해야 함 (closes #1105 — AS-IS `sess_<ts>_<rand>` 폐기).
+ */
+describe("useSessionStore.ensureSessionId weak fallback (no crypto)", () => {
+  const originalCrypto = globalThis.crypto;
+
+  afterEach(() => {
+    if (originalCrypto) {
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: originalCrypto,
+      });
+    }
+  });
+
+  it("crypto 가 전혀 없어도 sessionId 는 UUIDv4 hex 8-4-4-4-12 형식이다", () => {
+    // crypto 객체 자체 제거 → 마지막 보루 분기 진입.
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: undefined,
+    });
+
+    const id = useSessionStore.getState().ensureSessionId();
+    expect(isValidSessionId(id)).toBe(true);
   });
 });
 

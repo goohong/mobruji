@@ -27,7 +27,7 @@
  *   - auto-dismiss 정확 duration — useAutoDismissMessage.test.ts (lib 레벨) cover.
  *
  * 보안:
- *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). "test-session-id" 더미값.
+ *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). "00000000-0000-4000-8000-000000000001" 더미값.
  */
 
 import { ReactNode } from "react";
@@ -142,7 +142,7 @@ beforeEach(() => {
   useLikesStore.setState({ likedSongIds: [] });
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
-    sessionId: "test-session-id",
+    sessionId: "00000000-0000-4000-8000-000000000001",
     voiceRangeId: null,
     excludedSongIds: [],
   });

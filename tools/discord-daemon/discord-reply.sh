@@ -81,6 +81,7 @@
 #
 #   6) forum modes (#17 사용자 forum 전환 wave, 2026-05-24):
 #       discord-reply.sh --forum-post <forum_env> "<title>" "<tag_name>" "<body>"
+#       discord-reply.sh --forum-post-auto-tag <forum_env> "<title>" "<body>"   (#1106)
 #       discord-reply.sh --forum-comment <thread_id> "<body>"
 #       discord-reply.sh --forum-edit <thread_id> "<new_body>"
 #       discord-reply.sh --forum-retag <thread_id> <forum_env> "<new_tag_name>"
@@ -90,6 +91,18 @@
 #         → --forum-post: POST /channels/{forum_id}/threads (name + applied_tags +
 #           message.content). 생성된 thread_id 를 stdout 으로 출력 (호출자가
 #           후속 --forum-comment / --forum-edit / --forum-retag 에 사용).
+#         → --forum-post-auto-tag (#1106, 2026-05-26): tag 인자 없이 forum 의
+#           available_tags 에서 fallback chain 자동 선택 후 forum_create_thread
+#           호출. fallback 우선순위:
+#             1) "PR 진행 중"  2) "진행"  3) "spec"  4) "stage 1"  5) "대기"
+#             6) 그 외 첫 번째 available_tags 항목
+#           available_tags 가 비어 있으면 applied_tags 미포함으로 thread 생성
+#           (Discord 가 default tag 없이 post 허용 — forum 설정에 따름).
+#           의도: agent-launch-wrapper.sh 가 cycle 별 tag 매핑을 hardcode 하지
+#           않고 forum 운영자가 tag 를 자유롭게 rename 해도 작동 (사용자 P0
+#           영구 fix — cycle channel silence, 사고: BE/FE/REV/PLAN cycle forum
+#           4개 모두 0 메시지였던 root cause 가 wrapper 의 text-channel API
+#           400 reject).
 #         → --forum-comment: POST /channels/{thread_id}/messages (forum thread 안
 #           일반 댓글).
 #         → --forum-edit: PATCH /channels/{thread_id}/messages/{thread_id} 로
@@ -102,6 +115,36 @@
 #           reply 가 의미 없음).
 #         → 관련 룰: CLAUDE.md §11-9 [[feedback-nmae-forum-channel-enforce]]
 #                   [[feedback-nmae-per-cycle-channel]] [[feedback-nmae-directive-board-update-flow]]
+#
+#   7) writing marker — 답 작성 시작 시점 가시화 (#1095, 2026-05-26):
+#       discord-reply.sh --writing-marker <user_msg_id>
+#         → 사용자 메시지에 ✍️ reaction PUT (bot self) + 채널에 POST /typing
+#           (Discord "입력 중" indicator, 10초 동안 표시).
+#         → helper 본체가 답 작성 시작 시점에 호출 (또는 bare body 자동 hook 이
+#           대행 — 아래 자동화 항목 참고).
+#       discord-reply.sh --writing-done <user_msg_id>
+#         → 사용자 메시지에서 ✍️ reaction DELETE (bot self). typing 은 자동 종료
+#           (Discord 가 10초 후 또는 다음 메시지 push 시 정리).
+#         → helper 본체가 본답 push 직후 호출 (또는 bare body 자동 hook 대행).
+#
+#       자동화 (default):
+#         → bare body 본답 push 호출 시 자동으로 (a) writing-marker 동등 동작
+#           수행 → (b) 메시지 push → (c) ✍️ remove. helper 본체가 명시 호출
+#           안 해도 "답 작성 시작/완료" 가시화가 강제 강화 (학습 의존 ↓).
+#         → 토글: `BOT_WRITING_REACTION_ENABLED=0` 시 reaction add/remove skip.
+#                `BOT_TYPING_INDICATOR_ENABLED=0` 시 POST /typing skip.
+#                자동화 자체 disable 시 둘 다 0.
+#         → emoji override: `BOT_WRITING_REACTION_EMOJI` env (default=✍️ —
+#           URL-encoded `%E2%9C%8D%EF%B8%8F`).
+#         → target msg id 는 `resolve_reply_to_id` (#987) 우선순위 체인 재사용 —
+#           --reply-to / HELPER_TURN_TARGET_MSG_ID / helper-current-target.txt /
+#           helper-queue.jsonl / last-user-msg-id.txt. 모든 fallback 실패 시
+#           graceful skip (helper turn 안 깨짐).
+#         → --status-channel / --channel / --cycle-channel / --no-reply / thread
+#           모드 등 reply 가 명시적으로 disable 된 경우 자동 hook 도 skip
+#           (target msg 가 없거나 다른 채널이므로).
+#
+#       관련 룰: CLAUDE.md §12-3 (helper 본답 push 직전/직후 자동 hook 강제 강화)
 #
 #   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
@@ -277,6 +320,28 @@ LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-${HOME:-/tmp}/.mobruji/last-user
 HELPER_TARGET_FILE="${HELPER_TARGET_FILE:-${HOME:-/tmp}/.mobruji/helper-current-target.txt}"
 HELPER_QUEUE_FILE="${HELPER_QUEUE_FILE:-${HOME:-/tmp}/.mobruji/helper-queue.jsonl}"
 
+# Writing marker / typing indicator 설정 (#1095, 2026-05-26).
+#
+# 두 가지 호출 경로:
+#   A) 명시 호출 — helper 본체가 `--writing-marker <user_msg_id>` / `--writing-done
+#      <user_msg_id>` 직접 호출. 이 경우 본 env 의 _ENABLED 토글은 reaction/typing
+#      세부 부분만 disable (default 둘 다 ENABLED=1).
+#   B) bare body 자동 hook — bare body 본답 push 호출 시 자동으로 (a) ✍️ reaction +
+#      typing → push → (c) ✍️ remove 수행. helper 본체가 명시 호출을 까먹어도 강제
+#      가시화. 회귀 안전을 위해 default OFF — `BOT_WRITING_AUTO_HOOK_ENABLED=1` 로
+#      옵트인.
+#
+# default emoji: ✍️ (U+270D + U+FE0F variation selector) — URL-encoded
+# `%E2%9C%8D%EF%B8%8F`. Discord API 는 unicode emoji 를 URL-encoded 형태로 받음.
+# `:name:id` (custom emoji) 도 지원 가능하지만 본 PR scope 외.
+BOT_WRITING_REACTION_EMOJI="${BOT_WRITING_REACTION_EMOJI:-%E2%9C%8D%EF%B8%8F}"
+BOT_WRITING_REACTION_ENABLED="${BOT_WRITING_REACTION_ENABLED:-1}"
+BOT_TYPING_INDICATOR_ENABLED="${BOT_TYPING_INDICATOR_ENABLED:-1}"
+# bare body 자동 hook — default OFF. 명시 호출 (--writing-marker / --writing-done)
+# 와 두 path 분리. 운영 단계에서 helper 본체가 `--writing-marker` 호출 룰을
+# 안정적으로 학습하면 1 로 전환해 자동화 보강 가능 (helper-rules.md 참고).
+BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-0}"
+
 # Discord API retry 설정 (#911 G-6).
 # 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
 # Discord 가 권장하는 retry_after 또는 exponential backoff 로 재시도한다.
@@ -326,9 +391,12 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan> \"<title>\" \"<tag>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-post-auto-tag <directive|be|fe|rev|plan> \"<title>\" \"<body>\"" >&2
   echo "  discord-reply.sh --forum-comment <thread_id> \"<body>\"" >&2
   echo "  discord-reply.sh --forum-edit <thread_id> \"<new_body>\"" >&2
   echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan> \"<new_tag>\"" >&2
+  echo "  discord-reply.sh --writing-marker <user_msg_id>" >&2
+  echo "  discord-reply.sh --writing-done <user_msg_id>" >&2
   exit 1
 fi
 
@@ -491,6 +559,22 @@ case "$1" in
     MSG="$5"
     NO_REPLY=1
     ;;
+  --forum-post-auto-tag)
+    # #1106 (2026-05-26) — cycle channel silence permanent fix.
+    # --forum-post-auto-tag <forum_env> "<title>" "<body>"
+    # tag 인자 없이 forum 의 available_tags 에서 fallback chain 자동 선택.
+    # agent-launch-wrapper.sh 가 본 mode 를 호출 — wrapper 가 cycle 별 tag 매핑
+    # 을 hardcode 하지 않고 forum 운영자가 tag rename 해도 작동.
+    MODE="forum-post-auto-tag"
+    if [[ $# -lt 4 ]]; then
+      echo "discord-reply.sh: --forum-post-auto-tag <forum_env> \"<title>\" \"<body>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    FORUM_ENV="$2"
+    FORUM_TITLE="$3"
+    MSG="$4"
+    NO_REPLY=1
+    ;;
   --forum-comment)
     # #17 — forum thread 안 댓글 (POST /channels/{thread_id}/messages).
     MODE="forum-comment"
@@ -564,6 +648,30 @@ case "$1" in
     esac
     MSG="$3"
     NO_REPLY=1
+    ;;
+  --writing-marker|--writing-done)
+    # #1095 (2026-05-26) — 답 작성 시작/완료 가시화.
+    # --writing-marker <user_msg_id>:
+    #   1) ✍️ reaction PUT (bot self) — 사용자 메시지에 답 작성 시작 표시.
+    #   2) POST /channels/{channel_id}/typing — Discord "입력 중" indicator 10초.
+    # --writing-done <user_msg_id>:
+    #   1) ✍️ reaction DELETE (bot self) — 본답 push 완료 시 정리.
+    if [[ $# -lt 2 ]]; then
+      echo "discord-reply.sh: $1 뒤에 user_msg_id 가 필요합니다" >&2
+      exit 1
+    fi
+    if [[ "$1" == "--writing-marker" ]]; then
+      MODE="writing-marker"
+    else
+      MODE="writing-done"
+    fi
+    # user_msg_id snowflake 검증 — 짧은 정수 / 비숫자 / 빈 값 거부.
+    # validate_snowflake 가 함수 정의 이후라 line 호출 — set -e 회피 위해 `||`.
+    # 본 검증은 dispatch 시점이 아닌 실행 시점에 다시 수행 (validate_snowflake
+    # 가 헬퍼 섹션에 정의되기 때문).
+    THREAD_ID="$2"  # user_msg_id 임시 저장. mode 실행에서 사용.
+    MSG="(writing-marker placeholder)"  # MSG 빈값 가드 우회.
+    NO_REPLY=1  # reaction/typing 호출은 message_reference 무관.
     ;;
   --*)
     echo "discord-reply.sh: 알 수 없는 옵션 $1" >&2
@@ -845,6 +953,112 @@ atomic_write_thread_file() {
   mv "$tmp" "$thread_file"
 }
 
+# ─── writing marker helpers (#1095, 2026-05-26) ──────────────────────────────
+
+# Discord PUT reaction (bot self) — PUT /channels/{cid}/messages/{mid}/reactions/{emoji}/@me.
+# 204 No Content 응답 → 성공. 4xx 면 stderr warning + exit 0 (graceful, helper turn
+# 안 깨짐).
+#
+# 인자: user_msg_id (snowflake).
+# discord_curl_with_retry 와 별도로 처리 — reaction endpoint 는 body 없음 (PUT with
+# empty body). 직접 curl 호출.
+#
+# emoji 는 이미 URL-encoded 상태로 $BOT_WRITING_REACTION_EMOJI 에 들어있다.
+reaction_add() {
+  local message_id="$1"
+  local emoji="$BOT_WRITING_REACTION_EMOJI"
+  local response status
+  response=$(curl -sS -X PUT \
+    "https://discord.com/api/v10/channels/${CHANNEL}/messages/${message_id}/reactions/${emoji}/@me" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -H "Content-Length: 0" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: reaction add 실패 (msg=${message_id}, status=${status}) — skip" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Discord DELETE reaction (bot self).
+reaction_remove() {
+  local message_id="$1"
+  local emoji="$BOT_WRITING_REACTION_EMOJI"
+  local response status
+  response=$(curl -sS -X DELETE \
+    "https://discord.com/api/v10/channels/${CHANNEL}/messages/${message_id}/reactions/${emoji}/@me" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  # 404 (이미 제거됨) 도 graceful 처리.
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ && "$status" != "404" ]]; then
+    echo "discord-reply.sh: reaction remove 실패 (msg=${message_id}, status=${status}) — skip" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Discord POST /typing — 10초 동안 채널에 "입력 중" indicator 표시.
+# 응답: 204 No Content. body 없음. 본 호출은 retry 안 함 — 실패해도 본답 push 가
+# 더 중요.
+typing_indicator() {
+  local response status
+  response=$(curl -sS -X POST \
+    "https://discord.com/api/v10/channels/${CHANNEL}/typing" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -H "Content-Length: 0" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: typing indicator 실패 (status=${status}) — skip" >&2
+    return 1
+  fi
+  return 0
+}
+
+# bare body 본답 push 자동 hook — 본답 push 전 ✍️ + typing, push 후 ✍️ remove.
+# 호출자 (helper 본체) 의 명시 호출 없이도 답 작성 시작/완료 가시화 강제.
+#
+# 동작:
+#   - target msg id resolve (REPLY_TO_ID 가 이미 본답 mode 에서 계산됨).
+#   - target 없으면 (NO_REPLY=1 / 없는 fallback) skip — reaction 걸 대상이 없음.
+#   - BOT_WRITING_REACTION_ENABLED=0 시 reaction skip / TYPING_INDICATOR_ENABLED=0
+#     시 typing skip. 둘 다 0 이면 자동 hook 자체 skip.
+#   - 모든 호출은 graceful (return 1 무시) — 본답 push 자체는 항상 진행.
+writing_hook_start() {
+  local target_msg_id="$1"
+  # bare body 본답 mode 의 자동 hook — BOT_WRITING_AUTO_HOOK_ENABLED=0 시 skip
+  # (default OFF, 회귀 안전).
+  if [[ "$BOT_WRITING_AUTO_HOOK_ENABLED" != "1" ]]; then
+    return 0
+  fi
+  if [[ -z "$target_msg_id" ]]; then
+    return 0
+  fi
+  if [[ "$BOT_WRITING_REACTION_ENABLED" == "1" ]]; then
+    reaction_add "$target_msg_id" || true
+  fi
+  if [[ "$BOT_TYPING_INDICATOR_ENABLED" == "1" ]]; then
+    typing_indicator || true
+  fi
+  return 0
+}
+
+writing_hook_end() {
+  local target_msg_id="$1"
+  if [[ "$BOT_WRITING_AUTO_HOOK_ENABLED" != "1" ]]; then
+    return 0
+  fi
+  if [[ -z "$target_msg_id" ]]; then
+    return 0
+  fi
+  if [[ "$BOT_WRITING_REACTION_ENABLED" == "1" ]]; then
+    reaction_remove "$target_msg_id" || true
+  fi
+  return 0
+}
+
 # ─── forum helpers (#17, 2026-05-24) ─────────────────────────────────────────
 
 # forum_env 이름 (directive | be | fe | rev | plan) → *_FORUM_ID env 값 resolve.
@@ -910,25 +1124,85 @@ resolve_forum_tag_id() {
 
 # forum thread 생성 — POST /channels/{forum_id}/threads.
 # body: { name, applied_tags: [<tag_id>], message: { content } }.
+# tag_id 가 빈 문자열이면 applied_tags 미포함 (#1106 — forum 의 default tag
+# 설정에 따름 / available_tags 가 비어 있는 경우 graceful).
 forum_create_thread() {
   local forum_id="$1"
   local name="$2"
   local tag_id="$3"
   local content="$4"
   local body
-  body=$(jq -nc \
-    --arg n "$name" \
-    --arg t "$tag_id" \
-    --arg c "$content" \
-    '{
-      name: $n,
-      applied_tags: [$t],
-      message: { content: $c },
-      auto_archive_duration: 1440
-    }')
+  if [[ -n "$tag_id" ]]; then
+    body=$(jq -nc \
+      --arg n "$name" \
+      --arg t "$tag_id" \
+      --arg c "$content" \
+      '{
+        name: $n,
+        applied_tags: [$t],
+        message: { content: $c },
+        auto_archive_duration: 1440
+      }')
+  else
+    body=$(jq -nc \
+      --arg n "$name" \
+      --arg c "$content" \
+      '{
+        name: $n,
+        message: { content: $c },
+        auto_archive_duration: 1440
+      }')
+  fi
   discord_curl_with_retry POST \
     "https://discord.com/api/v10/channels/${forum_id}/threads" \
     "$body"
+}
+
+# forum 의 available_tags 에서 fallback chain 자동 선택 (#1106, 2026-05-26).
+# 우선순위 (높음 → 낮음):
+#   1) "PR 진행 중"  2) "진행"  3) "spec"  4) "stage 1"  5) "대기"
+#   6) 그 외 첫 번째 available_tags 항목 (tag 가 존재하는 경우)
+# available_tags 가 비어 있으면 빈 문자열 반환 (호출자가 tag 없이 thread 생성).
+# stdout: tag_id (or empty), stderr: 선택된 tag name (운영자 가시).
+resolve_forum_tag_id_auto() {
+  local forum_id="$1"
+  local response status payload
+  response=$(curl -sS -X GET \
+    "https://discord.com/api/v10/channels/${forum_id}" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  payload="${response%$'\n'*}"
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: forum channel fetch 실패 (forum_id=$forum_id, status=$status)" >&2
+    echo "$payload" >&2
+    return 1
+  fi
+  # fallback chain — 첫 매칭 entry 의 id 반환.
+  local picked_id picked_name
+  picked_id=$(printf '%s' "$payload" | jq -r '
+    (.available_tags // []) as $tags
+    | (
+        ($tags[]? | select(.name == "PR 진행 중") | .id),
+        ($tags[]? | select(.name == "진행") | .id),
+        ($tags[]? | select(.name == "spec") | .id),
+        ($tags[]? | select(.name == "stage 1") | .id),
+        ($tags[]? | select(.name == "대기") | .id),
+        ($tags[0]?.id // empty)
+      )
+    | select(. != null and . != "")
+  ' 2>/dev/null | head -1)
+  if [[ -n "$picked_id" && "$picked_id" != "null" ]]; then
+    picked_name=$(printf '%s' "$payload" | jq -r --arg i "$picked_id" \
+      '(.available_tags // [])[] | select(.id == $i) | .name' \
+      | head -1)
+    echo "discord-reply.sh: --forum-post-auto-tag — tag \"${picked_name}\" 선택 (forum_id=$forum_id)" >&2
+    printf '%s' "$picked_id"
+  else
+    echo "discord-reply.sh: --forum-post-auto-tag — forum (forum_id=$forum_id) 에 available_tags 가 비어 있음, tag 없이 thread 생성" >&2
+    printf ''
+  fi
+  return 0
 }
 
 # forum thread starter message 본문 PATCH.
@@ -1030,8 +1304,18 @@ case "$MODE" in
     # 파일 부재 / 빈 값 / 비숫자 → graceful standalone push (legacy 호환).
     # --no-reply flag 시에도 standalone.
     REPLY_TO_ID=$(resolve_reply_to_id)
+
+    # #1095 (2026-05-26): 본답 push 직전 ✍️ reaction + typing — 답 작성 시작 가시화.
+    # NO_REPLY=1 (--no-reply / --status-channel / --channel / --cycle-channel 등)
+    # 시 REPLY_TO_ID 가 빈 문자열 → writing_hook_start 도 skip (대상 없음).
+    writing_hook_start "$REPLY_TO_ID"
+
     PAYLOAD=$(build_reply_payload "$MSG" "$REPLY_TO_ID")
     post_channel_message "$PAYLOAD"
+
+    # #1095: 본답 push 직후 ✍️ remove — 답 작성 완료 가시화.
+    # typing 은 Discord 자체 10초 timeout + 메시지 push 후 자동 종료.
+    writing_hook_end "$REPLY_TO_ID"
     ;;
 
   ack)
@@ -1160,6 +1444,23 @@ case "$MODE" in
     printf '%s\n' "$NEW_THREAD_ID"
     ;;
 
+  forum-post-auto-tag)
+    # #1106 (2026-05-26) — cycle channel silence permanent fix.
+    # tag 인자 없이 forum 의 available_tags 에서 fallback chain 자동 선택 후
+    # forum_create_thread 호출. agent-launch-wrapper.sh 가 본 mode 를 호출.
+    FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
+    # resolve_forum_tag_id_auto 는 available_tags 비어 있으면 빈 문자열 반환 (graceful).
+    TAG_ID=$(resolve_forum_tag_id_auto "$FORUM_ID")
+    THREAD_RESPONSE=$(forum_create_thread "$FORUM_ID" "$FORUM_TITLE" "$TAG_ID" "$MSG")
+    NEW_THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$NEW_THREAD_ID" ]]; then
+      echo "discord-reply.sh: forum thread 생성 실패 (forum=$FORUM_ENV, title=$FORUM_TITLE)" >&2
+      echo "$THREAD_RESPONSE" >&2
+      exit 1
+    fi
+    printf '%s\n' "$NEW_THREAD_ID"
+    ;;
+
   forum-comment)
     # #17 — forum thread 안 일반 댓글.
     # POST /channels/{thread_id}/messages — post_thread_message 재사용 가능.
@@ -1237,6 +1538,35 @@ case "$MODE" in
         exit 1
       fi
       printf '%s\n' "$NEW_BACKLOG_ID"
+    fi
+    ;;
+
+  writing-marker)
+    # #1095 (2026-05-26) — 답 작성 시작 가시화: ✍️ reaction PUT + POST /typing.
+    # THREAD_ID 변수에 user_msg_id 가 들어있음 (mode dispatch 단계 임시 저장).
+    USER_MSG_ID="$THREAD_ID"
+    # snowflake 검증 (실행 시점) — validate_snowflake 헬퍼 사용.
+    if ! USER_MSG_ID=$(validate_snowflake "$USER_MSG_ID" "--writing-marker user_msg_id"); then
+      echo "discord-reply.sh: --writing-marker — user_msg_id 가 snowflake 형식이 아닙니다" >&2
+      exit 1
+    fi
+    if [[ "$BOT_WRITING_REACTION_ENABLED" == "1" ]]; then
+      reaction_add "$USER_MSG_ID" || true
+    fi
+    if [[ "$BOT_TYPING_INDICATOR_ENABLED" == "1" ]]; then
+      typing_indicator || true
+    fi
+    ;;
+
+  writing-done)
+    # #1095 (2026-05-26) — 답 작성 완료: ✍️ reaction DELETE.
+    USER_MSG_ID="$THREAD_ID"
+    if ! USER_MSG_ID=$(validate_snowflake "$USER_MSG_ID" "--writing-done user_msg_id"); then
+      echo "discord-reply.sh: --writing-done — user_msg_id 가 snowflake 형식이 아닙니다" >&2
+      exit 1
+    fi
+    if [[ "$BOT_WRITING_REACTION_ENABLED" == "1" ]]; then
+      reaction_remove "$USER_MSG_ID" || true
     fi
     ;;
 esac

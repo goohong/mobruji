@@ -55,7 +55,7 @@ beforeEach(() => {
   useLikesStore.setState({ likedSongIds: [] });
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
-    sessionId: "test-session-id",
+    sessionId: "00000000-0000-4000-8000-000000000001",
     voiceRangeId: null,
     excludedSongIds: [],
   });

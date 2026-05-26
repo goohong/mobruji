@@ -82,7 +82,7 @@ beforeEach(() => {
   useLikesStore.setState({ likedSongIds: [] });
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
-    sessionId: "test-session-id",
+    sessionId: "00000000-0000-4000-8000-000000000001",
     voiceRangeId: null,
     excludedSongIds: [],
   });
@@ -478,7 +478,7 @@ describe("SongCard", () => {
       // BE 호출 검증 — sessionId+songId 전달.
       await waitFor(() => {
         expect(toggleLikeMock).toHaveBeenCalledWith({
-          sessionId: "test-session-id",
+          sessionId: "00000000-0000-4000-8000-000000000001",
           songId: 1,
         });
       });
@@ -605,7 +605,7 @@ describe("SongCard", () => {
 
       await waitFor(() => {
         expect(toggleBookmarkMock).toHaveBeenCalledWith({
-          sessionId: "test-session-id",
+          sessionId: "00000000-0000-4000-8000-000000000001",
           songId: 1,
         });
       });

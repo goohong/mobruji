@@ -1346,5 +1346,285 @@ class DiscordReplyResolvePriorityTests(unittest.TestCase):
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# #1095: writing-marker / writing-done mode + bare body 자동 hook
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DiscordReplyWritingMarkerTests(unittest.TestCase):
+    """`--writing-marker` / `--writing-done` mode 인자 검증 + bare body 자동 hook.
+
+    fake curl 로 endpoint URL 캡처 → PUT /reactions + POST /typing + DELETE /reactions
+    호출 순서/패턴 검증.
+    """
+
+    SCRIPT_PATH = (
+        Path(__file__).resolve().parent.parent / "discord-reply.sh"
+    )
+
+    def _make_fake_curl(
+        self, tmpdir: str, url_capture_path: str, method_capture_path: str
+    ) -> Path:
+        """fake curl — URL + method 캡처용 (PUT/DELETE/POST 구분).
+
+        - URL: 첫 http* 인자.
+        - method: -X 다음 인자.
+        - 반환: payload body + status 200 (reaction PUT/DELETE 는 204 가 정상이나
+          stub 으로 200 충분).
+        """
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "URL=\"\"\n"
+            "METHOD=\"GET\"\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  case \"$1\" in\n"
+            "    -X) shift; METHOD=\"$1\";;\n"
+            "    -d) shift; PAYLOAD=\"$1\";;\n"
+            "    http*) URL=\"$1\";;\n"
+            "  esac\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$URL\" >> {url_capture_path}\n"
+            f"printf '%s\\n' \"$METHOD\" >> {method_capture_path}\n"
+            "printf '{\"id\": \"99999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+        return fake_curl
+
+    def _run(
+        self,
+        *args: str,
+        extra_env: dict[str, str] | None = None,
+        last_id_content: str | None = None,
+        target_content: str | None = None,
+    ):
+        """tmpdir + fake curl + env setup → 실행."""
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        url_capture = str(Path(tmpdir) / "urls.txt")
+        method_capture = str(Path(tmpdir) / "methods.txt")
+        self._make_fake_curl(tmpdir, url_capture, method_capture)
+
+        env_path = Path(tmpdir) / "test.env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=stub\n"
+            "MOBRUJI_CHANNEL_ID=42\n"
+            "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n",
+            encoding="utf-8",
+        )
+
+        last_id_path = Path(tmpdir) / "last-user-msg-id.txt"
+        if last_id_content is not None:
+            last_id_path.write_text(last_id_content, encoding="utf-8")
+
+        target_path = Path(tmpdir) / "helper-current-target.txt"
+        if target_content is not None:
+            target_path.write_text(target_content, encoding="utf-8")
+
+        new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+        run_env = os.environ.copy()
+        run_env.update({
+            "DISCORD_DAEMON_ENV_PATH": str(env_path),
+            "PATH": new_path,
+            "LAST_USER_MSG_ID_FILE": str(last_id_path),
+            "HELPER_TARGET_FILE": str(target_path),
+            "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+        })
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
+        if extra_env:
+            run_env.update(extra_env)
+
+        result = subprocess.run(
+            ["bash", str(self.SCRIPT_PATH), *args],
+            capture_output=True,
+            text=True,
+            env=run_env,
+            timeout=5,
+        )
+        return result, url_capture, method_capture
+
+    # ── --writing-marker mode 인자 검증 ─────────────────────────────────────
+
+    def test_writing_marker_missing_user_msg_id(self) -> None:
+        """--writing-marker 뒤에 user_msg_id 없으면 exit 1."""
+        result, _, _ = self._run("--writing-marker")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--writing-marker", result.stderr)
+
+    def test_writing_marker_rejects_non_snowflake(self) -> None:
+        """--writing-marker user_msg_id 가 짧은 정수 (snowflake X) 면 exit 1."""
+        result, _, _ = self._run("--writing-marker", "4")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("snowflake", result.stderr.lower())
+
+    def test_writing_marker_calls_put_reaction_and_post_typing(self) -> None:
+        """--writing-marker valid snowflake → PUT /reactions + POST /typing 호출."""
+        result, url_capture, method_capture = self._run(
+            "--writing-marker", "12345678901234567",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        # 2 건 호출 — PUT reaction + POST typing.
+        self.assertEqual(len(urls), 2, f"호출 카운트 다름: {urls}")
+        # 첫 번째 = PUT reaction.
+        self.assertIn("PUT", methods[0])
+        self.assertIn("/messages/12345678901234567/reactions/", urls[0])
+        self.assertIn("@me", urls[0])
+        # 두 번째 = POST typing.
+        self.assertIn("POST", methods[1])
+        self.assertIn("/channels/42/typing", urls[1])
+
+    def test_writing_marker_skips_reaction_when_disabled(self) -> None:
+        """BOT_WRITING_REACTION_ENABLED=0 시 reaction skip — typing 만 호출."""
+        result, url_capture, method_capture = self._run(
+            "--writing-marker", "12345678901234567",
+            extra_env={"BOT_WRITING_REACTION_ENABLED": "0"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        # 1 건 — typing 만.
+        self.assertEqual(len(urls), 1)
+        self.assertIn("/typing", urls[0])
+
+    def test_writing_marker_skips_typing_when_disabled(self) -> None:
+        """BOT_TYPING_INDICATOR_ENABLED=0 시 typing skip — reaction 만 호출."""
+        result, url_capture, _ = self._run(
+            "--writing-marker", "12345678901234567",
+            extra_env={"BOT_TYPING_INDICATOR_ENABLED": "0"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        self.assertEqual(len(urls), 1)
+        self.assertIn("/reactions/", urls[0])
+
+    # ── --writing-done mode 인자 검증 ───────────────────────────────────────
+
+    def test_writing_done_missing_user_msg_id(self) -> None:
+        result, _, _ = self._run("--writing-done")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--writing-done", result.stderr)
+
+    def test_writing_done_rejects_non_snowflake(self) -> None:
+        result, _, _ = self._run("--writing-done", "abc")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_writing_done_calls_delete_reaction(self) -> None:
+        """--writing-done valid snowflake → DELETE /reactions 호출 1건."""
+        result, url_capture, method_capture = self._run(
+            "--writing-done", "12345678901234567",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        self.assertEqual(len(urls), 1)
+        self.assertIn("DELETE", methods[0])
+        self.assertIn("/messages/12345678901234567/reactions/", urls[0])
+        self.assertIn("@me", urls[0])
+
+    def test_writing_done_skips_when_reaction_disabled(self) -> None:
+        """BOT_WRITING_REACTION_ENABLED=0 시 done 호출이 no-op."""
+        result, url_capture, _ = self._run(
+            "--writing-done", "12345678901234567",
+            extra_env={"BOT_WRITING_REACTION_ENABLED": "0"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # urls.txt 자체 미생성 (호출 0건) 또는 빈 파일.
+        if Path(url_capture).exists():
+            urls = Path(url_capture).read_text().splitlines()
+            self.assertEqual(len(urls), 0)
+
+    # ── bare body 자동 hook (default on) ────────────────────────────────────
+
+    def test_bare_body_auto_hook_calls_reaction_typing_message_remove(self) -> None:
+        """본답 (bare body) push 시 자동 hook: PUT reaction + POST typing + POST message + DELETE reaction.
+
+        target msg id 는 last-user-msg-id.txt (valid snowflake) 에서 resolve.
+        자동 hook 은 BOT_WRITING_AUTO_HOOK_ENABLED=1 옵트인 (default off).
+        """
+        result, url_capture, method_capture = self._run(
+            "본답",
+            last_id_content="12345678901234567",
+            extra_env={"BOT_WRITING_AUTO_HOOK_ENABLED": "1"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        # 4건 호출: PUT reaction + POST typing + POST message + DELETE reaction.
+        self.assertEqual(len(urls), 4, f"호출 카운트: {urls}")
+        # 순서 검증.
+        self.assertIn("PUT", methods[0])
+        self.assertIn("/reactions/", urls[0])
+        self.assertIn("POST", methods[1])
+        self.assertIn("/typing", urls[1])
+        self.assertIn("POST", methods[2])
+        self.assertIn("/channels/42/messages", urls[2])
+        self.assertNotIn("/reactions", urls[2])
+        self.assertNotIn("/typing", urls[2])
+        self.assertIn("DELETE", methods[3])
+        self.assertIn("/reactions/", urls[3])
+
+    def test_bare_body_auto_hook_skipped_when_no_reply(self) -> None:
+        """--no-reply → REPLY_TO_ID 빈 문자열 → writing hook 자동 skip."""
+        result, url_capture, _ = self._run(
+            "--no-reply", "본답",
+            last_id_content="12345678901234567",
+            extra_env={"BOT_WRITING_AUTO_HOOK_ENABLED": "1"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        # 메시지 push 1건만 — reaction/typing 없음.
+        self.assertEqual(len(urls), 1, f"호출 카운트: {urls}")
+        self.assertIn("/channels/42/messages", urls[0])
+
+    def test_bare_body_auto_hook_skipped_when_target_absent(self) -> None:
+        """last-user-msg-id 없음 → REPLY_TO_ID 빈 → hook skip."""
+        result, url_capture, _ = self._run(
+            "본답",
+            last_id_content=None,
+            extra_env={"BOT_WRITING_AUTO_HOOK_ENABLED": "1"},
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        self.assertEqual(len(urls), 1)
+        self.assertIn("/messages", urls[0])
+
+    def test_bare_body_auto_hook_off_by_default(self) -> None:
+        """BOT_WRITING_AUTO_HOOK_ENABLED default OFF — 자동 hook 자체 no-op.
+
+        본답 push 1건만 발생 (기존 호환 보장). 운영에서 helper 본체가 명시 호출
+        `--writing-marker` / `--writing-done` 룰을 안정적으로 학습한 뒤 옵트인.
+        """
+        result, url_capture, _ = self._run(
+            "본답",
+            last_id_content="12345678901234567",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        self.assertEqual(len(urls), 1, f"호출 카운트: {urls}")
+        self.assertIn("/messages", urls[0])
+
+    def test_bare_body_auto_hook_partial_reaction_only(self) -> None:
+        """TYPING_INDICATOR_ENABLED=0 + AUTO_HOOK on → PUT + POST message + DELETE 3건."""
+        result, url_capture, methods_capture = self._run(
+            "본답",
+            last_id_content="12345678901234567",
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "BOT_TYPING_INDICATOR_ENABLED": "0",
+            },
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(methods_capture).read_text().splitlines()
+        self.assertEqual(len(urls), 3, f"호출 카운트: {urls}")
+        self.assertIn("PUT", methods[0])
+        self.assertIn("POST", methods[1])
+        self.assertIn("/messages", urls[1])
+        self.assertIn("DELETE", methods[2])
+
+
 if __name__ == "__main__":
     unittest.main()

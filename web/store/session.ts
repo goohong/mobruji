@@ -40,6 +40,31 @@ type SessionState = {
 };
 
 /**
+ * BE `SessionIdPatterns.UUID_V4` 와 일치해야 하는 형식 regex (소문자 hex 8-4-4-4-12).
+ *
+ * spec: ADR-0011 — client 가 발급한 UUIDv4 만 허용. BE `*Request` DTO 의
+ * `@Pattern(SessionIdPatterns.UUID_V4)` (PR #991) 와 정확히 동일한 정규식을
+ * FE 측에서도 적용하여 stale localStorage 의 legacy format (예: `sess_<ts>_<rand>`
+ * fallback, 대문자 hex 등) 을 BE 호출 전 detect 한다.
+ *
+ * BE 와 마찬가지로 version/variant nibble 까지는 강제하지 않는다 — generator
+ * 호환성을 위한 가벼운 형식 가드.
+ */
+const SESSION_ID_UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * 영속된 sessionId 가 BE @Pattern(UUID_V4) 통과 가능한 형식인지 검증.
+ *
+ * stale localStorage sessionId (PR #991 이전 발급분, 구형 fallback prefix 등) 가
+ * BE 400 회귀를 유발하던 경로를 막는 형식 가드. 호출 측은 false 시 새 ID 를
+ * 발급하고 기존 값을 폐기해야 한다.
+ */
+export function isValidSessionId(value: unknown): value is string {
+  return typeof value === "string" && SESSION_ID_UUID_V4.test(value);
+}
+
+/**
  * 익명 세션 ID 생성 (closes #424, #406 M1 결정).
  *
  * 우선순위:
@@ -64,9 +89,32 @@ function generateSessionId(): string {
   ) {
     return randomUuidV4FromBytes();
   }
-  return `sess_${Date.now().toString(36)}_${Math.random()
-    .toString(36)
-    .slice(2, 10)}`;
+  // crypto 자체가 없는 마지막 보루 분기 — BE `@Pattern(UUID_V4)` (#991, 회귀 #1105)
+  // 와 호환되려면 entropy 가 약하더라도 형식은 UUIDv4 hex 8-4-4-4-12 를 유지해야
+  // 한다. 실 브라우저 런타임은 위 두 분기에서 종료되므로 본 분기는 SSR/Node
+  // 일부 경로의 graceful degradation 전용. AS-IS `sess_<ts>_<rand>` prefix 는
+  // BE 400 을 유발하므로 폐기.
+  return weakHexUuidV4();
+}
+
+/**
+ * `crypto` 가 없는 환경의 마지막 보루용 weak hex UUIDv4 발급.
+ *
+ * - entropy 는 `Math.random()` 기반이라 약하지만, BE 의 `@Pattern(UUID_V4)`
+ *   regex (소문자 hex 8-4-4-4-12) 를 통과하는 형식은 보장한다.
+ * - 실 브라우저는 `crypto.randomUUID()` / `getRandomValues()` 분기에서 끝나므로
+ *   본 분기는 거의 도달하지 않는다.
+ */
+function weakHexUuidV4(): string {
+  const hex = "0123456789abcdef";
+  let out = "";
+  for (let i = 0; i < 32; i += 1) {
+    out += hex[Math.floor(Math.random() * 16)];
+    if (i === 7 || i === 11 || i === 15 || i === 19) {
+      out += "-";
+    }
+  }
+  return out;
 }
 
 /**
@@ -133,7 +181,12 @@ export const useSessionStore = create<SessionState>()(
       excludedSongIds: [],
       ensureSessionId: () => {
         const existing = get().sessionId;
-        if (existing) {
+        // BE `*Request.sessionId` @Pattern(UUID_V4) (PR #991) 와 형식이 다른
+        // legacy / stale 값이 localStorage 에 영속돼 있으면 그대로 신뢰하지
+        // 않고 새 ID 를 발급한다. 회귀 사고: 추천 받기 → 저장 400
+        // (스코프: closes #1105 — \`sess_<ts>_<rand>\` 등 구형 fallback / 대문자
+        // hex / 그 외 invalid format 모두 정정).
+        if (isValidSessionId(existing)) {
           return existing;
         }
         const fresh = generateSessionId();
