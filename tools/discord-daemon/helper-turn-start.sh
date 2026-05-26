@@ -46,18 +46,23 @@ fi
 
 echo "=== helper turn-start (#1014) ==="
 
+# ─── 0) 룰 reminder (#1085, 2026-05-26 사용자 정정) ────────────────────────────
+# 메모리 학습 의존 ↓ — wrapper stdout 으로 매 turn 핵심 룰 reminder.
+# 단일 SoT: docs/helper-rules.md. CLAUDE.md §12 는 본 파일 포인터.
+echo "[0/6] rules: (a) 답 first → 그 다음 작업 (b) helper 본체 = pure dispatch (코드 변경 = sub-agent 위임) (c) docs/helper-rules.md = SoT"
+
 # ─── 1) target msg freeze (#987) ──────────────────────────────────────────────
 if [[ -r "$LAST_MSG_FILE" ]]; then
   if cp "$LAST_MSG_FILE" "$TARGET_FILE" 2>/dev/null; then
     target_id=$(head -1 "$TARGET_FILE" 2>/dev/null | tr -d '[:space:]')
-    echo "[1/5] target freeze: ${target_id:-?}"
+    echo "[1/6] target freeze: ${target_id:-?}"
   else
-    echo "[1/5] target freeze: ! cp 실패 (권한?)" >&2
-    echo "[1/5] target freeze: ?"
+    echo "[1/6] target freeze: ! cp 실패 (권한?)" >&2
+    echo "[1/6] target freeze: ?"
   fi
 else
-  echo "[1/5] target freeze: ! ${LAST_MSG_FILE} 부재" >&2
-  echo "[1/5] target freeze: ?"
+  echo "[1/6] target freeze: ! ${LAST_MSG_FILE} 부재" >&2
+  echo "[1/6] target freeze: ?"
 fi
 
 # ─── 2) cycle-status.json 4 워크트리 요약 ───────────────────────────────────
@@ -82,14 +87,14 @@ if [[ -r "$CYCLE_STATUS_FILE" ]]; then
     if [[ -z "$summary" ]]; then
       summary="(parse 실패)"
     fi
-    echo "[2/5] cycle-status: ${summary}"
+    echo "[2/6] cycle-status: ${summary}"
   else
-    echo "[2/5] cycle-status: (jq 미설치 — raw)"
+    echo "[2/6] cycle-status: (jq 미설치 — raw)"
     cat "$CYCLE_STATUS_FILE" 2>/dev/null | head -20
   fi
 else
-  echo "[2/5] cycle-status: ! ${CYCLE_STATUS_FILE} 부재" >&2
-  echo "[2/5] cycle-status: ?"
+  echo "[2/6] cycle-status: ! ${CYCLE_STATUS_FILE} 부재" >&2
+  echo "[2/6] cycle-status: ?"
 fi
 
 # ─── 3) user-presence (단순 정보 표시 — 행동 분기 X) ─────────────────────────
@@ -97,14 +102,14 @@ if [[ -r "$USER_PRESENCE_FILE" ]]; then
   if [[ "$HAS_JQ" -eq 1 ]]; then
     presence=$(jq -r '.status // .presence // "?"' "$USER_PRESENCE_FILE" 2>/dev/null)
     last_seen=$(jq -r '.last_seen // .updated_at // ""' "$USER_PRESENCE_FILE" 2>/dev/null)
-    echo "[3/5] user-presence: ${presence:-?} (last_seen=${last_seen:-?}) — 정보만, wait 분기 금지"
+    echo "[3/6] user-presence: ${presence:-?} (last_seen=${last_seen:-?}) — 정보만, wait 분기 금지"
   else
     raw=$(head -1 "$USER_PRESENCE_FILE" 2>/dev/null)
-    echo "[3/5] user-presence: ${raw:0:80} — 정보만, wait 분기 금지"
+    echo "[3/6] user-presence: ${raw:0:80} — 정보만, wait 분기 금지"
   fi
 else
-  echo "[3/5] user-presence: ! ${USER_PRESENCE_FILE} 부재" >&2
-  echo "[3/5] user-presence: ?"
+  echo "[3/6] user-presence: ! ${USER_PRESENCE_FILE} 부재" >&2
+  echo "[3/6] user-presence: ?"
 fi
 
 # ─── 4) helper-queue 마지막 pending 표시 ────────────────────────────────────
@@ -112,18 +117,18 @@ if [[ -r "$QUEUE_FILE" ]]; then
   if [[ "$HAS_JQ" -eq 1 ]]; then
     pending_count=$(jq -s '[.[] | select(.status == "pending")] | length' "$QUEUE_FILE" 2>/dev/null)
     last_pending=$(jq -r 'select(.status == "pending") | .message_id // "?"' "$QUEUE_FILE" 2>/dev/null | tail -1)
-    echo "[4/5] queue: pending=${pending_count:-?} last_pending_msg_id=${last_pending:-?} — append 의무 잊지 말기"
+    echo "[4/6] queue: pending=${pending_count:-?} last_pending_msg_id=${last_pending:-?} — append 의무 잊지 말기"
   else
     pending_count=$(grep -c '"status": "pending"' "$QUEUE_FILE" 2>/dev/null || echo "?")
-    echo "[4/5] queue: pending=${pending_count} (jq 미설치 raw count) — append 의무 잊지 말기"
+    echo "[4/6] queue: pending=${pending_count} (jq 미설치 raw count) — append 의무 잊지 말기"
   fi
 else
-  echo "[4/5] queue: ! ${QUEUE_FILE} 부재 (turn 종료 직전 신설 필요)" >&2
-  echo "[4/5] queue: ?"
+  echo "[4/6] queue: ! ${QUEUE_FILE} 부재 (turn 종료 직전 신설 필요)" >&2
+  echo "[4/6] queue: ?"
 fi
 
 # ─── 5) 다음 액션 reminder ──────────────────────────────────────────────────
-echo "[5/5] 다음 액션: (a) queue append (b) 분류 (c) 처리 (d) 본답 push (e) queue done + grep 0건 검증"
+echo "[5/6] 다음 액션 (docs/helper-rules.md §3): (a) queue append (b) 분류 (c) 답 first → 처리 (d) sub-agent dispatch (e) queue done + grep 0건 검증 (f) directive forum 등록 (지시 채택 시)"
 echo "=== /helper turn-start ==="
 
 exit 0

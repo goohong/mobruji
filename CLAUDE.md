@@ -35,6 +35,7 @@
 - `docs/ai-harness/10-observability.md` — 로깅/메트릭/트레이싱
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 런북
 - `docs/ai-harness/12-sub-agent-prompt-template.md` — **sub-agent launch single SoT (§13 위임)**
+- `docs/helper-rules.md` — **helper 본체 비협상 룰 single SoT (§12 위임, 2026-05-26 #1085)**
 - `docs/ai-harness/13-memory-promote-tracking.md` — 메모리 promote/tracking
 - `docs/ai-harness/14-discord-notify-setup.md` — Discord notify 셋업
 - `docs/ai-harness/15-discord-message-templates.md` — Discord 메시지 템플릿
@@ -271,6 +272,12 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 
 > 대상: 사용자 응답 + helper 자체 수정 (mac `tmux helper:0.0`).
 > 메모리 actor: `helper`.
+>
+> **SoT (2026-05-26 #1085)**: 본 섹션은 `docs/helper-rules.md` 의 거울/요약.
+> 충돌 시 `docs/helper-rules.md` 우선. 사용자 정정 (2026-05-26): "기본 중요 규칙
+> = 메모리 X, md/script 단일 SoT". 강제 룰은 `docs/helper-rules.md` + `tools/
+> discord-daemon/helper-turn-start.sh` (wrapper) 두 채널로 강제. 메모리 (`memory/
+> helper/feedback_*.md`) 는 nuance / 예시 / 사고 박제만 보관.
 
 ### 12-1) 채널 / 권한 경계
 
