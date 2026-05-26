@@ -1,0 +1,18 @@
+[Unit]
+Description=Mobruji maestro (Claude Code in tmux)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=mobruji
+WorkingDirectory=/home/mobruji/mobruji
+Environment=HOME=/home/mobruji
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/tmux new-session -d -s mobruji -c /home/mobruji/mobruji "/home/mobruji/.mobruji/maestro-launch.sh"
+ExecStop=/usr/bin/tmux kill-session -t mobruji
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
