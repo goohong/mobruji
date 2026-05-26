@@ -51,6 +51,13 @@ from directive_board_sync import (
     directive_board_summary,
     sync_once as directive_board_sync_once,
 )
+from directive_detect import (
+    DIRECTIVE_CLASSES,
+    append_detect_entry,
+    detect_mismatch as directive_detect_mismatch,
+    format_mismatch_push as directive_format_mismatch_push,
+    make_detect_entry,
+)
 
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
@@ -321,6 +328,20 @@ THREAD_CLEANUP_PER_THREAD_SLEEP_SECONDS: Final[float] = 0.5
 THREAD_CLEANUP_HTTP_TIMEOUT_SECONDS: Final[int] = 10
 # Discord snowflake epoch (ms): 2015-01-01T00:00:00Z.
 DISCORD_EPOCH_MS: Final[int] = 1_420_070_400_000
+
+# --- directive-detect register watchdog (#1071) ---
+# spec: 이슈 #1071. 사용자 P0 frustration "내가 지시한 거 왜 지시 forum에 추가 안해".
+# `on_message` 에서 메시지 분류 → directive-detect.jsonl 에 append.
+# watchdog loop 가 10분 주기 mismatch (detect > board + grace) 시 MOBRUJI 채널 push.
+DIRECTIVE_DETECT_PATH_DEFAULT: Final[Path] = Path(
+    "~/.mobruji/directive-detect.jsonl"
+).expanduser()
+DIRECTIVE_DETECT_WATCH_DEFAULT_ENABLED: Final[str] = "1"
+DIRECTIVE_DETECT_WATCH_DEFAULT_INTERVAL_SECONDS: Final[int] = 600  # 10분
+DIRECTIVE_DETECT_WATCH_DEFAULT_WINDOW_MINUTES: Final[int] = 60
+DIRECTIVE_DETECT_WATCH_DEFAULT_GRACE_COUNT: Final[int] = 5
+# push debounce — 같은 mismatch alarm 이 매 iter 중복 push 안 되도록.
+DIRECTIVE_DETECT_WATCH_DEBOUNCE_SECONDS: Final[int] = 60 * 60  # 1h
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
 logger = logging.getLogger("mobruji-discord-daemon")
@@ -2850,6 +2871,112 @@ async def directive_board_sync_loop(
         await asyncio.sleep(poll_interval)
 
 
+async def directive_register_watch_loop(
+    client: "discord.Client",
+    notify_channel_id: int,
+    *,
+    detect_path: Path = DIRECTIVE_DETECT_PATH_DEFAULT,
+    board_path: Path = DIRECTIVE_BOARD_JSONL_PATH_DEFAULT,
+    poll_interval: int = DIRECTIVE_DETECT_WATCH_DEFAULT_INTERVAL_SECONDS,
+    window_minutes: int = DIRECTIVE_DETECT_WATCH_DEFAULT_WINDOW_MINUTES,
+    grace_count: int = DIRECTIVE_DETECT_WATCH_DEFAULT_GRACE_COUNT,
+    debounce_seconds: int = DIRECTIVE_DETECT_WATCH_DEBOUNCE_SECONDS,
+    initial_delay: int = 180,
+) -> None:
+    """directive-detect.jsonl ↔ directive-board.jsonl mismatch 감시 loop (#1071).
+
+    배경 (사용자 P0 frustration, 2026-05-24):
+        "내가 지시한 거 왜 지시 forum에 추가 안해". helper 가 사용자 directive 메시지를
+        받았지만 forum 등록을 까먹는 사고. 메모리 룰 학습만으로는 누락 반복 →
+        watchdog 으로 mismatch 감지 + 사용자 채널 push.
+
+    동작:
+        1. ``initial_delay`` 초 warmup 후 polling 시작.
+        2. ``poll_interval`` 초 마다 ``detect_mismatch`` 로 directive-detect 와
+           directive-board 의 최근 ``window_minutes`` 분 카운트 비교.
+        3. ``detect_count > board_count + grace_count`` 면 mismatch — MOBRUJI 채널 push.
+        4. ``debounce_seconds`` 안 같은 mismatch 재 push 안 함 (중복 noise 차단).
+        5. graceful — 파일 부재 / parse 실패는 카운트 0 처리, 절대 loop 중단 X.
+
+    Args:
+        client: discord.Client (이미 connected)
+        notify_channel_id: 사용자 응답 채널 id (MOBRUJI_CHANNEL_ID, int)
+        detect_path: directive-detect.jsonl (on_message 기록)
+        board_path: directive-board.jsonl (forum 등록 SoT)
+        poll_interval: 10분 default
+        window_minutes: 60 default
+        grace_count: 5 default (사용자 메시지 직후 helper 가 forum 등록 처리 중 일 수
+            있는 grace)
+        debounce_seconds: 1h default
+        initial_delay: 3분 warmup
+    """
+    if poll_interval <= 0:
+        logger.info("directive_register_watch_loop disabled (poll_interval<=0)")
+        return
+    if notify_channel_id <= 0:
+        logger.info(
+            "directive_register_watch_loop disabled (notify_channel_id 유효하지 않음)"
+        )
+        return
+
+    await asyncio.sleep(initial_delay)
+    last_push_ts: float = 0.0
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            snapshot = directive_detect_mismatch(
+                detect_path=detect_path,
+                board_path=board_path,
+                now=now,
+                window_minutes=window_minutes,
+                grace_count=grace_count,
+            )
+            logger.info(
+                "directive_register_watch: window=%dmin detect=%d board=%d "
+                "mismatch=%s",
+                snapshot.window_minutes,
+                snapshot.detect_count,
+                snapshot.board_count,
+                snapshot.mismatch,
+            )
+            if snapshot.mismatch:
+                now_ts = now.timestamp()
+                if now_ts - last_push_ts < debounce_seconds:
+                    logger.info(
+                        "directive_register_watch: mismatch but debounce active "
+                        "(remaining=%ds)",
+                        int(debounce_seconds - (now_ts - last_push_ts)),
+                    )
+                else:
+                    message = directive_format_mismatch_push(snapshot)
+                    channel = client.get_channel(notify_channel_id)
+                    if channel is None:
+                        logger.warning(
+                            "directive_register_watch push 실패 — channel id=%d 미발견",
+                            notify_channel_id,
+                        )
+                    else:
+                        try:
+                            await channel.send(message)
+                            last_push_ts = now_ts
+                            logger.info(
+                                "directive_register_watch push OK: detect=%d board=%d",
+                                snapshot.detect_count,
+                                snapshot.board_count,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "directive_register_watch push 실패: %s",
+                                exc,
+                                exc_info=True,
+                            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("directive_register_watch_loop iter 실패: %s", exc)
+        await asyncio.sleep(poll_interval)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Discord thread auto-cleanup (#1023, 2026-05-24 사용자 P0)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3560,6 +3687,30 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         env.get("THREAD_CLEANUP_DELETE", THREAD_CLEANUP_DEFAULT_DELETE) == "1"
     )
 
+    # directive-detect register watchdog (#1071) — env 해석.
+    directive_detect_watch_enabled = (
+        env.get(
+            "DIRECTIVE_DETECT_WATCH_ENABLED",
+            DIRECTIVE_DETECT_WATCH_DEFAULT_ENABLED,
+        )
+        == "1"
+    )
+    directive_detect_watch_interval = _resolve_int_env(
+        "DIRECTIVE_DETECT_WATCH_INTERVAL",
+        DIRECTIVE_DETECT_WATCH_DEFAULT_INTERVAL_SECONDS,
+        allow_zero=False,
+    )
+    directive_detect_watch_window_minutes = _resolve_int_env(
+        "DIRECTIVE_DETECT_WATCH_WINDOW_MINUTES",
+        DIRECTIVE_DETECT_WATCH_DEFAULT_WINDOW_MINUTES,
+        allow_zero=False,
+    )
+    directive_detect_watch_grace = _resolve_int_env(
+        "DIRECTIVE_DETECT_WATCH_GRACE_COUNT",
+        DIRECTIVE_DETECT_WATCH_DEFAULT_GRACE_COUNT,
+        allow_zero=True,
+    )
+
     context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
     context_trigger_pct = resolve_context_pct_env(
         env.get("CONTEXT_CLEAR_TRIGGER_PCT"),
@@ -3823,6 +3974,39 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not thread_cleanup_enabled:
             logger.info("thread_cleanup_loop disabled (THREAD_CLEANUP_ENABLED=0)")
 
+        # directive-detect register watchdog loop (#1071).
+        # 10분 polling — detect (queue) vs board (forum) mismatch 감지 + MOBRUJI push.
+        # 사용자 P0 frustration "내가 지시한 거 왜 지시 forum에 추가 안해" 직접 fix.
+        if directive_detect_watch_enabled and not hasattr(
+            client, "_directive_detect_watch_task_started"
+        ):
+            client._directive_detect_watch_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(
+                directive_register_watch_loop(
+                    client,
+                    target_channel_id,
+                    detect_path=DIRECTIVE_DETECT_PATH_DEFAULT,
+                    board_path=directive_board_jsonl_path,
+                    poll_interval=directive_detect_watch_interval,
+                    window_minutes=directive_detect_watch_window_minutes,
+                    grace_count=directive_detect_watch_grace,
+                )
+            )
+            logger.info(
+                "directive_register_watch_loop launched: channel=%d interval=%ds "
+                "window=%dmin grace=%d detect_path=%s board_path=%s",
+                target_channel_id,
+                directive_detect_watch_interval,
+                directive_detect_watch_window_minutes,
+                directive_detect_watch_grace,
+                DIRECTIVE_DETECT_PATH_DEFAULT,
+                directive_board_jsonl_path,
+            )
+        elif not directive_detect_watch_enabled:
+            logger.info(
+                "directive_register_watch_loop disabled (DIRECTIVE_DETECT_WATCH_ENABLED=0)"
+            )
+
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
@@ -3882,6 +4066,31 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # discord-reply.sh bare body 모드가 이 파일을 읽어
         # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
         write_last_user_msg_id(message_id)
+
+        # #1071: directive 자동 분류 + jsonl 기록.
+        # 사용자 frustration "내가 지시한 거 왜 지시 forum에 추가 안해" 직접 fix.
+        # 메시지 텍스트를 regex 분류 후 ~/.mobruji/directive-detect.jsonl 에 append.
+        # helper turn-start wrapper / watchdog 이 본 jsonl 로 누락 탐지.
+        # 실패는 warning 만 — forwarding 흐름 차단 금지.
+        try:
+            detect_entry = make_detect_entry(
+                message_id=message_id,
+                ts_iso=payload["ts"],
+                text=original_body,
+                channel_id=payload["channel_id"],
+            )
+            append_detect_entry(DIRECTIVE_DETECT_PATH_DEFAULT, detect_entry)
+            if detect_entry["class"] in DIRECTIVE_CLASSES:
+                logger.info(
+                    "directive-detect classify: id=%s class=%s summary=%r",
+                    message_id,
+                    detect_entry["class"],
+                    detect_entry["summary"],
+                )
+        except OSError as exc:
+            logger.warning(
+                "directive-detect append 실패: id=%s exc=%r", message_id, exc
+            )
 
         # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
         # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
