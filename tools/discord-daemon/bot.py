@@ -570,6 +570,92 @@ def format_heartbeat_stale_message(stale: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def verify_deploy_dir(
+    *,
+    bot_file: Path | None = None,
+    env_get=None,
+    logger_override: logging.Logger | None = None,
+) -> str:
+    """bridge 배포 dir 격리 검증 (PR #1126 spec — bridge-deployment-dir-separation).
+
+    bot.py 가 메인 repo (`/home/mobruji/mobruji`) 가 아닌 전용 dir
+    (`/home/mobruji/mobruji-bridge`) 에서 실행 중인지 확인합니다.
+    임의 브랜치 전환에 봇 코드가 오염되는 사고 (2026-05-26 14:30 KST,
+    `feat/writing-marker-reaction-typing-#1095`) 의 재발을 막습니다.
+
+    Mode (env `MOBRUJI_BRIDGE_DEPLOY_DIR_CHECK`, default ``warn``):
+
+    - ``off`` — 검증 skip (rollback / 마이그레이션 중 임시 사용).
+    - ``warn`` (default) — 잘못된 dir 일 때 WARNING 로그만 emit, 정상 진행.
+    - ``strict`` — 잘못된 dir 일 때 ERROR 로그 + ``sys.exit(2)``.
+
+    기대 dir 경로 (env `MOBRUJI_BRIDGE_DEPLOY_DIR`,
+    default ``/home/mobruji/mobruji-bridge``) 와 ``Path(__file__).resolve()``
+    의 ancestor 비교로 판정합니다. symlink resolve 포함.
+
+    Args:
+        bot_file: 검사 대상 파일 경로 (default ``Path(bot.__file__)``). 테스트용.
+        env_get: env getter (default ``os.environ.get``). 테스트용.
+        logger_override: logger (default 모듈 logger). 테스트용.
+
+    Returns:
+        판정 결과 문자열 — ``"ok"`` / ``"warn"`` / ``"strict-exit"`` / ``"off"``.
+        ``"strict-exit"`` 는 실제 ``sys.exit`` 직전 반환 (테스트에서만 도달).
+    """
+    active_logger = logger_override if logger_override is not None else logger
+    get = env_get if env_get is not None else os.environ.get
+
+    mode = (get("MOBRUJI_BRIDGE_DEPLOY_DIR_CHECK") or "warn").strip().lower()
+    if mode not in {"off", "warn", "strict"}:
+        active_logger.warning(
+            "MOBRUJI_BRIDGE_DEPLOY_DIR_CHECK 값(%r) 알 수 없음 — 'warn' 으로 fallback.",
+            mode,
+        )
+        mode = "warn"
+
+    if mode == "off":
+        active_logger.info(
+            "bridge deploy dir 검증 mode=off — skip (마이그레이션/rollback 중에만 사용)."
+        )
+        return "off"
+
+    expected_raw = (
+        get("MOBRUJI_BRIDGE_DEPLOY_DIR") or "/home/mobruji/mobruji-bridge"
+    ).strip()
+    expected_dir = Path(expected_raw).resolve()
+    bot_path = (bot_file if bot_file is not None else Path(__file__)).resolve()
+
+    try:
+        bot_path.relative_to(expected_dir)
+        ok = True
+    except ValueError:
+        ok = False
+
+    if ok:
+        active_logger.info(
+            "bridge deploy dir OK — bot.py=%s expected=%s mode=%s",
+            bot_path,
+            expected_dir,
+            mode,
+        )
+        return "ok"
+
+    message = (
+        "bridge deploy dir MISMATCH — bot.py=%s 가 expected=%s 의 자식이 아닙니다. "
+        "PR #1126 spec (docs/features/bridge-deployment-dir-separation.md) 위반 — "
+        "메인 repo working tree 에서 봇이 실행 중일 가능성 (임의 브랜치 전환 오염 위험). "
+        "전용 dir 로 이전하거나 mode=off 로 임시 우회하십시오."
+    )
+    if mode == "strict":
+        active_logger.error(message, bot_path, expected_dir)
+        # 테스트에서 sys.exit monkeypatch 시 도달 가능.
+        sys.exit(2)
+        return "strict-exit"
+
+    active_logger.warning(message, bot_path, expected_dir)
+    return "warn"
+
+
 def load_env() -> dict[str, str]:
     """필수 환경변수를 로드합니다. 누락 시 즉시 종료합니다.
 
@@ -4668,6 +4754,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
 
 
 def main() -> None:
+    # bridge 배포 dir 격리 검증 (PR #1126) — load_env 이전에 호출하여
+    # 잘못된 dir 실행 시 가능한 한 일찍 fail-fast 합니다.
+    verify_deploy_dir()
     env = load_env()
     ledger = DedupLedger(env["DEDUP_LEDGER_PATH"])
     start_dedup_gc_thread(ledger)
