@@ -1,0 +1,33 @@
+# /etc/systemd/system/mobruji-helper.service
+#
+# mobruji helper systemd unit — Discord 사용자 양방향 relay 전담 Claude CLI 세션.
+#
+# 본 파일은 reference 사본입니다. 운영 본체는
+# `/etc/systemd/system/mobruji-helper.service` 에 있으며, 변경 시 반드시
+# 두 파일을 동시에 갱신하고 `sudo systemctl daemon-reload` 후 재시작합니다.
+#
+# 설계 의도 (2026-05-26 helper-role-enforcement 후속):
+# - helper 본체의 역할(=사용자↔nmae relay 전담)을 system prompt 로 강제하기 위해
+#   `helper-launch.sh` 런처를 경유합니다.
+# - 런처와 역할 정의(`helper-role.md`)는 브랜치 전환에 흔들리지 않도록 `~/.mobruji`
+#   안에 두는 것이 SoT 입니다. 본 repo 안 사본(`tools/discord-daemon/helper-role.md`,
+#   `tools/discord-daemon/helper-launch.sh`)은 PR 리뷰/감사용 reference 입니다.
+# - 변경 절차: docs/features/helper-role-enforcement.md §운영 변경 절차 참조.
+
+[Unit]
+Description=mobruji helper (Discord 사용자 양방향 전담 claude)
+After=network-online.target mobruji-maestro.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=mobruji
+WorkingDirectory=/home/mobruji/mobruji
+Environment=HOME=/home/mobruji
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; then /usr/bin/tmux new-session -d -s helper -c /home/mobruji/mobruji "/home/mobruji/.mobruji/helper-launch.sh"; fi'
+ExecStop=/usr/bin/tmux kill-session -t helper
+
+[Install]
+WantedBy=multi-user.target
