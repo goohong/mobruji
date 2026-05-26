@@ -291,6 +291,113 @@ case8_missing_args() {
     "echo '$stderr' | grep -q -- '--forum-post'"
 }
 
+# ── case 9: --forum-post-auto-tag (#1106) — fallback chain 우선순위 ─────────
+case9_forum_post_auto_tag_priority() {
+  echo "[case9] --forum-post-auto-tag — fallback chain 우선순위"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+  # 6 tag 모두 존재 — "PR 진행 중" 가 1순위 → 선택됨.
+  _write_fake_curl "$tmpdir" "$tmpdir/cap.txt" \
+    '[{"id":"tag-pr","name":"PR 진행 중"},{"id":"tag-prog","name":"진행"},{"id":"tag-spec","name":"spec"},{"id":"tag-stage","name":"stage 1"},{"id":"tag-wait","name":"대기"},{"id":"tag-other","name":"기타"}]'
+
+  local stdout
+  stdout=$(_run "$tmpdir" "$env_path" \
+    --forum-post-auto-tag be "title-auto" "body-auto" 2>/dev/null)
+  local rc=$?
+
+  _assert "case9 returncode 0" "[[ $rc -eq 0 ]]"
+  _assert "case9 thread_id 출력" "[[ -n '$stdout' ]]"
+  _assert "case9 GET forum 채널 호출" \
+    "grep -q 'GET https://discord.com/api/v10/channels/forum-be' $tmpdir/cap.txt"
+  _assert "case9 POST forum/threads 호출" \
+    "grep -q 'POST https://discord.com/api/v10/channels/forum-be/threads' $tmpdir/cap.txt"
+  local post_line
+  post_line=$(grep 'POST .*forum-be/threads' "$tmpdir/cap.txt" | head -1)
+  _assert "case9 applied_tags 에 tag-pr (1순위) 포함" \
+    "echo '$post_line' | grep -q 'tag-pr'"
+  _assert "case9 thread name 포함" \
+    "echo '$post_line' | grep -q 'title-auto'"
+  _assert "case9 starter message content 포함" \
+    "echo '$post_line' | grep -q 'body-auto'"
+}
+
+# ── case 10: --forum-post-auto-tag — 1순위 없으면 다음 우선순위 ─────────────
+case10_forum_post_auto_tag_secondary() {
+  echo "[case10] --forum-post-auto-tag — 1순위 없으면 \"진행\" 선택"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+  _write_fake_curl "$tmpdir" "$tmpdir/cap.txt" \
+    '[{"id":"tag-prog","name":"진행"},{"id":"tag-spec","name":"spec"}]'
+
+  local stdout
+  stdout=$(_run "$tmpdir" "$env_path" \
+    --forum-post-auto-tag fe "title-fe" "body-fe" 2>/dev/null)
+  local rc=$?
+
+  _assert "case10 returncode 0" "[[ $rc -eq 0 ]]"
+  local post_line
+  post_line=$(grep 'POST .*forum-fe/threads' "$tmpdir/cap.txt" | head -1)
+  _assert "case10 applied_tags 에 tag-prog (\"진행\") 포함" \
+    "echo '$post_line' | grep -q 'tag-prog'"
+  _assert "case10 1순위 \"PR 진행 중\" tag-pr id 미포함 (정확 매칭)" \
+    "! echo '$post_line' | grep -qE '\"tag-pr\"'"
+}
+
+# ── case 11: --forum-post-auto-tag — available_tags 비어 있으면 tag 없이 생성
+case11_forum_post_auto_tag_empty() {
+  echo "[case11] --forum-post-auto-tag — available_tags 비어 있음 → tag 없이"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local env_path
+  env_path=$(_write_env "$tmpdir")
+  _write_fake_curl "$tmpdir" "$tmpdir/cap.txt" '[]'
+
+  local stdout
+  stdout=$(_run "$tmpdir" "$env_path" \
+    --forum-post-auto-tag rev "title-rev" "body-rev" 2>/dev/null)
+  local rc=$?
+
+  _assert "case11 returncode 0" "[[ $rc -eq 0 ]]"
+  local post_line
+  post_line=$(grep 'POST .*forum-rev/threads' "$tmpdir/cap.txt" | head -1)
+  _assert "case11 applied_tags 미포함 (tag 없이 thread 생성)" \
+    "! echo '$post_line' | grep -q applied_tags"
+  _assert "case11 name 정상 포함" \
+    "echo '$post_line' | grep -q 'title-rev'"
+}
+
+# ── case 12: --forum-post-auto-tag — forum_id 미설정 → 명시 에러 ────────────
+case12_forum_post_auto_tag_id_unset() {
+  echo "[case12] --forum-post-auto-tag — forum_id 미설정 → 1 exit"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+  local env_path="$tmpdir/test.env"
+  {
+    echo "DISCORD_BOT_TOKEN=stub"
+    echo "MOBRUJI_CHANNEL_ID=42"
+    echo "BE_FORUM_ID=forum-be"
+    # PLAN_FORUM_ID 의도적 미작성.
+  } > "$env_path"
+  _write_fake_curl "$tmpdir" "$tmpdir/cap.txt" '[]'
+
+  local stderr
+  stderr=$(_run "$tmpdir" "$env_path" \
+    --forum-post-auto-tag plan "title-plan" "body-plan" 2>&1 >/dev/null)
+  local rc=$?
+
+  _assert "case12 returncode != 0" "[[ $rc -ne 0 ]]"
+  _assert "case12 stderr 안 PLAN_FORUM_ID 안내" \
+    "echo '$stderr' | grep -q 'PLAN_FORUM_ID'"
+}
+
 # ── 실행 ────────────────────────────────────────────────────────────────────────
 echo "== discord-reply.sh forum mode 테스트 =="
 case1_forum_post_directive
@@ -301,6 +408,10 @@ case5_unknown_forum_env
 case6_unknown_tag
 case7_forum_id_unset
 case8_missing_args
+case9_forum_post_auto_tag_priority
+case10_forum_post_auto_tag_secondary
+case11_forum_post_auto_tag_empty
+case12_forum_post_auto_tag_id_unset
 
 echo
 echo "결과: PASS=$PASS FAIL=$FAIL"

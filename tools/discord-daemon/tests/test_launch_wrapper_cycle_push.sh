@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# tools/discord-daemon/tests/test_launch_wrapper_cycle_push.sh — B2 검증 (2026-05-24).
+# tools/discord-daemon/tests/test_launch_wrapper_cycle_push.sh — B2 검증 (2026-05-24)
+#                                                                + #1106 (2026-05-26).
 #
-# 검증 시나리오:
+# 검증 시나리오 (#1106 forum-post 분기 이후):
 #   1) be / fe / rev / plan 4 cycle 모두 정상 push → stdout 에 LAUNCH_THREAD_ID 노출.
-#   2) discord-reply.sh 가 --cycle-channel <worktree> --auto-ack-thread "<본문>" 형태로
+#   2) discord-reply.sh 가 --forum-post-auto-tag <worktree> "<title>" "<body>" 형태로
 #      호출됐는지 (mock capture log).
 #   3) --no-cycle-push flag → push 단계 skip (mock 호출 없음, exit 0).
 #   4) AGENT_LAUNCH_NO_DISCORD=1 env → 동일하게 skip.
 #   5) DISCORD_REPLY_SH 가 부재 / 비실행 → graceful skip + warning + exit 0.
 #   6) discord-reply.sh 가 비-snowflake 출력 시 graceful (LAUNCH_THREAD_ID 미출력, exit 0).
 #   7) --description 우선 적용 (부재 시 title 사용).
+#   8) (#1106) forum-post 실패 시 --status-channel (DIGEST) graceful fallback.
 #
 # 사용:
 #   bash tools/discord-daemon/tests/test_launch_wrapper_cycle_push.sh
@@ -103,13 +105,15 @@ assert_contains "stdout 에 LAUNCH_THREAD_ID 노출" "$OUTPUT" "LAUNCH_THREAD_ID
 assert_contains "기존 confirm 한 줄 유지 (호환)" "$OUTPUT" "cycle-status set-active OK"
 
 CALL_LINE="$(cat "$LOG" 2>/dev/null)"
-assert_contains "mock 호출 인자: --cycle-channel be" "$CALL_LINE" "--cycle-channel be"
-assert_contains "mock 호출 인자: --auto-ack-thread" "$CALL_LINE" "--auto-ack-thread"
+assert_contains "mock 호출 인자: --forum-post-auto-tag be" "$CALL_LINE" "--forum-post-auto-tag be"
 assert_contains "mock 호출 인자: title 본문 포함" "$CALL_LINE" "feat: B2 test"
+# #1106 — text-channel API 호출이 더 이상 발생하면 안 됨 (사이런스 회귀 가드).
+assert_not_contains "회귀 가드: --cycle-channel 호출 안 함" "$CALL_LINE" "--cycle-channel"
+assert_not_contains "회귀 가드: --auto-ack-thread 호출 안 함" "$CALL_LINE" "--auto-ack-thread"
 rm -rf "$TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2) fe / rev / plan parametrize — 각 cycle 이름이 --cycle-channel 인자로 전달
+# 2) fe / rev / plan parametrize — 각 cycle 이름이 --forum-post-auto-tag 인자로 전달
 # ─────────────────────────────────────────────────────────────────────────────
 for cycle in fe rev plan; do
   TMP=$(make_tmp)
@@ -125,7 +129,7 @@ for cycle in fe rev plan; do
   assert_exit "$cycle 정상 push exit 0" 0 $RC
   assert_contains "$cycle LAUNCH_THREAD_ID 노출" "$OUTPUT" "LAUNCH_THREAD_ID=$SNOWFLAKE"
   CALL_LINE="$(cat "$LOG" 2>/dev/null)"
-  assert_contains "$cycle 호출 인자 --cycle-channel" "$CALL_LINE" "--cycle-channel $cycle"
+  assert_contains "$cycle 호출 인자 --forum-post-auto-tag" "$CALL_LINE" "--forum-post-auto-tag $cycle"
   rm -rf "$TMP"
 done
 
@@ -240,6 +244,47 @@ assert_contains "--description 본문이 push 인자에 포함" "$CALL_LINE" "DE
 # title 은 cycle-status set-active 호출 인자 (mock log 와 무관) — push 본문에는 없어야.
 # (단, title 이 description 안에 우연히 substring 되면 통과해도 무방하므로 negative
 #  assertion 은 두지 않음.)
+rm -rf "$TMP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8) (#1106) forum-post 실패 → --status-channel (DIGEST) graceful fallback
+# ─────────────────────────────────────────────────────────────────────────────
+TMP=$(make_tmp)
+export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
+MOCK="$TMP/discord-reply.sh"
+LOG="$TMP/calls.log"
+# Mock: --forum-post-auto-tag 면 exit 1, 그 외 (--status-channel) 는 exit 0.
+# wrapper 가 fallback chain 으로 status-channel 을 호출하는지 검증.
+cat > "$MOCK" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "__LOG__"
+case "$1" in
+  --forum-post-auto-tag)
+    echo "forum push 실패 stub" >&2
+    exit 1
+    ;;
+  *)
+    # status-channel 호출 — 정상 응답 (메시지 id 같은 stub).
+    echo "ok"
+    exit 0
+    ;;
+esac
+MOCK
+# heredoc 안 변수 치환 회피 위해 sed 로 LOG 경로 주입.
+sed -i.bak "s#__LOG__#$LOG#" "$MOCK" && rm -f "$MOCK.bak"
+chmod +x "$MOCK"
+
+export DISCORD_REPLY_SH="$MOCK"
+OUTPUT_AND_STDERR="$("$WRAPPER" be --title "forum fail fallback" 2>&1)"
+RC=$?
+unset DISCORD_REPLY_SH
+assert_exit "forum 실패 시에도 wrapper exit 0 (Agent launch 차단 X)" 0 $RC
+# LAUNCH_THREAD_ID 는 미출력 (forum 실패 → thread_id 없음).
+assert_not_contains "forum 실패 시 LAUNCH_THREAD_ID 미출력" "$OUTPUT_AND_STDERR" "LAUNCH_THREAD_ID="
+# fallback push 가 status-channel 로 발생했는지 (LOG 2번째 호출).
+CALL_LINES="$(cat "$LOG" 2>/dev/null)"
+assert_contains "DIGEST fallback: --status-channel 호출" "$CALL_LINES" "--status-channel"
+assert_contains "DIGEST fallback: title 본문 포함" "$CALL_LINES" "forum fail fallback"
 rm -rf "$TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
