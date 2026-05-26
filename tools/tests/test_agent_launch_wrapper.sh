@@ -133,6 +133,53 @@ RC=$?
 assert_exit "update.sh 실패 시 wrapper exit 4" 4 $RC
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7) --refresh-backlog (2026-05-26) — backlog upsert.sh 가 호출되는지 검증
+# ─────────────────────────────────────────────────────────────────────────────
+# wrapper 는 cycle-backlog/upsert.sh 를 호출 시도. discord push 가 fail 해도
+# wrapper exit 0 (graceful). 검증: cycle-status.json set-active 는 정상 + backlog
+# 단계는 errors swallow.
+TMP=$(make_tmp)
+export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
+# upsert.sh 가 호출되더라도 GitHub 인증 없을 수 있어 mock gh 를 PATH 에 prepend.
+# 빈 JSON 배열 반환 → 백로그 본문이 빈 셈션 + discord 호출은 CYCLE_BACKLOG_NO_DISCORD=1
+# 로 skip → dry-run mode → stdout 본문 print 하고 exit 0.
+MOCK_BIN="$TMP/bin"
+mkdir -p "$MOCK_BIN"
+cat > "$MOCK_BIN/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "[]"
+EOF
+chmod +x "$MOCK_BIN/gh"
+PATH="$MOCK_BIN:$PATH" CYCLE_BACKLOG_NO_DISCORD=1 \
+  "$WRAPPER" plan --title "backlog refresh test" --refresh-backlog \
+  >/dev/null 2>&1
+RC=$?
+assert_exit "--refresh-backlog graceful (exit 0)" 0 $RC
+# cycle-status.json 은 정상 set-active 됐어야 함.
+if [[ -f "$CYCLE_STATUS_PATH" ]]; then
+  CONTENT="$(cat "$CYCLE_STATUS_PATH")"
+  assert_contains "--refresh-backlog + set-active 동시 수행" "$CONTENT" "backlog refresh test"
+else
+  FAIL=$((FAIL + 1))
+  FAILURES+=("--refresh-backlog 케이스에서 cycle-status.json 없음")
+  echo "FAIL: --refresh-backlog 케이스에서 cycle-status.json 없음"
+fi
+rm -rf "$TMP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8) --no-refresh-backlog — CYCLE_BACKLOG_REFRESH_DEFAULT=1 에서 skip 검증
+# ─────────────────────────────────────────────────────────────────────────────
+# default 가 ON 일 때 --no-refresh-backlog 가 강제 OFF 시키는지 확인.
+TMP=$(make_tmp)
+export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
+CYCLE_BACKLOG_REFRESH_DEFAULT=1 \
+  "$WRAPPER" rev --title "no refresh test" --no-refresh-backlog \
+  >/dev/null 2>&1
+RC=$?
+assert_exit "--no-refresh-backlog default ON override (exit 0)" 0 $RC
+rm -rf "$TMP"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 결과
 # ─────────────────────────────────────────────────────────────────────────────
 echo

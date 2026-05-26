@@ -221,6 +221,11 @@ FE_FORUM_VALUE=$(read_env_value FE_FORUM_ID || true)
 REV_FORUM_VALUE=$(read_env_value REV_FORUM_ID || true)
 PLAN_FORUM_VALUE=$(read_env_value PLAN_FORUM_ID || true)
 
+# guild_id — forum thread 검색 시 GET /guilds/{guild_id}/threads/active 호출에 필요.
+# DISCORD_GUILD_ID env 우선, 없으면 forum_find_active_thread_by_name 함수가 forum
+# channel fetch 로 추출 (graceful).
+DISCORD_GUILD_ID_VALUE=$(read_env_value DISCORD_GUILD_ID || true)
+
 CHANNEL="$MOBRUJI_CHANNEL_VALUE"
 if [[ -z "$CHANNEL" ]]; then
   CHANNEL="$DIGEST_CHANNEL_VALUE"
@@ -523,6 +528,41 @@ case "$1" in
     FORUM_TAG="$4"
     # body 인자는 retag 에선 사용하지 않으나 MSG 빈값 가드 우회용 placeholder.
     MSG="(retag)"
+    NO_REPLY=1
+    ;;
+  --cycle-backlog-upsert)
+    # 2026-05-26 — cycle (be/fe/rev/plan) 백로그 forum thread upsert.
+    # 형식: --cycle-backlog-upsert <be|fe|rev|plan> "<markdown body>"
+    #
+    # 동작:
+    #   1) 해당 cycle 의 *_FORUM_ID 에서 active thread 검색 — name == "[BACKLOG] <cycle>".
+    #   2) 있으면 starter message PATCH (forum_edit_starter) — 본문 갱신.
+    #   3) 없으면 신규 thread post (forum_create_thread, tag="대기" — 없으면 첫 available tag).
+    #   4) stdout 으로 thread_id 출력 (호출자가 wrapper 에서 cache 가능).
+    #
+    # 의도:
+    #   각 cycle sub-agent 가 자기 forum 안 단일 [BACKLOG] thread 를 보고 자기
+    #   계획 (작업 안 까먹기) — 사용자 정정 (2026-05-26): "각 agent 가 자기 계획이
+    #   있어야지. 백로그 보면서 작업 안 까먹고 다 진행하고."
+    #
+    # 본문 컨벤션 (권장):
+    #   - markdown checkbox: `- [ ] 작업 1 (#N)` / `- [x] 완료된 작업 (#M)`.
+    #   - 끝줄에 "_갱신: 2026-05-26T12:00Z_" 형태 timestamp.
+    #   - 호출자 (tools/cycle-backlog/upsert.sh wrapper) 가 markdown 빌드 책임.
+    MODE="cycle-backlog-upsert"
+    if [[ $# -lt 3 ]]; then
+      echo "discord-reply.sh: --cycle-backlog-upsert <be|fe|rev|plan> \"<markdown body>\" 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    FORUM_ENV="$2"
+    case "$FORUM_ENV" in
+      be|fe|rev|plan) ;;
+      *)
+        echo "discord-reply.sh: --cycle-backlog-upsert <forum_env> 값은 be|fe|rev|plan 중 하나여야 합니다 (받은 값: $FORUM_ENV)" >&2
+        exit 1
+        ;;
+    esac
+    MSG="$3"
     NO_REPLY=1
     ;;
   --*)
@@ -916,6 +956,63 @@ forum_retag_thread() {
     "$body"
 }
 
+# forum 안 active thread 검색 — 정확한 이름 match.
+# GET /guilds/{guild_id}/threads/active 응답에서 parent_id == forum_id + name == query 인
+# thread 의 id 반환. archive 된 thread 는 검색 대상 아님 (archive 시 백로그
+# 의도와 어긋남 — 새로 만들면 OK).
+#
+# Discord REST: GET /guilds/{guild_id}/threads/active — 호출자가 guild_id 알아야 함.
+# guild_id 는 .env DISCORD_GUILD_ID 또는 GET /channels/{forum_id} 응답의 guild_id.
+# 본 함수는 guild_id 가 비어 있으면 forum_id 채널 fetch 로 추출.
+#
+# 인자: forum_id thread_name
+# stdout: thread_id (active, name match) 또는 빈 문자열.
+# 종료코드: 항상 0 (caller 가 빈 문자열로 판정).
+forum_find_active_thread_by_name() {
+  local forum_id="$1"
+  local target_name="$2"
+  local guild_id="$DISCORD_GUILD_ID_VALUE"
+
+  if [[ -z "$guild_id" ]]; then
+    # forum channel fetch 로 guild_id 추출.
+    local ch_response ch_status ch_payload
+    ch_response=$(curl -sS -X GET \
+      "https://discord.com/api/v10/channels/${forum_id}" \
+      -H "Authorization: Bot ${TOKEN}" \
+      -w $'\n%{http_code}' 2>/dev/null || true)
+    ch_status="${ch_response##*$'\n'}"
+    ch_payload="${ch_response%$'\n'*}"
+    if [[ "$ch_status" =~ ^2[0-9][0-9]$ ]]; then
+      guild_id=$(printf '%s' "$ch_payload" | jq -r '.guild_id // empty')
+    fi
+  fi
+
+  if [[ -z "$guild_id" || "$guild_id" == "null" ]]; then
+    echo "discord-reply.sh: forum_find_active_thread_by_name — guild_id 추출 실패 (forum=$forum_id)" >&2
+    printf ''
+    return 0
+  fi
+
+  local response status payload
+  response=$(curl -sS -X GET \
+    "https://discord.com/api/v10/guilds/${guild_id}/threads/active" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  payload="${response%$'\n'*}"
+
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: forum_find_active_thread_by_name — guild threads 조회 실패 (status=$status)" >&2
+    printf ''
+    return 0
+  fi
+
+  printf '%s' "$payload" \
+    | jq -r --arg pid "$forum_id" --arg n "$target_name" \
+        '.threads[]? | select(.parent_id == $pid and .name == $n) | .id' \
+    | head -1
+}
+
 # ─── mode 실행 ────────────────────────────────────────────────────────────────
 
 case "$MODE" in
@@ -1081,5 +1178,65 @@ case "$MODE" in
     FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
     TAG_ID=$(resolve_forum_tag_id "$FORUM_ID" "$FORUM_TAG")
     forum_retag_thread "$THREAD_ID" "$TAG_ID"
+    ;;
+
+  cycle-backlog-upsert)
+    # 2026-05-26 — cycle (be/fe/rev/plan) 백로그 forum thread upsert.
+    #
+    # 절차:
+    #   1) cycle forum id resolve (FORUM_ENV → *_FORUM_ID).
+    #   2) thread name = "[BACKLOG] <cycle>" 검색.
+    #   3) 있으면 starter message PATCH (forum_edit_starter).
+    #      없으면 forum_create_thread 호출 — tag 는 "대기" / "백로그" / 첫 available
+    #      순으로 graceful fallback.
+    #   4) stdout 으로 thread_id 출력.
+    BACKLOG_FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
+    BACKLOG_THREAD_NAME="[BACKLOG] ${FORUM_ENV}"
+
+    EXISTING_THREAD_ID=$(forum_find_active_thread_by_name "$BACKLOG_FORUM_ID" "$BACKLOG_THREAD_NAME")
+
+    if [[ -n "$EXISTING_THREAD_ID" ]]; then
+      # 기존 thread starter PATCH.
+      forum_edit_starter "$EXISTING_THREAD_ID" "$MSG" >/dev/null
+      printf '%s\n' "$EXISTING_THREAD_ID"
+    else
+      # 신규 thread 생성. tag 후보: "대기" → "백로그" → 첫 available.
+      BACKLOG_TAG_ID=""
+      for candidate_tag in "대기" "백로그" "todo" "open"; do
+        if BACKLOG_TAG_ID=$(resolve_forum_tag_id "$BACKLOG_FORUM_ID" "$candidate_tag" 2>/dev/null); then
+          break
+        fi
+        BACKLOG_TAG_ID=""
+      done
+      if [[ -z "$BACKLOG_TAG_ID" ]]; then
+        # 첫 available tag 로 fallback — GET /channels/{forum_id} 응답 첫 entry.
+        FORUM_INFO=$(curl -sS -X GET \
+          "https://discord.com/api/v10/channels/${BACKLOG_FORUM_ID}" \
+          -H "Authorization: Bot ${TOKEN}" 2>/dev/null || true)
+        BACKLOG_TAG_ID=$(printf '%s' "$FORUM_INFO" \
+          | jq -r '.available_tags[0]?.id // empty')
+        if [[ -z "$BACKLOG_TAG_ID" ]]; then
+          echo "discord-reply.sh: forum $FORUM_ENV 에 available_tags 가 없음 — thread 생성 시 tag 미부착 시도" >&2
+        fi
+      fi
+      # forum_create_thread 는 tag_id 필수 — 빈 값이면 별 페이로드 (tag 미부착).
+      if [[ -n "$BACKLOG_TAG_ID" ]]; then
+        NEW_BACKLOG_RESP=$(forum_create_thread "$BACKLOG_FORUM_ID" "$BACKLOG_THREAD_NAME" "$BACKLOG_TAG_ID" "$MSG")
+      else
+        # tag 없이 — body 에서 applied_tags 제외.
+        BODY=$(jq -nc --arg n "$BACKLOG_THREAD_NAME" --arg c "$MSG" \
+          '{ name: $n, message: { content: $c }, auto_archive_duration: 10080 }')
+        NEW_BACKLOG_RESP=$(discord_curl_with_retry POST \
+          "https://discord.com/api/v10/channels/${BACKLOG_FORUM_ID}/threads" \
+          "$BODY")
+      fi
+      NEW_BACKLOG_ID=$(echo "$NEW_BACKLOG_RESP" | jq -r '.id // empty')
+      if [[ -z "$NEW_BACKLOG_ID" ]]; then
+        echo "discord-reply.sh: cycle-backlog-upsert — thread 생성 실패 (forum=$FORUM_ENV)" >&2
+        echo "$NEW_BACKLOG_RESP" >&2
+        exit 1
+      fi
+      printf '%s\n' "$NEW_BACKLOG_ID"
+    fi
     ;;
 esac

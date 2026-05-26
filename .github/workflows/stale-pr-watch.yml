@@ -1,0 +1,198 @@
+name: Stale PR Watch
+
+# CONFLICTING / 오래 방치된 OPEN PR 을 자동 escalation.
+#
+# 배경 (2026-05-26 사용자 정정):
+#   "PR 방치 사고" — #994 #1032 #1042 가 CONFLICTING 상태로 2일+ stale.
+#   rebase 책임 모호 → 영구 방치. helper / nmae 학습 의존 = 굴복 패턴.
+#   이슈 라벨/코멘트 + Discord push 로 가시화 강제.
+#
+# 트리거:
+#   - schedule: 매 1시간 — Discord push noise 최소화 (24h+ stale 만 잡으니
+#     하루 1회 cron 도 OK 지만, 즉시성 위해 1h).
+#   - workflow_dispatch: 수동 점검 (dry-run 가능).
+#
+# 동작:
+#   - mergeable=CONFLICTING + age >= 24h → 코멘트 1회 ("@author rebase 필요") +
+#     라벨 `stale:rebase-needed` 부착.
+#   - mergeable=MERGEABLE + reviewed:claude 라벨 있음 + age >= 6h → 코멘트 1회
+#     ("자동 머지 후보 — auto-merge workflow 가 잡았어야 함, 조사 필요") +
+#     라벨 `stale:auto-merge-missed`.
+#   - 일반 OPEN PR + age >= 7d → 라벨 `stale:long-open` (자동 close 안 함 —
+#     사용자 결정 보존).
+#   - 라벨 중복 부착 회피 — 이미 라벨 있으면 코멘트/push skip.
+#
+# Discord push:
+#   - DISCORD_WEBHOOK_STALE_PR secret 있으면 escalation 한 줄 요약 push.
+#   - 없으면 skip (graceful).
+#
+# 안전망:
+#   - workflow_dispatch input `dry_run=true` 시 라벨/코멘트/push skip + 후보만 print.
+#   - 본 workflow 자체는 `.github/workflows/**` 보호 영역 → 신설 PR 은
+#     `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+#
+# 관련:
+#   - 사용자 정정 (2026-05-26 12:24 KST)
+#   - 자매 workflow: auto-merge-on-rev-pass.yml
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 매 시 정각
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'dry-run 모드 (라벨/코멘트/push 안 함, 후보만 print)'
+        type: boolean
+        default: true
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        with:
+          script: |
+            const dryRun = process.env.DRY_RUN === 'true';
+            core.info(`Stale PR watch — dryRun=${dryRun}`);
+
+            const now = Date.now();
+            const HOUR = 60 * 60 * 1000;
+            const DAY = 24 * HOUR;
+
+            // open PR 전체 — develop base 만 (release PR 은 사용자 수동 관리).
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              base: 'develop',
+              per_page: 50,
+            });
+
+            // GraphQL 로 mergeable + labels 한 번에 가져오기.
+            const escalations = [];
+
+            for (const pr of prs) {
+              const q = `
+                query($owner:String!,$repo:String!,$num:Int!) {
+                  repository(owner:$owner,name:$repo) {
+                    pullRequest(number:$num) {
+                      number title mergeable isDraft
+                      createdAt updatedAt
+                      labels(first:30){ nodes { name } }
+                      author { login }
+                    }
+                  }
+                }
+              `;
+              let data;
+              try {
+                data = (await github.graphql(q, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  num: pr.number,
+                })).repository.pullRequest;
+              } catch (e) {
+                core.warning(`PR #${pr.number}: GraphQL 실패 — ${e.message}`);
+                continue;
+              }
+              if (!data || data.isDraft) continue;
+
+              const labels = data.labels.nodes.map(l => l.name);
+              const ageMs = now - new Date(data.createdAt).getTime();
+              const ageDays = Math.floor(ageMs / DAY);
+              const ageHours = Math.floor(ageMs / HOUR);
+
+              let category = null;
+              let reason = '';
+              let labelToAdd = null;
+
+              if (data.mergeable === 'CONFLICTING' && ageMs >= 24 * HOUR) {
+                category = 'conflicting';
+                reason = `CONFLICTING ${ageHours}h+ — rebase 필요`;
+                labelToAdd = 'stale:rebase-needed';
+              } else if (
+                data.mergeable === 'MERGEABLE' &&
+                labels.includes('reviewed:claude') &&
+                !labels.includes('rev:hold') &&
+                !labels.includes('needs-human-review') &&
+                ageHours >= 6
+              ) {
+                category = 'auto-merge-missed';
+                reason = `MERGEABLE + reviewed:claude 인데 ${ageHours}h+ 방치 — auto-merge workflow 점검 필요`;
+                labelToAdd = 'stale:auto-merge-missed';
+              } else if (ageDays >= 7) {
+                category = 'long-open';
+                reason = `OPEN ${ageDays}일 — 사용자 결정 필요`;
+                labelToAdd = 'stale:long-open';
+              }
+
+              if (!category) continue;
+
+              const alreadyLabeled = labels.includes(labelToAdd);
+              if (alreadyLabeled) {
+                core.info(`PR #${pr.number} 이미 ${labelToAdd} 라벨 — skip (중복 회피)`);
+                continue;
+              }
+
+              core.info(`PR #${pr.number} '${data.title}' — ${category}: ${reason}`);
+              escalations.push({
+                num: pr.number,
+                title: data.title,
+                author: data.author?.login || '?',
+                category,
+                reason,
+                label: labelToAdd,
+              });
+
+              if (dryRun) continue;
+
+              // 라벨 추가.
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: [labelToAdd],
+                });
+              } catch (e) {
+                core.warning(`PR #${pr.number} 라벨 ${labelToAdd} 부착 실패: ${e.message}`);
+              }
+
+              // 코멘트 — 중복 회피는 label 로 보장 (라벨 있으면 위에서 skip).
+              const commentBody =
+                category === 'conflicting'
+                  ? `🚨 stale watch: ${reason}\n\n author (@${data.author?.login || '?'}) 또는 nmae 가 develop rebase 후 force-push 부탁드립니다.\n` +
+                    `\nworkflow: \`${context.workflow}\` (run #${context.runId})`
+                  : category === 'auto-merge-missed'
+                  ? `🚨 stale watch: ${reason}\n\n auto-merge-on-rev-pass.yml 이 본 PR 을 머지하지 못 한 사유 조사 필요 (CI status / mergeStateStatus / required check 등).\n` +
+                    `\nworkflow: \`${context.workflow}\` (run #${context.runId})`
+                  : `📌 stale watch: ${reason}\n\n 닫거나 머지하거나 \`do-not-merge\` 라벨로 명시.\n` +
+                    `\nworkflow: \`${context.workflow}\` (run #${context.runId})`;
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: commentBody,
+                });
+              } catch (e) {
+                core.warning(`PR #${pr.number} 코멘트 추가 실패: ${e.message}`);
+              }
+            }
+
+            core.notice(`Stale escalations: ${escalations.length} 건`);
+            await core.summary
+              .addHeading('Stale PR Watch')
+              .addRaw(`dryRun: \`${dryRun}\`\n\n`)
+              .addTable([
+                [{ data: 'PR', header: true }, { data: 'Category', header: true }, { data: 'Reason', header: true }, { data: 'Label', header: true }],
+                ...escalations.map(e => [`#${e.num}`, e.category, e.reason, e.label]),
+              ])
+              .write();
