@@ -28,7 +28,7 @@
  *     3000ms 타이머 dismiss** 3 축만 다룬다.
  *
  * 보안:
- *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). 본 테스트의 "test-session-id" 는
+ *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). 본 테스트의 "00000000-0000-4000-8000-000000000001" 는
  *     의도된 더미값으로 raw 노출 안전.
  */
 
@@ -107,7 +107,7 @@ beforeEach(() => {
   useLikesStore.setState({ likedSongIds: [] });
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
-    sessionId: "test-session-id",
+    sessionId: "00000000-0000-4000-8000-000000000001",
     voiceRangeId: null,
     excludedSongIds: [],
   });

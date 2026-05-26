@@ -72,7 +72,7 @@ function freshDefaults(): MockSessionState {
     sessionId: null,
     voiceRangeId: null,
     excludedSongIds: [],
-    ensureSessionId: vi.fn(() => "test-session-id"),
+    ensureSessionId: vi.fn(() => "00000000-0000-4000-8000-000000000001"),
     setVoiceRangeId: vi.fn(),
     appendExcluded: vi.fn(),
     clearExcluded: vi.fn(),
