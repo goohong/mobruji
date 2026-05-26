@@ -52,10 +52,61 @@ _QUERY_PATTERNS: tuple[str, ...] = (
     r"~니\?$|~까\?$|~지\?$|~나\?$|~냐\?$|~을까\?$|~는데\?$",
     r"여부$|확인.{0,10}(부탁|해|할)$|상태.{0,10}(보고|확인)$|진행 상황$|진행상황$|어디까지$",
     r"맞아\?$|되니\?$|있어\?$|있니\?$|됐어\?$|됐니\?$",
+    # 의문부호 없는 자연어 query (#1124 false-positive 가드):
+    # "nmae는 뭐하니" / "고양이는 뭐야" / "어디까지 갔어"
+    r"는 뭐(하|해|야|니|냐)|는 어디|는 언제|는 얼마",
+    # "들리니 / 들려 / 보이니 / 보여" 같은 확인 의문 (#1124 "내말 들리니" 케이스)
+    r"들리니$|들려$|보이니$|보여\?$|이해했어\?$|이해됐어\?$",
+)
+
+# meta / bot leak 패턴 (#1124): bot 본인의 ack/시스템 알림이 inbox 로 leak 되어
+# directive 로 잘못 분류되는 사고 가드. 매칭 시 즉시 conversation 으로 분류.
+_META_PATTERNS: tuple[str, ...] = (
+    # bot auto-ack 자체
+    r"🤖\s*helper\s*bot",
+    r"helper\s*bot\s*수신",
+    r"auto-ack",
+    r"helper\s*가?\s*nmae\s*상태\s*확인\s*중",
+    r"곧\s*답변\s*드리(겠습니다|ㄴ다)",
+    # bot 시스템 메시지
+    r"메시지가\s*전달되지\s*않(았|은)",
+    r"내용이\s*없는\s*메시지",
+    r"공백만\s*있어\s*무시",
+    # watchdog / cron digest 본문 leak
+    r"^:warning:|^⚠️|^🚨",
+    r"watchdog\s*alert",
+    r"cron\s*digest",
+    # 사이클 launch / 완료 자동 알림 leak
+    r"^🚀\s*sub-agent\s*launch",
+    r"^✅\s*완료",
+)
+
+# 짧은 ack: "응 해줘" / "오케이 진행" 같은 메시지는 user→helper 진행 승인
+# 신호일 뿐 신규 directive 가 아니다. 8자 이하 + ack 핵심어 일치 시 conversation
+# 으로 분류 (#1124).
+#
+# **주의**: "진행해" / "진행" 같은 bare verb 는 (a) 진행 승인 ack 와 (b) 실제 신규
+# directive 가 모두 가능 — 기존 false-positive safe 정책 (모호 시 directive) 유지
+# 위해 ack 패턴에서 제외. 명확한 ack 표지어 ("응" / "그래" / "오케이" / "ㅇㅋ" /
+# "네" / "좋아" / "컨펌" / "승인") 와 결합된 경우에만 conversation.
+_SHORT_ACK_PATTERNS: tuple[str, ...] = (
+    # "응 해줘" / "응 해주세요" — 명시적 동의 + 실행
+    r"^응\s*해(줘|주세요)?$",
+    r"^네\s*해(줘|주세요)?$",
+    r"^그래\s*해(줘|주세요)?$",
+    # "오케이 진행" / "ㅇㅋ 진행" / "좋아 진행" — 동의 + 실행 ack
+    r"^오케이\s*진행(해)?$",
+    r"^ㅇㅋ\s*진행(해)?$",
+    r"^좋아\s*진행(해)?$",
+    r"^그래\s*진행(해)?$",
+    # 순수 동의 표지어 (실행 동사 없이) — "오케이" / "ㅇㅋ" / "컨펌" / "확인"
+    r"^컨펌$|^오케이$|^ㅇㅋ$",
 )
 
 _DIRECTIVE_RE = re.compile("|".join(_DIRECTIVE_PATTERNS))
 _QUERY_RE = re.compile("|".join(_QUERY_PATTERNS))
+_META_RE = re.compile("|".join(_META_PATTERNS), re.IGNORECASE)
+_SHORT_ACK_RE = re.compile("|".join(_SHORT_ACK_PATTERNS))
 
 # 분류 결과 enum (string — JSON friendly).
 CLASS_DIRECTIVE = "directive"
@@ -75,11 +126,28 @@ def classify(text: str) -> str:
 
     Boundary 케이스는 directive 로 분류 (false-positive safe — 사용자 frustration
     "왜 지시 forum 에 추가 안해" 가드).
+
+    추가 가드 (#1124, 2026-05-26 false-positive 사고 박제):
+    1. **meta / bot leak 제외**: bot 본인 ack 메시지 / 시스템 알림 키워드 매칭
+       → conversation 으로 즉시 분류 (잘못된 directive 등록 방지).
+    2. **짧은 ack 제외**: "응 해줘" / "오케이 진행" 같은 user→helper 진행 승인 신호
+       (신규 directive 가 아니라 진행 중인 작업에 대한 ack) → conversation.
+    3. **자연어 의문어 보강**: "nmae는 뭐하니" / "내말 들리니" 같은 의문부호 없는
+       query → directive-ambiguous 가 아닌 query 로 분류.
     """
     if text is None:
         return CLASS_CONVERSATION
     stripped = text.strip()
     if not stripped:
+        return CLASS_CONVERSATION
+
+    # #1124 guard 1: meta / bot leak 우선 차단.
+    if _META_RE.search(stripped):
+        return CLASS_CONVERSATION
+
+    # #1124 guard 2: 짧은 ack ("응 해줘" 등) — directive 패턴 매칭 전 차단.
+    # 길이 8자 이하 + 짧은 ack 패턴 일치 시 conversation.
+    if len(stripped) <= 8 and _SHORT_ACK_RE.match(stripped):
         return CLASS_CONVERSATION
 
     has_directive = bool(_DIRECTIVE_RE.search(stripped))
