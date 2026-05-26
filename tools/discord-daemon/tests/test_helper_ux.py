@@ -17,9 +17,12 @@ AsyncMock 으로 stub.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -151,6 +154,8 @@ class BotAutoAckTests(unittest.TestCase):
         auto_ack: str = "1",
         auto_ack_mode: str | None = None,
         auto_ack_emoji: str | None = None,
+        secondary_reaction_enabled: str = "0",
+        cycle_status_path: str | None = None,
     ) -> dict[str, str]:
         env: dict[str, str] = {
             "DISCORD_BOT_TOKEN": "t",
@@ -164,7 +169,15 @@ class BotAutoAckTests(unittest.TestCase):
             "DIGEST_ENABLED": "0",
             "CONTEXT_AUTO_CLEAR_ENABLED": "0",
             "BOT_AUTO_ACK": auto_ack,
-            "CYCLE_STATUS_PATH": "/tmp/cycle-status.json",
+            # 기존 BotAutoAck 테스트가 secondary reaction 부수효과를 만나지
+            # 않도록 default disabled. secondary reaction 전용 테스트는
+            # secondary_reaction_enabled="1" + cycle_status_path 명시.
+            "BOT_SECONDARY_REACTION_ENABLED": secondary_reaction_enabled,
+            "CYCLE_STATUS_PATH": (
+                cycle_status_path
+                if cycle_status_path is not None
+                else "/tmp/cycle-status.json"
+            ),
             "TMUX_PANE_TARGETS": "helper:0.0",
             "TMUX_PANE_TARGET": "helper:0.0",
             "CONTEXT_CLEAR_TRIGGER_PCT": "95",
@@ -302,6 +315,174 @@ class BotAutoAckTests(unittest.TestCase):
         """
         self.assertIn("🤖 helper bot", bot.BOT_AUTO_ACK_TEXT)
         self.assertIn("nmae 상태 확인", bot.BOT_AUTO_ACK_TEXT)
+
+    # ------------------------------------------------------------------
+    # secondary reaction (#1080) — nmae 점유 상태 emoji
+    # ------------------------------------------------------------------
+
+    def _write_cycle_status(
+        self,
+        path: pathlib.Path,
+        *,
+        occupied: int,
+    ) -> None:
+        """occupied 개수만큼 in_progress 채워진 cycle-status.json 작성."""
+        worktrees = ("be", "fe", "rev", "plan")
+        body: dict[str, dict] = {}
+        for index, worktree in enumerate(worktrees):
+            if index < occupied:
+                body[worktree] = {
+                    "in_progress": {
+                        "title": f"work-{worktree}",
+                        "started_at": "2026-05-26T00:00:00Z",
+                    },
+                    "last_completed": None,
+                }
+            else:
+                body[worktree] = {
+                    "in_progress": None,
+                    "last_completed": None,
+                }
+        path.write_text(json.dumps(body, ensure_ascii=False))
+
+    def test_secondary_reaction_default_constants(self) -> None:
+        # default emoji 3종 = ⚡ / ⏳ / 🕐. 워크트리 = be/fe/rev/plan.
+        self.assertEqual(bot.BOT_SECONDARY_REACTION_EMOJI_IDLE_DEFAULT, "⚡")
+        self.assertEqual(
+            bot.BOT_SECONDARY_REACTION_EMOJI_PARTIAL_DEFAULT, "⏳"
+        )
+        self.assertEqual(bot.BOT_SECONDARY_REACTION_EMOJI_FULL_DEFAULT, "🕐")
+        self.assertEqual(bot.NMAE_WORKTREES, ("be", "fe", "rev", "plan"))
+        self.assertEqual(bot.BOT_SECONDARY_REACTION_DEFAULT_ENABLED, "1")
+
+    def test_classify_nmae_status_idle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            self._write_cycle_status(cycle_path, occupied=0)
+            result = bot.classify_nmae_status(str(cycle_path))
+            self.assertEqual(result, "⚡")
+
+    def test_classify_nmae_status_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            for occupied in (1, 2, 3):
+                self._write_cycle_status(cycle_path, occupied=occupied)
+                result = bot.classify_nmae_status(str(cycle_path))
+                self.assertEqual(
+                    result, "⏳", f"occupied={occupied} → expected partial"
+                )
+
+    def test_classify_nmae_status_full(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            self._write_cycle_status(cycle_path, occupied=4)
+            result = bot.classify_nmae_status(str(cycle_path))
+            self.assertEqual(result, "🕐")
+
+    def test_classify_nmae_status_file_missing(self) -> None:
+        # 부재 → None (silent skip).
+        result = bot.classify_nmae_status("/nonexistent/cycle-status.json")
+        self.assertIsNone(result)
+
+    def test_classify_nmae_status_parse_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            cycle_path.write_text("not-json{{{")
+            result = bot.classify_nmae_status(str(cycle_path))
+            self.assertIsNone(result)
+
+    def test_classify_nmae_status_custom_emojis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            self._write_cycle_status(cycle_path, occupied=2)
+            result = bot.classify_nmae_status(
+                str(cycle_path),
+                emoji_idle="I",
+                emoji_partial="P",
+                emoji_full="F",
+            )
+            self.assertEqual(result, "P")
+
+    def test_secondary_reaction_disabled_by_default_skips(self) -> None:
+        # _build_env default = secondary_reaction_enabled="0" → 기존 회귀 가드.
+        env = self._build_env(auto_ack_mode="reaction")
+        message = _make_fake_message(
+            content="hello", channel_id=999, author_id=111, message_id=10
+        )
+        self._run_handler(env, message)
+        # primary reaction 만 호출 (1회).
+        self.assertEqual(message.add_reaction.await_count, 1)
+
+    def test_secondary_reaction_idle_adds_lightning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            self._write_cycle_status(cycle_path, occupied=0)
+            env = self._build_env(
+                auto_ack_mode="reaction",
+                secondary_reaction_enabled="1",
+                cycle_status_path=str(cycle_path),
+            )
+            message = _make_fake_message(
+                content="hello", channel_id=999, author_id=111, message_id=11
+            )
+            self._run_handler(env, message)
+            # primary 👀 + secondary ⚡ = 2회 호출.
+            self.assertEqual(message.add_reaction.await_count, 2)
+            calls = [c.args[0] for c in message.add_reaction.await_args_list]
+            self.assertEqual(
+                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "⚡"]
+            )
+
+    def test_secondary_reaction_partial_adds_hourglass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            self._write_cycle_status(cycle_path, occupied=2)
+            env = self._build_env(
+                auto_ack_mode="reaction",
+                secondary_reaction_enabled="1",
+                cycle_status_path=str(cycle_path),
+            )
+            message = _make_fake_message(
+                content="hello", channel_id=999, author_id=111, message_id=12
+            )
+            self._run_handler(env, message)
+            self.assertEqual(message.add_reaction.await_count, 2)
+            calls = [c.args[0] for c in message.add_reaction.await_args_list]
+            self.assertEqual(
+                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "⏳"]
+            )
+
+    def test_secondary_reaction_full_adds_clock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
+            self._write_cycle_status(cycle_path, occupied=4)
+            env = self._build_env(
+                auto_ack_mode="reaction",
+                secondary_reaction_enabled="1",
+                cycle_status_path=str(cycle_path),
+            )
+            message = _make_fake_message(
+                content="hello", channel_id=999, author_id=111, message_id=13
+            )
+            self._run_handler(env, message)
+            self.assertEqual(message.add_reaction.await_count, 2)
+            calls = [c.args[0] for c in message.add_reaction.await_args_list]
+            self.assertEqual(
+                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "🕐"]
+            )
+
+    def test_secondary_reaction_file_missing_silent_skip(self) -> None:
+        # cycle-status.json 부재 → secondary skip (primary 만 1회).
+        env = self._build_env(
+            auto_ack_mode="reaction",
+            secondary_reaction_enabled="1",
+            cycle_status_path="/nonexistent/cycle-status.json",
+        )
+        message = _make_fake_message(
+            content="hello", channel_id=999, author_id=111, message_id=14
+        )
+        self._run_handler(env, message)
+        self.assertEqual(message.add_reaction.await_count, 1)
 
     def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거
