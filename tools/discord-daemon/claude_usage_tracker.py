@@ -33,8 +33,25 @@ from zoneinfo import ZoneInfo
 KST: Final[ZoneInfo] = ZoneInfo("Asia/Seoul")
 DEFAULT_PROJECTS_ROOT: Final[Path] = Path("~/.claude/projects").expanduser()
 DEFAULT_STATE_PATH: Final[Path] = Path("~/.mobruji/claude-usage.json").expanduser()
-DEFAULT_DAILY_LIMIT: Final[int] = 1_000_000
-DEFAULT_WEEKLY_LIMIT: Final[int] = 7_000_000
+# DEFAULT_*_LIMIT — Claude Max 20x plan 실측 기반 1000x 보정 (#1120, 2026-05-26).
+#
+# 박제 사고:
+#   2026-05-26 사용자 P0 정정 — daily=298,569,527 tokens (29850% 표기) /
+#   weekly=311,543,317 tokens (4450%). 기존 default 1M/7M 이 실제 plan 의
+#   1/1000 수준으로 부족 → 사용자 채널에 매 5분 "Claude usage 100% 초과" push
+#   가 의미 없는 노이즈로 반복되는 사고.
+#
+# 보정 근거:
+#   Anthropic 이 Max 20x plan 정확 한도를 공식 endpoint 로 노출하지 않는다.
+#   따라서 측정값 + 안전 여유 (5x 이상) 로 1B / 7B 채택. 실제 plan 한도가
+#   확인되면 .env 의 ``CLAUDE_DAILY_TOKEN_LIMIT`` / ``CLAUDE_WEEKLY_TOKEN_LIMIT``
+#   override 로 운영 시점에 정확값으로 교체 가능 (default 만 raise).
+#
+# 기존 운영 환경에 대한 영향:
+#   .env 가 명시한 override 가 있으면 그 값 우선 (bot.py 가 env → tracker 인자
+#   주입). default 만 raise 되므로 명시 override 운영자는 무영향.
+DEFAULT_DAILY_LIMIT: Final[int] = 1_000_000_000
+DEFAULT_WEEKLY_LIMIT: Final[int] = 7_000_000_000
 # 10% 단위 threshold — 0, 10, 20, ..., 100 중 마지막으로 통과한 bucket.
 THRESHOLD_BUCKET_PCT: Final[int] = 10
 STATE_FILE_MODE: Final[int] = 0o600
