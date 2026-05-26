@@ -203,11 +203,20 @@ inject 받으면 **다음 turn 시작 즉시** 4단계 순서대로 수행 (누�
 
 Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리별 `idle_since` / reason 한 줄.
 
-### 11-5) 4 사이클 동시 launch — 도메인 독립 병행
+### 11-5) 4 사이클 동시 launch — 도메인 독립 병행 + 본진 오케스트레이션 only
 
 - be/fe/rev/plan **4 워크트리 동시 가동** ([[feedback-keep-4-cycles-active]]). 1 sub-agent 완료 통지 받자마자 같은 워크트리 다음 백로그 launch (idle default 금지).
 - placeholder/null fallback 으로 BE/FE 거의 다 동시 launch 가능 ([[feedback-be-fe-parallel]]). "BE 필드 의존" 보수적 미룸 금지.
 - 한 워크트리 = 동시 1 sub-agent ([[feedback-worktree-lock]]). 같은 도메인 백로그 2건 동시 launch 시 git stash/checkout 충돌. 같은 도메인 병렬 필요 시 임시 워크트리 (`git worktree add /tmp/<name> <branch>`) 신설.
+
+**동시 사이클 수 = 4 고정** (사용자 2026-05-26 ~16:00 정정): "동시 사이클 4개 유지. 과부하 대응 = 본진 context 가벼이 유지 + 위임."
+
+- 본진(nmae) 과부하 시 사이클 수를 줄이지 않는다. 대신 **본진을 가볍게 유지** 한다 — 구현·머지·긴 추론·테스트 실행을 본진 turn 안에서 처리하지 않고 sub-agent 에 위임.
+- 본진 책임 = **오케스트레이션 only** — (1) sub-agent launch / 위임 prompt 작성 / (2) 완료 통지 수신 + cycle-status.json 갱신 + 다음 백로그 launch / (3) PR 머지 결정 (실제 머지 명령 자체도 가능하면 sub-agent 위임 또는 cron auto-merge) / (4) cron digest 가 cover 안 하는 1회성 사용자 보고.
+- 본진이 직접 수행하면 안 되는 것 — 코드 변경, 길어진 git 작업, gradle/npm 실행, 대량 로그 분석. 이 모두는 sub-agent 또는 helper-launched sub-agent 영역.
+- 본진 context% marker (§14) 가 75% 이상 → 즉시 본진 추가 작업 자제 + sub-agent 위임 + 다음 turn `/clear` 후보. context 폭증을 본진에서 흡수하면 4 사이클 launch 가 끊긴다.
+
+관련 메모리 (nmae 후속 박제 예정): `nmae/feedback_nmae_main_lightweight.md` — "본진은 오케스트레이션만 / 구현·머지·긴 추론은 sub-agent 위임 / context% marker + cycle-status 강제".
 
 ### 11-6) Sub-agent launch / 통지 / Discord 가시화
 
