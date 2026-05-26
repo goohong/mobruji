@@ -1,12 +1,12 @@
 ---
 feature: work-cycle-refactor
 slug: work-cycle-refactor
-status: draft
+status: approved
 owner: @goohong
 scope: infra
 related_issues: [1074]
-related_prs: []
-last_reviewed: 2026-05-24
+related_prs: [1077]
+last_reviewed: 2026-05-26
 ---
 
 # Work Cycle Refactor — 5단계 마이그 (운영 break 0)

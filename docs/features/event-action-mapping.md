@@ -1,12 +1,12 @@
 ---
 feature: event-action-mapping
 slug: event-action-mapping
-status: draft
+status: approved
 owner: @goohong
 scope: infra
 related_issues: [1074]
-related_prs: []
-last_reviewed: 2026-05-24
+related_prs: [1077]
+last_reviewed: 2026-05-26
 ---
 
 # Event ↔ Action Mapping (작업 체계 v2 — state machine + event hook)

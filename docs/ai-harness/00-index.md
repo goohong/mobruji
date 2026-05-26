@@ -50,6 +50,7 @@
   - `0016-maestro-context-percent-estimation.md` — maestro context 사용률 추정
   - `0017-spring-boot-eol-strategy.md` — Spring Boot 3.5 EOL 대응 (3.6 라인 채택, proposed)
   - `0018-design-tokens.md` — 디자인 토큰 (color/typography/spacing/radius/shadow/motion) — UI/UX 부활 4단계 (`docs/features/ui-ux-redesign.md`)
+  - `0019-event-driven-architecture-v2.md` — 작업 체계 event-driven 아키텍처 v2 (agent 망각 의존 폐기, 동반 spec: `docs/features/event-action-mapping.md` + `docs/features/work-cycle-refactor.md`, PR #1077)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
 - `docs/runbooks/`: 운영 런북 (로컬 환경 가동 등)
   - `local-3tier-setup.md` — MySQL + Spring Boot + Next.js 로컬 3-tier 가동 가이드 (rev QA 기본 환경)

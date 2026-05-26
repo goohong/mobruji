@@ -240,6 +240,9 @@
 ## 7) 관련 문서
 
 - `CLAUDE.md §4 비협상 룰` — 룰의 첫 진입점
+- `docs/decisions/0019-event-driven-architecture-v2.md` — 본 spec 의 원칙을 작업 체계 전체에 확장한 ADR (PR #1077). 본 spec 의 "왜 메모리 / 어떻게 코드" 결정 트리를 12 critical event 의 코드 hook 강제로 정형화.
+- `docs/features/event-action-mapping.md` — ADR-0019 의 동반 spec. event ↔ action 매핑 + state machine + failure modes.
+- `docs/features/work-cycle-refactor.md` — ADR-0019 의 5단계 마이그 plan (운영 break 0).
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 운영 런북
 - `docs/ai-harness/12-sub-agent-prompt-template.md` — sub-agent 룰 SoT
 - `docs/ai-harness/13-memory-promote-tracking.md` — 메모리 → 코드 promote 트래킹

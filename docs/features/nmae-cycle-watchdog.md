@@ -200,9 +200,17 @@ STRICT relaunch (1): fe
 | Q1 | helper 도 같은 watchdog 대상 (`helper:0.0`) 으로 inject 해야 하나? | (a) nmae 만 (현재) / (b) 양쪽 — helper 도 4 워크트리 책임 | @user / TBD |
 | Q2 | threshold 10분 → 5분 단축? sub-agent 보통 5-15분 걸리는데 false positive 위험 | (a) 10분 유지 (보수적) / (b) 5분 (agressive) | @user / TBD |
 
-## 9) 결정 로그
+## 9) 관련 spec / ADR
+
+- `docs/decisions/0019-event-driven-architecture-v2.md` — 본 spec 의 "5분 polling 기반 (real-time 이벤트 X)" 패턴이 ADR-0019 §4.1 원칙 2 "event 가 action 을 trigger" 의 polling fallback 사례 (PR #1077 머지).
+- `docs/features/event-action-mapping.md` — 본 spec 의 watchdog inject 가 event 10 (`watchdog_detect_idle`) 의 trigger 지점으로 1:1 매핑. STRICT mode note 강제는 event 7 (`cycle_status_set_idle`) action (a) note 필수 와 짝.
+- `docs/features/work-cycle-refactor.md` — 본 spec 의 5분 polling → realtime hook (GitHub webhook) 마이그가 단계 1.4 의 대상.
+- `docs/features/autonomous-cycle-orchestration.md` — 본 spec 이 §5-5 stale verification 표준 명령의 코드 강제 구현체.
+
+## 10) 결정 로그
 - 2026-05-24: 초안 작성 (status=draft). #941 머지 후 status=shipped 로 갱신.
 - 2026-05-24: 외부 데몬 watchdog 채택 — nmae cron/timer 도입 대안 기각 (기존 bot.py daemon 활용이 운영 복잡도 낮음).
 - 2026-05-24: debounce 15분 — Discord rate limit 안전 마진 + idle 정정에 충분 (사용자 응답 turn 1회면 해소).
 - 2026-05-24 (#956): STRICT mode 도입 — note 미명시 idle 은 즉시 relaunch + 의무 강제 prompt. 사용자 정정: "idle 시 digest 에 사유 명시 / 타당한 사유 없으면 relaunch 강제". rev/plan 은 note 명시 패턴 정착, fe 는 누락 → 강제화 필요.
 - 2026-05-24 (#956): `CYCLE_REASON_REQUIRED=1` default — 후방호환 off 가능. `tools/cycle-status/update.sh` 도입 — nmae 수동 JSON 편집 부담 해소.
+- 2026-05-26: ADR-0019 머지 후 관련 spec 절 (§9) 추가 — 본 spec 의 polling 기반 watchdog 가 event-action-mapping event 10 의 trigger 지점으로 정형화 (PR #1077 머지 후속 audit).

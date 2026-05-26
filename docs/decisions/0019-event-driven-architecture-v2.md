@@ -1,9 +1,9 @@
 ---
-status: proposed
+status: accepted
 date: 2026-05-24
 deciders: plan sub-agent (사용자 strategic 정정 #1074)
-related_issues: [#1074]
-related_prs: []
+related_issues: [1074]
+related_prs: [1077]
 supersedes: []
 superseded_by: []
 ---
