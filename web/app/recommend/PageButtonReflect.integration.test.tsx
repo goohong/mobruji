@@ -41,7 +41,7 @@
  *     추후 별 사이클 검토.
  *
  * 보안:
- *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). "test-session-id" 더미값 사용.
+ *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). "00000000-0000-4000-8000-000000000001" 더미값 사용.
  */
 
 import { ReactNode } from "react";
@@ -94,7 +94,7 @@ const createRecommendationMock = vi.mocked(createRecommendation);
 const toggleLikeMock = vi.mocked(toggleLike);
 const toggleBookmarkMock = vi.mocked(toggleBookmark);
 
-const SESSION_ID = "test-session-id";
+const SESSION_ID = "00000000-0000-4000-8000-000000000001";
 const VOICE_RANGE_ID = 42;
 
 /**

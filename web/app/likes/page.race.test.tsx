@@ -42,7 +42,7 @@
  *   - happy path (빈 상태 / N건 렌더 / store 동기화) — `page.test.tsx` cover.
  *
  * 보안:
- *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). 본 테스트의 "test-session-id"
+ *   - sessionId 는 PII (logging.ts §SENSITIVE_KEYS). 본 테스트의 "00000000-0000-4000-8000-000000000001"
  *     는 의도된 더미값.
  *   - localStorage 키 `mobruji-likes` 는 songId 만 보관 (PII 없음).
  */
@@ -141,7 +141,7 @@ beforeEach(() => {
   useLikesStore.setState({ likedSongIds: [] });
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
-    sessionId: "test-session-id",
+    sessionId: "00000000-0000-4000-8000-000000000001",
     voiceRangeId: null,
     excludedSongIds: [],
   });

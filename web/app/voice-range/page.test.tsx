@@ -168,7 +168,7 @@ describe("VoiceRangePage 제출 흐름", () => {
     const user = userEvent.setup();
     createVoiceRangeMock.mockResolvedValueOnce({
       id: 77,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 50,
       highestNoteMidi: 65,
       sourceMethod: "OCTAVE_PICK",
@@ -191,7 +191,7 @@ describe("VoiceRangePage 제출 흐름", () => {
       expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
     });
     expect(createVoiceRangeMock).toHaveBeenCalledWith({
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 50,
       highestNoteMidi: 65,
       sourceMethod: "OCTAVE_PICK",
@@ -230,7 +230,7 @@ describe("VoiceRangePage 제출 흐름", () => {
     const user = userEvent.setup();
     const response = {
       id: 88,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 50,
       highestNoteMidi: 65,
       sourceMethod: "OCTAVE_PICK" as const,
@@ -251,7 +251,7 @@ describe("VoiceRangePage 제출 흐름", () => {
       expect(pushMock).toHaveBeenCalledWith("/recommend");
     });
 
-    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+    expect(client.getQueryData(["voice-range", "00000000-0000-4000-8000-000000000001"])).toEqual(
       response,
     );
   });
@@ -353,7 +353,7 @@ describe("VoiceRangePage mutation 경계 가드 (race/unmount/Button reflect)", 
     await act(async () => {
       deferred.resolve({
         id: 1,
-        sessionId: "test-session-id",
+        sessionId: "00000000-0000-4000-8000-000000000001",
         lowestNoteMidi: 48,
         highestNoteMidi: 69,
         sourceMethod: "OCTAVE_PICK",
@@ -398,7 +398,7 @@ describe("VoiceRangePage mutation 경계 가드 (race/unmount/Button reflect)", 
     await act(async () => {
       deferred.resolve({
         id: 2,
-        sessionId: "test-session-id",
+        sessionId: "00000000-0000-4000-8000-000000000001",
         lowestNoteMidi: 48,
         highestNoteMidi: 69,
         sourceMethod: "OCTAVE_PICK",
@@ -442,7 +442,7 @@ describe("VoiceRangePage mutation 경계 가드 (race/unmount/Button reflect)", 
     await act(async () => {
       deferred.resolve({
         id: 3,
-        sessionId: "test-session-id",
+        sessionId: "00000000-0000-4000-8000-000000000001",
         lowestNoteMidi: 48,
         highestNoteMidi: 69,
         sourceMethod: "OCTAVE_PICK",

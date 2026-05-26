@@ -364,7 +364,7 @@ describe("AutoVoiceRangePage 저장", () => {
     const user = userEvent.setup();
     createVoiceRangeMock.mockResolvedValueOnce({
       id: 91,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "MIC_MEASURE",
@@ -387,7 +387,7 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
     });
     expect(createVoiceRangeMock).toHaveBeenCalledWith({
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "MIC_MEASURE",
@@ -405,7 +405,7 @@ describe("AutoVoiceRangePage 저장", () => {
     const user = userEvent.setup();
     const response = {
       id: 92,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "MIC_MEASURE" as const,
@@ -431,7 +431,7 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(pushMock).toHaveBeenCalledWith("/recommend");
     });
 
-    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+    expect(client.getQueryData(["voice-range", "00000000-0000-4000-8000-000000000001"])).toEqual(
       response,
     );
   });
@@ -566,7 +566,7 @@ describe("AutoVoiceRangePage mutation 경계 가드 (race/unmount/401/fallback t
     await act(async () => {
       deferred.resolve({
         id: 1001,
-        sessionId: "test-session-id",
+        sessionId: "00000000-0000-4000-8000-000000000001",
         lowestNoteMidi: 48,
         highestNoteMidi: 69,
         sourceMethod: "MIC_MEASURE",
@@ -607,7 +607,7 @@ describe("AutoVoiceRangePage mutation 경계 가드 (race/unmount/401/fallback t
     await act(async () => {
       deferred.resolve({
         id: 1002,
-        sessionId: "test-session-id",
+        sessionId: "00000000-0000-4000-8000-000000000001",
         lowestNoteMidi: 48,
         highestNoteMidi: 69,
         sourceMethod: "MIC_MEASURE",
@@ -641,7 +641,7 @@ describe("AutoVoiceRangePage mutation 경계 가드 (race/unmount/401/fallback t
     await act(async () => {
       deferred.resolve({
         id: 1003,
-        sessionId: "test-session-id",
+        sessionId: "00000000-0000-4000-8000-000000000001",
         lowestNoteMidi: 48,
         highestNoteMidi: 69,
         sourceMethod: "MIC_MEASURE",
