@@ -528,6 +528,26 @@ bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all
 - 금지: `backend/**`/`web/**` 구현 코드 (구현은 be/fe 담당)
 - ADR/spec 작성 시 `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md` 규약 준수
 
+#### plan 신규 spec frontmatter 의무 (2026-05-26 비협상, #1135/#1136/#1139/#1140 박제)
+
+신규 spec (`docs/features/<slug>.md`) 작성 시 **첫 줄 `---` 부터 시작하는 frontmatter 블록 필수**. 학습 의존 금지 — 매 spec 작성 시 명시적으로 `_template.md` 헤더 복제.
+
+표준 절차:
+1. spec 파일 생성 직전 `_template.md` 헤더 복제:
+   ```bash
+   head -20 /home/mobruji/mobruji-plan/docs/features/_template.md
+   ```
+2. 출력의 첫 줄 `---` 부터 두 번째 `---` 까지 (frontmatter 블록 전체) 신규 spec 첫 부분에 붙여넣기.
+3. 필드 8개 채우기 (`docs/features/README.md §10` 참조): `feature` / `slug` / `status` / `owner` / `scope` / `related_issues` / `related_prs` / `last_reviewed`.
+4. push 전 sanity check:
+   ```bash
+   head -1 docs/features/<slug>.md   # 출력이 정확히 "---" 이어야 함
+   ```
+
+**검증 강제**: `.github/workflows/spec-status-check.yml` 가 PR 단계에서 frontmatter 형식을 검증 → 누락/형식 오류 시 fail → 머지 차단. plan sub-agent 가 frontmatter 누락 spec 을 push 하면 spec-status-check job fail 로 후행 사이클까지 wall-clock 손해.
+
+**박제 사고**: 2026-05-26 rev round 5/6 발견 — 신규 spec 4 PR (#1135 / #1136 / #1139 / #1140) 모두 frontmatter 블록 자체 누락. plan 사이클 hotfix 4 PR 으로 unblock. 메모리 [[feedback-spec-frontmatter-required]] 영속화.
+
 ### helper (sub-agent)
 - 워크트리: `/home/mobruji/mobruji/.claude/worktrees/agent-<id>` (격리된 worktree, helper 본체가 `Agent` 도구로 launch)
 - 작업 가능 경로: helper 본체 ([[feedback-helper-role-boundary]]) 와 동일 — 사용자 응답·helper 자체 수정·discord-reply.sh·tools/discord-daemon 등. **helper 본체가 수행하기엔 너무 긴 일회성 작업을 위임받는 sub-agent**.
@@ -626,3 +646,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — §1 "Discord thread 진행 stream (`LAUNCH_THREAD_ID` env)" 절 추가 (#1011): helper/nmae 본체가 `--auto-ack-thread` 로 사전에 만든 thread_id 를 launch prompt 안에 `LAUNCH_THREAD_ID=<id>` env 로 전달하면 sub-agent 는 milestone 마다 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` push 의무. main 채널 noise 없이 sub-agent 별 진행 stream 확보. helper turn-level (`helper-current-thread.txt` / `--auto-thread`) 와 독립 채널.
 - 2026-05-24 — §1 "sub-agent 자율 결정 STRICT" 보강 (#1015 P1): AskUserQuestion 도구 사용 자체 금지 명시 + "자율 결정 + 사유 보고" 패턴 (PR 본문 `## 자율 결정 (사유)` 섹션) + high-stakes 항목 처리 패턴 (`## 사용자 확인 필요` 섹션 — 질문 X, 상태 명시) 추가. 트리거: #1014 helper-turn-start wrapper 도입 후 자동화 audit (#1015) 결과 자율 결정 룰이 학습 의존으로 잔존 — sub-agent prompt template 자체 강화로 학습 의존 ↓. 메모리 [[feedback-sub-agent-no-user-wait]] 본문에 AskUserQuestion 금지 라인 추가.
 - 2026-05-26 — §1 PR session 라벨 표준 명령 토큰 정정 (#1094): `session:<be|fe|rev|plan|helper>` → `session:<backend|frontend|review|plan|helper>` (실제 GitHub repo 라벨과 일치). sub-agent role 명칭 (be/fe/rev) 과 라벨 토큰 (backend/frontend/review) 분리 명시. 라벨 rename 은 머지된 과거 PR + auto-label workflow 영향으로 위험 — docs 단일화 채택. 사고: be PR #1082 `session:backend` / fe PR #1090 `session:frontend` 가 명세 (be/fe) 와 mismatch.
+- 2026-05-26 — §2 plan 역할에 "신규 spec frontmatter 의무" 절 추가: 신규 spec 파일 생성 시 `_template.md` 의 frontmatter 블록 (`---` ~ `---`) 복제 + 필드 8개 (feature/slug/status/owner/scope/related_issues/related_prs/last_reviewed) 채움 의무. push 전 `head -1 docs/features/<slug>.md` sanity check. 검증: `.github/workflows/spec-status-check.yml` fail → 머지 차단. 트리거: rev round 5/6 발견 — 신규 spec 4 PR (#1135 / #1136 / #1139 / #1140) 모두 frontmatter 블록 자체 누락 → plan 사이클 hotfix 4 PR 으로 unblock. 메모리 [[feedback-spec-frontmatter-required]] 영속화.
