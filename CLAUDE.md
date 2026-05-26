@@ -351,7 +351,7 @@ helper LLM 응답 = Discord raw push. nmae 작업 + digest 도 직접 push 유�
 - hook 우회 금지 (`--no-verify` 등)
 - 보호 영역 변경 시 `needs-human-review` 라벨
 - `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) — default=main 사고 가드
-- 라벨 자기 점검 (type/scope/ai-generated/ai:claude/`session:<be|fe|rev|plan|helper>`) — session 라벨 부착 의무 (이슈 #1002 / `.github/workflows/auto-label.yml` 추론 fallback)
+- 라벨 자기 점검 (type/scope/ai-generated/ai:claude/`session:<backend|frontend|review|plan|helper>`) — session 라벨 부착 의무 (이슈 #1002 / `.github/workflows/auto-label.yml` 추론 fallback). sub-agent role → 라벨 매핑: be → `session:backend`, fe → `session:frontend`, rev → `session:review`, plan → `session:plan`, helper → `session:helper` (`docs/ai-harness/12-sub-agent-prompt-template.md §1 PR session 라벨 부착 의무` 표 참조)
 - 완료 보고 시 PR URL + mergeable + 게이트 + 보호 영역 + 발견 사항 (🔴/🟡/🟢) + 다음 사이클 후보
 
 ### 13-2) 역할별 룰 포인터 — `12-template §2`
