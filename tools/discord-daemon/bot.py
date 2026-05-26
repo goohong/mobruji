@@ -80,6 +80,19 @@ BOT_AUTO_ACK_MODE_DEFAULT: Final[str] = "reaction"
 BOT_AUTO_ACK_EMOJI_DEFAULT: Final[str] = "👀"
 BOT_AUTO_ACK_MODES_ALLOWED: Final[tuple[str, ...]] = ("text", "reaction", "both")
 
+# Secondary reaction (2026-05-26, #1080) — nmae 점유 상태를 사용자 메시지에
+# emoji 로 즉시 시각화. cycle-status.json 의 4 워크트리(be/fe/rev/plan)
+# in_progress 채워짐 개수로 분류합니다.
+#   0 occupied → ⚡ (즉시 가능, idle)
+#   1~3 occupied → ⏳ (작업 중, partial)
+#   4 occupied → 🕐 (대기 큐잉, full)
+# 파일 부재 / parse 실패 → silent skip (warning log).
+BOT_SECONDARY_REACTION_DEFAULT_ENABLED: Final[str] = "1"
+BOT_SECONDARY_REACTION_EMOJI_IDLE_DEFAULT: Final[str] = "⚡"
+BOT_SECONDARY_REACTION_EMOJI_PARTIAL_DEFAULT: Final[str] = "⏳"
+BOT_SECONDARY_REACTION_EMOJI_FULL_DEFAULT: Final[str] = "🕐"
+NMAE_WORKTREES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
+
 # reply.referenced_message forwarding (#880) — 사용자 Discord "답장" 으로 보낸 메시지가
 # 어떤 메시지에 대한 답장인지 helper 가 알 수 있도록 prefix.
 REPLY_CONTEXT_PREVIEW_LEN: Final[int] = 30
@@ -1203,6 +1216,52 @@ def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
     except OSError as exc:
         logger.warning("cycle-status.json 읽기 실패: path=%s err=%s", path, exc)
         return None
+
+
+def classify_nmae_status(
+    cycle_status_path: str,
+    *,
+    emoji_idle: str = BOT_SECONDARY_REACTION_EMOJI_IDLE_DEFAULT,
+    emoji_partial: str = BOT_SECONDARY_REACTION_EMOJI_PARTIAL_DEFAULT,
+    emoji_full: str = BOT_SECONDARY_REACTION_EMOJI_FULL_DEFAULT,
+) -> str | None:
+    """nmae 4 워크트리(be/fe/rev/plan) 점유 상태를 emoji 로 분류합니다 (#1080).
+
+    cycle-status.json 의 각 워크트리 ``in_progress`` 가 None (또는 워크트리 키
+    자체 누락) 이면 idle, dict/str (truthy) 이면 occupied 로 본다.
+
+    반환:
+        - 0 occupied → ``emoji_idle`` (즉시 가능)
+        - 1~3 occupied → ``emoji_partial`` (작업 중)
+        - 4 occupied → ``emoji_full`` (대기 큐잉)
+        - 파일 부재 / parse 실패 / 스키마 깨짐 → ``None`` (silent skip)
+
+    secondary reaction (BOT_SECONDARY_REACTION_ENABLED) 호출부가 본 결과를
+    그대로 message.add_reaction() 인자로 사용한다.
+    """
+    status = read_cycle_status(cycle_status_path)
+    if status is None:
+        return None
+    if not isinstance(status, dict):
+        logger.warning(
+            "cycle-status.json 스키마 dict 아님: type=%s — secondary reaction skip",
+            type(status).__name__,
+        )
+        return None
+    occupied = 0
+    for worktree in NMAE_WORKTREES:
+        entry = status.get(worktree)
+        if not isinstance(entry, dict):
+            # 워크트리 키 자체 누락 또는 None — idle 로 간주.
+            continue
+        in_progress = entry.get("in_progress")
+        if in_progress:
+            occupied += 1
+    if occupied == 0:
+        return emoji_idle
+    if occupied >= len(NMAE_WORKTREES):
+        return emoji_full
+    return emoji_partial
 
 
 def read_cycle_counts(path: str = DEFAULT_CYCLE_COUNTER_PATH) -> dict | None:
@@ -3855,6 +3914,27 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         "BOT_AUTO_ACK_EMOJI", BOT_AUTO_ACK_EMOJI_DEFAULT
     )
 
+    # secondary reaction (#1080) — nmae 점유 상태를 emoji 로 시각화.
+    bot_secondary_reaction_enabled = (
+        env.get(
+            "BOT_SECONDARY_REACTION_ENABLED",
+            BOT_SECONDARY_REACTION_DEFAULT_ENABLED,
+        )
+        == "1"
+    )
+    bot_secondary_reaction_emoji_idle = env.get(
+        "BOT_SECONDARY_REACTION_EMOJI_IDLE",
+        BOT_SECONDARY_REACTION_EMOJI_IDLE_DEFAULT,
+    )
+    bot_secondary_reaction_emoji_partial = env.get(
+        "BOT_SECONDARY_REACTION_EMOJI_PARTIAL",
+        BOT_SECONDARY_REACTION_EMOJI_PARTIAL_DEFAULT,
+    )
+    bot_secondary_reaction_emoji_full = env.get(
+        "BOT_SECONDARY_REACTION_EMOJI_FULL",
+        BOT_SECONDARY_REACTION_EMOJI_FULL_DEFAULT,
+    )
+
     # cycle watchdog (#941) — env 해석.
     cycle_idle_watch_enabled = (
         env.get("CYCLE_IDLE_WATCH", CYCLE_IDLE_WATCH_DEFAULT_ENABLED) == "1"
@@ -4096,7 +4176,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s alert=%s allowed=%d digest_enabled=%s auto_ack=%s auto_ack_mode=%s auto_ack_emoji=%s",
+            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s alert=%s allowed=%d digest_enabled=%s auto_ack=%s auto_ack_mode=%s auto_ack_emoji=%s secondary_reaction=%s secondary_emojis=(idle=%s partial=%s full=%s)",
             client.user,
             target_channel_id,
             digest_channel_id,
@@ -4106,6 +4186,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             bot_auto_ack_enabled,
             bot_auto_ack_mode,
             bot_auto_ack_emoji,
+            bot_secondary_reaction_enabled,
+            bot_secondary_reaction_emoji_idle,
+            bot_secondary_reaction_emoji_partial,
+            bot_secondary_reaction_emoji_full,
         )
         # P12 (2026-05-24) per-cycle 채널 가시화. 0 = unset (DIGEST fallback).
         logger.info(
@@ -4530,6 +4614,38 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                         exc,
                         exc_info=True,
                     )
+
+        # secondary reaction (#1080) — primary auto-ack 직후 nmae 점유 상태를
+        # emoji 로 시각화. cycle-status.json 부재 / parse 실패 시 silent skip.
+        # auto-ack 와 독립적인 try/except — primary 가 실패해도 secondary 시도.
+        if bot_secondary_reaction_enabled:
+            try:
+                secondary_emoji = classify_nmae_status(
+                    cycle_status_path,
+                    emoji_idle=bot_secondary_reaction_emoji_idle,
+                    emoji_partial=bot_secondary_reaction_emoji_partial,
+                    emoji_full=bot_secondary_reaction_emoji_full,
+                )
+                if secondary_emoji is not None:
+                    await message.add_reaction(secondary_emoji)
+                    logger.info(
+                        "bot secondary reaction OK: message_id=%s emoji=%s",
+                        message_id,
+                        secondary_emoji,
+                    )
+                else:
+                    logger.info(
+                        "bot secondary reaction skip (cycle-status 없음/깨짐): "
+                        "message_id=%s",
+                        message_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "bot secondary reaction 실패: message_id=%s exc=%r",
+                    message_id,
+                    exc,
+                    exc_info=True,
+                )
 
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
