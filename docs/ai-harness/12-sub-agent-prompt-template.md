@@ -225,8 +225,10 @@ gh pr ready <PR번호>   # draft → ready for review
 
 표준 명령 (PR 생성 직후 1회):
 ```bash
-gh pr edit <N> --add-label session:<be|fe|rev|plan|helper>
+gh pr edit <N> --add-label session:<backend|frontend|review|plan|helper>
 ```
+
+> 라벨 토큰은 실제 GitHub repo 라벨과 일치해야 한다 (`session:backend` / `session:frontend` / `session:review` / `session:plan` / `session:helper`). sub-agent role 명칭 (be / fe / rev) 과 라벨 토큰 (backend / frontend / review) 은 별개 — 위 매핑 표 따라 부착 (이슈 #1094 docs ↔ 라벨 단일화).
 
 또는 `gh pr create --label` 호출 시 함께 부여 (PR 생성과 동시에 박는 게 가장 안전):
 ```bash
@@ -623,3 +625,4 @@ PR https://github.com/.../405 — ready, mergeable yes
 - 2026-05-24 — 메모리 actor 디렉토리 분리 (#1004 후속): 메모리 파일 44건이 `~/.claude/projects/-home-mobruji-mobruji/memory/` 단일 디렉토리에서 `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/` 6개 actor 디렉토리로 이동. Actor TOC 표 "메모리 actor 매칭" 컬럼 → 디렉토리 경로 명시. §1 "메모리 보호 + 로드 범위" 절 신설 — sub-agent 가 자기 actor 디렉토리만 명시 Read 하도록 가이드. MEMORY.md index 도 디렉토리 경로 갱신. CLAUDE.md §15 메모리 path 동기화. 트리거: 사용자 "메모리를 actor만 명시하지말고 아예 문서 자체를 분리해야 너가 너꺼에만 집중해서 읽지" (2026-05-24).
 - 2026-05-24 — §1 "Discord thread 진행 stream (`LAUNCH_THREAD_ID` env)" 절 추가 (#1011): helper/nmae 본체가 `--auto-ack-thread` 로 사전에 만든 thread_id 를 launch prompt 안에 `LAUNCH_THREAD_ID=<id>` env 로 전달하면 sub-agent 는 milestone 마다 `discord-reply.sh --thread "$LAUNCH_THREAD_ID" "<진행>"` push 의무. main 채널 noise 없이 sub-agent 별 진행 stream 확보. helper turn-level (`helper-current-thread.txt` / `--auto-thread`) 와 독립 채널.
 - 2026-05-24 — §1 "sub-agent 자율 결정 STRICT" 보강 (#1015 P1): AskUserQuestion 도구 사용 자체 금지 명시 + "자율 결정 + 사유 보고" 패턴 (PR 본문 `## 자율 결정 (사유)` 섹션) + high-stakes 항목 처리 패턴 (`## 사용자 확인 필요` 섹션 — 질문 X, 상태 명시) 추가. 트리거: #1014 helper-turn-start wrapper 도입 후 자동화 audit (#1015) 결과 자율 결정 룰이 학습 의존으로 잔존 — sub-agent prompt template 자체 강화로 학습 의존 ↓. 메모리 [[feedback-sub-agent-no-user-wait]] 본문에 AskUserQuestion 금지 라인 추가.
+- 2026-05-26 — §1 PR session 라벨 표준 명령 토큰 정정 (#1094): `session:<be|fe|rev|plan|helper>` → `session:<backend|frontend|review|plan|helper>` (실제 GitHub repo 라벨과 일치). sub-agent role 명칭 (be/fe/rev) 과 라벨 토큰 (backend/frontend/review) 분리 명시. 라벨 rename 은 머지된 과거 PR + auto-label workflow 영향으로 위험 — docs 단일화 채택. 사고: be PR #1082 `session:backend` / fe PR #1090 `session:frontend` 가 명세 (be/fe) 와 mismatch.
