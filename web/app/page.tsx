@@ -48,17 +48,36 @@ export default function Home() {
   const voiceRangeId = useSessionStore((state) => state.voiceRangeId);
   const hasMeasurement = hasHydrated && voiceRangeId !== null;
 
+  /*
+   * ADR-0018 단계 4 PR 2 — homepage 토큰 swap 1차.
+   *
+   * 본 PR 에서 swap 한 요소 (총 8개):
+   *  1) <main> 배경 : `bg-zinc-50 ... dark:bg-zinc-950` → `bg-[var(--bg-subtle)]`
+   *  2) <main> padding : `px-6 py-12` → `px-[var(--page-padding-x)] py-[var(--page-padding-y)]`
+   *  3) h1 색상 : `text-zinc-900 dark:text-zinc-50` → `text-[var(--text-primary)]`
+   *  4) header 부제 색상 : `text-zinc-600 dark:text-zinc-400` → `text-[var(--text-secondary)]`
+   *  5) NewUser 카드 배경 + ring + radius : `bg-white ring-zinc-200 rounded-2xl ...` → tokens
+   *  6) Returning 카드 동일 패턴
+   *  7) NewUser primary CTA : `bg-zinc-900 ...` (검정) → `bg-[var(--brand-500)] hover:bg-[var(--brand-600)]` (브랜드 indigo)
+   *  8) Returning primary CTA 동일 패턴
+   *
+   * 다크 모드: tokens.css 의 `:where(html.dark)` selector 가 토큰값을 자동
+   * swap 하므로 swap 한 요소에서는 `dark:` prefix 를 제거할 수 있다. 보조 CTA /
+   * SecondaryNav / FlowStep / VoiceRangeSummary 는 후속 PR (단계 4 PR 3+) 에
+   * 양보 — 본 PR scope 는 "first-paint 핵심 5요소 (배경/h1/카드/CTA/padding)" 로
+   * 한정해 회귀 표면 최소화.
+   */
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col items-center gap-8">
         <header className="space-y-3 text-center">
           <p className="text-sm font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             mobruji
           </p>
-          <h1 className="text-3xl font-semibold leading-tight text-zinc-900 dark:text-zinc-50 sm:text-4xl">
+          <h1 className="text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl">
             오늘 노래방, 뭐 부르지?
           </h1>
-          <p className="text-base text-zinc-600 dark:text-zinc-400">
+          <p className="text-base text-[var(--text-secondary)]">
             내 음역대만 알려주면, 부르기 편한 곡을 추천해드려요.
           </p>
         </header>
@@ -86,7 +105,7 @@ function NewUserPanel() {
   return (
     <section
       aria-labelledby="home-onboarding-heading"
-      className="flex w-full flex-col gap-5 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+      className="flex w-full flex-col gap-5 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-6 shadow-[var(--shadow-sm)] ring-1 ring-[var(--border)]"
     >
       <div className="space-y-2">
         <h2
@@ -113,7 +132,7 @@ function NewUserPanel() {
       <div className="flex flex-col gap-2">
         <Link
           href="/voice-range/auto"
-          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--brand-500)] px-6 text-base font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
         >
           음역대 측정하기
         </Link>
@@ -152,7 +171,7 @@ function ReturningUserPanel() {
   return (
     <section
       aria-labelledby="home-returning-heading"
-      className="flex w-full flex-col gap-5 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+      className="flex w-full flex-col gap-5 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-6 shadow-[var(--shadow-sm)] ring-1 ring-[var(--border)]"
     >
       <div className="space-y-2">
         <h2
@@ -175,7 +194,7 @@ function ReturningUserPanel() {
       <div className="flex flex-col gap-2">
         <Link
           href="/recommend"
-          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-medium text-white transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--brand-500)] px-6 text-base font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
         >
           추천 받기
         </Link>

@@ -120,4 +120,61 @@ describe("design tokens (ADR-0018)", () => {
     expect(tokens).toMatch(/animation-duration:\s*10ms\s*!important/);
     expect(tokens).toMatch(/scroll-behavior:\s*auto\s*!important/);
   });
+
+  /*
+   * ADR-0018 단계 4 PR 2 — Pretendard Variable 자체 호스팅 회귀 가드.
+   * 본 PR 부터 폰트 가 `web/public/fonts/PretendardVariable.woff2` 에 위치 +
+   * globals.css 가 `@font-face` 로 등록 + body / Tailwind utility 가 Pretendard
+   * 우선 stack 을 사용하도록 swap. 토큰 측 SoT (`--font-family-sans`) 가 별칭
+   * 으로 살아있는지 검증해 자기참조 무한 fallback 회귀를 차단한다.
+   */
+  it("Pretendard Variable @font-face 가 globals.css 에 등록된다 (PR 2)", () => {
+    // `/s` (dotAll) flag 는 ES2018+ 필요. tsconfig target 호환 위해 `[\s\S]` 사용.
+    expect(globals).toMatch(
+      /@font-face\s*{[\s\S]*?font-family:\s*["']Pretendard Variable["'][\s\S]*?}/,
+    );
+    expect(globals).toMatch(
+      /src:\s*url\(["']\/fonts\/PretendardVariable\.woff2["']\)\s*format\(["']woff2-variations["']\)/,
+    );
+    // FOIT 회피 — swap 의무.
+    expect(globals).toMatch(/font-display:\s*swap/);
+    // variable axis 전체 범위 — Pretendard v1.3 weight 45-920.
+    expect(globals).toMatch(/font-weight:\s*45\s+920/);
+  });
+
+  it("font-family 별칭 (`--font-family-*`) 이 SoT 로 정의된다 (자기참조 회귀 가드)", () => {
+    // Tailwind v4 `@theme inline { --font-sans: var(--font-sans) }` 자기참조 무한
+    // fallback 방지: SoT 가 별 이름 (`--font-family-*`) 을 가져야 한다.
+    expect(tokens).toMatch(
+      /--font-family-sans:\s*"Pretendard Variable"/,
+    );
+    expect(tokens).toMatch(/--font-family-display:/);
+    expect(tokens).toMatch(/--font-family-mono:/);
+    // `--font-sans` alias 가 별칭을 가리켜야 한다.
+    expect(tokens).toMatch(/--font-sans:\s*var\(--font-family-sans\)/);
+  });
+
+  it("globals.css `@theme inline` 의 `--font-sans` 가 SoT 별칭을 가리킨다", () => {
+    // 자기참조 방지: globals.css `@theme inline` 안의 `--font-sans` 가
+    // `var(--font-family-sans)` 를 가리켜야 한다 (`var(--font-sans)` 면 무한 fallback).
+    const themeInlineMatch = globals.match(/@theme inline\s*{([\s\S]*?)}/);
+    expect(themeInlineMatch).not.toBeNull();
+    const themeInline = themeInlineMatch?.[1] ?? "";
+    expect(themeInline).toMatch(
+      /--font-sans:\s*var\(--font-family-sans\)/,
+    );
+    expect(themeInline).toMatch(
+      /--font-mono:\s*var\(--font-family-mono\)/,
+    );
+  });
+
+  it("body font-family 가 토큰 (`var(--font-sans)`) 으로 swap 된다 (Arial hardcode 폐기)", () => {
+    // 기존 `font-family: Arial, Helvetica, sans-serif` → `var(--font-sans)`.
+    const bodyMatch = globals.match(/body\s*{([\s\S]*?)}/);
+    expect(bodyMatch).not.toBeNull();
+    const bodyBlock = bodyMatch?.[1] ?? "";
+    expect(bodyBlock).toMatch(/font-family:\s*var\(--font-sans\)/);
+    // Arial hardcode 잔존 0 확인.
+    expect(bodyBlock).not.toMatch(/Arial/);
+  });
 });

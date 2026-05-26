@@ -79,12 +79,24 @@
    * Pretendard 호스팅 결정은 PR 2 (Pretendard 통합) 시점에 별도 결정. 본 PR 은
    * 변수만 선언 — system-ui fallback 으로 회귀 0.
    */
-  --font-sans:
+  /*
+   * 별칭 (`--font-family-*`) 을 정의해 globals.css `@theme inline` 에서 자기참조
+   * 무한 fallback 을 회피한다. Tailwind v4 `@theme inline { --font-sans: ... }`
+   * 가 `var(--font-sans)` 를 호출하면 같은 scope 의 정의를 가리키므로 별 이름의
+   * source-of-truth 가 필요하다.
+   */
+  --font-family-sans:
     "Pretendard Variable", "Geist", system-ui, -apple-system, "Segoe UI",
     sans-serif;
-  --font-display:
+  --font-family-display:
     "Pretendard Variable", "Geist", system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-family-mono:
+    "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* tokens.css 직접 사용용 별칭 (`var(--font-sans)` 호출 호환) */
+  --font-sans: var(--font-family-sans);
+  --font-display: var(--font-family-display);
+  --font-mono: var(--font-family-mono);
 
   /* Type scale — Major Third (1.250 ratio). globals.css 의 Tailwind v4 base 와 별개로 의미 토큰 추가 */
   --text-xs: 0.75rem; /* 12px — caption, helper text, step indicator */

@@ -105,6 +105,25 @@ zinc 유지하되 변수 표준화.
 
 Pretendard 채택 사유: 한국어 서비스 한글 가독성 1순위, 무료 (OFL-1.1), 9 weight, variable font 로 단일 파일.
 
+##### 호스팅 결정 — **자체 호스팅 (`public/fonts/`)** 채택 (단계 4 PR 2)
+
+| 옵션 | 장점 | 단점 | 채택 |
+|---|---|---|---|
+| **(b) 자체 호스팅** (`web/public/fonts/PretendardVariable.woff2`, ~2MB) | latency 외부 의존 0 (같은 origin → HTTP/2 multiplex 이득) / 캐시 정책 자체 제어 / CSP 단순 (`font-src 'self'`) / CDN 장애 무영향 | 초기 첫 로드 ~2MB (gzip 후 ~1MB) — 단 woff2 자체 압축 + browser cache 1회 다운로드 후 영구 | **선택** |
+| (a) CDN | 외부 CDN edge 가까운 사용자 latency ↓ / 빌드 산출물 가벼움 | `cdn.jsdelivr.net` / `cdn.pretendard.dev` 장애 = 폰트 깨짐 / CSP `font-src` 외부 도메인 허용 필요 / 브라우저 같은 origin 캐시 공유 가정 약화 | 미채택 |
+
+**결정 사유**:
+1. **mobruji 는 PWA + service worker (`sw.js`) 운영** — 자체 호스팅 폰트는 SW precache 대상으로 자동 편입되어 오프라인에서도 일관 렌더링. CDN 외부 도메인은 SW 캐시 정책 추가 작업 필요.
+2. **latency 제어** — Next.js 가 동일 origin 정적 자산을 `Cache-Control: public, max-age=31536000, immutable` 으로 자동 설정. CDN 의존 시 외부 도메인 캐시 정책에 의존.
+3. **CSP 단순화** — 자체 호스팅이면 `font-src 'self'` 만 허용하여 보안 검토 부담 ↓. CDN 은 도메인 화이트리스트 추가 필요.
+4. **2MB 비용은 1회성** — woff2 압축 + `font-display: swap` 으로 초기 paint 차단 0. 브라우저 캐시 후 무영향.
+
+**구현**:
+- 폰트 파일: `web/public/fonts/PretendardVariable.woff2` (Pretendard v1.3.9 variable, OFL-1.1)
+- 라이선스: `web/public/fonts/PretendardVariable-LICENSE.txt` 동봉 (OFL-1.1 명시 의무)
+- `@font-face` 등록: `web/app/globals.css` 가 `src: url('/fonts/PretendardVariable.woff2') format('woff2-variations')` + `font-display: swap` + `font-weight: 45 920` (variable axis 전체 범위) 선언.
+- body fallback: `var(--font-sans)` — Pretendard 로드 실패 시 Geist / system-ui 로 graceful degrade.
+
 #### Type scale (Major Third — 1.250 ratio)
 
 | Token | rem | px | 용도 |
