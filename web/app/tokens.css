@@ -1,0 +1,199 @@
+/*
+ * Design tokens — ADR-0018 (#1044 단계 4 PR 1).
+ *
+ * 본 파일은 CSS 변수 정의만 담당하며, 기존 페이지 코드의 hardcode 색상/사이즈를
+ * 즉시 swap 하지 않는다 (회귀 0 보장). 후속 PR 2-9 (ui-ux-redesign 단계 4) 가
+ * 페이지/컴포넌트 별로 점진 마이그레이션한다.
+ *
+ * 구조:
+ *   1) Color        — brand, semantic, neutral
+ *   2) Typography   — font-family, scale, weight, leading
+ *   3) Spacing      — 4px base scale + 의미 alias
+ *   4) Radius       — sm/md/lg/xl/full
+ *   5) Shadow       — elevation + brand accent
+ *   6) Motion       — duration + easing + reduced-motion 가드
+ *
+ * 다크 모드: `:where(html.dark)` selector 로 light → dark 토큰 swap.
+ * globals.css 의 `@custom-variant dark (&:where(.dark, .dark *))` 와 함께 동작.
+ *
+ * 명명 규칙:
+ *   - 색상: `--brand-*` / `--success-*` / `--warning-*` / `--danger-*` / `--info-*`
+ *   - 의미 토큰: `--bg-*` / `--text-*` / `--border` / `--page-padding-*` / `--card-padding`
+ *   - 사이즈: `--space-*` / `--radius-*` / `--text-*` (font-size)
+ *   - 모션: `--duration-*` / `--ease-*`
+ */
+
+/* ───────── 1) Color token ───────── */
+
+:root {
+  /* Brand color — indigo→violet gradient. 노래방 무대 조명/네온 사인 모티프 (ADR-0018 §1) */
+  --brand-50: #eef0ff;
+  --brand-100: #e0e4ff;
+  --brand-200: #c2c9ff;
+  --brand-300: #a0a8ff;
+  --brand-400: #7e85ff;
+  --brand-500: #6366f1; /* primary base — indigo-500 */
+  --brand-600: #4f46e5; /* primary hover/active */
+  --brand-700: #4338ca;
+  --brand-800: #3730a3;
+  --brand-900: #312e81;
+
+  --brand-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+
+  /* Semantic color — 단일 토큰 (red/rose 혼용 폐기) */
+  --success-50: #ecfdf5;
+  --success-500: #10b981;
+  --warning-50: #fffbeb;
+  --warning-500: #f59e0b;
+  --danger-50: #fef2f2;
+  --danger-500: #ef4444;
+  --info-50: #eff6ff;
+  --info-500: #3b82f6;
+
+  /* Neutral — light mode default (zinc 표준화) */
+  --bg-base: #ffffff;
+  --bg-subtle: #fafafa; /* zinc-50 */
+  --bg-muted: #f4f4f5; /* zinc-100 */
+  --border: #e4e4e7; /* zinc-200 */
+  --text-primary: #18181b; /* zinc-900 */
+  --text-secondary: #52525b; /* zinc-600 */
+  --text-tertiary: #a1a1aa; /* zinc-400 */
+}
+
+/* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
+:where(html.dark) {
+  --bg-base: #09090b; /* zinc-950 */
+  --bg-subtle: #18181b; /* zinc-900 */
+  --bg-muted: #27272a; /* zinc-800 */
+  --border: #3f3f46; /* zinc-700 */
+  --text-primary: #fafafa; /* zinc-50 */
+  --text-secondary: #d4d4d8; /* zinc-300 */
+  --text-tertiary: #71717a; /* zinc-500 */
+}
+
+/* ───────── 2) Typography token ───────── */
+
+:root {
+  /*
+   * font-family — Pretendard (한글) → Geist (라틴) → system fallback.
+   * Pretendard 호스팅 결정은 PR 2 (Pretendard 통합) 시점에 별도 결정. 본 PR 은
+   * 변수만 선언 — system-ui fallback 으로 회귀 0.
+   */
+  --font-sans:
+    "Pretendard Variable", "Geist", system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-display:
+    "Pretendard Variable", "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type scale — Major Third (1.250 ratio). globals.css 의 Tailwind v4 base 와 별개로 의미 토큰 추가 */
+  --text-xs: 0.75rem; /* 12px — caption, helper text, step indicator */
+  --text-sm: 0.875rem; /* 14px — body small, chip, table */
+  --text-base: 1rem; /* 16px — body default */
+  --text-lg: 1.125rem; /* 18px — section title (h3) */
+  --text-xl: 1.5rem; /* 24px — page subtitle (h2) */
+  --text-2xl: 1.875rem; /* 30px — page title (h1, 모바일) */
+  --text-3xl: 2.25rem; /* 36px — page title (h1, 데스크탑) */
+  --text-display: 3rem; /* 48px — hero, onboarding wow */
+
+  /* line-height */
+  --leading-tight: 1.25; /* 헤더 */
+  --leading-normal: 1.5; /* 본문 default */
+  --leading-relaxed: 1.75; /* 긴 설명 */
+
+  /* font-weight */
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-black: 800; /* display */
+}
+
+/* ───────── 3) Spacing token (4px base) ───────── */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* 의미 alias */
+  --page-padding-x: var(--space-6); /* px-6 → 24px */
+  --page-padding-y: var(--space-12); /* py-12 → 48px */
+  --card-padding: var(--space-4); /* p-4 → 16px Card 기본 */
+  --section-gap: var(--space-8); /* section 간 32px */
+}
+
+/* ───────── 4) Radius token ───────── */
+
+:root {
+  --radius-sm: 6px; /* Chip, Tag */
+  --radius-md: 12px; /* Input, Button */
+  --radius-lg: 16px; /* Card */
+  --radius-xl: 24px; /* Modal, Sheet */
+  --radius-full: 9999px; /* Avatar, FAB */
+}
+
+/* ───────── 5) Shadow token (elevation) ───────── */
+
+:root {
+  /* 토스 패턴 — 부드러운 low-opacity multi-layer */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-md:
+    0 2px 8px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-lg:
+    0 4px 16px 0 rgba(0, 0, 0, 0.06), 0 2px 4px 0 rgba(0, 0, 0, 0.04);
+  --shadow-xl:
+    0 8px 32px 0 rgba(0, 0, 0, 0.08), 0 4px 8px 0 rgba(0, 0, 0, 0.04);
+
+  /* 브랜드 액센트 — primary CTA hover 시 */
+  --shadow-brand: 0 8px 32px 0 rgba(99, 102, 241, 0.24);
+}
+
+/* 다크 모드는 opacity 1.5배 — 같은 ratio 유지하면서 가시성 ↑ */
+:where(html.dark) {
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-md:
+    0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-lg:
+    0 4px 16px 0 rgba(0, 0, 0, 0.09), 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+  --shadow-xl:
+    0 8px 32px 0 rgba(0, 0, 0, 0.12), 0 4px 8px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* ───────── 6) Motion token ───────── */
+
+:root {
+  --duration-fast: 150ms; /* hover, focus, color */
+  --duration-base: 200ms; /* button press, chip toggle */
+  --duration-slow: 300ms; /* modal, sheet enter/exit */
+  --duration-slower: 500ms; /* page transition, hero */
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* 부드러운 도착 */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 양방향 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 스프링 bounce */
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1); /* 강조 — page transition */
+}
+
+/*
+ * a11y — prefers-reduced-motion 의무 가드 (ADR-0018 §6).
+ *
+ * 후속 PR 이 본 토큰을 사용한 transition/animation 을 추가하더라도, motion
+ * sensitive 사용자에게는 즉시 단축 적용 (10ms — 시각적 "없음" 과 동등).
+ * 본 PR 시점엔 사용처가 0건이라 실효 영향 0 이지만, 토큰 도입과 함께 미리
+ * 적용해 후속 PR 누락 위험을 차단한다.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 10ms !important;
+    animation-duration: 10ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
