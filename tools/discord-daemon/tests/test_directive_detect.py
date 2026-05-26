@@ -81,6 +81,93 @@ class TestClassify:
         assert classify("   ") == CLASS_CONVERSATION
 
 
+class TestClassifyFalsePositiveGuards:
+    """#1124: false-positive 약 90% 차단 — meta / 짧은 ack / 자연어 의문어 보강."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # bot 본인 auto-ack 가 inbox leak
+            "앞으로 🤖 helper bot 수신 — helper 가 nmae 상태 확인 중. 곧 답변드립니다",
+            "🤖 helper bot 수신 — helper 가 nmae 상태 확인 중",
+            "helper bot auto-ack 활성",
+            # 시스템 알림 (helper-empty-message-classify 등)
+            "메시지가 전달되지 않은 것 같습니다. 다시 보내 주십시오.",
+            "내용이 없는 메시지를 받았습니다",
+            # watchdog / digest leak
+            "⚠️ watchdog alert — cycle-status idle",
+            "🚀 sub-agent launch: be — 진행",
+            "✅ 완료: P1 #1083 머지",
+        ],
+    )
+    def test_meta_message_classified_conversation(self, text: str) -> None:
+        """bot 본인 ack / 시스템 알림 → conversation (directive 등록 차단)."""
+        assert classify(text) == CLASS_CONVERSATION
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # 명시적 동의 표지어 + 실행 동사 — "응 해줘" 등
+            "응 해줘",
+            "응 해주세요",
+            "오케이 진행",
+            "ㅇㅋ 진행",
+            "그래 해줘",
+            "좋아 진행",
+            # 순수 동의 표지어 (실행 동사 없이)
+            "컨펌",
+            "오케이",
+            "ㅇㅋ",
+        ],
+    )
+    def test_short_ack_classified_conversation(self, text: str) -> None:
+        """user→helper 진행 승인 (신규 directive 아님) → conversation.
+
+        주의: "진행" / "진행해" 같은 bare verb 는 실제 신규 directive 도 가능하므로
+        ack 패턴에서 제외 (모호 시 directive 유지).
+        """
+        assert classify(text) == CLASS_CONVERSATION
+
+    def test_bare_verb_still_directive(self) -> None:
+        """bare verb '진행해' / '진행' — 신규 directive 가능성 보존 (#1124 backward-compat)."""
+        # 기존 테스트 + jsonl 사례에서 '진행해' 는 directive 분류 보존
+        assert classify("진행해") == CLASS_DIRECTIVE
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "nmae는 뭐하니",
+            "지금 nmae는 뭐해",
+            "사이클은 어디까지",
+            "다음 배포는 언제",
+            "비용은 얼마",
+            "내말 들리니",
+            "잘 들려",
+            "이거 보이니",
+            "이해했어?",
+        ],
+    )
+    def test_natural_query_without_question_mark(self, text: str) -> None:
+        """의문부호 없는 자연어 의문문 — query 분류 (#1124)."""
+        assert classify(text) == CLASS_QUERY
+
+    def test_meta_takes_priority_over_directive(self) -> None:
+        """meta + directive 키워드 혼합 — meta 가 우선 (bot ack 안 등록)."""
+        # "helper bot 수신" + "진행" — bot 본인 ack 이므로 conversation
+        assert classify("🤖 helper bot 수신 — 진행 중") == CLASS_CONVERSATION
+
+    def test_short_ack_within_8_char_boundary(self) -> None:
+        """8자 boundary — '응 해줘' (4자 stripped) conversation."""
+        assert classify("응 해줘") == CLASS_CONVERSATION
+        # 9자 이상이면 short-ack 가드 미적용 → 기존 directive 패턴 매칭 가능
+        assert classify("응 그건 해줘") in {CLASS_DIRECTIVE, CLASS_DIRECTIVE_AMBIGUOUS}
+
+    def test_real_directive_still_works(self) -> None:
+        """false-positive 차단 후에도 실제 directive 는 정상 분류."""
+        assert classify("이 부분 수정해줘") == CLASS_DIRECTIVE
+        assert classify("forum 채널 신설해") == CLASS_DIRECTIVE
+
+
 class TestSummarize:
     def test_truncation(self) -> None:
         text = "a" * 80
