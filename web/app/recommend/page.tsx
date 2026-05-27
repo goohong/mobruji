@@ -226,18 +226,41 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     return <NoSessionFallback />;
   }
 
+  /*
+   * ADR-0018 단계 4 PR 4 — /recommend 페이지 토큰 swap (#1150 secondary pages 패턴).
+   *
+   * swap 한 요소 (first-paint 핵심):
+   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
+   *  2) h1 : text-zinc-900 dark:text-zinc-50 → --text-primary
+   *  3) "내 음역대" 부제 p : text-zinc-600 dark:text-zinc-400 → --text-secondary
+   *  4) header Link 2개 (마이크 다시 측정 / 음역대 다시 입력) : zinc text → tokens
+   *  5) error 박스 (red bg + button) — danger 토큰 미정 → red 유지 (#1150 미swap 정책)
+   *  6) 빈 결과 / hasNextPage=false fallback 카드 (2건) : rounded-2xl ring-zinc-200
+   *     bg-white dark:* → tokens (--radius-lg / --bg-base / --border)
+   *  7) fallback CTA Link (2건) : bg-zinc-900 dark:bg-zinc-50 → --brand-500/600
+   *  8) StatusShell <main> 배경/padding/h1/부제/CTA : tokens
+   *
+   * 미swap (후속 PR 양보):
+   *  - "Step 2" caption (text-zinc-500 dark:text-zinc-400) — caption 토큰 별 매핑 미정
+   *  - SourceMethodBadge 내부 (zinc / emerald) — 자체 함수 컴포넌트, 별 토큰 그룹
+   *  - error 박스 (text-red / bg-red) — danger 토큰 매핑 미정 (#1150 후속 양보 항목)
+   *  - SongCard / SongCardSkeleton — 별도 컴포넌트 (PR 6 #1160 진행 중)
+   *
+   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
+   * `dark:` prefix 제거.
+   */
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Step 2
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             추천 결과
           </h1>
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <p className="text-sm text-[var(--text-secondary)]">
               내 음역대: {midiToCombinedNoteName(voiceRange.lowestNoteMidi)} ~{" "}
               {midiToCombinedNoteName(voiceRange.highestNoteMidi)}
             </p>
@@ -250,14 +273,14 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
             {voiceRange.sourceMethod === "MIC_MEASURE" ? (
               <Link
                 href="/voice-range/auto"
-                className="text-sm font-medium text-zinc-900 underline-offset-4 hover:underline dark:text-zinc-50"
+                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
               >
                 마이크로 다시 측정
               </Link>
             ) : null}
             <Link
               href="/voice-range"
-              className="text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
+              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
             >
               음역대 다시 입력
             </Link>
@@ -446,14 +469,14 @@ function RecommendationFeed({
     return (
       <div
         role="status"
-        className="flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex flex-col items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-5"
       >
-        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+        <p className="text-sm text-[var(--text-secondary)]">
           더 이상 추천할 곡이 없어요. 음역대를 다시 입력해 보세요.
         </p>
         <Link
           href="/voice-range"
-          className="inline-flex h-10 items-center justify-center rounded-full bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--brand-500)] px-4 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
         >
           음역대 다시 입력
         </Link>
@@ -536,15 +559,15 @@ function RecommendationFeed({
       ) : (
         <div
           role="status"
-          className="flex flex-col items-start gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
+          className="flex flex-col items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-5"
         >
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <p className="text-sm text-[var(--text-secondary)]">
             추천할 수 있는 곡을 모두 보여드렸어요. 음역대나 분위기를 바꿔서 다시
             시도해 보세요.
           </p>
           <Link
             href="/voice-range"
-            className="inline-flex h-10 items-center justify-center rounded-full bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--brand-500)] px-4 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
           >
             음역대 다시 입력
           </Link>
@@ -568,20 +591,18 @@ function StatusShell({
   ctaLabel,
 }: StatusShellProps) {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 text-center dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)] text-center">
       <div className="w-full max-w-md flex flex-col items-center gap-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           {title}
         </h1>
         {description ? (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {description}
-          </p>
+          <p className="text-sm text-[var(--text-secondary)]">{description}</p>
         ) : null}
         {ctaHref && ctaLabel ? (
           <Link
             href={ctaHref}
-            className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--brand-500)] px-5 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
           >
             {ctaLabel}
           </Link>
