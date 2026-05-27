@@ -1,8 +1,12 @@
 ---
-name: rev-e2e-3-stages
-status: draft
-owners: rev
-related-issues: ["#882", "#851"]
+feature: rev 3단계 e2e 자율 QA
+slug: rev-e2e-3-stages
+status: implementing
+owner: @mobruji-maestro
+scope: infra
+related_issues: [882, 851]
+related_prs: [889, 932, 953, 958, 1009]
+last_reviewed: 2026-05-27
 ---
 
 # rev 3단계 e2e 자율 QA
