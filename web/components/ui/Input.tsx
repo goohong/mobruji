@@ -76,7 +76,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {description ? (
         <p
           id={descId}
-          className="text-xs text-zinc-500 dark:text-zinc-400"
+          className="text-xs text-[var(--text-caption)]"
         >
           {description}
         </p>

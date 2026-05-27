@@ -241,10 +241,13 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
    *  8) StatusShell <main> 배경/padding/h1/부제/CTA : tokens
    *
    * 미swap (후속 PR 양보):
-   *  - "Step 2" caption (text-zinc-500 dark:text-zinc-400) — caption 토큰 별 매핑 미정
-   *  - SourceMethodBadge 내부 (zinc / emerald) — 자체 함수 컴포넌트, 별 토큰 그룹
+   *  - SourceMethodBadge 내부 (zinc / emerald) — 자체 함수 컴포넌트, 별도 토큰 그룹
    *  - error 박스 (text-red / bg-red) — danger 토큰 매핑 미정 (#1150 후속 양보 항목)
    *  - SongCard / SongCardSkeleton — 별도 컴포넌트 (PR 6 #1160 진행 중)
+   *
+   * 본 PR 8 (#1044 단계 4 PR 8) 에서 추가:
+   *  - "Step 2" caption (text-zinc-500 dark:text-zinc-400 → text-[var(--text-caption)])
+   *    — tokens.css `--text-caption` 신규 정의 (zinc-500 light / zinc-400 dark).
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
    * `dark:` prefix 제거.
@@ -253,7 +256,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-8">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Step 2
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">

@@ -70,7 +70,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
   // crash 방지 + 스크린리더 status 안내.
   if (points.length === 0) {
     return (
-      <p role="status" className="text-xs text-zinc-500 dark:text-zinc-400">
+      <p role="status" className="text-xs text-[var(--text-caption)]">
         아직 표시할 측정 기록이 없어요.
       </p>
     );
@@ -115,7 +115,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
       className="flex flex-col gap-4 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
     >
       <header className="flex flex-col gap-1">
-        <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
           내 음역 발전 추적
         </p>
         <h2
@@ -124,7 +124,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
         >
           {headline}
         </h2>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs text-[var(--text-caption)]">
           {/*
            * #766: aria-label/스크린리더 컨텍스트의 NaN/Infinity 입력 가드.
            * 헤더 텍스트는 스크린리더가 그대로 읽으므로 "--" 대신 의미 있는
@@ -147,7 +147,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
          * 양수=음(피치)이 높아진 방향(고음 확장 / 저음 좁아짐), 음수=낮아진 방향.
          * 헤드라인(spanDelta)은 폭만 보여주므로 lower/upper bound 변화를 별도 표기.
          */}
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs text-[var(--text-caption)]">
           첫 측정 대비 저음 {formatSemitoneDelta(lowMidiDeltaSemitones)} · 고음{" "}
           {formatSemitoneDelta(highMidiDeltaSemitones)}
         </p>

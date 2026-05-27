@@ -190,7 +190,7 @@ export default function HistoryPage() {
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             History
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
@@ -379,7 +379,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
           >
             {relativeTime}
           </time>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs text-[var(--text-caption)]">
             추천 {entry.songs.length}곡
             {entry.excludedSongIds.length > 0
               ? ` · ${entry.excludedSongIds.length}곡 제외`
@@ -392,7 +392,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
             type="button"
             onClick={onRemove}
             aria-label={`${relativeTime} 추천 삭제`}
-            className="rounded-full border border-transparent px-2 py-1 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-300 hover:text-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-700 dark:hover:text-zinc-100"
+            className="rounded-full border border-transparent px-2 py-1 text-xs font-medium text-[var(--text-caption)] transition-colors hover:border-zinc-300 hover:text-zinc-800 dark:hover:border-zinc-700 dark:hover:text-zinc-100"
           >
             삭제
           </button>
@@ -419,7 +419,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
           {expanded ? "접기" : `이 추천 다시 보기 (+${remaining}개 더보기)`}
         </button>
       ) : (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs text-[var(--text-caption)]">
           전체 {entry.songs.length}곡 보기 중
         </p>
       )}

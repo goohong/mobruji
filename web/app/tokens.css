@@ -58,6 +58,14 @@
   --text-primary: #18181b; /* zinc-900 */
   --text-secondary: #52525b; /* zinc-600 */
   --text-tertiary: #a1a1aa; /* zinc-400 */
+  /*
+   * --text-caption — Step indicator / metadata label / 보조 caption 전용
+   * (ADR-0018 단계 4 PR 8, #1044). `--text-tertiary` 와 light/dark 매핑이
+   * 반대 (zinc-500 light / zinc-400 dark). 기존 `text-zinc-500 dark:text-zinc-400`
+   * 페어가 다수 페이지 (voice-range / history / recommend / likes / bookmarks /
+   * songs / page) 에서 동일 의미로 쓰여 단일 토큰으로 통합한다.
+   */
+  --text-caption: #71717a; /* zinc-500 */
 }
 
 /* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
@@ -69,6 +77,7 @@
   --text-primary: #fafafa; /* zinc-50 */
   --text-secondary: #d4d4d8; /* zinc-300 */
   --text-tertiary: #71717a; /* zinc-500 */
+  --text-caption: #a1a1aa; /* zinc-400 */
 }
 
 /* ───────── 2) Typography token ───────── */
