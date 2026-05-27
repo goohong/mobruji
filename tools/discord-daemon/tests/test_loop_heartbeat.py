@@ -456,15 +456,15 @@ class HeartbeatWatchLoopTest(unittest.TestCase):
 
 class LoopHeartbeatExpectedIntervalsTest(unittest.TestCase):
     def test_all_known_loops_mapped(self) -> None:
-        # docstring 에 명시된 8 + self = 9 loop 모두 매핑에 존재 (directive_detect_
-        # register_watch_loop 은 PR #1082 가 develop 에 가져온 loop).
+        # PR #1140 (event-driven 전환): directive_board_sync_loop 폐기 →
+        # 8 loop 로 축소. directive_detect_register_watch_loop 은 PR #1082 가
+        # develop 에 가져온 누락 detect loop (별개) — 유지.
         expected = {
             "digest_loop",
             "context_auto_clear_loop",
             "cycle_idle_watch_loop",
             "rev_post_merge_audit_loop",
             "claude_usage_watch_loop",
-            "directive_board_sync_loop",
             "thread_cleanup_loop",
             "directive_detect_register_watch_loop",
             "heartbeat_watch_loop",

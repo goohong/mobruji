@@ -49,7 +49,6 @@ from directive_board_sync import (
     DEFAULT_JSONL_PATH as DIRECTIVE_BOARD_JSONL_PATH_DEFAULT,
     DEFAULT_STATE_PATH as DIRECTIVE_BOARD_STATE_PATH_DEFAULT,
     directive_board_summary,
-    sync_once as directive_board_sync_once,
 )
 from directive_detect import (
     DIRECTIVE_CLASSES,
@@ -313,15 +312,12 @@ CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
 # boot warmup — 다른 loop 와 stagger.
 CLAUDE_USAGE_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 120
 
-# --- directive-board auto-PATCH (#P11) ---
-# spec: 이슈 #P11. 사용자 P0 사고 (2026-05-24) — helper backfill 후 8 directive
-# 본문이 stale (PR 머지/상태 변경 후 Discord PATCH 누락). loop 가 5분 polling
-# 으로 jsonl ↔ Discord 비교 + 변경 발견 시 자동 PATCH.
-# 모듈 분리: `directive_board_sync.py`.
-DIRECTIVE_BOARD_SYNC_DEFAULT_ENABLED: Final[str] = "1"
-DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
-# boot warmup — 다른 loop 와 stagger (digest 60s, claude_usage 120s 사이).
-DIRECTIVE_BOARD_SYNC_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 150
+# --- directive-board event-driven (#1129, PR #1140 spec) ---
+# 폐기 (2026-05-27): polling 기반 `directive_board_sync_loop` 5분 주기 → mismatch
+# 자동 PATCH 불완전 (사용자 정정 "directive_board_mismatch=106"). event-driven 전환:
+# 트리거 3 시점 actor atomic 호출 (지시 발생 / 위임 / 완료) — `directive_append.sh`
+# / `directive_status.sh`. bot.py = dumb conduit (sync_loop 폐기).
+# spec: `docs/features/directive-board-event-driven-redesign.md`.
 
 # Discord thread auto-cleanup (#1023, 2026-05-24 사용자 P0).
 # helper sub-agent launch per-thread (#1011) + auto-ack thread 누적 → 채널 sidebar
@@ -390,14 +386,13 @@ HEARTBEAT_WATCH_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 180  # boot warmup
 HEARTBEAT_WATCH_PUSH_DEBOUNCE_SECONDS: Final[int] = 60 * 60
 # loop name → 정상 max iter interval (seconds). stale 임계 = value × multiplier.
 # 본 매핑은 record_loop_heartbeat 호출 위치의 sleep interval 기준.
-# directive_detect_register_watch_loop (#1071) 도 합쳐 8 + 1 = 9 loop 추적.
+# directive_board_sync_loop (#P11) 는 PR #1140 event-driven 전환으로 폐기 (8 loop).
 LOOP_HEARTBEAT_EXPECTED_INTERVALS: Final[dict[str, int]] = {
     "digest_loop": DEFAULT_DIGEST_INTERVAL_SECONDS,
     "context_auto_clear_loop": CONTEXT_AUTO_CLEAR_POLL_INTERVAL_SECONDS,
     "cycle_idle_watch_loop": CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS,
     "rev_post_merge_audit_loop": REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS,
     "claude_usage_watch_loop": CLAUDE_USAGE_DEFAULT_INTERVAL_SECONDS,
-    "directive_board_sync_loop": DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS,
     "thread_cleanup_loop": THREAD_CLEANUP_DEFAULT_INTERVAL_SECONDS,
     "directive_detect_register_watch_loop": (
         DIRECTIVE_DETECT_WATCH_DEFAULT_INTERVAL_SECONDS
@@ -726,8 +721,8 @@ def load_env() -> dict[str, str]:
     # Forum 채널 (#17 사용자 forum 전환 wave, 2026-05-24) — directive-board /
     # per-cycle 채널이 GUILD_FORUM type 으로 신설. discord-reply.sh 의
     # `--forum-post|--forum-comment|--forum-edit|--forum-retag` mode 가 .env 에서
-    # 직접 read 하지만, bot.py 도 on_ready 로그 / 향후 directive_board_sync_loop
-    # forum 확장 (jsonl forum_thread_id 인식) 진입점으로 env dict 에 보존.
+    # 직접 read 하지만, bot.py 도 on_ready 로그 / event-driven directive_append.sh
+    # 호출 (#1140) 진입점으로 env dict 에 보존.
     # 미설정 시 빈 문자열 (라우팅 책임은 discord-reply.sh — silent fallback 금지).
     for _forum in (
         "DIRECTIVE_BOARD_FORUM_ID",
@@ -882,17 +877,10 @@ def load_env() -> dict[str, str]:
             "CLAUDE_USAGE_STATE_PATH", str(CLAUDE_USAGE_STATE_PATH_DEFAULT)
         )
     )
-    # directive-board auto-PATCH (#P11).
-    env["DIRECTIVE_BOARD_SYNC_ENABLED"] = os.environ.get(
-        "DIRECTIVE_BOARD_SYNC_ENABLED", DIRECTIVE_BOARD_SYNC_DEFAULT_ENABLED
-    )
-    env["DIRECTIVE_BOARD_SYNC_INTERVAL"] = os.environ.get(
-        "DIRECTIVE_BOARD_SYNC_INTERVAL",
-        str(DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS),
-    )
-    env["DIRECTIVE_BOARD_CHANNEL_ID"] = os.environ.get(
-        "DIRECTIVE_BOARD_CHANNEL_ID", ""
-    )
+    # directive-board (#P11 → PR #1140 event-driven 전환).
+    # polling sync (`DIRECTIVE_BOARD_SYNC_ENABLED` / `_INTERVAL` / `_CHANNEL_ID`)
+    # env 변수는 폐기. JSONL/STATE path 는 digest 의 directive_board_summary
+    # 호출 + 향후 event-driven `directive_append.sh` 가 사용하므로 유지.
     env["DIRECTIVE_BOARD_JSONL_PATH"] = os.path.expanduser(
         os.environ.get(
             "DIRECTIVE_BOARD_JSONL_PATH", str(DIRECTIVE_BOARD_JSONL_PATH_DEFAULT)
@@ -3170,77 +3158,15 @@ async def claude_usage_watch_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# directive-board auto-PATCH loop (#P11)
+# directive-board auto-PATCH loop — 폐기 (PR #1140 event-driven 전환, 2026-05-27)
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-async def directive_board_sync_loop(
-    client: "discord.Client",
-    *,
-    channel_id: str,
-    token: str,
-    jsonl_path: Path,
-    state_path: Path,
-    poll_interval: int = DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS,
-    initial_delay: int = DIRECTIVE_BOARD_SYNC_DEFAULT_INITIAL_DELAY_SECONDS,
-) -> None:
-    """directive-board.jsonl ↔ Discord 자동 동기화 loop (#P11).
-
-    배경 (사용자 P0 사고, 2026-05-24):
-        helper backfill 후 8 directive 본문이 stale. PR 머지/상태 변경 후에도
-        Discord 측 PATCH 가 manual 이라 갱신 누락. 사용자 정정: "모부르지-지시
-        들은 그냥 계속 진행 중인가? 진행 상황에 변동이 없네".
-
-    동작:
-        1. ``initial_delay`` 초 warmup 후 polling 시작.
-        2. ``poll_interval`` 초마다 ``directive_board_sync_once`` 호출 —
-           jsonl 의 각 entry 별 ``last_updated_kst`` 가 state 와 다르면
-           Discord REST API PATCH /channels/{ch}/messages/{msg_id} 호출.
-        3. 404 (메시지 삭제) → mismatch 카운트 누적, state status="mismatch".
-        4. graceful — 모든 예외는 warning 로그 후 다음 iter 재시도.
-        5. ``poll_interval <= 0`` 이면 disabled (테스트 용).
-        6. ``channel_id`` 비어 있으면 즉시 return (env 미설정).
-
-    asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
-    """
-    if poll_interval <= 0:
-        logger.info("directive_board_sync_loop disabled (poll_interval<=0)")
-        return
-    if not channel_id or not channel_id.strip():
-        logger.info(
-            "directive_board_sync_loop disabled (DIRECTIVE_BOARD_CHANNEL_ID 미설정)"
-        )
-        return
-    if not token:
-        logger.warning(
-            "directive_board_sync_loop disabled — DISCORD_BOT_TOKEN 부재 (호출자 검증 누락)"
-        )
-        return
-
-    await asyncio.sleep(initial_delay)
-    while True:
-        try:
-            result = directive_board_sync_once(
-                channel_id=channel_id,
-                token=token,
-                jsonl_path=jsonl_path,
-                state_path=state_path,
-            )
-            logger.info(
-                "directive_board_sync_loop: scanned=%d patched=%d skipped=%d "
-                "mismatched=%d errors=%d",
-                result.scanned,
-                result.patched,
-                result.skipped,
-                result.mismatched,
-                result.errors,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("directive_board_sync_loop iter 실패: %s", exc)
-        record_loop_heartbeat("directive_board_sync_loop")
-        await asyncio.sleep(poll_interval)
+# 기존 `directive_board_sync_loop` 함수는 PR #1140 (`docs/features/
+# directive-board-event-driven-redesign.md`) 에 따라 폐기. polling sync 가
+# desync 사고 (`directive_board_mismatch=106`, 2026-05-26) 의 root cause —
+# event-driven actor atomic 호출 (`directive_append.sh` / `directive_status.sh`)
+# 로 대체. bot.py 는 dumb conduit 으로 `on_message` 안 `directive_append.sh`
+# 호출만 담당.
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def directive_register_watch_loop(
@@ -4141,19 +4067,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         env.get("CLAUDE_USAGE_STATE_PATH", str(CLAUDE_USAGE_STATE_PATH_DEFAULT))
     )
 
-    # directive-board auto-PATCH (#P11) — env 해석.
-    directive_board_sync_enabled = (
-        env.get(
-            "DIRECTIVE_BOARD_SYNC_ENABLED", DIRECTIVE_BOARD_SYNC_DEFAULT_ENABLED
-        )
-        == "1"
-    )
-    directive_board_sync_interval = _resolve_int_env(
-        "DIRECTIVE_BOARD_SYNC_INTERVAL",
-        DIRECTIVE_BOARD_SYNC_DEFAULT_INTERVAL_SECONDS,
-        allow_zero=False,
-    )
-    directive_board_channel_id = env.get("DIRECTIVE_BOARD_CHANNEL_ID", "").strip()
+    # directive-board (#P11 → PR #1140 event-driven) — env 해석.
+    # polling sync_loop 폐기 — `directive_board_sync_enabled` / `_interval` /
+    # `_channel_id` 변수 삭제. JSONL/STATE path 만 digest summary 와 향후
+    # event-driven 호출용으로 유지.
     directive_board_jsonl_path = Path(
         env.get(
             "DIRECTIVE_BOARD_JSONL_PATH", str(DIRECTIVE_BOARD_JSONL_PATH_DEFAULT)
@@ -4454,39 +4371,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not claude_usage_loop_enabled:
             logger.info("claude_usage_watch_loop disabled (CLAUDE_USAGE_LOOP=0)")
 
-        # directive-board auto-PATCH loop (#P11) — 사용자 P0 사고 fix.
-        # 5분 polling, jsonl ↔ Discord 비교 + 자동 PATCH.
-        if directive_board_sync_enabled and not hasattr(
-            client, "_directive_board_sync_task_started"
-        ):
-            if not directive_board_channel_id:
-                logger.warning(
-                    "directive_board_sync_loop skip — DIRECTIVE_BOARD_CHANNEL_ID 미설정 (.env 확인 필요)"
-                )
-            else:
-                client._directive_board_sync_task_started = True  # type: ignore[attr-defined]
-                client.loop.create_task(
-                    directive_board_sync_loop(
-                        client,
-                        channel_id=directive_board_channel_id,
-                        token=env["DISCORD_BOT_TOKEN"],
-                        jsonl_path=directive_board_jsonl_path,
-                        state_path=directive_board_state_path,
-                        poll_interval=directive_board_sync_interval,
-                    )
-                )
-                logger.info(
-                    "directive_board_sync_loop launched: channel=%s interval=%ds "
-                    "jsonl=%s state=%s",
-                    directive_board_channel_id,
-                    directive_board_sync_interval,
-                    directive_board_jsonl_path,
-                    directive_board_state_path,
-                )
-        elif not directive_board_sync_enabled:
-            logger.info(
-                "directive_board_sync_loop disabled (DIRECTIVE_BOARD_SYNC_ENABLED=0)"
-            )
+        # directive-board polling sync_loop — PR #1140 event-driven 전환으로 폐기.
+        # 등록 코드 자체 제거. trigger 3 시점 actor atomic 호출 (`directive_append.sh`
+        # / `directive_status.sh`) + wrapper 누락 detect 가 대체.
+        # spec: `docs/features/directive-board-event-driven-redesign.md`.
 
         # Discord thread auto-cleanup (#1023, 2026-05-24 사용자 P0 + #1062 사용자 P1).
         # per-launch thread 누적 → sidebar 가시성 ↓ 해소.
@@ -4641,6 +4529,14 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # 메시지 텍스트를 regex 분류 후 ~/.mobruji/directive-detect.jsonl 에 append.
         # helper turn-start wrapper / watchdog 이 본 jsonl 로 누락 탐지.
         # 실패는 warning 만 — forwarding 흐름 차단 금지.
+        #
+        # PR #1140 (event-driven 전환): directive 분류 (`class in DIRECTIVE_CLASSES`)
+        # 시점에 `directive_append.sh` 도 호출 — `directive-board.jsonl` 에 entry
+        # 추가 + Discord forum thread 생성. polling sync_loop 폐기 대체. 본 호출이
+        # bot.py = dumb conduit 의 핵심 — 멱등하므로 helper / nmae 의 manual 호출과
+        # 충돌 없음.
+        detect_class: str | None = None
+        detect_summary: str = ""
         try:
             detect_entry = make_detect_entry(
                 message_id=message_id,
@@ -4650,16 +4546,60 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
             append_detect_entry(DIRECTIVE_DETECT_PATH_DEFAULT, detect_entry)
             if detect_entry["class"] in DIRECTIVE_CLASSES:
+                detect_class = str(detect_entry["class"])
+                detect_summary = str(detect_entry["summary"])
                 logger.info(
                     "directive-detect classify: id=%s class=%s summary=%r",
                     message_id,
-                    detect_entry["class"],
-                    detect_entry["summary"],
+                    detect_class,
+                    detect_summary,
                 )
         except OSError as exc:
             logger.warning(
                 "directive-detect append 실패: id=%s exc=%r", message_id, exc
             )
+
+        # PR #1140: directive 분류 시점에 directive_append.sh 호출 (event-driven).
+        # 멱등 — 동일 msg_id 재호출 시 no-op (script 안 grep 가드).
+        # subprocess timeout 5s — Discord REST API 응답 + JSONL append 충분.
+        # 실패는 warning 만 — on_message forwarding 흐름 차단 금지.
+        if detect_class is not None:
+            try:
+                append_script = (
+                    Path(__file__).resolve().parent / "directive_append.sh"
+                )
+                if append_script.exists():
+                    subprocess.run(  # noqa: S603 — script path hardcoded sibling
+                        [
+                            "bash",
+                            str(append_script),
+                            message_id,
+                            detect_summary or original_body[:80],
+                        ],
+                        check=False,
+                        timeout=5.0,
+                        capture_output=True,
+                    )
+                    logger.info(
+                        "directive_append invoked: id=%s class=%s",
+                        message_id,
+                        detect_class,
+                    )
+                else:
+                    logger.warning(
+                        "directive_append.sh 부재 — event-driven 호출 skip: %s",
+                        append_script,
+                    )
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "directive_append timeout (5s): id=%s", message_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "directive_append 호출 실패: id=%s exc=%r",
+                    message_id,
+                    exc,
+                )
 
         # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
         # latency 5+초 깜깜이 해소.
