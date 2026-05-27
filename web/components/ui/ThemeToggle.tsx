@@ -30,6 +30,25 @@ const CURRENT_MODE_LABEL: Record<ReturnType<typeof useTheme>["mode"], string> = 
 export function ThemeToggle() {
   const { mode, isDark, toggleMode } = useTheme();
 
+  /*
+   * ADR-0018 단계 4 PR 5 — ThemeToggle 컴포넌트 토큰 swap.
+   *
+   * swap 한 element:
+   *  1) border : border-zinc-200 dark:border-zinc-700 → --border
+   *  2) text : text-zinc-700 dark:text-zinc-200 → --text-secondary
+   *  3) hover text : hover:text-zinc-900 dark:hover:text-zinc-50 → --text-primary
+   *  4) shadow : shadow-sm → --shadow-sm
+   *  5) transition duration: transition-colors → duration-[var(--duration-base)]
+   *
+   * 미swap (후속 PR 양보):
+   *  - bg-white/90 + dark:bg-zinc-900/90 + hover:bg-white + dark:hover:bg-zinc-900
+   *    : opacity suffix 가 var() 와 호환 안 됨. backdrop-blur floating button
+   *    패턴 토큰화 별도 결정 필요 (PR 6+).
+   *  - focus-visible:ring-zinc-500 — semantic focus ring 토큰 매핑 미정.
+   *
+   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
+   * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
+   */
   return (
     <button
       type="button"
@@ -42,11 +61,11 @@ export function ThemeToggle() {
         // fixed top-right, safe-area 고려. BottomNav 와 z-index 겹치지 않도록 z-30.
         "fixed top-3 right-3 z-30",
         "flex h-10 w-10 items-center justify-center rounded-full",
-        "border border-zinc-200 bg-white/90 backdrop-blur",
-        "text-zinc-700 shadow-sm transition-colors",
-        "hover:bg-white hover:text-zinc-900",
-        "dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-200",
-        "dark:hover:bg-zinc-900 dark:hover:text-zinc-50",
+        "border border-[var(--border)] bg-white/90 backdrop-blur",
+        "text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors duration-[var(--duration-base)]",
+        "hover:bg-white hover:text-[var(--text-primary)]",
+        "dark:bg-zinc-900/90",
+        "dark:hover:bg-zinc-900",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500",
         "pt-[env(safe-area-inset-top)]",
       ].join(" ")}
