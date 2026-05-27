@@ -46,13 +46,14 @@
 
 | step | 동작 | 명령 | 누락 시 사고 |
 |---|---|---|---|
-| 0 | turn-start wrapper | `bash tools/discord-daemon/helper-turn-start.sh` | target freeze 누락 → 응답이 직전 사용자 메시지에 reply |
+| 0 | turn-start wrapper | `bash tools/discord-daemon/helper-turn-start.sh` (target freeze + ✍️ ON 자동) | target freeze 누락 → 응답이 직전 사용자 메시지에 reply / ✍️ ON 누락 → 응답 작성 중 가시성 0초 |
 | 1 | queue append | `~/.mobruji/helper-queue.jsonl` 에 `{ts,message_id,text,status:pending}` 추가 | 다중 메시지 race condition |
 | 2 | target freeze | `cp ~/.mobruji/last-user-msg-id.txt ~/.mobruji/helper-current-target.txt` (wrapper 가 자동 수행) | reply target 이 새 메시지로 leak |
+| 2.5 | ✍️ writing marker ON | `bash ~/.mobruji/discord-reply.sh --writing-marker $(cat ~/.mobruji/helper-current-target.txt)` (wrapper 가 자동 수행, 사용자 16:21-24 directive #1128) | turn 내내 ✍️ 미표시 → 사용자가 "helper 가 답 만드는 중" 인지 불가 |
 | 3 | 분류 | (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문 | 분류 누락 시 dispatch 룰 위반 |
 | 4 | (선택) thread 생성 | 장시간 작업 시 `discord-reply.sh --auto-ack-thread "🔍 시작 — <1줄>"` | 진행 가시성 ↓ |
 | 5 | 처리 + 본답 push | (a) 직접 / (b) sub-agent launch + 즉시 "위임함" push / (c) 자체 답 push | 본답 누락 시 사용자 깜깜이 |
-| 6 | queue done + 검증 | jsonl entry `status: done` 갱신 + `grep '"status": "pending"'` 0건 확인 | pending 잔존 → 누적 누락 |
+| 6 | ✍️ writing marker OFF + queue done + 검증 | `bash ~/.mobruji/discord-reply.sh --writing-done $(cat ~/.mobruji/helper-current-target.txt)` + jsonl entry `status: done` 갱신 + `grep '"status": "pending"'` 0건 확인. `BOT_WRITING_AUTO_HOOK_ENABLED=1` 옵트인 시 본답 push hook 으로 자동 OFF | ✍️ 잔존 → 다음 turn 까지 ON 표시 / pending 잔존 → 누적 누락 |
 
 ## 4. directive forum 즉시 등록 (구현/수정 지시 채택 시점)
 
