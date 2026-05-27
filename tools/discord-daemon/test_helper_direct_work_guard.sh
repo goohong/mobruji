@@ -4,7 +4,8 @@
 # 모든 케이스 통과 시 exit 0, 실패 시 exit 1 + 어느 케이스인지 출력.
 set -u
 
-HOOK="/home/mobruji/mobruji-be/tools/discord-daemon/helper-direct-work-guard.sh"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOOK="$SCRIPT_DIR/helper-direct-work-guard.sh"
 if [ ! -x "$HOOK" ]; then
   echo "FAIL: hook script not executable: $HOOK" >&2
   exit 1
