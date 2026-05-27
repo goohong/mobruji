@@ -32,19 +32,34 @@ NMAE_WRAPPER_PATH = (
 
 
 def _write_fake_curl(tmpdir: str, url_capture: str, payload_capture: str) -> None:
-    """payload + URL 동시 캡처용 fake curl. test_status_channel_routing.py 와 동일 패턴."""
+    """payload + URL 동시 캡처용 fake curl. test_status_channel_routing.py 와 동일 패턴.
+
+    PR #1155 (2026-05-27, forum adapter impl):
+        `--cycle-channel <name>` 호출 시 channel type 자동 감지 GET 가 1회 선행 호출됨.
+        fake curl 은 GET 응답에 `type:0` (text) 을 포함시켜 adapter 가 기존 reply 경로를
+        유지하도록 한다. GET 호출은 url_capture / payload_capture 에 안 기록 — 기존
+        assertion 호환성 (urls[0] == 첫 POST messages) 유지.
+    """
     fake_curl = Path(tmpdir) / "curl"
     fake_curl.write_text(
         "#!/usr/bin/env bash\n"
+        "METHOD=\"GET\"\n"
         "URL=\"\"\n"
         "PAYLOAD=\"\"\n"
         "while [[ $# -gt 0 ]]; do\n"
         "  case \"$1\" in\n"
+        "    -X) shift; METHOD=\"$1\";;\n"
         "    -d) shift; PAYLOAD=\"$1\";;\n"
         "    http*) URL=\"$1\";;\n"
         "  esac\n"
         "  shift\n"
         "done\n"
+        "# PR #1155 forum adapter: cycle channel type detect GET 는 routing 관심사 외\n"
+        "#   → capture skip. text channel (type=0) 응답으로 adapter 가 기존 path 유지.\n"
+        "if [[ \"$METHOD\" == \"GET\" ]]; then\n"
+        "  printf '{\"id\":\"stub\",\"type\":0}\\n200'\n"
+        "  exit 0\n"
+        "fi\n"
         f"printf '%s\\n' \"$URL\" >> {url_capture}\n"
         f"printf '%s\\n' \"$PAYLOAD\" >> {payload_capture}\n"
         "printf '{\"id\": \"99999\"}\\n200'\n"

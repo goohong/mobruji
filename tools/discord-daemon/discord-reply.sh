@@ -71,6 +71,12 @@
 #           미설정 시 DIGEST_CHANNEL_ID 로 graceful fallback + stderr deprecation
 #           warning. 의도: 사이클 alert (launch/완료/오류) 가 사이클 별 채널로
 #           분기 → 사용자가 워크트리 별 진행을 분리해 follow.
+#           Forum adapter (PR #1155, 2026-05-27): cycle channel 이 Discord forum
+#           (type=15) 으로 전환된 경우 자동 감지해 forum_create_thread 경로로
+#           fallback. title 은 본문 첫 줄 80자 truncate, tag 는 forum 의
+#           available_tags 에서 fallback chain 자동 선택. text channel (type=0/5)
+#           은 기존 동작 유지. 학습 부담 없이 cycle channel 이 forum 으로 전환되어도
+#           기존 호출 패턴 (`--cycle-channel <ws> "<본문>"`) 그대로 동작.
 #         → 모든 flag 자동으로 `--no-reply` 와 동등한 효과 — status push 는
 #           사용자 메시지에 답장 형태로 매달 필요가 없고, message_reference 가
 #           원본 메시지 (다른 채널) 를 참조하면 Discord 가 404 처리.
@@ -472,6 +478,14 @@ CHANNEL_OVERRIDE=""
 # DIGEST_CHANNEL_ID 로 fallback + stderr deprecation warning. NO_REPLY 자동 1.
 # 우선순위: --channel <id> > --cycle-channel <name> > --status-channel > default.
 CYCLE_CHANNEL=""
+# forum adapter (PR #1155 spec impl, 2026-05-27):
+#   --cycle-channel <name> 호출 시 resolve 한 CHANNEL 이 Discord forum (type=15)
+#   채널이면 bare body push 가 50008 (Cannot send messages in a non-text channel)
+#   로 silent fail. 본 플래그가 1 이면 mode 실행 단계에서 reply / auto-thread
+#   대신 forum_create_thread 경로로 fallback.
+#   설정: --cycle-channel 처리 직후 detect_cycle_channel_type 가 GET /channels/{id}
+#   호출로 type 확인 → forum (15) 또는 media (16) 시 1.
+CYCLE_FORUM_FALLBACK=0
 # Forum mode 인자 (#17, 2026-05-24).
 # --forum-post / --forum-retag 의 forum_env: directive | be | fe | rev | plan.
 # --forum-post 의 title (thread name) + tag (available_tags name).
@@ -482,7 +496,7 @@ FORUM_TAG=""
 if [[ $# -eq 0 ]]; then
   echo "discord-reply.sh: 인자 부족 — 사용법:" >&2
   echo "  discord-reply.sh \"<메시지>\"" >&2
-  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] [--status-channel | --channel <id> | --cycle-channel <be|fe|rev|plan>] \"<메시지>\"" >&2
+  echo "  discord-reply.sh [--no-reply] [--reply-to <id>] [--status-channel | --channel <id> | --cycle-channel <be|fe|rev|plan> (forum 자동 감지)] \"<메시지>\"" >&2
   echo "  discord-reply.sh --ack \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
@@ -1226,6 +1240,74 @@ writing_hook_end() {
   return 0
 }
 
+# ─── cycle-channel forum adapter (PR #1155 spec impl, 2026-05-27) ────────────
+
+# `--cycle-channel <name>` resolve 후 CHANNEL 의 Discord channel type 을 1회 조회.
+# nmae 가 cycle channel 을 text → forum 으로 전환하면서 기존 cycle-channel 호출이
+# 50008 (Cannot send messages in a non-text channel) 으로 silent fail 한 사고
+# (2026-05-26 plan PR #1153 audit 박제) 의 영구 가드.
+#
+# 동작:
+#   - GET /channels/{CHANNEL} 호출 → response.type 확인.
+#   - text (type=0/5) → 기존 reply mode 유지.
+#   - forum (15) / media (16) → CYCLE_FORUM_FALLBACK=1 설정 + stderr 1줄 log.
+#   - fetch 실패 (4xx/5xx/네트워크) → best-effort 로 기존 path 유지 + stderr warning.
+#
+# 호출 조건: CYCLE_CHANNEL 비어 있지 않을 때만 (즉 --cycle-channel 명시적 사용).
+# 명시적 --channel / --status-channel / forum mode 들은 호출자가 channel 형태를
+# 알고 있다고 가정 — 자동 adapter 적용 안 함.
+#
+# cache 정책: per-process. 본 함수는 1회 invocation 동안 한 번만 호출되므로
+# 별도 cache 변수 불필요.
+detect_cycle_channel_type() {
+  local channel_id="$1"
+  local response status payload channel_type
+  response=$(curl -sS -X GET \
+    "https://discord.com/api/v10/channels/${channel_id}" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${response##*$'\n'}"
+  payload="${response%$'\n'*}"
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    echo "discord-reply.sh: --cycle-channel ${CYCLE_CHANNEL} — channel type 조회 실패 (status=$status), 기존 text channel 경로로 best-effort 시도" >&2
+    return 0
+  fi
+  channel_type=$(printf '%s' "$payload" | jq -r '.type // empty' 2>/dev/null || true)
+  case "$channel_type" in
+    0|5)
+      # text / announcement — 기존 동작 유지.
+      return 0
+      ;;
+    15|16)
+      # GUILD_FORUM / GUILD_MEDIA — bare body push 불가, forum thread 생성 경로로 fallback.
+      CYCLE_FORUM_FALLBACK=1
+      echo "discord-reply.sh: --cycle-channel ${CYCLE_CHANNEL} — forum (type=${channel_type}) detected, fallback to forum-post mode" >&2
+      return 0
+      ;;
+    *)
+      echo "discord-reply.sh: --cycle-channel ${CYCLE_CHANNEL} — 지원하지 않는 channel type=${channel_type}, 기존 text channel 경로로 best-effort 시도" >&2
+      return 0
+      ;;
+  esac
+}
+
+# body 첫 줄 80자 truncate → forum thread title 추론 (spec §9 결정 로그).
+# 호출자가 `--cycle-channel` 호출 시 title 인자를 추가하지 않게 — 기존 sub-agent /
+# nmae prompt 광범위 변경 회피.
+derive_forum_title_from_body() {
+  local body="$1"
+  local first_line truncated
+  # 첫 줄 (newline 까지) 만 추출 + control char 제거.
+  first_line=$(printf '%s' "$body" | head -1 | tr -d '\r\n')
+  # 80 자 truncate (UTF-8 byte 단위 안 안전, character 단위는 cut -c 가 처리).
+  truncated=$(printf '%s' "$first_line" | cut -c1-80)
+  if [[ -z "$truncated" ]]; then
+    # 본문 첫 줄이 비어 있으면 ISO timestamp 로 fallback.
+    truncated="cycle-channel post $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  printf '%s' "$truncated"
+}
+
 # ─── forum helpers (#17, 2026-05-24) ─────────────────────────────────────────
 
 # forum_env 이름 (directive | be | fe | rev | plan) → *_FORUM_ID env 값 resolve.
@@ -1456,8 +1538,38 @@ forum_find_active_thread_by_name() {
 
 # ─── mode 실행 ────────────────────────────────────────────────────────────────
 
+# PR #1155 spec impl (2026-05-27) — `--cycle-channel` forum adapter.
+# CYCLE_CHANNEL 가 설정돼 있으면 (즉 사용자가 --cycle-channel 명시) CHANNEL 의
+# Discord type 1회 조회. forum (15) 또는 media (16) 채널이면 CYCLE_FORUM_FALLBACK
+# 가 1 로 설정되어 아래 reply mode 분기에서 forum_create_thread 경로로 우회.
+# 기존 text channel 은 detect 함수가 no-op (graceful).
+if [[ -n "$CYCLE_CHANNEL" ]]; then
+  detect_cycle_channel_type "$CHANNEL"
+fi
+
 case "$MODE" in
   reply)
+    # PR #1155 spec impl (2026-05-27) — `--cycle-channel` forum adapter.
+    # CYCLE_FORUM_FALLBACK=1 이면 cycle channel 이 Discord forum 으로 전환된 상태
+    # → bare body POST messages 가 50008 fail. forum_create_thread 경로로 우회.
+    # title 은 body 첫 줄 80자 truncate, tag 는 forum 의 available_tags 에서
+    # fallback chain 자동 선택 (--forum-post-auto-tag 와 동일 로직 재사용).
+    if [[ "$CYCLE_FORUM_FALLBACK" -eq 1 ]]; then
+      FORUM_AUTO_TITLE=$(derive_forum_title_from_body "$MSG")
+      # CHANNEL 은 이미 cycle forum id 로 resolve 됐음 — forum_create_thread 가 직접 사용.
+      FORUM_AUTO_TAG_ID=$(resolve_forum_tag_id_auto "$CHANNEL")
+      FORUM_AUTO_RESPONSE=$(forum_create_thread "$CHANNEL" "$FORUM_AUTO_TITLE" "$FORUM_AUTO_TAG_ID" "$MSG")
+      FORUM_AUTO_THREAD_ID=$(echo "$FORUM_AUTO_RESPONSE" | jq -r '.id // empty')
+      if [[ -z "$FORUM_AUTO_THREAD_ID" ]]; then
+        echo "discord-reply.sh: --cycle-channel ${CYCLE_CHANNEL} forum fallback — thread 생성 실패" >&2
+        echo "$FORUM_AUTO_RESPONSE" >&2
+        exit 1
+      fi
+      # stdout 으로 thread id 출력 (호출자가 후속 forum-comment 등에서 재사용 가능).
+      printf '%s\n' "$FORUM_AUTO_THREAD_ID"
+      exit 0
+    fi
+
     # 본답 모드: 자동 leading ZWSP(U+200B) + \n prepend (#921, 2026-05-24).
     # 이유: jq escape 가 leading/trailing \n strip 해서 ack 메시지와 본답
     # 메시지가 Discord 채널에서 시각적으로 붙어 보이는 문제 영구 해결.
