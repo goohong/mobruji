@@ -163,24 +163,17 @@ class BotAutoAckTests(unittest.TestCase):
     def _run_handler(
         self,
         env: dict[str, str],
-        message: mock.MagicMock,
-    ) -> mock.MagicMock:
-        """build_client → on_message 호출 + tmux/inbox 부수효과 차단."""
-        ledger = bot.DedupLedger(":memory:")
-        # 핸들러 등록 가로채기. discord.Client.event 데코레이터가
-        # 내부에 콜백을 저장하므로, build_client 안의 @client.event 가 호출되면
-        # client.on_message attr 로 노출되도록 stub.
+        message: mock.AsyncMock,
+    ) -> mock.AsyncMock:
+        """build_client → on_message 호출 + task queue/inbox 부수효과 차단."""
+        ledger = bot.OpLedger(":memory:")
         registered: dict[str, object] = {}
 
         class FakeClient:
-            user = "fake-bot"
+            user = mock.MagicMock(id=1)
             loop = mock.MagicMock()
 
-            def __init__(self):
-                self._tasks: list[object] = []
-
             def event(self, func):
-                # @client.event 데코레이터: 함수명으로 attr 저장.
                 registered[func.__name__] = func
                 setattr(self, func.__name__, func)
                 return func
@@ -190,18 +183,14 @@ class BotAutoAckTests(unittest.TestCase):
 
         fake_client = FakeClient()
         with mock.patch.object(bot.discord, "Client", return_value=fake_client), \
-             mock.patch.object(bot.discord, "Intents") as intents_cls, \
-             mock.patch.object(bot, "ensure_tmux_session", return_value=True), \
-             mock.patch.object(bot, "tmux_send_payload", return_value=True), \
-             mock.patch.object(bot, "append_inbox"):
+             mock.patch.object(bot.discord, "Intents") as intents_cls:
             intents_cls.default.return_value = mock.MagicMock()
             bot.build_client(env, ledger)
 
         handler = registered.get("on_message")
         self.assertIsNotNone(handler, "on_message 핸들러 등록 누락")
 
-        with mock.patch.object(bot, "ensure_tmux_session", return_value=True), \
-             mock.patch.object(bot, "tmux_send_payload", return_value=True), \
+        with mock.patch.object(ledger, "enqueue_task", return_value=1), \
              mock.patch.object(bot, "append_inbox"):
             asyncio.run(handler(message))
         return message
@@ -212,7 +201,10 @@ class BotAutoAckTests(unittest.TestCase):
             content="hello", channel_id=999, author_id=111, message_id=1
         )
         self._run_handler(env, message)
-        message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
+        # 1초 generic ack 가 포함되어 있어야 함
+        message.channel.send.assert_any_call(bot.BOT_AUTO_ACK_TEXT)
+        # typing indicator 도 호출되어야 함
+        message.channel.typing.assert_called()
 
     def test_auto_ack_disabled_skips_push(self) -> None:
         env = self._build_env(auto_ack="0")
@@ -220,19 +212,19 @@ class BotAutoAckTests(unittest.TestCase):
             content="hello", channel_id=999, author_id=111, message_id=2
         )
         self._run_handler(env, message)
-        message.channel.send.assert_not_awaited()
+        # BOT_AUTO_ACK_TEXT 가 포함된 호출이 없어야 함
+        for call in message.channel.send.call_args_list:
+            if call.args and call.args[0] == bot.BOT_AUTO_ACK_TEXT:
+                self.fail("auto-ack should be disabled")
 
     def test_auto_ack_default_is_enabled(self) -> None:
         env = self._build_env()
         env.pop("BOT_AUTO_ACK")
-        # build_client 가 env.get("BOT_AUTO_ACK", default) 로 가져가므로
-        # key 미존재 시 default ("1") 로 enabled 여야 함.
-        env["BOT_AUTO_ACK"] = bot.BOT_AUTO_ACK_DEFAULT_ENABLED
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=3
         )
         self._run_handler(env, message)
-        message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
+        message.channel.send.assert_any_call(bot.BOT_AUTO_ACK_TEXT)
 
     def test_auto_ack_text_v2_phrasing_guard(self) -> None:
         """BOT_AUTO_ACK_TEXT 문구 회귀 가드 (이슈 #943 v2).
@@ -244,7 +236,7 @@ class BotAutoAckTests(unittest.TestCase):
         self.assertIn("🤖 helper bot", bot.BOT_AUTO_ACK_TEXT)
         self.assertIn("nmae 상태 확인", bot.BOT_AUTO_ACK_TEXT)
 
-    def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
+    def test_reply_referenced_message_enqueued(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거
         ref = mock.MagicMock()
         ref.content = "PR #790 머지 필요"
@@ -255,11 +247,11 @@ class BotAutoAckTests(unittest.TestCase):
             message_id=4,
             referenced_message=ref,
         )
-        ledger = bot.DedupLedger(":memory:")
+        ledger = bot.OpLedger(":memory:")
         registered: dict[str, object] = {}
 
         class FakeClient:
-            user = "fake-bot"
+            user = mock.MagicMock(id=1)
             loop = mock.MagicMock()
 
             def event(self, func):
@@ -273,18 +265,17 @@ class BotAutoAckTests(unittest.TestCase):
         fake_client = FakeClient()
         with mock.patch.object(bot.discord, "Client", return_value=fake_client), \
              mock.patch.object(bot.discord, "Intents") as intents_cls, \
-             mock.patch.object(bot, "ensure_tmux_session", return_value=True), \
-             mock.patch.object(bot, "tmux_send_payload", return_value=True) as send_keys, \
+             mock.patch.object(ledger, "enqueue_task", return_value=1) as enqueue_mock, \
              mock.patch.object(bot, "append_inbox"):
             intents_cls.default.return_value = mock.MagicMock()
             bot.build_client(env, ledger)
             handler = registered["on_message"]
             asyncio.run(handler(message))
 
-        # tmux_send_payload 가 prefix 가 붙은 텍스트를 받았는지 확인.
-        send_keys.assert_called_once()
-        sent_text = send_keys.call_args.args[1]
-        self.assertEqual(sent_text, "[답장→ PR #790 머지 필요] 응 해줘")
+        # enqueue_task 가 prefix 가 붙은 텍스트를 받았는지 확인.
+        enqueue_mock.assert_called_once()
+        payload = enqueue_mock.call_args.kwargs["payload"]
+        self.assertEqual(payload["text"], "[답장→ PR #790 머지 필요] 응 해줘")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

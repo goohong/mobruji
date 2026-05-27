@@ -24,33 +24,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
+import discord
+from dotenv import load_dotenv
+
 PARENT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PARENT_DIR))
 
-# discord stub — HTTPException 은 status / retry_after 속성을 그대로 가지는 단순
-# 예외로 흉내. 실제 discord.py 가 import 가능하면 진짜를 쓰고, 없으면 stub.
-try:
-    import discord as _real_discord  # noqa: F401
-except ImportError:
-    _stub_discord = mock.MagicMock()
-
-    class _StubHTTPException(Exception):
-        def __init__(self, status: int, retry_after: float | None = None):
-            super().__init__(f"HTTP {status}")
-            self.status = status
-            self.retry_after = retry_after
-
-    _stub_discord.HTTPException = _StubHTTPException
-    sys.modules["discord"] = _stub_discord
-
-for missing in ("requests", "dotenv"):
-    if missing not in sys.modules:
-        stub = mock.MagicMock()
-        if missing == "dotenv":
-            stub.load_dotenv = lambda *a, **kw: None
-        sys.modules[missing] = stub
-
 import bot  # noqa: E402
+
+# requests 는 단순 stub 으로 충분.
+if "requests" not in sys.modules:
+    sys.modules["requests"] = mock.MagicMock()
 
 
 # 실제 discord.py 가 있어도 HTTPException 시그니처 다양성 (status/retry_after
@@ -189,14 +173,14 @@ class _FakeChannel:
         self._responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
-    async def send(self, content: str | None = None, embed: object | None = None) -> None:
+    async def send(self, content: str | None = None, embed: object | None = None) -> object:
         self.calls.append({"content": content, "embed": embed})
         if not self._responses:
-            return
+            return mock.MagicMock(spec=discord.Message, id=99999)
         next_resp = self._responses.pop(0)
         if isinstance(next_resp, BaseException):
             raise next_resp
-        # 외 None / 그 외 → success
+        return mock.MagicMock(spec=discord.Message, id=99999)
 
 
 class SendWithRetryTests(unittest.TestCase):

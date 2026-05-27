@@ -3,7 +3,7 @@
 대상:
 - **F-1 (inbox PII)**: ``append_inbox`` 호출 후 inbox.jsonl 권한 ``0o600`` +
   ``text`` 필드 ``INBOX_TEXT_MAX_LEN`` (500자) 캡.
-- **F-3 (dedup race)**: ``DedupLedger.claim`` 원자성 + ``on_message`` 가
+- **F-3 (dedup race)**: ``OpLedger.claim`` 원자성 + ``on_message`` 가
   ``is_processed`` 직후 즉시 mark (tmux send 이전) 하는지.
 
 외부 네트워크 호출 없음. discord/dotenv/requests 는 stub.
@@ -105,11 +105,11 @@ class AppendInboxSecurityTests(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class DedupLedgerClaimTests(unittest.TestCase):
-    """DedupLedger.claim 원자성 — INSERT OR IGNORE rowcount 기반."""
+class OpLedgerClaimTests(unittest.TestCase):
+    """OpLedger.claim 원자성 — INSERT OR IGNORE rowcount 기반."""
 
     def setUp(self) -> None:
-        self.ledger = bot.DedupLedger(":memory:")
+        self.ledger = bot.OpLedger(":memory:")
 
     def test_first_claim_returns_true(self) -> None:
         self.assertTrue(self.ledger.claim("m1"))
@@ -184,7 +184,7 @@ class OnMessageDedupOrderTests(unittest.TestCase):
         "CONTEXT_CLEAR_HYSTERESIS_PCT": "80",
     }
 
-    def _build_handler(self, ledger: bot.DedupLedger):
+    def _build_handler(self, ledger: bot.OpLedger):
         registered: dict[str, object] = {}
 
         class FakeClient:
@@ -206,44 +206,42 @@ class OnMessageDedupOrderTests(unittest.TestCase):
             bot.build_client(self.BASE_ENV, ledger)
         return registered["on_message"]
 
-    def test_claim_called_before_tmux_send(self) -> None:
-        """claim 이 tmux_send_payload 보다 먼저 호출되는지 순서 검증."""
-        ledger = bot.DedupLedger(":memory:")
+    def test_claim_called_before_enqueue(self) -> None:
+        """claim 이 enqueue_task 보다 먼저 호출되는지 순서 검증."""
+        ledger = bot.OpLedger(":memory:")
         call_order: list[str] = []
 
         original_claim = ledger.claim
+        original_enqueue = ledger.enqueue_task
 
         def tracking_claim(message_id: str, now_epoch: int | None = None) -> bool:
             call_order.append("claim")
             return original_claim(message_id, now_epoch)
 
+        def tracking_enqueue(*a, **kw) -> int:
+            call_order.append("enqueue")
+            return original_enqueue(*a, **kw)
+
         with mock.patch.object(ledger, "claim", side_effect=tracking_claim), \
-             mock.patch.object(bot, "ensure_tmux_session", return_value=True), \
-             mock.patch.object(
-                 bot, "tmux_send_payload",
-                 side_effect=lambda *a, **kw: (call_order.append("tmux_send"), True)[1],
-             ), \
+             mock.patch.object(ledger, "enqueue_task", side_effect=tracking_enqueue), \
              mock.patch.object(bot, "append_inbox"):
             handler = self._build_handler(ledger)
             msg = _make_fake_message(message_id=1)
             asyncio.run(handler(msg))
 
-        # claim 이 반드시 tmux_send 보다 먼저.
+        # claim 이 반드시 enqueue 보다 먼저.
         self.assertIn("claim", call_order)
-        self.assertIn("tmux_send", call_order)
+        self.assertIn("enqueue", call_order)
         self.assertLess(
             call_order.index("claim"),
-            call_order.index("tmux_send"),
-            f"claim 이 tmux_send 보다 먼저여야 함. 실제 순서: {call_order}",
+            call_order.index("enqueue"),
+            f"claim 이 enqueue 보다 먼저여야 함. 실제 순서: {call_order}",
         )
 
     def test_duplicate_message_id_skipped(self) -> None:
-        """같은 message_id 두 번 들어오면 두 번째는 tmux send 가 호출되지 않음."""
-        ledger = bot.DedupLedger(":memory:")
-        with mock.patch.object(bot, "ensure_tmux_session", return_value=True), \
-             mock.patch.object(
-                 bot, "tmux_send_payload", return_value=True
-             ) as send_mock, \
+        """같은 message_id 두 번 들어오면 두 번째는 enqueue 가 호출되지 않음."""
+        ledger = bot.OpLedger(":memory:")
+        with mock.patch.object(ledger, "enqueue_task") as enqueue_mock, \
              mock.patch.object(bot, "append_inbox"):
             handler = self._build_handler(ledger)
             msg1 = _make_fake_message(message_id=7)
@@ -252,26 +250,24 @@ class OnMessageDedupOrderTests(unittest.TestCase):
             asyncio.run(handler(msg2))
 
         self.assertEqual(
-            send_mock.call_count,
+            enqueue_mock.call_count,
             1,
             "중복 message_id 는 두 번째 진입에서 dedup hit 으로 빠져야 함",
         )
 
-    def test_tmux_failure_keeps_claim(self) -> None:
-        """tmux send 실패해도 claim 은 유지 (재처리 위험 회피)."""
-        ledger = bot.DedupLedger(":memory:")
-        with mock.patch.object(bot, "ensure_tmux_session", return_value=True), \
-             mock.patch.object(
-                 bot, "tmux_send_payload", return_value=False
-             ), \
+    def test_processing_failure_keeps_claim(self) -> None:
+        """이후 단계(큐 등록 등) 실패해도 claim 은 유지 (재처리 위험 회피)."""
+        ledger = bot.OpLedger(":memory:")
+        with mock.patch.object(ledger, "enqueue_task", side_effect=Exception("DB Error")), \
              mock.patch.object(bot, "append_inbox"):
             handler = self._build_handler(ledger)
             msg = _make_fake_message(message_id=99)
+            # broad except 에 잡히므로 에러는 전파 안 됨
             asyncio.run(handler(msg))
 
         self.assertTrue(
             ledger.is_processed("99"),
-            "tmux send 실패해도 claim 은 유지되어야 함 (재처리 방지)",
+            "작업 처리 중 예외가 발생해도 claim 은 유지되어야 함 (재처리 방지)",
         )
 
 

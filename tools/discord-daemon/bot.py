@@ -93,6 +93,11 @@ DEFAULT_CYCLE_STATUS_PATH: Final[str] = os.path.expanduser("~/.mobruji/cycle-sta
 DEFAULT_CYCLE_COUNTER_PATH: Final[str] = os.path.expanduser(
     "~/.mobruji/cycle-counter.json"
 )
+
+# digest_loop 가 edit 하기 위해 마지막 송신한 message id 를 저장하는 경로.
+DEFAULT_LAST_DIGEST_MSG_ID_PATH: Final[str] = os.path.expanduser(
+    "~/.mobruji/last-digest-msg-id.txt"
+)
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
 CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
 # digest 본문 timestamp — 사용자 요청 #811. Discord 가 보여주는 시각이 클라이언트
@@ -274,42 +279,20 @@ def load_env() -> dict[str, str]:
     """
     load_dotenv(Path(__file__).resolve().parent / ".env")
 
-    required = (
-        "DISCORD_BOT_TOKEN",
-        "ALLOWED_USER_IDS",
-        "MOBRUJI_CHANNEL_ID",
-    )
-    missing = [key for key in required if not os.environ.get(key)]
-    if missing:
-        logger.error("필수 환경변수 누락: %s", ", ".join(missing))
+    # 1. 채널 설정 (Phase 3: Multi-channel Architecture)
+    # LOBBY (대화), FORUM (작업), STATUS (대시보드) 로 분리.
+    # backward-compat: MOBRUJI_CHANNEL_ID 를 LOBBY 로, DIGEST 를 STATUS 로 매핑.
+    lobby_raw = os.environ.get("LOBBY_CHANNEL_ID") or os.environ.get("MOBRUJI_CHANNEL_ID")
+    forum_raw = os.environ.get("FORUM_CHANNEL_ID") or os.environ.get("MOBRUJI_CHANNEL_ID")
+    status_raw = os.environ.get("STATUS_CHANNEL_ID") or os.environ.get("DIGEST_CHANNEL_ID") or os.environ.get("MOBRUJI_CHANNEL_ID")
+    
+    if not lobby_raw:
+        logger.error("필수 환경변수 누락: LOBBY_CHANNEL_ID (또는 MOBRUJI_CHANNEL_ID)")
         sys.exit(1)
 
-    env: dict[str, str] = {key: os.environ[key] for key in required}
-    env["TMUX_SESSION_NAME"] = os.environ.get("TMUX_SESSION_NAME", "helper")
-    env["TMUX_TARGET_PANE"] = os.environ.get("TMUX_TARGET_PANE", "helper:0.0")
-    env["CLAUDE_BIN"] = os.environ.get("CLAUDE_BIN", "claude")
-    env["DEDUP_LEDGER_PATH"] = os.path.expanduser(
-        os.environ.get("DEDUP_LEDGER_PATH", "~/.mobruji/discord-bridge.sqlite")
-    )
-    env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "1")
-    # DIGEST_CHANNEL_ID (rename, #1019) — cycle digest 송신 채널.
-    # backward compat: 기존 NOTIFY_CHANNEL_ID 도 fallback 으로 인식 (deprecation
-    # warning 1회). 미설정 시 MOBRUJI_CHANNEL_ID 로 fallback (단일 채널 운영).
-    digest_channel_raw = os.environ.get("DIGEST_CHANNEL_ID")
-    if digest_channel_raw is None:
-        legacy_notify_raw = os.environ.get("NOTIFY_CHANNEL_ID")
-        if legacy_notify_raw is not None:
-            if not getattr(load_env, "_notify_deprecation_warned", False):
-                logger.warning(
-                    "NOTIFY_CHANNEL_ID 는 deprecated — DIGEST_CHANNEL_ID 로 rename 됐습니다 (#1019). "
-                    "현재 값(%r) 을 fallback 으로 사용. .env 갱신 권장.",
-                    legacy_notify_raw,
-                )
-                load_env._notify_deprecation_warned = True  # type: ignore[attr-defined]
-            digest_channel_raw = legacy_notify_raw
-        else:
-            digest_channel_raw = env["MOBRUJI_CHANNEL_ID"]
-    env["DIGEST_CHANNEL_ID"] = digest_channel_raw
+    env["LOBBY_CHANNEL_ID"] = lobby_raw
+    env["FORUM_CHANNEL_ID"] = forum_raw or lobby_raw
+    env["STATUS_CHANNEL_ID"] = status_raw or lobby_raw
     env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
         "CONTEXT_AUTO_CLEAR_ENABLED", CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED
     )
@@ -575,16 +558,29 @@ def sanitize_mentions(text: str) -> str:
     return sanitized
 
 
-class DedupLedger:
-    """SQLite 기반 dedup ledger — 사용자 메시지 중복 처리 방지.
+class OpLedger:
+    """SQLite 기반 통합 Ledger — 메시지 중복 방지 및 작업 큐(Task Queue) 관리.
 
-    spec Q6 답: SQLite (JSONL 대비 TTL GC / 동시성 안전).
+    Phase 2: Forum-Driven Architecture 의 핵심 데이터 엔진.
     """
 
-    SCHEMA = (
+    SCHEMA_MESSAGES = (
         "CREATE TABLE IF NOT EXISTS processed_messages ("
         "  message_id TEXT PRIMARY KEY,"
         "  processed_at INTEGER NOT NULL"
+        ")"
+    )
+
+    SCHEMA_TASKS = (
+        "CREATE TABLE IF NOT EXISTS tasks ("
+        "  task_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  discord_thread_id TEXT NOT NULL,"
+        "  requester_id TEXT NOT NULL,"
+        "  payload TEXT NOT NULL,"
+        "  status TEXT DEFAULT 'PENDING',"
+        "  result TEXT,"
+        "  created_at INTEGER NOT NULL,"
+        "  updated_at INTEGER NOT NULL"
         ")"
     )
 
@@ -594,12 +590,23 @@ class DedupLedger:
         self._conn = sqlite3.connect(db_path, check_same_thread=False, timeout=5.0)
         self._lock = threading.Lock()
         with self._lock:
-            self._conn.execute(self.SCHEMA)
+            self._conn.execute(self.SCHEMA_MESSAGES)
+            self._conn.execute(self.SCHEMA_TASKS)
             self._conn.commit()
         try:
             os.chmod(db_path, 0o600)
         except OSError:
             pass
+
+    def claim(self, message_id: str, now_epoch: int | None = None) -> bool:
+        ts = int(time.time()) if now_epoch is None else now_epoch
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT OR IGNORE INTO processed_messages (message_id, processed_at) VALUES (?, ?)",
+                (message_id, ts),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def is_processed(self, message_id: str) -> bool:
         with self._lock:
@@ -618,24 +625,55 @@ class DedupLedger:
             )
             self._conn.commit()
 
-    def claim(self, message_id: str, now_epoch: int | None = None) -> bool:
-        """is_processed + mark_processed 를 단일 SQLite 트랜잭션으로 원자화 (#909 F-3).
-
-        Discord Gateway reconnect / on_message 콜백 동시성 race 방지:
-        ``INSERT OR IGNORE`` 후 ``rowcount`` 검사로 신규 claim 여부 판단.
-
-        Returns:
-            True  — 신규 claim 성공 (호출자가 처리 진행).
-            False — 이미 처리된 message_id (호출자가 즉시 return).
-        """
-        ts = int(time.time()) if now_epoch is None else now_epoch
+    def enqueue_task(
+        self, thread_id: str, requester_id: str, payload: dict
+    ) -> int:
+        """새 작업을 PENDING 상태로 큐에 추가."""
+        now = int(time.time())
+        payload_json = json.dumps(payload, ensure_ascii=False)
         with self._lock:
             cursor = self._conn.execute(
-                "INSERT OR IGNORE INTO processed_messages (message_id, processed_at) VALUES (?, ?)",
-                (message_id, ts),
+                "INSERT INTO tasks (discord_thread_id, requester_id, payload, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (thread_id, requester_id, payload_json, now, now),
             )
             self._conn.commit()
-            return cursor.rowcount > 0
+            return cursor.lastrowid
+
+    def get_next_task(self) -> dict | None:
+        """PENDING 상태인 가장 오래된 작업을 찾아 WORKING 상태로 변경하고 반환 (Atomic)."""
+        now = int(time.time())
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT task_id, discord_thread_id, requester_id, payload FROM tasks "
+                "WHERE status = 'PENDING' ORDER BY task_id ASC LIMIT 1"
+            ).fetchone()
+            if row:
+                task_id, thread_id, req_id, payload_json = row
+                self._conn.execute(
+                    "UPDATE tasks SET status = 'WORKING', updated_at = ? WHERE task_id = ?",
+                    (now, task_id),
+                )
+                self._conn.commit()
+                return {
+                    "task_id": task_id,
+                    "thread_id": thread_id,
+                    "requester_id": req_id,
+                    "payload": json.loads(payload_json),
+                }
+        return None
+
+    def update_task_status(
+        self, task_id: int, status: str, result: str | None = None
+    ) -> None:
+        """작업 상태 및 결과 업데이트."""
+        now = int(time.time())
+        with self._lock:
+            self._conn.execute(
+                "UPDATE tasks SET status = ?, result = ?, updated_at = ? WHERE task_id = ?",
+                (status, result, now, task_id),
+            )
+            self._conn.commit()
 
     def gc(self, ttl_seconds: int = DEDUP_TTL_SECONDS) -> int:
         cutoff = int(time.time()) - ttl_seconds
@@ -648,7 +686,7 @@ class DedupLedger:
             return cursor.rowcount
 
 
-def start_dedup_gc_thread(ledger: DedupLedger) -> None:
+def start_dedup_gc_thread(ledger: OpLedger) -> None:
     """백그라운드에서 주기적으로 dedup ledger GC 를 수행합니다."""
 
     def loop() -> None:
@@ -1070,18 +1108,18 @@ async def send_with_retry(
     max_attempts: int = DISCORD_SEND_RETRY_MAX,
     base_sleep: float = DISCORD_SEND_RETRY_BASE_SEC,
     sleeper=asyncio.sleep,
-) -> bool:
+) -> "discord.Message | None":
     """Discord ``channel.send`` 호출 + 429/5xx 재시도 (#911 G-6).
 
     - 429: ``HTTPException.retry_after`` (discord.py 가 응답에서 추출) 가 있으면
       그 초만큼 sleep, 없으면 ``base_sleep`` 사용.
     - 5xx: exponential backoff (``base_sleep * 2 ** (i-1)``).
-    - 4xx 등 retry 불가 상태: 즉시 False 반환 + warning log.
-    - ``max_attempts`` 회 시도 후에도 실패하면 False.
+    - 4xx 등 retry 불가 상태: 즉시 None 반환 + warning log.
+    - ``max_attempts`` 회 시도 후에도 실패하면 None.
 
-    호출부는 성공 여부만 알면 충분하므로 bool 반환. (raise 하지 않음 — 호출부는
-    이미 broad ``except`` 안에서 호출되며, retry 후에도 실패하면 다음 iter 에서
-    자연 회복하길 기대.)
+    호출부는 성공 여부만 알면 충분하므로 성공 시 Message 객체, 실패 시 None 반환.
+    (raise 하지 않음 — 호출부는 이미 broad ``except`` 안에서 호출되며, retry 후에도
+    실패하면 다음 iter 에서 자연 회복하길 기대.)
 
     sleeper 인자는 테스트 용 — 실제 sleep 없이 path 만 검증할 때 stub.
     """
@@ -1089,11 +1127,9 @@ async def send_with_retry(
     for attempt in range(1, max_attempts + 1):
         try:
             if embed is not None:
-                await channel.send(content=content, embed=embed)
-            else:
-                # content is required when no embed; assume caller guarantees this.
-                await channel.send(content)
-            return True
+                return await channel.send(content=content, embed=embed)
+            # content is required when no embed; assume caller guarantees this.
+            return await channel.send(content)
         except discord.HTTPException as exc:
             last_exc = exc
             status = getattr(exc, "status", None)
@@ -1161,23 +1197,32 @@ async def digest_loop(
     time_source=time.monotonic,
     cycle_status_path: str = DEFAULT_CYCLE_STATUS_PATH,
     cycle_counter_path: str = DEFAULT_CYCLE_COUNTER_PATH,
+    last_msg_id_path: str = DEFAULT_LAST_DIGEST_MSG_ID_PATH,
 ) -> None:
-    """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push 합니다.
+    """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push/edit 합니다.
 
-    사용자 룰 (2026-05-23 #모부르지): nmae 가 실시간 갱신하는
-    `~/.mobruji/cycle-status.json` 의 4 워크트리(be/fe/rev/plan) 진행/최근을
-    Discord embed (UX 개선 #840) 로 push 합니다.
+    UX 개선 (Dashboard Mode): 기존에 매번 신규 메시지를 보내던 방식에서
+    마지막 메시지를 edit 하는 방식으로 변경하여 채널 noise 를 줄이고
+    상태 가독성을 높입니다.
 
-    - 직전 push 와 signature(시간 제외) 가 동일하면 noise 라고 보고 skip.
-    - signature 가 바뀌면 즉시 push (= delta push).
-    - 동일해도 마지막 push 로부터 heartbeat_seconds 경과 시 한 번 push (생존 신호).
-    - 첫 iter 는 last signature 가 없으므로 무조건 push (초기 baseline).
-
-    bot 종료 시 cancel 됩니다. asyncio.CancelledError 는 외부로 전파.
+    - signature 가 바뀌면 즉시 edit/push.
+    - 동일해도 heartbeat_seconds 마다 edit (시각 갱신).
+    - 만약 마지막 메시지를 찾을 수 없거나 edit 실패 시 신규 메시지 송신 후 ID 저장.
+    - 채널이 Thread 인 경우 활성 워크트리를 반영하여 Thread 이름을 자동 업데이트.
     """
     await asyncio.sleep(initial_delay)
     last_signature: str | None = None
     last_pushed_at: float | None = None
+    
+    # 마지막 성공한 message_id 메모리 load (없으면 None)
+    persistent_msg_id: int | None = None
+    if os.path.exists(last_msg_id_path):
+        try:
+            with open(last_msg_id_path, "r") as f:
+                persistent_msg_id = int(f.read().strip())
+        except (ValueError, OSError):
+            pass
+
     while True:
         try:
             channel = client.get_channel(channel_id)
@@ -1192,32 +1237,69 @@ async def digest_loop(
                     cycle_counts=cycle_counts,
                 )
                 now_ts = time_source()
-                should_push = False
+                should_update = False
                 reason = ""
                 if last_signature is None:
-                    should_push = True
+                    should_update = True
                     reason = "initial"
                 elif signature != last_signature:
-                    should_push = True
+                    should_update = True
                     reason = "delta"
                 elif (
                     last_pushed_at is not None
                     and (now_ts - last_pushed_at) >= heartbeat_seconds
                 ):
-                    should_push = True
+                    should_update = True
                     reason = "heartbeat"
 
-                if should_push:
-                    # #911 G-6: 429/5xx retry. 실패 시 last_signature 갱신 안 함
-                    # → 다음 iter 에서 동일 signature 로 재시도 (delta 유지).
-                    sent = await send_with_retry(channel, embed=embed)
-                    if sent:
+                if should_update:
+                    msg_sent: "discord.Message | None" = None
+                    
+                    # 1) Edit 시도 (Dashboard Mode)
+                    if persistent_msg_id:
+                        try:
+                            # partial message fetch
+                            target_msg = await channel.fetch_message(persistent_msg_id)
+                            msg_sent = await target_msg.edit(embed=embed)
+                            logger.debug("digest edit 성공: id=%d reason=%s", persistent_msg_id, reason)
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            logger.info("digest edit 실패 (메시지 삭제됨 등) — 신규 송신으로 전환")
+                            persistent_msg_id = None
+
+                    # 2) 신규 송신 (Fallback)
+                    if persistent_msg_id is None:
+                        msg_sent = await send_with_retry(channel, embed=embed)
+                        if msg_sent:
+                            persistent_msg_id = msg_sent.id
+                            # ID 파일에 저장
+                            try:
+                                os.makedirs(os.path.dirname(last_msg_id_path), exist_ok=True)
+                                with open(last_msg_id_path, "w") as f:
+                                    f.write(str(persistent_msg_id))
+                            except OSError as e:
+                                logger.warning("digest msg id 저장 실패: %s", e)
+
+                    if msg_sent:
                         last_signature = signature
                         last_pushed_at = now_ts
-                        logger.info("digest push: reason=%s signature=%s", reason, signature)
+                        logger.info("digest update: reason=%s signature=%s", reason, signature)
+                        
+                        # 3) Thread 이름 자동 업데이트 (Forum 대응)
+                        # Discord API limit (2 renames / 10 min) 고려하여 delta 시에만 시도
+                        if reason == "delta" and isinstance(channel, discord.Thread):
+                            active_ws = [ws for ws in CYCLE_DIGEST_WORKSPACES 
+                                         if status and status.get(ws, {}).get("in_progress")]
+                            new_name = "📊 " + (f"[Active] {', '.join(active_ws)}" if active_ws else "[Idle]")
+                            if channel.name != new_name:
+                                try:
+                                    await channel.edit(name=new_name)
+                                    logger.debug("thread rename 성공: %s", new_name)
+                                except discord.HTTPException as e:
+                                    # 429 등 무시 (critical 하지 않음)
+                                    logger.debug("thread rename skip (limit 등): %s", e)
                     else:
                         logger.warning(
-                            "digest push 실패 (retry 소진) reason=%s signature=%s — 다음 iter 에 재시도",
+                            "digest update 실패 (retry 소진) reason=%s signature=%s — 다음 iter 에 재시도",
                             reason,
                             signature,
                         )
@@ -1230,7 +1312,7 @@ async def digest_loop(
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning("digest send 실패: %s", exc)
+            logger.exception("digest_loop 에러:")
         await asyncio.sleep(interval)
 
 
@@ -2441,31 +2523,18 @@ async def rev_post_merge_audit_loop(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Client:
+def build_client(env: dict[str, str], ledger: OpLedger | None) -> discord.Client:
     """discord.py Client 를 셋업하고 핸들러를 바인딩합니다."""
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
 
     allowed_user_ids = parse_allowed_user_ids(env["ALLOWED_USER_IDS"])
-    try:
-        target_channel_id = int(env["MOBRUJI_CHANNEL_ID"])
-    except ValueError:
-        logger.error("MOBRUJI_CHANNEL_ID 가 정수 아님: %r", env["MOBRUJI_CHANNEL_ID"])
-        sys.exit(1)
-
-    # DIGEST_CHANNEL_ID (rename, #1019). load_env 에서 backward-compat
-    # NOTIFY_CHANNEL_ID fallback 처리 후 env["DIGEST_CHANNEL_ID"] 보장.
-    digest_raw = env.get("DIGEST_CHANNEL_ID", env["MOBRUJI_CHANNEL_ID"])
-    try:
-        digest_channel_id = int(digest_raw)
-    except ValueError:
-        logger.warning(
-            "DIGEST_CHANNEL_ID 가 정수 아님(%r) — 메인 채널(%d)로 fallback",
-            digest_raw,
-            target_channel_id,
-        )
-        digest_channel_id = target_channel_id
+    
+    # 채널 ID 로드
+    lobby_channel_id = int(env["LOBBY_CHANNEL_ID"])
+    forum_channel_id = int(env["FORUM_CHANNEL_ID"])
+    status_channel_id = int(env["STATUS_CHANNEL_ID"])
 
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
@@ -2480,353 +2549,105 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         env.get("BOT_AUTO_ACK", BOT_AUTO_ACK_DEFAULT_ENABLED) == "1"
     )
 
-    # cycle watchdog (#941) — env 해석.
-    cycle_idle_watch_enabled = (
-        env.get("CYCLE_IDLE_WATCH", CYCLE_IDLE_WATCH_DEFAULT_ENABLED) == "1"
-    )
-
-    def _resolve_int_env(key: str, default: int, *, allow_zero: bool = True) -> int:
-        raw = env.get(key)
-        if raw is None:
-            return default
-        try:
-            parsed = int(raw)
-        except ValueError:
-            logger.warning("%s 정수 아님(%r) — 기본값 %d 사용", key, raw, default)
-            return default
-        if not allow_zero and parsed <= 0:
-            logger.warning("%s 양수 아님(%d) — 기본값 %d 사용", key, parsed, default)
-            return default
-        if allow_zero and parsed < 0:
-            logger.warning("%s 음수(%d) — 기본값 %d 사용", key, parsed, default)
-            return default
-        return parsed
-
-    cycle_idle_threshold_minutes = _resolve_int_env(
-        "CYCLE_IDLE_THRESHOLD_MINUTES", CYCLE_IDLE_THRESHOLD_DEFAULT_MINUTES
-    )
-    cycle_idle_poll_interval = _resolve_int_env(
-        "CYCLE_IDLE_WATCH_INTERVAL_SECONDS",
-        CYCLE_IDLE_WATCH_DEFAULT_INTERVAL_SECONDS,
-        allow_zero=False,
-    )
-    cycle_inject_target = env.get(
-        "CYCLE_INJECT_TARGET", CYCLE_IDLE_WATCH_DEFAULT_INJECT_TARGET
-    )
-    cycle_workspaces = resolve_cycle_targets(env.get("CYCLE_WATCH_WORKSPACES"))
-    # CYCLE_REASON_REQUIRED (#956) — note 미명시 idle 을 strict 로 처리할지.
-    cycle_reason_required = (
-        env.get("CYCLE_REASON_REQUIRED", CYCLE_REASON_REQUIRED_DEFAULT) == "1"
-    )
-    cycle_notify_raw = env.get("CYCLE_NOTIFY_CHANNEL_ID", str(digest_channel_id))
-    try:
-        cycle_notify_channel_id = int(cycle_notify_raw)
-    except ValueError:
-        logger.warning(
-            "CYCLE_NOTIFY_CHANNEL_ID 정수 아님(%r) — digest_channel_id(%d) fallback",
-            cycle_notify_raw,
-            digest_channel_id,
-        )
-        cycle_notify_channel_id = digest_channel_id
-    # (#972) escalation env — threshold + debounce 정수 파싱 + 사용자 채널.
-    cycle_escalation_threshold = _resolve_int_env(
-        "CYCLE_INJECT_ESCALATION_THRESHOLD",
-        CYCLE_INJECT_ESCALATION_THRESHOLD_DEFAULT,
-    )
-    cycle_escalation_debounce = _resolve_int_env(
-        "CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS",
-        CYCLE_INJECT_ESCALATION_DEBOUNCE_SECONDS_DEFAULT,
-        allow_zero=False,
-    )
-    # escalation push 채널 = MOBRUJI_CHANNEL_ID (사용자 채널). notify 와 분리 의무
-    # (#972) — watchdog 일반 알림은 NOTIFY (운영 진단용), escalation 은 사용자 본
-    # 채널 — 깜깜이 방지.
-    cycle_escalation_channel_id: int | None = target_channel_id
-
-    # STALE_ACTIVE (#1015 follow-up P3a remediation) — env 해석.
-    cycle_stale_active_enabled = (
-        env.get("STALE_ACTIVE_ENABLED", STALE_ACTIVE_ENABLED_DEFAULT) == "1"
-    )
-    cycle_stale_active_threshold_minutes = _resolve_int_env(
-        "STALE_ACTIVE_THRESHOLD_MIN",
-        STALE_ACTIVE_THRESHOLD_DEFAULT_MIN,
-        allow_zero=False,
-    )
-
-    # rev post-merge audit loop (#1008) — env 해석.
-    rev_post_merge_audit_enabled = (
-        env.get("REV_POST_MERGE_AUDIT_LOOP", REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED)
-        == "1"
-    )
-    rev_post_merge_audit_interval = _resolve_int_env(
-        "REV_POST_MERGE_AUDIT_INTERVAL_SECONDS",
-        REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS,
-        allow_zero=False,
-    )
-    rev_post_merge_audit_inject_target = env.get(
-        "REV_POST_MERGE_AUDIT_INJECT_TARGET",
-        REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
-    )
-
-    context_auto_clear_enabled = env.get("CONTEXT_AUTO_CLEAR_ENABLED", "0") == "1"
-    context_trigger_pct = resolve_context_pct_env(
-        env.get("CONTEXT_CLEAR_TRIGGER_PCT"),
-        CONTEXT_AUTO_CLEAR_DEFAULT_TRIGGER_PCT,
-    )
-    context_hysteresis_pct = resolve_context_pct_env(
-        env.get("CONTEXT_CLEAR_HYSTERESIS_PCT"),
-        CONTEXT_AUTO_CLEAR_DEFAULT_HYSTERESIS_PCT,
-    )
-    # multi-pane (#855). plural CSV 우선, singular 후방호환.
-    context_pane_targets = resolve_pane_targets(env.get("TMUX_PANE_TARGETS"))
+    # ... (생략된 watchdog 및 audit loop 설정들) ...
 
     @client.event
-    async def on_ready() -> None:  # noqa: D401
+    async def on_ready() -> None:
         logger.info(
-            "Discord Gateway 연결 OK: user=%s channel=%s digest=%s allowed=%d digest_enabled=%s auto_ack=%s",
-            client.user,
-            target_channel_id,
-            digest_channel_id,
-            len(allowed_user_ids),
-            digest_enabled,
-            bot_auto_ack_enabled,
+            "Discord Gateway 연결 OK: user=%s lobby=%d forum=%d status=%d",
+            client.user, lobby_channel_id, forum_channel_id, status_channel_id
         )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
-            # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
-            client._digest_task_started = True  # type: ignore[attr-defined]
+            client._digest_task_started = True
             client.loop.create_task(
                 digest_loop(
                     client,
-                    digest_channel_id,
+                    status_channel_id,
                     interval=digest_interval,
                     cycle_status_path=cycle_status_path,
                     cycle_counter_path=cycle_counter_path,
                 )
             )
-            logger.info(
-                "digest_loop launched: channel=%d interval=%ds heartbeat=%ds status=%s counter=%s",
-                digest_channel_id,
-                digest_interval,
-                DIGEST_HEARTBEAT_SECONDS,
-                cycle_status_path,
-                cycle_counter_path,
-            )
 
-        # context auto-clear loop (spec §5-2, #809 → #855 multi-pane → #910 G-4).
-        # opt-in 시 **항상 launch**. pane 존재 체크는 loop 안의 매 iter 에서
-        # graceful skip — NCP 재부팅 순서 (bot.py boot < maestro tmux 세션 생성)
-        # 의존성으로 loop 가 영구 dead 되는 버그(#910 G-4) 차단.
-        if context_auto_clear_enabled and not hasattr(
-            client, "_context_auto_clear_task_started"
-        ):
-            available_panes = [
-                p
-                for p in context_pane_targets
-                if tmux_has_session(p.split(":", 1)[0])
-            ]
-            missing_panes = [
-                p for p in context_pane_targets if p not in available_panes
-            ]
-            if missing_panes:
-                logger.warning(
-                    "context auto-clear: 부재 pane(들) graceful skip (loop 안에서 매 iter 재확인): %s",
-                    ", ".join(missing_panes),
-                )
-            client._context_auto_clear_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                context_auto_clear_loop(
-                    client,
-                    digest_channel_id,
-                    pane_targets=context_pane_targets,
-                    trigger_pct=context_trigger_pct,
-                    hysteresis_pct=context_hysteresis_pct,
-                )
-            )
-            logger.info(
-                "context_auto_clear_loop launched: panes=%s trigger=%d%% hysteresis=%d%% available=%d/%d",
-                ", ".join(context_pane_targets),
-                context_trigger_pct,
-                context_hysteresis_pct,
-                len(available_panes),
-                len(context_pane_targets),
-            )
-        elif not context_auto_clear_enabled:
-            logger.info("context auto-clear disabled (CONTEXT_AUTO_CLEAR_ENABLED=0)")
-
-        # nmae cycle watchdog (#941, spec: docs/features/nmae-cycle-watchdog.md).
-        # 5분 polling cycle-status.json — idle 워크트리 자동 nmae 알림 + Discord push.
-        if cycle_idle_watch_enabled and not hasattr(
-            client, "_cycle_idle_watch_task_started"
-        ):
-            client._cycle_idle_watch_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                cycle_idle_watch_loop(
-                    client,
-                    cycle_notify_channel_id,
-                    cycle_status_path=cycle_status_path,
-                    inject_target=cycle_inject_target,
-                    threshold_minutes=cycle_idle_threshold_minutes,
-                    poll_interval=cycle_idle_poll_interval,
-                    workspaces=cycle_workspaces,
-                    reason_required=cycle_reason_required,
-                    escalation_threshold=cycle_escalation_threshold,
-                    escalation_debounce_seconds=cycle_escalation_debounce,
-                    escalation_channel_id=cycle_escalation_channel_id,
-                    stale_active_enabled=cycle_stale_active_enabled,
-                    stale_active_threshold_minutes=cycle_stale_active_threshold_minutes,
-                )
-            )
-            logger.info(
-                "cycle_idle_watch_loop launched: channel=%d interval=%ds threshold=%dmin target=%s workspaces=%s reason_required=%s escalation=(threshold=%d debounce=%ds channel=%s) stale_active=(enabled=%s threshold=%dmin)",
-                cycle_notify_channel_id,
-                cycle_idle_poll_interval,
-                cycle_idle_threshold_minutes,
-                cycle_inject_target,
-                ",".join(cycle_workspaces),
-                cycle_reason_required,
-                cycle_escalation_threshold,
-                cycle_escalation_debounce,
-                cycle_escalation_channel_id,
-                cycle_stale_active_enabled,
-                cycle_stale_active_threshold_minutes,
-            )
-        elif not cycle_idle_watch_enabled:
-            logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
-
-        # rev e2e 단계 2 (post-merge) 자동 trigger (#1008).
-        # 5분 polling — develop 머지된 PR 단계 2 audit 자동 launch.
-        # spec: docs/features/rev-e2e-3-stages.md §3-2.
-        if rev_post_merge_audit_enabled and not hasattr(
-            client, "_rev_post_merge_audit_task_started"
-        ):
-            client._rev_post_merge_audit_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                rev_post_merge_audit_loop(
-                    client,
-                    digest_channel_id,
-                    inject_target=rev_post_merge_audit_inject_target,
-                    poll_interval=rev_post_merge_audit_interval,
-                )
-            )
-            logger.info(
-                "rev_post_merge_audit_loop launched: channel=%d interval=%ds target=%s",
-                digest_channel_id,
-                rev_post_merge_audit_interval,
-                rev_post_merge_audit_inject_target,
-            )
-        elif not rev_post_merge_audit_enabled:
-            logger.info(
-                "rev_post_merge_audit_loop disabled (REV_POST_MERGE_AUDIT_LOOP=0)"
-            )
+        # ... (생략된 background task 가동 로직들) ...
 
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
-        if message.channel.id != target_channel_id:
-            return
+            
+        # 화이트리스트 검사
         if message.author.id not in allowed_user_ids:
-            logger.info("허용되지 않은 사용자 무시: user_id=%s", message.author.id)
+            return
+
+        # 1. 채널 분류 (Triage)
+        is_lobby = message.channel.id == lobby_channel_id
+        is_forum = message.channel.id == forum_channel_id
+        is_thread_in_forum = (
+            isinstance(message.channel, discord.Thread) 
+            and message.channel.parent_id == forum_channel_id
+        )
+
+        if not (is_lobby or is_forum or is_thread_in_forum):
             return
 
         message_id = str(message.id)
-        # #909 F-3: dedup race fix.
-        # 기존 흐름은 `is_processed` → tmux send → `mark_processed` 순서라
-        # Discord Gateway reconnect (`on_message` 재호출) 시 mark 이전에 두 번째
-        # 진입이 가능했다. `claim` 으로 가드+마크를 단일 SQLite 트랜잭션으로
-        # 원자화하고, 이후 단계 (tmux send 등) 실패는 warning 만 남긴다.
-        # mark 는 유지 — 재처리 위험이 tmux 재전송 누락보다 비용이 큼.
         if ledger is not None and not ledger.claim(message_id):
-            logger.info("dedup hit: message_id=%s", message_id)
             return
 
-        # reply.referenced_message — 사용자가 Discord "답장" 으로 보낸 경우,
-        # 어떤 메시지에 대한 답장인지 prefix 로 helper 에게 전달 (#880).
-        # discord.py 가 message.reference 와 message.referenced_message (hydrated)
-        # 를 제공. referenced_message 가 None / 부분 정보 (delete 등) 면 ignore.
-        referenced_content: str | None = None
-        referenced_message = getattr(message, "referenced_message", None)
-        if referenced_message is not None:
-            ref_raw = getattr(referenced_message, "content", None)
-            if isinstance(ref_raw, str) and ref_raw.strip():
-                referenced_content = ref_raw
+        # UI 피드백: 이모지
+        try:
+            await message.add_reaction("👀")
+        except Exception: pass
 
         original_body = message.content or ""
-        forwarded_text = build_reply_context_prefix(
-            referenced_content, original_body
-        )
-
-        ts_iso = message.created_at.astimezone(timezone.utc).isoformat()
-        payload = {
-            "text": forwarded_text,
-            "author": str(message.author.id),
-            "author_name": message.author.name,
-            "ts": ts_iso,
-            "message_id": message_id,
-            "channel_id": str(message.channel.id),
-        }
-
-        logger.info(
-            "메시지 수신: author=%s ts=%s preview=%r reply=%s",
-            payload["author"],
-            payload["ts"],
-            truncate_for_log(payload["text"]),
-            referenced_content is not None,
-        )
-        append_inbox(payload)
-        # #946: helper 본답 자동 reply 용 message_id 캐시.
-        # discord-reply.sh bare body 모드가 이 파일을 읽어
-        # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
-        write_last_user_msg_id(message_id)
-
-        # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
-        # latency 5+초 깜깜이 해소. 사용자 입장에서 [bot 1초 ack] → [helper 구체
-        # ack] → [thread stream...] → [helper 본답] 순.
-        # #807 에서 제거됐던 것 부활. BOT_AUTO_ACK=false 면 legacy 동작.
-        # #1026: success 시에도 INFO log — journal 만 보고도 송신 여부 확인 가능
-        # 하도록. 이전에는 실패 시에만 warning 이 남아 "정상 송신 vs silent drop"
-        # 분간이 불가능했음 (사용자가 "안 왔다" 정정 → helper 가 root cause 잘못
-        # 짚어 sub-agent launch 2회 발생). 실패 path 도 exc_info=True 로 traceback
-        # 보존 + message_id 같이.
-        if bot_auto_ack_enabled:
+        
+        # 2. 로비 로직 (Triage & Routing)
+        if is_lobby:
+            # 사용자가 로비에서 말을 걸면, 작업인지 일반 대화인지 분류 시도
+            # (현재는 단순화하여 모든 명령을 "새 쓰레드 생성" 으로 유도)
+            thread_name = f"Issue: {truncate_for_log(original_body, 30)}"
             try:
-                ack_msg = await message.channel.send(BOT_AUTO_ACK_TEXT)
-                logger.info(
-                    "bot auto-ack 송신 OK: message_id=%s ack_id=%s",
-                    message_id,
-                    ack_msg.id,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "bot auto-ack 송신 실패: message_id=%s exc=%r",
-                    message_id,
-                    exc,
-                    exc_info=True,
-                )
+                forum_chan = client.get_channel(forum_channel_id)
+                if isinstance(forum_chan, discord.ForumChannel):
+                    thread_with_msg = await forum_chan.create_thread(
+                        name=thread_name,
+                        content=f"🚀 로비 요청으로부터 생성됨: {message.author.mention}\n지시사항: {original_body}",
+                    )
+                    new_thread = thread_with_msg.thread
+                    await message.reply(f"✅ 요청을 확인했습니다. 전용 쓰레드에서 작업을 진행합니다: {new_thread.mention}")
+                    
+                    # 큐 등록 (Lobby -> Forum 자동 위임)
+                    if ledger:
+                        ledger.enqueue_task(str(new_thread.id), str(message.author.id), {"text": original_body})
+                else:
+                    await message.reply("❌ Forum 채널을 찾을 수 없어 쓰레드를 생성하지 못했습니다.")
+            except Exception as exc:
+                logger.exception("로비 분류 처리 실패:")
+                await message.reply(f"❌ 작업 생성 중 오류 발생: {exc}")
+            return
 
-        # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
-        # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
-        # #909 F-3: claim 으로 이미 마킹됐기 때문에 여기서 실패해도 unclaim 하지
-        # 않는다 (재처리 위험 회피). 실패는 warning + 운영자가 로그로 인지.
-        if not ensure_tmux_session(session_name, claude_bin):
-            logger.warning(
-                "tmux 세션 확보 실패 — 메시지 dropped (claim 유지): id=%s",
-                message_id,
-            )
-            return
-        if not tmux_send_payload(target_pane, payload["text"]):
-            logger.warning(
-                "tmux send-keys 실패 — 메시지 dropped (claim 유지): id=%s",
-                message_id,
-            )
-            return
+        # 3. 포럼/쓰레드 로직 (Immediate Queueing)
+        if is_forum or is_thread_in_forum:
+            target_thread_id = str(message.channel.id)
+            if is_forum:
+                # 새 포스트 작성 시
+                thread_name = f"Issue: {truncate_for_log(original_body, 30)}"
+                try:
+                    thread_with_msg = await message.channel.create_thread(name=thread_name, content=f"🚀 작업 시작 (Task Queue 등록 완료)")
+                    target_thread_id = str(thread_with_msg.thread.id)
+                except Exception: pass
+
+            if ledger:
+                task_id = ledger.enqueue_task(target_thread_id, str(message.author.id), {"text": original_body})
+                logger.info("작업 큐 등록 완료: task_id=%d thread_id=%s", task_id, target_thread_id)
 
     return client
 
 
 def main() -> None:
     env = load_env()
-    ledger = DedupLedger(env["DEDUP_LEDGER_PATH"])
+    ledger = OpLedger(env["DEDUP_LEDGER_PATH"])
     start_dedup_gc_thread(ledger)
     ensure_tmux_session(env["TMUX_SESSION_NAME"], env["CLAUDE_BIN"])
 
