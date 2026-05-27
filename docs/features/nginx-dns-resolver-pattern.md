@@ -1,12 +1,12 @@
 ---
 feature: nginx DNS resolver pattern (stale upstream IP 회피)
 slug: nginx-dns-resolver-pattern
-status: draft
+status: implementing
 owner: @mobruji-maestro
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-26
+related_prs: [1142, 1144]
+last_reviewed: 2026-05-27
 ---
 
 # nginx DNS resolver pattern (stale upstream IP 회피)
