@@ -1,30 +1,31 @@
 # AI Harness Docs Index (mobruji)
 
 ## 1) 목적
-- 이 문서 묶음은 `mobruji`(노래방 추천 서비스)에서 AI 코딩 하네스를 안전하고 일관되게 운영하기 위한 기준이다.
-- 1차 목표는 품질 안정성(우선) + 개발 속도(보조)이며, 객체지향 설계와 DDD 규칙 준수를 포함한다.
+- 이 문서 묶음은 `mobruji`에서 다중 에이전트(Maestro, Plan, BE, FE, Rev)가 자율적으로 협업하기 위한 **모듈형 프로토콜**이다.
+- 에이전트의 역할에 따라 필요한 지식(Volume)만 주입하여 토큰 효율성과 정확도를 극대화한다.
 
-## 2) 적용 범위
-- 적용: 이 레포(`mobruji`)에서 수행하는 AI 기반 코드/문서 작업 (backend + web 모노레포)
-- 비적용: 타 레포 공통 정책, 조직 전사 정책
+## 2) 핵심 하네스 볼륨 (P0 - 모듈형 통합본)
+- [**`00-MANIFEST.md`**](./00-MANIFEST.md): 에이전트 라우팅 및 작업 분류(Fast/Standard) 지도.
+- [**`01-GOVERNANCE.md`**](./01-GOVERNANCE.md): 공통 운영 헌법, 보안 정책, PR/핸드오프 프로토콜.
+- [**`02-ARCHITECT_NOTE.md`**](./02-ARCHITECT_NOTE.md): 도메인 모델, 패키지 구조, 설계 원칙 및 ADR 가이드.
+- [**`03-ENGINEERING_STANDARDS.md`**](./03-ENGINEERING_STANDARDS.md): 코드 컨벤션, 테스트 전략, 품질 게이트, 관측성 표준.
 
-## 3) 문서 목록 (P0)
-- `docs/ai-harness/01-harness-spec.md`: 하네스 실행 규격과 결정 규칙
-- `docs/ai-harness/02-agent-workflow.md`: 브랜치/PR/커밋/핸드오프 워크플로우
-- `docs/ai-harness/03-quality-gates.md`: 빌드/테스트 게이트와 실패 처리
-- `docs/ai-harness/04-security-policy.md`: 민감정보/시크릿/금지행위 정책
-- `docs/ai-harness/05-prompt-ops.md`: 프롬프트 버전관리/승인/롤백 운영
-- `docs/ai-harness/06-domain-model.md`: 도메인 모델/유비쿼터스 랭귀지/ERD (기능 구현의 공통 참조 기준) — **현재 스켈레톤, 도메인 확정 시 채움**
-- `docs/ai-harness/07-testing-guide.md`: 레이어별 테스트 전략 및 필수 기준
-- `docs/ai-harness/08-code-conventions.md`: 코드 컨벤션 (final/어노테이션/DTO/엔티티/Lombok/null 검증 등)
-- `docs/ai-harness/10-observability.md`: 관측성 (Actuator + Micrometer) — 현재 backend endpoint만 노출, 시각화는 추후
-- `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev) 셋업·운영 런북
-- `docs/ai-harness/12-sub-agent-prompt-template.md`: maestro이 sub-agent launch 시 참조하는 공통 룰 + 역할별 추가 룰
-- `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스
-- `docs/ai-harness/14-discord-notify-setup.md`: Discord webhook/bot 셋업 및 토큰 관리
-- `docs/ai-harness/15-discord-message-templates.md`: Discord 메시지 템플릿 + 양방향 명령 syntax
+## 3) 운영 및 참조 문서
+- `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev/plan) 셋업·운영 런북.
+- `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스.
+- `CLAUDE.md`: Claude Code 세션 자동 로드 룰 요약 (비협상 핵심 룰).
 
-> `09-notion-api-spec.md`는 추후 Notion API 명세 DB 연동 시 추가.
+---
+> ⚠️ **주의**: 아래의 `01~15` 개별 문서들은 위 통합 볼륨(00~03)의 원천 데이터이며, 향후 관리 효율을 위해 통합본으로 완전 대체될 예정이다. 작업 시에는 상단의 **통합 볼륨을 최우선**으로 참조한다.
+
+## 3-1) 원천 문서 목록 (Archive 예정)
+- `docs/ai-harness/01-harness-spec.md` / `02-agent-workflow.md`
+- `docs/ai-harness/03-quality-gates.md` / `04-security-policy.md`
+- `docs/ai-harness/06-domain-model.md` / `07-testing-guide.md`
+- `docs/ai-harness/08-code-conventions.md` / `10-observability.md`
+- `docs/ai-harness/12-sub-agent-prompt-template.md`
+- `docs/ai-harness/14-discord-notify-setup.md` / `15-discord-message-templates.md`
+
 
 ## 3-1) 관련 자산
 - `prompts/`: 재사용 프롬프트 저장소 (운영 규칙은 `05-prompt-ops.md`)

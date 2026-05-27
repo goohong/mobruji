@@ -1,273 +1,38 @@
 # Sub-Agent Prompt Template
 
-> maestro(`mobruji` 워크트리)이 be/fe/rev/plan 서브에이전트를 `Agent` 도구로 launch할 때 매번 반복되는 공통 룰을 코드화한 문서.
-> sub-agent prompt에 매번 300+ 줄을 박지 말고, **이 문서를 참조하라**고만 적는다.
+> Maestro(`nmae`)가 서브 에이전트(BE/FE/Rev/Plan)를 launch할 때 주입하는 공통 지침입니다.
+> **단일 진실 원칙**: 모든 서브 에이전트는 `docs/ai-harness/00-MANIFEST.md`의 라우팅 지도를 따릅니다.
 
-## 사용법
+## 1. 서브 에이전트 호출 표준 (Maestro 전용)
 
-maestro이 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는다:
+Maestro는 에이전트를 가동할 때 아래 한 줄을 반드시 포함해야 합니다:
 
 ```
-공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.
+공통 프로토콜은 docs/ai-harness/01-GOVERNANCE.md를, 기술 표준은 03-ENGINEERING_STANDARDS.md를 따릅니다. 역할은 <BE|FE|Rev|Plan> 입니다.
 ```
 
-그 외 prompt 본문은 **이번 사이클 한정 작업 지시**(이슈 번호/구체 요구사항/완료 조건)만 담는다.
+## 2. 역할별 컨텍스트 주입 가이드
 
-## 1) 공통 룰 (모든 sub-agent 공통)
+Maestro는 에이전트의 역할에 따라 다음 볼륨을 추가로 읽게 합니다:
 
-### 워크트리 격리
-- prompt 첫 명령으로 `cd <워크트리 절대경로>` 실행. maestro(`mobruji`), 다른 세션(`mobruji-be`/`mobruji-fe`/`mobruji-rev`/`mobruji-plan`) **절대 건드리지 마**.
-- 워크트리 경로 외 다른 경로(예: `~/.claude/`, 다른 repo)를 읽거나 쓰지 마.
-- 실제 절대경로 (NCP Linux 호스트, 2026-05-23 기준):
-  - maestro: `/home/mobruji/mobruji`
-  - be: `/home/mobruji/mobruji-be`
-  - fe: `/home/mobruji/mobruji-fe`
-  - rev: `/home/mobruji/mobruji-rev`
-  - plan: `/home/mobruji/mobruji-plan`
+- **Plan**: `02-ARCHITECT_NOTE.md` (도메인 및 설계 지식)
+- **BE**: `02-ARCHITECT_NOTE.md` (엔티티 및 BC 참조용)
+- **FE/Rev**: 해당 역할에 특화된 `03-ENGINEERING_STANDARDS.md` 섹션 강조
 
-### 본진(maestro) 항시 가동 — sub-agent launch mandatory
-- 본진은 be/fe/rev/plan **4 워크트리에 sub-agent 1개씩 항상 가동** 유지 ([[feedback-keep-4-cycles-active]]). 1 sub-agent 완료 통지 받자마자 같은 워크트리에 다음 백로그 launch (idle 워크트리 default 금지).
-- 본진 sub-agent launch 절대 까먹기 금지 ([[feedback-sub-agent-launch-mandatory]]). 본진 자체 reasoning 으로 코드/테스트 처리 시 → 워크트리 idle + 컨텍스트 폭증 + 사용자 의도 위배.
-- 본진 default = 메타 (spec/ADR/메모리/orchestration/Discord 답). 코드/테스트/문서 본문 작성은 sub-agent 위임 default.
-- sub-agent 본인은 본진 룰을 직접 적용할 일은 없지만, 완료 보고 시 "다음 사이클 후보" 제시로 본진 launch loop 를 돕는다 (§4 보고 양식).
+## 3. 공통 핵심 수칙 (모든 에이전트)
 
-### 워크트리 lock (한 워크트리 = 동시 1 sub-agent)
-- 본진은 한 워크트리에 동시 1 sub-agent 만 launch ([[feedback-worktree-lock]]). 같은 도메인 사이클 동시 launch 시 git stash/checkout 충돌로 in-progress 변경 유실 위험.
-- sub-agent 본인은 자기 워크트리의 git state 를 다른 sub-agent 가 만지지 않는다고 가정 가능. 단 본진이 룰을 어겨 동시 launch 한 경우, `git status` 가 예상과 다르면 즉시 본진에 보고 후 중단.
-- 같은 도메인 백로그 병렬 필요 시 본진이 임시 워크트리 (`git worktree add /tmp/<name> <branch>`) 신설.
+1. **상태 기록 의무**: 매 turn 시작 시 `tools/cycle-status/update.sh <role> set-in-progress --title '...'`를 실행하고, 작업 완료 시 `set-idle`을 실행한다. (nmae와 사용자가 실시간으로 인지하게 하기 위함)
+2. **워크트리 격리**: 지정된 경로(`/home/mobruji/mobruji-<role>`) 외의 다른 세션 영역을 절대 수정하지 않는다.
+2. **5분 룰**: 단일 턴의 작업이 5분을 넘지 않도록 단위를 쪼개어 수행한다.
+3. **메모리 보호**: `~/.claude/projects/*/memory/` 쓰기는 Maestro만 수행하며, 서브 에이전트는 보고서에 '메모리 후보'만 남긴다.
+4. **라벨링**: PR 생성 즉시 `type`, `scope`, `ai-generated`, `session` 라벨을 부착한다. 보호 영역 변경 시 `needs-human-review`를 부착한다.
+5. **보고**: 작업 종료 시 `01-GOVERNANCE.md`의 표준 양식(🔴/🟡/🟢)에 따라 요약 보고한다.
 
-### reasoning chunk 5분 룰
-- sub-agent 한 turn 의 reasoning + tool call 누적이 **5분 이상** 길어지면 의도적 자기 interrupt ([[feedback-reasoning-chunk-limit]]). 10분 이상이면 강제 분할.
-- 5분 경과 시점:
-  - 진행한 작업의 외부 효과 (commit/push/PR 생성) 는 완수
-  - 남은 작업은 본진 보고에 "다음 사이클 후보" 로 hand-off
-  - 짧은 마무리 보고 후 turn 종료
-- 본진은 5분 룰 어긴 sub-agent 의 결과물도 일단 수용하되, 다음 사이클부터 작업 범위 축소.
+## 4. 안티패턴 (절대 금지)
+- **시크릿 노출**: 로그나 PR 본문에 raw 토큰/키를 박는 행위.
+- **도메인 침범**: BE 에이전트가 FE 코드를, 혹은 그 반대로 수정하는 행위.
+- **hook 우회**: `git push --no-verify` 등으로 검증 프로세스를 건너뛰는 행위.
+- **자의적 해석**: 하네스에 명시된 비기능 요구사항(결정성, PII 마스킹 등)을 "효율성"을 이유로 누락하는 행위.
 
-### 메모리 보호
-- `~/.claude/projects/*/memory/` 디렉토리 **쓰기 금지**.
-- 메모리 갱신은 maestro만 담당 (race 회피, `11-multi-session-runbook.md §1-2`).
-
-### hook 우회 금지
-- `git push --no-verify`, `git commit --no-verify`, `--no-gpg-sign` 등으로 hook을 우회하지 마.
-- pre-push/pre-commit hook이 실패하면 **원인 수정** 후 재커밋. hook 우회 필요한 정당한 사유가 있으면 maestro에 보고.
-
-### 보호 영역 라벨
-- 다음 경로 변경 시 PR에 `needs-human-review` 라벨 필수:
-  - `.github/workflows/**`, `.github/CODEOWNERS`
-  - `**/db/migration/**`, `**/resources/db/**`
-  - `**/application*.yml`, `**/application*.properties`, `.env*`
-  - `backend/build.gradle*`, `backend/settings.gradle*`, `backend/gradle/**`
-  - `web/next.config.*`, `web/package.json`, **lockfile 전체**(`web/pnpm-lock.yaml`, `web/package-lock.json`, `web/yarn.lock` 등) — devDep만 추가된 lockfile-only diff도 보호 영역
-  - `Dockerfile`, `docker-compose*.yml`
-  - `LICENSE`
-- 상세: `CLAUDE.md §4 AI 작업 보호 영역`
-
-#### 보호 영역 라벨 drift 가드 (사이클 9 retro, #124)
-- `needs-human-review` 라벨은 머지 시까지 **유지**한다. 임의로 떼지 말 것.
-- `.github/workflows/auto-label.yml`이 `opened|edited|synchronize|reopened|ready_for_review|unlabeled` 이벤트마다 보호 영역을 재평가해 라벨을 재부착하며, 부착 실패 시 워크플로우 자체를 실패시켜(빨간 체크) 머지를 차단한다.
-- lockfile 변경(devDep 추가, transitive 업데이트)도 보호 영역이다. "package.json 본문은 안 건드렸으니 괜찮다"는 가정 금지.
-
-### 기획/이슈 등록
-- be/fe/rev는 **이슈 등록 금지** (maestro에 보고만). 기능/스펙 의사결정은 maestro이 한다.
-- plan은 docs/spec/ADR 작업 일환으로 이슈를 직접 등록할 수 있다.
-
-### 푸시 + ready 전환 표준 명령
-```bash
-git push
-gh pr ready <PR번호>   # draft → ready for review
-```
-
-### 라벨 자기 점검 (PR 생성 직후)
-- [ ] `type:*` 라벨 1개
-- [ ] `scope:*` 라벨 1개
-- [ ] `ai-generated` + `ai:claude` 라벨
-- [ ] 보호 영역 변경 시 `needs-human-review`
-- [ ] (해당 세션) `session:backend|frontend|review`
-
-상세: `CLAUDE.md §7-2 PR 생성 직후`.
-
-### 완료 보고 형식
-sub-agent가 maestro에 회신할 때 다음을 포함:
-- PR URL + mergeable 상태
-- 변경 한 줄 요약 (수십 줄 코드 dump 금지)
-- 품질 게이트 통과 여부
-- 보호 영역 변경 여부 + `needs-human-review` 부착 여부
-
-## 2) 역할별 추가 룰
-
-### be (mobruji-be)
-- 워크트리: `/home/mobruji/mobruji-be` (NCP Linux 호스트)
-- 작업 가능 경로: `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시)
-- 금지: `web/**`, 공유 영역(`CLAUDE.md`/`AGENTS.md`/`docs/ai-harness/**` 단 §5/§6 entity 갱신 제외)/root 설정
-- 품질 게이트 (푸시 전 필수):
-  ```bash
-  cd backend && ./gradlew checkstyleMain spotlessCheck test
-  ```
-- 포맷 위반 시: `./gradlew spotlessApply`
-- 새 엔드포인트는 **성공 케이스 E2E(RestAssured) 필수** (`07-testing-guide.md`)
-- DDD 계층 침범 금지 (Controller → Repository 직접 호출 등)
-
-### fe (mobruji-fe)
-- 워크트리: `/home/mobruji/mobruji-fe` (NCP Linux 호스트)
-- 작업 디렉토리: 거의 모든 명령은 `web/` 하위에서 실행 — `cd /home/mobruji/mobruji-fe/web` 한 번 박고 시작.
-- 작업 가능 경로: `web/**`, `docs/features/*.md`(UI 부분)
-- 금지: `backend/**`, 공유 영역, root 설정
-- 품질 게이트 (푸시 전 필수):
-  ```bash
-  cd /home/mobruji/mobruji-fe/web && npm run lint && npm run typecheck && npm test && npm run build
-  ```
-- API 호출은 `web/src/lib/api/` 한 곳에서 집중 관리
-- 환경변수 `NEXT_PUBLIC_*` / 서버 전용 명확히 구분
-
-#### node_modules / `npm install` 룰
-- `post-merge-cleanup.sh` 는 `node_modules` 를 **건드리지 않는다** (의도, `11-runbook §1` lines 138-153). 매 사이클 재설치는 wall-clock 손해.
-- 본진 prompt 에 "직전 사이클에서 web deps 변경 PR(예: #N) 머지됨" 명시가 있으면 **1회만** `cd /home/mobruji/mobruji-fe/web && npm install` 실행. 그 외 사이클은 생략.
-- `web/package.json` / lockfile (`package-lock.json` / `pnpm-lock.yaml`) 변경은 보호 영역 (`needs-human-review` 필수). devDep 추가 only 도 동일.
-- `node_modules/` 디렉토리를 commit/symlink 변경/rm 금지. 워크트리 첫 launch 시 누락이면 `npm install` 1회만.
-- **의존성 설치 금지** — `npm install` / `npm ci` / `pnpm install` / `yarn` 등 직접 실행 금지. 의존성 누락(`Cannot find module ...`) 시 maestro에 보고 + 사이클 일시 정지. `web/node_modules`는 외부 디스크 symlink로 운영될 수 있어 sub-agent install이 symlink를 깨뜨릴 위험이 있다. 상세: `11-multi-session-runbook.md §0-7 fe 워크트리 node_modules 동기화`.
-- `web/node_modules` 디렉토리 자체를 `rm`/`mv`/`ln` 으로 건드리지 마. symlink 보존이 필수.
-
-### rev (mobruji-rev)
-- 워크트리: `/home/mobruji/mobruji-rev` (NCP Linux 호스트)
-- **파일 수정 절대 금지** (`pre-push` hook으로 push 차단됨). PR 코멘트만.
-- 동작 패턴:
-  ```bash
-  gh pr list --search "is:open draft:false -label:reviewed:claude" --json number,title
-  # 각 PR마다:
-  gh pr view <N> --json title,body,labels
-  gh pr diff <N>
-  gh pr review <N> --comment --body "..."
-  gh pr edit <N> --add-label reviewed:claude
-  ```
-- QA 실행 검증 (read-only로 실행만):
-  - BE: `./gradlew test`, RestAssured E2E 분석, curl로 endpoint 검증
-  - FE: `npm run lint/typecheck/test/build`, `npm run dev` + curl SSR 응답 확인
-  - 통합: `docker compose up -d` + `./gradlew bootRun` + `npm run dev` 동시 기동 후 흐름/결정성/p95/다양성 검증
-- 발견 사항은 PR 코멘트로. 후속이 필요하면 maestro에 보고(이슈 등록은 maestro).
-
-#### E-1) rev 감사 표준 절차 (비협상)
-
-본 절은 rev 사이클 8 self-review(2026-05-21, 이슈 #104)에서 박제된 룰을 영속화한다. 16 PR 통틀어 보안 grep 0건이었고, 사이클 5~7 8연속 🔴=0 LGTM drift가 발견된 직후의 보강이다.
-
-##### E-1.1 비기능 매트릭스 grep (rev 필수)
-
-매 PR 변경분(`gh pr diff <N>`)에 대해 다음 패턴을 grep하고 **결과(0건도 명시)를 PR 코멘트에 보고**한다. "안 봤다"와 "0건"을 분간 가능하게 만드는 게 목적이다.
-
-| 카테고리 | grep 패턴 / 점검 항목 | 참조 |
-|---|---|---|
-| 보안 | `password\|secret\|token\|api[_-]?key\|PII\|sessionId\|민감` | `04-security-policy.md` |
-| 로그/관측성 | `log\.(info\|warn\|error)` — 구조화 로그 + trace ID 포함 여부 | `10-observability.md` |
-| DB | 새 마이그레이션 / DDL / `fetch.*EAGER` / N+1 의심 쿼리 | `06-domain-model.md`, `03-quality-gates.md` |
-| 의존성 | `package.json` / `build.gradle*` diff 시 신규 라이브러리 라이선스 + CVE | `02-license-agpl-3-0` ADR, `04-security-policy.md` |
-| 마이그레이션 안전성 | DDL 변경 시 rollback 가능 여부 + zero-downtime 검증 | `03-quality-gates.md` |
-
-> 보고 형식 예: `보안 grep: 0건 / 로그 grep: 2건 (log.info 2건, trace ID 미포함 — 보강 권장)`.
-
-##### E-1.2 LGTM self-guard (rev 필수)
-
-- 최근 **3 PR 연속 🔴=0**이면 본 PR 감사에 비기능 매트릭스를 **한 단계 더 깊게**(예: grep을 변경분 → 인접 파일 전체로 확장, 또는 통합 시나리오 1개 추가) 적용한다.
-- drift 가능성을 maestro에 보고한다(예: "최근 N PR 🔴=0 — drift 의심, 추가 점검 권고"). maestro이 패턴 재검토 사이클을 launch할 수 있도록 가시화한다.
-- 사이클 6 PR #74에서 LGTM 헤더 다음 EAGER fetch p95=80.9ms(3.7배) 회귀 신호를 누락한 사례가 본 룰의 근거다.
-
-##### E-1.3 누적 경고 봉인 명시 섹션
-
-PR 코멘트에 **"이전 사이클에서 예측한 패턴 N개 중 본 PR에서 봉인된 항목"** 표를 포함한다. drift 추적 가능하도록 누적 경고를 명시적으로 닫는다.
-
-| 사이클/PR | 예측 패턴 | 본 PR에서 봉인 여부 | 비고 |
-|---|---|---|---|
-| 사이클 6 #74 | EAGER fetch p95 회귀 | 봉인됨 / 미봉인 / 해당 없음 | (관찰 또는 후속 이슈 링크) |
-
-##### E-1.4 결론 헤더 폐기 (anchoring 회피)
-
-- rev 코멘트 **첫 줄**을 `🟢 LGTM` 또는 `🟢 GREEN` 같은 **결론 단정형**으로 시작 **금지**.
-- 대신 중립 헤더(`발견 사항 — 분석`)로 시작하여 **발견 → 분석 → 종합 판정** 순서로 작성한다.
-- 이유: 리뷰어/머지권자가 첫 줄에 anchoring되어 본문 회귀 신호를 놓치는 confirmation bias를 회피한다.
-- 사례: 사이클 6 PR #74에서 `🟢 LGTM` 헤더 다음에 EAGER fetch p95=80.9ms(3.7배) 회귀 신호가 누락된 적이 있다.
-
-### plan (mobruji-plan)
-- 워크트리: `/home/mobruji/mobruji-plan` (NCP Linux 호스트)
-- 작업 가능 경로: 큰 docs/spec/ADR — `docs/ai-harness/**`, `docs/features/**`, `docs/decisions/**`, `scripts/**`, `.github/**`(보호 영역 라벨 필수)
-- 금지: `backend/**`/`web/**` 구현 코드 (구현은 be/fe 담당)
-- ADR/spec 작성 시 `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md` 규약 준수
-
-## 3) maestro sub-agent launch 시 prompt 예시
-
-좋은 예시:
-```
-공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 be.
-
-이번 사이클 작업:
-- 이슈: #92 — RecommendationRequest 캐싱 도입
-- 브랜치: feat/recommendation-cache-#92 (이미 스캐폴드됨)
-- 요구사항:
-  1. RecommendationService.recommend()에 Caffeine 캐시 적용
-  2. TTL 5분, max size 1000
-  3. E2E 테스트로 cache hit 확인
-
-완료 후 PR URL + mergeable + 게이트 통과 여부 보고.
-```
-
-나쁜 예시 (공통 룰을 매번 박는다):
-```
-너는 be 세션. 워크트리 ... cd ... 메모리 절대 ... --no-verify ... (300줄)
-```
-
-## 4) sub-agent → maestro 완료 보고 표준 양식
-
-sub-agent 가 turn 종료 시 maestro 에 회신할 때 다음 구조를 권장. 본진이 발견 사항을 다음 사이클 백로그로 전환하기 쉽게 만든다.
-
-### 4-1) 필수 헤더
-- **PR URL** + draft/ready 상태 + mergeable (yes/no/UNKNOWN)
-- **변경 한 줄 요약** — 수십 줄 코드 dump 금지, 무엇을 왜 바꿨는지만
-- **품질 게이트 결과** — be: `checkstyleMain + spotlessCheck + test` 통과 여부 / fe: `lint + typecheck + test + build` / plan: 해당 없음 명시
-- **보호 영역 변경 여부** — yes 면 `needs-human-review` 부착 확인까지
-
-### 4-2) 발견 사항 분류 (선택)
-sub-agent 가 작업 중 발견한 잠재 이슈 / 후속 작업을 다음 3분류로 보고. 본진이 백로그 우선순위 매기는 비용 절감.
-
-| 분류 | 의미 | 본진 처리 |
-|---|---|---|
-| 🔴 | 시급 — 머지된 코드/spec 에 회귀/보안/결정성 위반. 본 PR 사이클 안에 해소 권고. | 다음 cycle 즉시 launch 또는 본 PR revert. |
-| 🟡 | 보강 — 작동은 하지만 컨벤션/관측성/문서 drift. 별도 PR 권고. | 백로그 등록, 다음 사이클 후보. |
-| 🟢 | 관찰 — 패턴/메타 발견. 메모리/ADR 후보. | maestro 메모리 갱신 또는 ADR 트리거. |
-
-### 4-3) "다음 사이클 후보"
-같은 도메인 (be/fe/rev/plan) 의 다음 백로그 후보 1~3개 제시. 본진 launch loop 가 idle 워크트리 빠르게 채우도록 돕는다 ([[feedback-keep-4-cycles-active]]).
-
-### 4-4) 보고 예시
-```
-PR https://github.com/.../405 — ready, mergeable yes
-변경: 12 문서에 Linux 워크트리 경로 + 5분/lock/4-cycles 룰 추가
-게이트: 해당 없음 (docs only)
-보호 영역: yes (docs/ai-harness/**) — needs-human-review 부착됨
-
-발견 사항
-- 🟡 session:plan 라벨 매핑 (auto-set-session.yml) 누락 — issue/PR 생성 시 차단됨
-- 🟢 본 PR 의 §4 보고 양식이 11-runbook §0-X 의 보고 룰과 중복 가능 — drift 점검 필요
-
-다음 사이클 후보 (plan)
-- session:plan 라벨 신설 PR (.github/workflows/ 보호 영역)
-- 01-harness-spec.md §6 ADR-0014 cross-ref 보강
-```
-
-## 5) 안티패턴 (sub-agent 가 절대 하지 말 것)
-
-| 안티패턴 | 무엇이 잘못인가 | 회피책 |
-|---|---|---|
-| **다른 워크트리 침범** | be sub-agent 가 `mobruji-fe/web/**` 를 cd / Read / Edit | prompt 첫 줄에 `cd /home/mobruji/mobruji-<role>` 박고 그 외 경로 접근 금지. 본진(`mobruji`) 워크트리도 동일하게 금지. |
-| **다른 도메인 작업** | be sub-agent 가 `web/**` 코드 / fe sub-agent 가 `backend/**` 코드 수정 | 도메인 boundary 위반 발견 시 즉시 중단, 본진에 보고. 풀스택 기능은 두 PR 로 분리. |
-| **시크릿 raw 출력** | `.env`, GitHub token, NCP API key 등을 PR body / 코멘트 / 로그에 그대로 박음 | grep 결과 mask 또는 "redacted" 표기. `04-security-policy.md` 참조. |
-| **spec 무시** | `docs/features/<slug>.md` 가 있는 기능에서 spec §3 체크박스 미확인 후 구현 | `CLAUDE.md §7-1` 자기 점검 절차 준수. 누락 시 본진 보고. |
-| **hook 우회** | `git push --no-verify` / `--no-gpg-sign` 로 pre-push/pre-commit 우회 | hook 실패 → 원인 수정 → 재커밋. 우회 필요하면 본진에 사전 보고. |
-| **본진 룰 재해석** | "더 효율적이라" 며 본진이 박은 작업 범위를 사이클 안에서 확장 | 본진 prompt 외 작업은 별 사이클 후보로 보고만. 본 사이클 안에서 처리 금지. |
-| **메모리 직접 수정** | sub-agent 가 `~/.claude/projects/*/memory/*.md` 를 write/edit | 메모리는 maestro 전담. sub-agent 는 회신 본문에 "메모리 후보" 만 적시. |
-| **워크트리 lock 위반 무시** | 같은 워크트리에서 다른 sub-agent in-progress 변경 발견했는데 계속 진행 | 즉시 본진 보고 + turn 종료. `git status` 가 예상과 다르면 무조건 멈춤. |
-
-## 6) 변경 이력
-
-- 2026-05-21 — 최초 작성 (be/fe/rev/plan 4역할, 공통 룰 추출).
-- 2026-05-21 — rev §E-1 추가: 비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 표 / 결론 헤더 폐기 (이슈 #104, PR #109).
-- 2026-05-21 — §1 보호 영역 라벨 drift 가드 추가: lockfile-only 변경도 보호 영역 명시, auto-label.yml fail-fast 동작 박제 (이슈 #124, PR #127).
-- 2026-05-23 — fe 역할에 의존성 설치 금지 룰 + `node_modules` symlink 보존 룰 추가. 사고: sub-agent `npm install --no-save` 실행으로 외부 디스크 symlink 풀림 (이슈 #187).
-- 2026-05-23 — NCP Linux 워크트리 절대경로 박제 (`/home/mobruji/...`) + §1 본진 항시 가동 / 워크트리 lock / 5분 reasoning 룰 박스 / fe `npm install` 1회 룰 / §4 sub-agent → maestro 완료 보고 표준 양식 (🔴/🟡/🟢) / §5 안티패턴 매트릭스 신설 (이슈 #405, PR TBD). 메모리 [[feedback-keep-4-cycles-active]] [[feedback-worktree-lock]] [[feedback-reasoning-chunk-limit]] [[feedback-sub-agent-launch-mandatory]] 영속화.
+---
+**업데이트 이력**: 2026-05-27 — 모듈형 하네스 볼륨(00~03) 체제로 전면 개편.

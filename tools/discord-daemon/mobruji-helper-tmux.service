@@ -1,0 +1,24 @@
+[Unit]
+Description=Mobruji Helper Agent (Claude CLI in tmux)
+After=network-online.target
+Wants=network-online.target
+# nmae 가 부팅된 후 helper 가 뜨는 것이 안전 (위임 대상이므로)
+After=mobruji-maestro.service
+
+[Service]
+Type=forking
+User=mobruji
+Group=mobruji
+WorkingDirectory=/home/mobruji/mobruji
+# Anthropic API Key 등 공유 환경변수
+EnvironmentFile=/etc/mobruji/maestro.env
+# tmux 세션 생성 및 루프 실행
+ExecStart=/usr/bin/tmux new-session -d -s helper -c /home/mobruji/mobruji '/home/mobruji/mobruji/tools/deploy/helper-agent-loop.sh'
+ExecStop=/usr/bin/tmux kill-session -t helper
+# systemd 는 tmux 프로세스만 감시하므로, 내부 루프가 죽어도 tmux 가 살아있으면 Restart 가 안 뜰 수 있음.
+# 그래서 helper-agent-loop.sh 내부에서 자체 루프를 돌림.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
