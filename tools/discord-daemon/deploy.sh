@@ -27,8 +27,11 @@
 #   4. systemctl 재시작 후 journalctl 마지막 30줄 출력 (사용자 즉시 확인).
 #   5. hook symlink ensure — `~/.mobruji/<hook>` 가 regular file 이면 backup 후 symlink
 #      로 전환 (PR #1154 helper-direct-work-guard 머지 후 수동 절차 자동화).
+#      구현: `lib/hook_symlinks.sh` 공통 라이브러리 (setup-*.sh 거울 룰, PR #1124).
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DEPLOY_DIR=${MOBRUJI_BRIDGE_DEPLOY_DIR:-/home/mobruji/mobruji-bridge}
 SERVICE=${MOBRUJI_BRIDGE_SERVICE:-mobruji-discord-bridge}
@@ -50,7 +53,7 @@ for arg in "$@"; do
       DRY_RUN=1
       ;;
     --help|-h)
-      sed -n '2,28p' "$0"
+      sed -n '2,30p' "$0"
       exit 0
       ;;
     *)
@@ -72,75 +75,11 @@ run() {
   fi
 }
 
-# hook 단일 파일 symlink ensure.
-#
-# 인자: $1 = hook 파일명 (예: helper-direct-work-guard.sh)
-#
-# 동작:
-#   - source 파일 (HOOK_SOURCE_DIR/<name>) 부재 시 skip + log (PR 머지 전 hook 호환).
-#   - link 위치 (HOOK_LINK_DIR/<name>) 가 이미 source 와 동일한 symlink → skip ("ok").
-#   - link 위치가 regular file → 같은 dir 에 backup (`.bak.<TS>`) 후 symlink 생성.
-#   - link 위치가 다른 target 의 symlink 또는 broken → unlink 후 symlink 재생성.
-#   - link 위치 부재 → symlink 신규 생성.
-#
-# DRY_RUN=1 시 실제 명령 echo 만.
-ensure_hook_symlink() {
-  local hook_name=$1
-  local source_path="$HOOK_SOURCE_DIR/$hook_name"
-  local link_path="$HOOK_LINK_DIR/$hook_name"
-
-  if [[ ! -f "$source_path" ]]; then
-    log "  $hook_name: source 부재 ($source_path) — skip."
-    return 0
-  fi
-
-  if [[ -L "$link_path" ]]; then
-    local current_target
-    current_target=$(readlink "$link_path")
-    if [[ "$current_target" == "$source_path" ]]; then
-      if [[ -e "$link_path" ]]; then
-        log "  $hook_name: 이미 올바른 symlink — skip."
-        return 0
-      else
-        log "  $hook_name: symlink 깨짐 ($current_target) — 재생성."
-      fi
-    else
-      log "  $hook_name: 다른 target ($current_target) — 재생성."
-    fi
-    run "rm -f \"$link_path\""
-    run "ln -s \"$source_path\" \"$link_path\""
-    return 0
-  fi
-
-  if [[ -e "$link_path" ]]; then
-    local backup_path
-    backup_path="${link_path}.bak.$(date +%Y%m%d%H%M%S)"
-    log "  $hook_name: regular file 감지 — $backup_path 로 backup 후 symlink 전환."
-    run "mv \"$link_path\" \"$backup_path\""
-    run "ln -s \"$source_path\" \"$link_path\""
-    return 0
-  fi
-
-  log "  $hook_name: link 부재 — symlink 신규 생성."
-  run "ln -s \"$source_path\" \"$link_path\""
-}
-
-ensure_hook_symlinks() {
-  if [[ "$HOOK_SYMLINK_ENSURE" != "1" ]]; then
-    log "HOOK_SYMLINK_ENSURE=0 — hook symlink ensure skip."
-    return 0
-  fi
-
-  if [[ ! -d "$HOOK_LINK_DIR" ]]; then
-    log "HOOK_LINK_DIR=$HOOK_LINK_DIR 부재 — hook symlink ensure skip (사용자 환경 기본 dir 없음)."
-    return 0
-  fi
-
-  log "hook symlink ensure (HOOK_SOURCE_DIR=$HOOK_SOURCE_DIR, HOOK_LINK_DIR=$HOOK_LINK_DIR)"
-  for hook_name in "${HOOK_NAMES[@]}"; do
-    ensure_hook_symlink "$hook_name"
-  done
-}
+# hook symlink ensure 공통 라이브러리 source — `log()` / `run()` / `DRY_RUN`
+# 정의 후 source 하여 라이브러리가 호출 측 헬퍼를 그대로 재사용한다.
+# 함수 본체는 `lib/hook_symlinks.sh` 단일 진실 — deploy / setup-*.sh 거울 룰 (PR #1124).
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/hook_symlinks.sh"
 
 # 1. 전용 dir 존재 + .git 디렉토리 검증
 if [[ ! -d "$DEPLOY_DIR" ]]; then
