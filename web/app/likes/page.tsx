@@ -85,14 +85,29 @@ type LikesContentProps = {
 };
 
 function LikesContent({ songs }: LikesContentProps) {
+  /*
+   * ADR-0018 단계 4 PR 7 — /likes 페이지 토큰 swap (#1163 /recommend 패턴 확장).
+   *
+   * swap 한 요소 (first-paint 핵심):
+   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
+   *  2) h1 "좋아한 곡" : text-zinc-900 dark:text-zinc-50 → --text-primary
+   *  3) 카운트 라이브 p : text-zinc-600 dark:text-zinc-400 → --text-secondary
+   *
+   * 미swap (후속 PR 양보 — #1163 정책 일치):
+   *  - "Likes" caption (text-zinc-500 dark:text-zinc-400) — caption 토큰 매핑 미정
+   *  - SongCard / SongDetailModal — 별도 컴포넌트 (PR 6 #1160 머지 후 진행)
+   *
+   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
+   * `dark:` prefix 제거.
+   */
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             Likes
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             좋아한 곡
           </h1>
           {/*
@@ -107,7 +122,7 @@ function LikesContent({ songs }: LikesContentProps) {
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            className="text-sm text-zinc-600 dark:text-zinc-400"
+            className="text-sm text-[var(--text-secondary)]"
           >
             총 {songs.length}곡을 좋아했어요.
           </p>
@@ -157,7 +172,7 @@ function LoadingLikes() {
     <main
       role="status"
       aria-label="좋아한 곡 불러오는 중"
-      className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950"
+      className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]"
     >
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
         좋아한 곡을 불러오는 중…
@@ -168,24 +183,24 @@ function LoadingLikes() {
 
 function EmptyLikes() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 text-center dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)] text-center">
       <div className="w-full max-w-md flex flex-col items-center gap-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           아직 좋아한 곡이 없어요
         </h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           추천 결과나 곡 검색에서 ❤️ 를 눌러 좋아한 곡을 모아보세요.
         </p>
         <div className="flex flex-col gap-2 w-full">
           <Link
             href="/recommend"
-            className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--brand-500)] px-5 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
           >
             추천 받으러 가기
           </Link>
           <Link
             href="/songs"
-            className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 px-5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-[var(--border)] px-5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]"
           >
             곡 검색하기
           </Link>
