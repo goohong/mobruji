@@ -1,12 +1,12 @@
 ---
 feature: helper writing marker timing fix
 slug: helper-writing-marker-timing-fix
-status: approved
+status: implementing
 owner: plan
 scope: infra
 related_issues: [1128]
-related_prs: [1139]
-last_reviewed: 2026-05-26
+related_prs: [1139, 1143]
+last_reviewed: 2026-05-27
 ---
 
 # helper writing marker timing fix

@@ -1,12 +1,12 @@
 ---
 feature: helper-direct-work-guard sub-agent context 보강
 slug: helper-direct-work-guard-subagent-context
-status: draft
+status: implementing
 owner: @mobruji-maestro
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-26
+related_prs: [1146, 1154]
+last_reviewed: 2026-05-27
 ---
 
 # helper-direct-work-guard hook sub-agent context 보강
