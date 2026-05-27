@@ -86,9 +86,9 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
         <div
           role="alert"
           aria-live="assertive"
-          className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+          className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4"
         >
-          <p className="text-sm text-red-700 dark:text-red-200">
+          <p className="text-sm text-[var(--danger-fg-strong)]">
             곡 정보를 불러오지 못했습니다.{" "}
             {query.error instanceof ApiError
               ? `${query.error.status}: ${query.error.message}`
@@ -96,7 +96,7 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
           </p>
           <Link
             href="/songs"
-            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600"
+            className="self-start rounded-full bg-[var(--danger-cta-bg)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--danger-cta-bg-hover)]"
           >
             검색으로 돌아가기
           </Link>

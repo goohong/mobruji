@@ -400,7 +400,7 @@ function PermissionStep({
         <div className="flex flex-col gap-2">
           <p
             role="alert"
-            className="text-sm text-red-600 dark:text-red-400"
+            className="text-sm text-[var(--danger-fg-soft)]"
           >
             {permissionError}
           </p>
@@ -599,11 +599,11 @@ function ResultStep({
       />
 
       {validationError ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{validationError}</p>
+        <p className="text-sm text-[var(--danger-fg-soft)]">{validationError}</p>
       ) : null}
 
       {submitError ? (
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <p className="text-sm text-[var(--danger-fg-soft)]">
           저장에 실패했습니다. {submitError}
         </p>
       ) : null}

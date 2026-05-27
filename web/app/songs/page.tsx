@@ -381,9 +381,9 @@ function SearchResult({
       <div
         role="alert"
         aria-live="assertive"
-        className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+        className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4"
       >
-        <p className="text-sm text-red-700 dark:text-red-200">
+        <p className="text-sm text-[var(--danger-fg-strong)]">
           검색에 실패했습니다.{" "}
           {error instanceof ApiError
             ? `${error.status}: ${error.message}`

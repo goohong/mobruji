@@ -113,7 +113,7 @@ export default function VoiceRangePage() {
    *
    * 미swap (후속 PR 양보):
    *  - NoteSelect 내부 border / focus 색 (스타일 변경 없이 토큰 매핑 부재)
-   *  - role="alert" 에러 텍스트의 text-red-600 dark:text-red-400 → --danger 토큰 매핑 후속.
+   *  - (resolved #1044 PR 9) role="alert" 에러 텍스트의 text-red-600 dark:text-red-400 → --danger-fg-soft 토큰 swap.
    *  - <Button /> 컴포넌트 — 별도 컴포넌트라 본 페이지 범위 밖.
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
@@ -209,7 +209,7 @@ export default function VoiceRangePage() {
               <p
                 id={VALIDATION_ERROR_ID}
                 role="alert"
-                className="text-sm text-red-600 dark:text-red-400"
+                className="text-sm text-[var(--danger-fg-soft)]"
               >
                 {validationError}
               </p>
@@ -219,7 +219,7 @@ export default function VoiceRangePage() {
               <p
                 id={SUBMIT_ERROR_ID}
                 role="alert"
-                className="text-sm text-red-600 dark:text-red-400"
+                className="text-sm text-[var(--danger-fg-soft)]"
               >
                 저장에 실패했습니다. {submitError}
               </p>

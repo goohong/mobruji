@@ -45,7 +45,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const baseClasses =
     "h-12 w-full rounded-2xl border bg-white px-4 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500";
   const stateClasses = error
-    ? "border-red-400 focus:border-red-500 focus:ring-red-200 dark:border-red-700 dark:focus:border-red-500 dark:focus:ring-red-900"
+    ? "border-[var(--danger-border)] focus:border-[var(--danger-500)] focus:ring-[var(--danger-border)]"
     : "border-zinc-200 focus:border-zinc-400 focus:ring-zinc-300 dark:border-zinc-800 dark:focus:border-zinc-600 dark:focus:ring-zinc-700";
   const merged = [baseClasses, stateClasses, className ?? ""]
     .filter((v) => v.length > 0)
@@ -84,7 +84,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {error ? (
         <p
           id={errorId}
-          className="text-sm text-red-600 dark:text-red-400"
+          className="text-sm text-[var(--danger-fg-soft)]"
         >
           {error}
         </p>
