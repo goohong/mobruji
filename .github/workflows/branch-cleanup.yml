@@ -1,0 +1,139 @@
+name: branch-cleanup
+
+# tools/branch-cleanup/sweep.sh 를 GitHub Actions 에서 수동 trigger 로 실행한다.
+#
+# 배경 (이슈 #1127, 2026-05-26 사용자 brief):
+#   remote 446 + local 419 누적. PR 머지 후 head branch 가 자동 삭제 안 됐고,
+#   abandon 된 작업 브랜치도 누적. sweep.sh (PR #1128 머지) 로 dry-run 분류 +
+#   --apply 일괄 삭제 가능. 본 workflow 는 그 진입점.
+#
+# 트리거:
+#   - workflow_dispatch (manual only) — cron 사용 안 함. 사용자가 결과 확인 후
+#     `--apply` 다시 trigger 하는 2-step 흐름.
+#
+# 입력:
+#   - apply        (bool, default false) — false=dry-run, true=실 삭제
+#   - merged_days  (int,  default 30)    — PR 머지 후 N일 경과 한 head branch 대상
+#   - stale_days   (int,  default 60)    — open PR 없는 branch + last commit N일+
+#
+# 동작:
+#   - sweep.sh 호출 (`--yes` 자동 부여 — CI 는 interactive 불가)
+#   - sweep-report-<ts>.txt 산출물 artifact upload (30일 보관)
+#   - GitHub Actions summary 에 통계 + sample 표시
+#
+# 안전망:
+#   - default dry-run. apply=true 명시 시에만 실 삭제.
+#   - apply=true 진입 시 workflow 시작 로그에 명시.
+#   - sweep.sh 자체 whitelist (main / develop / HEAD / 현재 checkout) 보존.
+#
+# 보호 영역:
+#   - 본 workflow 는 `.github/workflows/**` 보호 영역. 신설 PR 은
+#     `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: '실 삭제 모드 (false=dry-run 분류만, true=remote/local/worktree 삭제)'
+        type: boolean
+        default: false
+      merged_days:
+        description: 'PR 머지 후 N일 경과 한 head branch 대상 (default 30)'
+        type: string
+        default: '30'
+      stale_days:
+        description: 'open PR 없는 branch + last commit N일+ (default 60)'
+        type: string
+        default: '60'
+
+permissions:
+  contents: write          # remote branch 삭제 위해 필요
+  pull-requests: read      # gh pr list 조회
+
+jobs:
+  sweep:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (full history for branch metadata)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all remote branches
+        run: |
+          git fetch --all --prune
+          git remote prune origin
+
+      - name: Run sweep.sh
+        id: sweep
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ inputs.apply }}
+          MERGED_DAYS: ${{ inputs.merged_days }}
+          STALE_DAYS: ${{ inputs.stale_days }}
+        run: |
+          set -euo pipefail
+          echo "::group::sweep parameters"
+          echo "apply=${APPLY}"
+          echo "merged_days=${MERGED_DAYS}"
+          echo "stale_days=${STALE_DAYS}"
+          echo "::endgroup::"
+
+          ARGS=(--merged-days "${MERGED_DAYS}" --stale-days "${STALE_DAYS}" --yes)
+          if [[ "${APPLY}" == "true" ]]; then
+            ARGS+=(--apply)
+            echo "::warning::APPLY mode — branches/worktrees will be deleted."
+          else
+            echo "::notice::DRY-RUN mode — no deletion."
+          fi
+
+          bash tools/branch-cleanup/sweep.sh "${ARGS[@]}" 2>&1 | tee sweep-output.log
+
+          # report 파일 경로 잡기 (sweep.sh 가 REPO_ROOT 에 생성)
+          REPORT_PATH="$(ls -1t sweep-report-*.txt 2>/dev/null | head -1 || true)"
+          if [[ -n "${REPORT_PATH}" ]]; then
+            echo "report_path=${REPORT_PATH}" >> "$GITHUB_OUTPUT"
+            echo "report_path=${REPORT_PATH}"
+          else
+            echo "::warning::sweep-report file not found"
+          fi
+
+      - name: Upload sweep report
+        if: steps.sweep.outputs.report_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-report
+          path: |
+            ${{ steps.sweep.outputs.report_path }}
+            sweep-output.log
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        env:
+          APPLY: ${{ inputs.apply }}
+          MERGED_DAYS: ${{ inputs.merged_days }}
+          STALE_DAYS: ${{ inputs.stale_days }}
+          REPORT_PATH: ${{ steps.sweep.outputs.report_path }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Branch Cleanup Summary"
+            echo ""
+            echo "- mode: \`${APPLY}\` (false=dry-run, true=apply)"
+            echo "- merged_days: \`${MERGED_DAYS}\`"
+            echo "- stale_days: \`${STALE_DAYS}\`"
+            echo ""
+            if [[ -n "${REPORT_PATH:-}" && -f "${REPORT_PATH}" ]]; then
+              echo "### Report header"
+              echo ""
+              echo '```'
+              head -20 "${REPORT_PATH}"
+              echo '```'
+              echo ""
+              echo "전체 report 는 artifact \`sweep-report\` 다운로드."
+            else
+              echo "_report 파일이 생성되지 않았습니다._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
