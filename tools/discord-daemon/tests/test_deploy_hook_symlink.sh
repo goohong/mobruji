@@ -24,8 +24,19 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_SH="$REPO_DIR/deploy.sh"
+LIB_PATH="$REPO_DIR/lib/hook_symlinks.sh"
 if [[ ! -f "$DEPLOY_SH" ]]; then
   printf '[FAIL] deploy.sh 부재: %s\n' "$DEPLOY_SH"
+  exit 1
+fi
+if [[ ! -f "$LIB_PATH" ]]; then
+  printf '[FAIL] lib/hook_symlinks.sh 부재: %s\n' "$LIB_PATH"
+  exit 1
+fi
+
+# deploy.sh 가 lib/hook_symlinks.sh 를 source 하는지 회귀 가드.
+if ! grep -q "source \"\$SCRIPT_DIR/lib/hook_symlinks.sh\"" "$DEPLOY_SH"; then
+  printf '[FAIL] deploy.sh 가 lib/hook_symlinks.sh 를 source 하지 않습니다 (PR #1124 lib 추출 회귀).\n'
   exit 1
 fi
 
@@ -40,28 +51,23 @@ _setup_tmpdir() {
   echo "$tmpdir"
 }
 
-# deploy.sh 에서 ensure_hook_symlink + ensure_hook_symlinks 함수 정의만 추출.
-# git/systemctl main flow 는 source 하지 않음 (사이드 이펙트 회피).
-ENSURE_FN_BODY=$(sed -n '/^ensure_hook_symlink()/,/^}$/p' "$DEPLOY_SH")
-ENSURE_ALL_FN_BODY=$(sed -n '/^ensure_hook_symlinks()/,/^}$/p' "$DEPLOY_SH")
-if [[ -z "$ENSURE_FN_BODY" ]] || [[ -z "$ENSURE_ALL_FN_BODY" ]]; then
-  printf '[FAIL] deploy.sh 에서 ensure_hook_symlink(s) 함수 추출 실패\n'
-  exit 1
-fi
+# 함수 본체는 lib/hook_symlinks.sh 단일 진실 (PR #1124).
+# deploy.sh main flow 의 git/systemctl 사이드 이펙트는 source 하지 않음.
 
 _invoke_ensure() {
   local tmpdir=$1
   local hook=$2
+  LIB_PATH="$LIB_PATH" \
   HOOK_SOURCE_DIR="$tmpdir/source" \
   HOOK_LINK_DIR="$tmpdir/link" \
   DRY_RUN=0 \
-  FN_BODY="$ENSURE_FN_BODY" \
   HOOK_NAME_ARG="$hook" \
   bash -c '
     set -euo pipefail
     log() { printf "[deploy] %s\n" "$*"; }
     run() { eval "$@"; }
-    eval "$FN_BODY"
+    # shellcheck disable=SC1090
+    source "$LIB_PATH"
     ensure_hook_symlink "$HOOK_NAME_ARG"
   '
 }
@@ -69,19 +75,18 @@ _invoke_ensure() {
 _invoke_ensure_all() {
   local tmpdir=$1
   local hook_ensure=${2:-1}
+  LIB_PATH="$LIB_PATH" \
   HOOK_SOURCE_DIR="$tmpdir/source" \
   HOOK_LINK_DIR="$tmpdir/link" \
   HOOK_SYMLINK_ENSURE="$hook_ensure" \
   DRY_RUN=0 \
-  FN_BODY="$ENSURE_FN_BODY" \
-  FN_ALL_BODY="$ENSURE_ALL_FN_BODY" \
   bash -c '
     set -uo pipefail
     HOOK_NAMES=(hook-a.sh hook-b.sh)
     log() { printf "[deploy] %s\n" "$*"; }
     run() { eval "$@"; }
-    eval "$FN_BODY"
-    eval "$FN_ALL_BODY"
+    # shellcheck disable=SC1090
+    source "$LIB_PATH"
     ensure_hook_symlinks
   '
 }
