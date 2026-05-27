@@ -46,9 +46,29 @@
   --warning-50: #fffbeb;
   --warning-500: #f59e0b;
   --danger-50: #fef2f2;
-  --danger-500: #ef4444;
+  --danger-500: #ef4444; /* red-500 — alert 텍스트 (text-red-600 light 매핑) */
+  --danger-600: #dc2626; /* red-600 — alert CTA / hover base */
+  --danger-700: #b91c1c; /* red-700 — alert 박스 본문 텍스트 (text-red-700 매핑) */
   --info-50: #eff6ff;
   --info-500: #3b82f6;
+
+  /*
+   * Danger 의미 토큰 (#1044 단계 4 PR 9) — alert 박스용 의미 alias.
+   *
+   * 기존 hardcode:
+   *   border-red-200 bg-red-50 + dark:border-red-900 dark:bg-red-950
+   *   text-red-700 + dark:text-red-200
+   *   text-red-600 + dark:text-red-400  (간단 inline 알림 텍스트)
+   *   bg-red-600 hover:bg-red-700 (alert 박스 CTA 버튼)
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 (사용처는 `dark:` prefix 제거).
+   */
+  --danger-bg: var(--danger-50); /* alert 박스 배경 (light) */
+  --danger-border: #fecaca; /* red-200 — alert 박스 border (light) */
+  --danger-fg-strong: var(--danger-700); /* alert 박스 본문 텍스트 (light) */
+  --danger-fg-soft: var(--danger-600); /* inline 알림 텍스트 (light, text-red-600) */
+  --danger-cta-bg: var(--danger-600); /* alert CTA 배경 */
+  --danger-cta-bg-hover: #b91c1c; /* red-700 — alert CTA hover */
 
   /* Neutral — light mode default (zinc 표준화) */
   --bg-base: #ffffff;
@@ -78,6 +98,14 @@
   --text-secondary: #d4d4d8; /* zinc-300 */
   --text-tertiary: #71717a; /* zinc-500 */
   --text-caption: #a1a1aa; /* zinc-400 */
+
+  /* Danger 의미 토큰 dark swap (alert 박스 — dark:bg-red-950 / dark:border-red-900 / dark:text-red-200 / dark:text-red-400 매핑) */
+  --danger-bg: #450a0a; /* red-950 */
+  --danger-border: #7f1d1d; /* red-900 */
+  --danger-fg-strong: #fecaca; /* red-200 — alert 박스 본문 (dark:text-red-200) */
+  --danger-fg-soft: #f87171; /* red-400 — inline 알림 (dark:text-red-400) */
+  --danger-cta-bg: #ef4444; /* red-500 — alert CTA dark */
+  --danger-cta-bg-hover: #dc2626; /* red-600 — alert CTA hover dark */
 }
 
 /* ───────── 2) Typography token ───────── */

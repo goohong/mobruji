@@ -36,6 +36,47 @@ describe("design tokens (ADR-0018)", () => {
     }
   });
 
+  /*
+   * #1044 단계 4 PR 9 — danger 의미 토큰 (alert 박스 swap) 회귀 가드.
+   *
+   * 사용처 (recommend / songs / voice-range / Input.tsx) 의 `text-red` /
+   * `bg-red` / `border-red` 가 본 토큰 6종 (bg/border/fg-strong/fg-soft/cta-bg/
+   * cta-bg-hover) 으로 일괄 swap. 토큰 정의가 누락되면 빌드 후 alert 박스가
+   * unset 으로 paint → 본 테스트가 사전 차단.
+   *
+   * dark mode swap 도 필수 — 사용처에서 `dark:` prefix 제거했으므로
+   * tokens.css 의 `:where(html.dark)` 안에 같은 토큰들이 재정의돼야 한다.
+   */
+  it("danger 의미 토큰 (alert 박스) light + dark 정의 + 600/700 scale", () => {
+    // scale 확장 — text-red-700 / bg-red-600 hardcode 매핑용.
+    expect(tokens).toMatch(/--danger-600:/);
+    expect(tokens).toMatch(/--danger-700:/);
+
+    const dangerSemanticTokens = [
+      "--danger-bg",
+      "--danger-border",
+      "--danger-fg-strong",
+      "--danger-fg-soft",
+      "--danger-cta-bg",
+      "--danger-cta-bg-hover",
+    ];
+    for (const token of dangerSemanticTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+
+    // dark mode swap — 사용처에서 `dark:` prefix 제거했으므로 토큰 자체가 swap 책임.
+    // tokens.css 의 dark mode block 은 2개 (color + shadow) 이상 — `--danger-bg`
+    // / `--danger-border` / `--danger-fg-*` 가 그 중 color block 안에 있어야 함.
+    const allDarkBlocks = [
+      ...tokens.matchAll(/:where\(html\.dark\)\s*{([\s\S]*?)}/g),
+    ].map((m) => m[1]);
+    expect(allDarkBlocks.length).toBeGreaterThanOrEqual(1);
+    const allDarkContent = allDarkBlocks.join("\n");
+    for (const token of dangerSemanticTokens) {
+      expect(allDarkContent).toMatch(new RegExp(`${token}:`));
+    }
+  });
+
   it("neutral token (bg/border/text) 가 light + dark 모두 정의된다", () => {
     const requiredTokens = [
       "--bg-base",

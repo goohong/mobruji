@@ -234,7 +234,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
    *  2) h1 : text-zinc-900 dark:text-zinc-50 → --text-primary
    *  3) "내 음역대" 부제 p : text-zinc-600 dark:text-zinc-400 → --text-secondary
    *  4) header Link 2개 (마이크 다시 측정 / 음역대 다시 입력) : zinc text → tokens
-   *  5) error 박스 (red bg + button) — danger 토큰 미정 → red 유지 (#1150 미swap 정책)
+   *  5) error 박스 (red bg + button) → --danger-* 토큰 swap (#1044 PR 9 적용)
    *  6) 빈 결과 / hasNextPage=false fallback 카드 (2건) : rounded-2xl ring-zinc-200
    *     bg-white dark:* → tokens (--radius-lg / --bg-base / --border)
    *  7) fallback CTA Link (2건) : bg-zinc-900 dark:bg-zinc-50 → --brand-500/600
@@ -242,7 +242,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
    *
    * 미swap (후속 PR 양보):
    *  - SourceMethodBadge 내부 (zinc / emerald) — 자체 함수 컴포넌트, 별도 토큰 그룹
-   *  - error 박스 (text-red / bg-red) — danger 토큰 매핑 미정 (#1150 후속 양보 항목)
+   *  - (resolved #1044 PR 9) error 박스 (text-red / bg-red) → --danger-bg / --danger-border / --danger-fg-strong / --danger-cta-* 토큰 swap.
    *  - SongCard / SongCardSkeleton — 별도 컴포넌트 (PR 6 #1160 진행 중)
    *
    * 본 PR 8 (#1044 단계 4 PR 8) 에서 추가:
@@ -448,8 +448,8 @@ function RecommendationFeed({
 
   if (error) {
     return (
-      <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
-        <p className="text-sm text-red-700 dark:text-red-200">
+      <div className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4">
+        <p className="text-sm text-[var(--danger-fg-strong)]">
           추천을 불러오지 못했습니다.{" "}
           {error instanceof ApiError
             ? `${error.status}: ${error.message}`
@@ -458,7 +458,7 @@ function RecommendationFeed({
         <button
           type="button"
           onClick={() => refetch()}
-          className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700"
+          className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-[var(--danger-cta-bg)] px-4 text-sm font-medium text-white hover:bg-[var(--danger-cta-bg-hover)]"
         >
           다시 시도
         </button>
