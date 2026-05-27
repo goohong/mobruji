@@ -144,21 +144,21 @@ export function SongCard(props: SongCardProps) {
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {item ? (
-            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            <p className="text-xs font-medium text-[var(--text-tertiary)]">
               #{item.rankPosition}
             </p>
           ) : null}
-          <h2 className="truncate text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          <h2 className="truncate text-lg font-semibold text-[var(--text-primary)]">
             {song.title}
           </h2>
-          <p className="truncate text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="truncate text-sm text-[var(--text-secondary)]">
             {song.artist}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 text-right">
           {difficulty ? <DifficultyBadge difficulty={difficulty} /> : null}
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">키</span>
-          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+          <span className="text-xs text-[var(--text-tertiary)]">키</span>
+          <span className="text-sm font-medium text-[var(--text-primary)]">
             {keyLabel}
           </span>
         </div>
@@ -169,12 +169,12 @@ export function SongCard(props: SongCardProps) {
         <div className="flex items-baseline gap-3">
           {highestNoteName ? (
             <div className="flex items-baseline gap-1.5">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="text-xs text-[var(--text-tertiary)]">
                 최고음
               </span>
               <span
                 aria-label={`최고음 ${highestNoteName}`}
-                className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+                className="text-base font-semibold text-[var(--text-primary)]"
               >
                 {highestNoteName}
               </span>
@@ -182,10 +182,10 @@ export function SongCard(props: SongCardProps) {
           ) : null}
           {lowestNoteName ? (
             <div className="flex items-baseline gap-1.5">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="text-xs text-[var(--text-tertiary)]">
                 최저음
               </span>
-              <span className="text-xs text-zinc-700 dark:text-zinc-300">
+              <span className="text-xs text-[var(--text-secondary)]">
                 {lowestNoteName}
               </span>
             </div>
@@ -202,13 +202,13 @@ export function SongCard(props: SongCardProps) {
            * 피드백의 핵심.
            */}
           {item && !isModalMode ? (
-            <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="truncate text-xs text-[var(--text-tertiary)]">
               {item.matchReason}
             </span>
           ) : null}
         </div>
         {item && !isModalMode ? (
-          <span className="shrink-0 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+          <span className="shrink-0 font-mono text-xs text-[var(--text-secondary)]">
             score {item.score.toFixed(2)}
           </span>
         ) : null}
@@ -244,17 +244,17 @@ export function SongCard(props: SongCardProps) {
   // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
   if (isModalMode) {
     return (
-      <li className="group flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
+      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
         <button
           type="button"
           onClick={onShowDetail}
           aria-label={`${song.title} 상세 보기`}
           aria-haspopup="dialog"
-          className="flex flex-col gap-3 rounded-2xl p-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
         >
           {body}
         </button>
-        <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        <div className="flex flex-col gap-2 border-t border-[var(--border)] px-[var(--card-padding)] py-3">
           {feedbackPanel}
         </div>
       </li>
@@ -266,15 +266,15 @@ export function SongCard(props: SongCardProps) {
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
-      <li className="group flex flex-col rounded-2xl bg-white ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
+      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500">
         <Link
           href={href}
           aria-label={`${song.title} 상세 보기`}
-          className="flex flex-col gap-3 rounded-2xl p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
         >
           {body}
         </Link>
-        <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        <div className="flex flex-col gap-2 border-t border-[var(--border)] px-[var(--card-padding)] py-3">
           {breakdownPanel}
           {feedbackPanel}
         </div>
@@ -285,7 +285,7 @@ export function SongCard(props: SongCardProps) {
   return (
     <li
       tabIndex={0}
-      className="group flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 transition hover:ring-zinc-300 hover:shadow-md focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500"
+      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:hover:ring-zinc-600 dark:focus-within:ring-zinc-500"
     >
       {body}
       {breakdownPanel}
@@ -506,7 +506,7 @@ function MatchReasonExpander({
       {expanded ? (
         <div
           id={panelId}
-          className="flex flex-col gap-2 rounded-xl bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+          className="flex flex-col gap-2 rounded-xl bg-[var(--bg-subtle)] p-3 text-xs text-[var(--text-secondary)]"
         >
           <dl className="flex flex-col gap-1.5">
             {breakdown.map((entry) => (
@@ -514,7 +514,7 @@ function MatchReasonExpander({
             ))}
           </dl>
           {hasEstimated ? (
-            <p className="text-[11px] text-zinc-500 dark:text-zinc-500">
+            <p className="text-[11px] text-[var(--text-tertiary)]">
               ※ 점수 분해는 클라이언트 추정값입니다. 백엔드 산출값이 추가되면 자동으로 교체됩니다.
             </p>
           ) : null}
@@ -533,16 +533,16 @@ function BreakdownRow({ entry }: BreakdownRowProps) {
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="flex min-w-0 flex-col">
-        <span className="font-medium text-zinc-800 dark:text-zinc-200">
+        <span className="font-medium text-[var(--text-primary)]">
           {entry.label}
         </span>
-        <span className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+        <span className="truncate text-[11px] text-[var(--text-tertiary)]">
           {entry.detail}
         </span>
       </dt>
       <dd
         aria-label={`${entry.label} 점수 ${percent}%`}
-        className="shrink-0 font-mono text-xs tabular-nums text-zinc-700 dark:text-zinc-300"
+        className="shrink-0 font-mono text-xs tabular-nums text-[var(--text-secondary)]"
       >
         {percent}%
       </dd>
@@ -645,27 +645,27 @@ export function formatMusicalKey(key: string): string {
  */
 export function SongCardSkeleton() {
   return (
-    <li className="flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
+    <li className="flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)]">
       <div className="flex items-start justify-between gap-4">
         {/* closes #322 — 앨범 커버 thumbnail 자리 (실제 카드와 동일한 56px). */}
-        <div className="h-14 w-14 shrink-0 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-14 w-14 shrink-0 animate-pulse rounded-xl bg-[var(--bg-muted)]" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div className="h-3 w-8 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-          <div className="h-5 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-          <div className="h-4 w-1/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+          <div className="h-3 w-8 animate-pulse rounded bg-[var(--bg-muted)]" />
+          <div className="h-5 w-2/3 animate-pulse rounded bg-[var(--bg-muted)]" />
+          <div className="h-4 w-1/3 animate-pulse rounded bg-[var(--bg-muted)]" />
         </div>
         <div className="flex flex-col items-end gap-2">
-          <div className="h-5 w-14 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
-          <div className="h-3 w-10 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+          <div className="h-5 w-14 animate-pulse rounded-full bg-[var(--bg-muted)]" />
+          <div className="h-3 w-10 animate-pulse rounded bg-[var(--bg-muted)]" />
         </div>
       </div>
       <div className="flex items-baseline gap-3">
-        <div className="h-4 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="h-3 w-14 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-4 w-20 animate-pulse rounded bg-[var(--bg-muted)]" />
+        <div className="h-3 w-14 animate-pulse rounded bg-[var(--bg-muted)]" />
       </div>
       <div className="flex items-center justify-between">
-        <div className="h-4 w-1/2 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="h-3 w-12 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-muted)]" />
+        <div className="h-3 w-12 animate-pulse rounded bg-[var(--bg-muted)]" />
       </div>
     </li>
   );
