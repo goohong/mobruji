@@ -70,3 +70,44 @@ ADR 본문이 아닌 **부속 운영 가이드**(예: 1회성 마이그레이션
 `_template.md`를 복사해서 시작. 길이는 **50줄 이내** 권장.
 
 섹션 순서 고정: Context → Decision → Consequences → Alternatives → References.
+
+## 현재 목록
+
+> **자동 갱신 의무 (2026-05-27 신설)**: 신규 ADR 추가 / status 전이 / superseded 표기 PR 은 같은 diff 안에서 본 표 행도 함께 갱신한다. drift 발견 시 plan 사이클이 docs(infra) sync PR 로 보강.
+>
+> 일련번호 오름차순. status = ADR 본문 frontmatter / Status 라인과 1:1.
+
+| ADR | 제목 |
+|---|---|
+| [0001](0001-tech-stack-and-monorepo.md) | 기술 스택 및 모노레포 구조 채택 |
+| [0002](0002-license-agpl-3-0.md) | 라이선스를 AGPL-3.0-or-later로 적용 |
+| [0003](0003-test-db-strategy.md) | 테스트 DB 전략 — H2 (단위/슬라이스) + MySQL (통합/E2E) |
+| [0004](0004-frontend-state-and-fetching.md) | 프론트엔드 상태 관리 및 데이터 페칭 스택 |
+| [0005](0005-package-structure.md) | 패키지 구조 — BoundedContext × 4계층 (Hexagonal lite) |
+| [0006](0006-audio-source-youtube.md) | 자체 곡 분석 파이프라인의 audio 출처 — YouTube audio extract |
+| [0007](0007-vocal-difficulty-classification.md) | 곡 난이도 분류 — Difficulty enum (EASY / NORMAL / HARD) |
+| [0008](0008-archunit-layer-verification.md) | ArchUnit 으로 계층 의존 자동 검증 (ADR-0005 §A-7 가드) |
+| [0009](0009-schema-migration-tool.md) | Schema 마이그레이션 도구 = Flyway |
+| [0010](0010-self-analysis-pipeline-stack.md) | 자체 곡 분석 파이프라인 실행 stack — Python worker + Spring ProcessBuilder |
+| [0011](0011-session-bound-auth-policy.md) | Session-Bound Endpoint 인증 정책 |
+| [0012](0012-observability-stack.md) | 운영 관측성 수집 스택 — Grafana Cloud Free + Prometheus remote_write |
+| [0013](0013-sessionid-ttl-rotation.md) | 익명 sessionId TTL · 회전 · 데이터 라이프사이클 정책 |
+| [0014](0014-multi-agent-worktree-orchestration.md) | 4 sub-agent 워크트리 + maestro 오케스트레이션 패턴 |
+| [0015](0015-hosting-stack.md) | 운영 호스팅 스택 — NCP maestro 전용 VM (c2-g3a) + NCP 별 VM (백/프론트 기생) |
+| [0016](0016-maestro-context-percent-estimation.md) | maestro context% 추정 방식 — `/context` slash + bot.py 5분 inject hybrid |
+| [0017](0017-spring-boot-eol-strategy.md) | Spring Boot 3.5 EOL 대응 — 3.6 라인 채택 |
+| [0018](0018-design-tokens.md) | Design tokens — color / typography / spacing / radius / shadow / motion |
+| [0019](0019-event-driven-architecture-v2.md) | 작업 체계 event-driven 아키텍처 v2 — agent 망각 의존 폐기 |
+| [0021](0021-worktree-count-evaluation.md) | 워크트리 개수 평가 — 4 워크트리 status quo 재확인 |
+| [0022](0022-work-cycle-simplification-retrospective.md) | work-cycle-simplification 회고 (stub — Phase 3 완료 후 본문) |
+| [0023](0023-workflow-main-sync.md) | workflow / unit file main 미동기화 사고 박제 + sync 전략 |
+
+> 번호 0020 은 비어 있음 (스킵). 0021 이 직후 번호.
+
+### Archive
+
+완료/대체된 부속 가이드.
+
+| 파일 | 상태 |
+|---|---|
+| [0005-package-structure-migration](archive/0005-package-structure-migration.md) | ADR-0005 부속 마이그레이션 가이드 (완료 후 archive) |
