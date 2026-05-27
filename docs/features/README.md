@@ -136,6 +136,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [release-fork-watchdog](release-fork-watchdog.md) | release fork watchdog (scheduled GHA + 임계치 Discord push) | draft | 2026-05-27 |
 | [rev-e2e-3-stages](rev-e2e-3-stages.md) | rev 3단계 e2e 자율 QA | draft | (frontmatter legacy) |
 | [rev-qa-protocol](rev-qa-protocol.md) | rev 세션 QA 실행 검증 프로토콜 | implementing | 2026-05-24 |
+| [spec-status-check-legacy-key-fail](spec-status-check-legacy-key-fail.md) | spec-status-check legacy key hard fail | draft | 2026-05-27 |
 | [systemd-restart-always](systemd-restart-always.md) | mobruji-helper.service Type=simple + Restart=always | draft | 2026-05-26 |
 | [user-decisions-pending-2026-05-26](user-decisions-pending-2026-05-26.md) | User Decisions Pending — 2026-05-26 권고안 | draft | 2026-05-26 |
 | [v03-roadmap](v03-roadmap.md) | v0.3 P1~P3 로드맵 (백로그 우선순위 정리) | draft | 2026-05-24 |
