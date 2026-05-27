@@ -89,7 +89,7 @@ function LikesContent({ songs }: LikesContentProps) {
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Likes
           </p>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -159,7 +159,7 @@ function LoadingLikes() {
       aria-label="좋아한 곡 불러오는 중"
       className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950"
     >
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="text-sm text-[var(--text-caption)]">
         좋아한 곡을 불러오는 중…
       </p>
     </main>

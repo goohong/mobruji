@@ -78,7 +78,7 @@ export function SongDetailContent(props: SongDetailContentProps) {
         <AlbumCover song={song} />
         <div className="flex flex-col gap-1">
           {item ? (
-            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            <p className="text-xs font-medium text-[var(--text-caption)]">
               #{item.rankPosition}
             </p>
           ) : null}
@@ -234,7 +234,7 @@ function MusicNoteIcon({ size }: MusicNoteIconProps) {
       strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="text-zinc-500 dark:text-zinc-400"
+      className="text-[var(--text-caption)]"
     >
       <path d="M9 18V6l10-2v12" />
       <circle cx="6" cy="18" r="3" />
@@ -297,7 +297,7 @@ function BreakdownRow({ entry }: BreakdownRowProps) {
         <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
           {entry.label}
         </span>
-        <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+        <span className="truncate text-xs text-[var(--text-caption)]">
           {entry.detail}
         </span>
       </dt>
@@ -319,7 +319,7 @@ type NoteCellProps = {
 function NoteCell({ label, value }: NoteCellProps) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
+      <span className="text-xs text-[var(--text-caption)]">{label}</span>
       <span
         aria-label={`${label} ${value}`}
         className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50"
@@ -340,7 +340,7 @@ function MetaCell({ label, value }: MetaCellProps) {
     value === null || value === undefined || value === "" ? "-" : String(value);
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
+      <span className="text-xs text-[var(--text-caption)]">{label}</span>
       <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
         {display}
       </span>

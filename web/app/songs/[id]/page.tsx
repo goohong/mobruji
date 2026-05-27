@@ -129,14 +129,14 @@ function SongDetailView({ song }: SongDetailViewProps) {
       <nav aria-label="이전" className="mb-2">
         <Link
           href="/songs"
-          className="text-sm text-zinc-500 underline-offset-4 hover:underline dark:text-zinc-400"
+          className="text-sm text-[var(--text-caption)] underline-offset-4 hover:underline"
         >
           ← 검색으로 돌아가기
         </Link>
       </nav>
 
       <header className="flex flex-col gap-2">
-        <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
           Song detail
         </p>
         <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -158,7 +158,7 @@ function SongDetailView({ song }: SongDetailViewProps) {
           {difficulty ? (
             <DifficultyBadge difficulty={difficulty} />
           ) : (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="text-xs text-[var(--text-caption)]">
               가창 난이도 정보가 아직 없어요
             </span>
           )}
@@ -187,7 +187,7 @@ function SongDetailView({ song }: SongDetailViewProps) {
             ) : null}
           </dl>
         ) : (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs text-[var(--text-caption)]">
             이 곡의 음역 정보(최고음/최저음)는 아직 등록되지 않았어요.
           </p>
         )}
@@ -270,7 +270,7 @@ type NoteCellProps = {
 function NoteCell({ label, value }: NoteCellProps) {
   return (
     <div className="flex flex-col gap-1">
-      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt className="text-xs text-[var(--text-caption)]">{label}</dt>
       <dd
         aria-label={`${label} ${value}`}
         className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50"
@@ -291,7 +291,7 @@ function MetaCell({ label, value }: MetaCellProps) {
     value === null || value === undefined || value === "" ? "-" : String(value);
   return (
     <div className="flex flex-col gap-1">
-      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt className="text-xs text-[var(--text-caption)]">{label}</dt>
       <dd className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
         {display}
       </dd>

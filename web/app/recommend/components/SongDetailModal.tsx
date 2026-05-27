@@ -217,7 +217,7 @@ export function SongDetailModal({
             type="button"
             onClick={onClose}
             aria-label="상세 닫기"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--text-caption)] transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
           >
             <span aria-hidden="true" className="text-lg leading-none">
               ×

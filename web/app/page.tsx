@@ -71,7 +71,7 @@ export default function Home() {
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col items-center gap-8">
         <header className="space-y-3 text-center">
-          <p className="text-sm font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm font-medium uppercase tracking-widest text-[var(--text-caption)]">
             mobruji
           </p>
           <h1 className="text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl">
@@ -246,7 +246,7 @@ function VoiceRangeSummary({
       <p
         role="status"
         aria-live="polite"
-        className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+        className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-[var(--text-caption)] dark:bg-zinc-800"
       >
         음역대 불러오는 중…
       </p>
@@ -256,7 +256,7 @@ function VoiceRangeSummary({
   return (
     <p
       aria-label="저장된 음역대 ID"
-      className="rounded-lg bg-zinc-100 px-3 py-2 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+      className="rounded-lg bg-zinc-100 px-3 py-2 text-xs text-[var(--text-caption)] dark:bg-zinc-800"
     >
       저장된 음역대 #{voiceRangeId}
     </p>
