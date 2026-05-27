@@ -22,7 +22,7 @@
 ## 3. 핵심 설계 원칙
 - **결정성(Determinism)**: 추천 알고리즘은 동일 입력에 대해 항상 동일 결과를 보장해야 한다. `Random()`, `Instant.now()` 직접 호출을 금지하고 `SeedDeriver`나 `Clock` DI를 사용한다.
 - **BC 간 격리**: 타 도메인 엔티티는 ID-only 참조를 지향하며, 필요 시 application 계층에서 조인한다.
-- **메모리 트래킹**: 반복되는 설계 결정은 `13-memory-promote-tracking.md`를 통해 정식 문서로 promote하여 휘발을 방지한다.
+- **메모리 트래킹**: 반복되는 설계 결정은 `11-memory-promote-tracking.md`를 통해 정식 문서로 promote하여 휘발을 방지한다.
 
 ## 4. ADR 및 Spec 작성 가이드
 - **ADR**: 횡단적인 기술 결정(DB 전략, 라이선스, 아키텍처 패턴)은 `docs/decisions/`에 기록한다.

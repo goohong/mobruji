@@ -3,7 +3,7 @@
 > maestro/세션이 Claude 메모리(`~/.claude/projects/.../memory/`)에 보관 중인 항목 중 **반복적으로 적용되는 운영 룰·프로젝트 결정**을 코드베이스(런북/CLAUDE.md/ADR/spec)로 promote한 기록.
 > 메모리는 휘발성·세션 의존이라 핵심 룰은 코드로 옮겨 다음 세션도 동일 룰을 읽게 한다.
 >
-> 본 문서는 **트래킹 매트릭스**이며 실제 promote는 별 PR로 진행. 메모리 본문은 **수정하지 않는다** (race 회피, `11-multi-session-runbook.md §1-2`).
+> 본 문서는 **트래킹 매트릭스**이며 실제 promote는 별 PR로 진행. 메모리 본문은 **수정하지 않는다** (race 회피, `10-multi-session-runbook.md §1-2`).
 
 ## 1) 매트릭스
 
@@ -12,27 +12,27 @@
 | `user_working_style` | 메모리 유지 | (코드 promote 부적합) | 사용자 컨텍스트라 메모리에 두는 게 적절 |
 | `feedback_domain_model_section_7` | 메모리 유지 | (코드 promote 부적합) | 한 줄짜리 negative rule. 코드에 박을 가치 < 메모리 |
 | `feedback_runbook_spelling` | 메모리 유지 | (코드 promote 부적합) | 표기 정정 1줄. 별 코드 문서 가치 없음 |
-| `project_multi_session_setup` | 완전 promote됨 | `11-multi-session-runbook.md §1` | 메모리는 짧은 포인터 유지 |
-| `feedback_orchestration_pattern` | 완전 promote됨 | `11-multi-session-runbook.md §0-1`, `§2` | 메모리에 "promote 완료" 명시됨 |
-| `feedback_role_expansion` | 완전 promote됨 | `11-multi-session-runbook.md §2 표`, `12-sub-agent-prompt-template.md §2` | 메모리에 "promote 완료" 명시됨 |
-| `feedback_continuous_cycles` | 완전 promote됨 | `11-multi-session-runbook.md §2 공통 룰 마지막 항목` | 메모리에 "promote 완료" 명시됨 |
-| `feedback_autonomous_loop` | 완전 promote됨 | `11-multi-session-runbook.md §2 공통 룰` | 메모리에 "한 줄 promote" 명시됨 |
-| `feedback_plan_session_option` | 완전 promote됨 | `12-sub-agent-prompt-template.md §2 plan`, `11-multi-session-runbook.md §0-4 사이클 명명` | plan 세션 정식 합류 |
-| `project_plan_session_active` | 완전 promote됨 | `11-multi-session-runbook.md §2 표`, `12-sub-agent-prompt-template.md §2 plan` | 4번째 세션 도입 사실 자체 |
+| `project_multi_session_setup` | 완전 promote됨 | `10-multi-session-runbook.md §1` | 메모리는 짧은 포인터 유지 |
+| `feedback_orchestration_pattern` | 완전 promote됨 | `10-multi-session-runbook.md §0-1`, `§2` | 메모리에 "promote 완료" 명시됨 |
+| `feedback_role_expansion` | 완전 promote됨 | `10-multi-session-runbook.md §2 표`, `12-sub-agent-prompt-template.md §2` | 메모리에 "promote 완료" 명시됨 |
+| `feedback_continuous_cycles` | 완전 promote됨 | `10-multi-session-runbook.md §2 공통 룰 마지막 항목` | 메모리에 "promote 완료" 명시됨 |
+| `feedback_autonomous_loop` | 완전 promote됨 | `10-multi-session-runbook.md §2 공통 룰` | 메모리에 "한 줄 promote" 명시됨 |
+| `feedback_plan_session_option` | 완전 promote됨 | `12-sub-agent-prompt-template.md §2 plan`, `10-multi-session-runbook.md §0-4 사이클 명명` | plan 세션 정식 합류 |
+| `project_plan_session_active` | 완전 promote됨 | `10-multi-session-runbook.md §2 표`, `12-sub-agent-prompt-template.md §2 plan` | 4번째 세션 도입 사실 자체 |
 | `project_self_analysis_pivot` | 완전 promote됨 | `docs/features/song-self-analysis-pipeline.md`, `docs/decisions/0006-audio-source-youtube.md` | spec + ADR 두 곳에 모두 코드화 |
-| `feedback_notification_preempts_main` | ✅ 완전 promote됨 | `11-multi-session-runbook.md §0-8 통지 우선 처리` | 처리 순서·호흡 단위·우선순위 모두 코드화 (PR #116) |
-| `feedback_auto_register_rev_findings` | ✅ 완전 promote됨 | `11-multi-session-runbook.md §0-9 rev 코멘트 자동 등록` | 🔴/🟡/🟢 분류·묶음 룰·즉시 트리거 모두 코드화 (PR #116) |
+| `feedback_notification_preempts_main` | ✅ 완전 promote됨 | `10-multi-session-runbook.md §0-8 통지 우선 처리` | 처리 순서·호흡 단위·우선순위 모두 코드화 (PR #116) |
+| `feedback_auto_register_rev_findings` | ✅ 완전 promote됨 | `10-multi-session-runbook.md §0-9 rev 코멘트 자동 등록` | 🔴/🟡/🟢 분류·묶음 룰·즉시 트리거 모두 코드화 (PR #116) |
 | `feedback_external_research` | 메모리 유지 | (코드 promote 부적합) | 기획 보조 룰. 한 줄 negative cue, 코드 박을 가치 < 메모리 |
-| `feedback_rev_release_gate` | ✅ 완전 promote됨 | `11-multi-session-runbook.md §0` rev gate / release 절차 | release 전 `reviewed:claude` 라벨 gate. 런북 명시 |
+| `feedback_rev_release_gate` | ✅ 완전 promote됨 | `10-multi-session-runbook.md §0` rev gate / release 절차 | release 전 `reviewed:claude` 라벨 gate. 런북 명시 |
 | `project_discord_channel` | 부분 promote됨 | `14-discord-notify-setup.md`, `15-discord-message-templates.md` | 채널 ID는 메모리 전용(사용자 컨텍스트). webhook/메시지 룰만 코드화 |
 | `feedback_discord_polling` | 메모리 유지 | (코드 promote 부적합) | maestro polling cadence. 사용자 컨텍스트 의존, 24/7 인프라는 plan 20에서 별도 추진 |
 
 ## 2) 보강 후보 (다음 docs PR에서 처리)
 
-### 2-1) [✅ 완료] `11-multi-session-runbook.md §0-8` "통지 우선 처리" 절 추가
+### 2-1) [✅ 완료] `10-multi-session-runbook.md §0-8` "통지 우선 처리" 절 추가
 PR #116에서 promote 완료. 메모리 → 코드 1:1 매핑.
 
-### 2-2) [✅ 완료] `11-multi-session-runbook.md §0-9` "rev 코멘트 자동 등록" 절 추가
+### 2-2) [✅ 완료] `10-multi-session-runbook.md §0-9` "rev 코멘트 자동 등록" 절 추가
 PR #116에서 promote 완료. 메모리 → 코드 1:1 매핑.
 
 ### 2-3) [P2] `12-sub-agent-prompt-template.md §1`에 "통지/등록 절차" 백 참조

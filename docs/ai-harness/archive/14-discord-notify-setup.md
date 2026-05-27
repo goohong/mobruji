@@ -5,7 +5,7 @@
 
 ## 1) 왜 필요한가
 
-maestro Claude 세션을 닫으면 background sub-agent도 모두 종료된다 (`docs/ai-harness/11-multi-session-runbook.md §0` 참조). 그래서 사용자가 외출 중일 때는 사이클 진행 상황을 알 방법이 없다.
+maestro Claude 세션을 닫으면 background sub-agent도 모두 종료된다 (`docs/ai-harness/10-multi-session-runbook.md §0` 참조). 그래서 사용자가 외출 중일 때는 사이클 진행 상황을 알 방법이 없다.
 
 단기 보완책으로 **GitHub Actions → Discord webhook → 모바일 push** 흐름을 깐다. 사용자는 핸드폰 Discord 알림으로 PR/이슈/릴리즈 이벤트를 받고, 필요하면 모바일에서 `gh` CLI 또는 GitHub 앱으로 명령을 내린다.
 
@@ -165,6 +165,6 @@ GitHub 모바일 앱에서도 Actions → workflow → Run workflow로 동일 �
 |---|---|
 | webhook workflow 셋업·운영 | 본 문서 (`14-discord-notify-setup.md`) |
 | 어느 이벤트를 발생시킬지 (maestro 의무) | `docs/features/discord-status-push.md` |
-| 사이클 카운트 / sub-agent 운영 | `docs/ai-harness/11-multi-session-runbook.md` |
+| 사이클 카운트 / sub-agent 운영 | `docs/ai-harness/10-multi-session-runbook.md` |
 
-핵심 매핑은 `11-multi-session-runbook.md §0-6-2` 또는 spec §5-2 표 참조.
+핵심 매핑은 `10-multi-session-runbook.md §0-6-2` 또는 spec §5-2 표 참조.

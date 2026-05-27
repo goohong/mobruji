@@ -242,5 +242,5 @@ rev sub-agent가 QA 수행 시 이 가이드를 그대로 따른다 (`docs/featu
 ## 7) 관련 문서
 - `CLAUDE.md` §6 — 단축 치트시트
 - `docs/features/rev-qa-protocol.md` — rev QA 실행 검증 spec
-- `docs/ai-harness/11-multi-session-runbook.md` §2 — 세션별 역할 (rev QA 범위)
+- `docs/ai-harness/10-multi-session-runbook.md` §2 — 세션별 역할 (rev QA 범위)
 - `docs/ai-harness/03-quality-gates.md` §8 — rev QA gate (CI 게이트 보강)

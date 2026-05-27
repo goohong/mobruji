@@ -46,7 +46,7 @@ deciders: [@goohong]
 
 ## References
 - `docs/ai-harness/02-agent-workflow.md §10` — 다중 AI 운영 룰 (본 ADR의 정책 표현)
-- `docs/ai-harness/11-multi-session-runbook.md` — 셋업·운영 런북 (본 ADR의 실행 형태)
+- `docs/ai-harness/10-multi-session-runbook.md` — 셋업·운영 런북 (본 ADR의 실행 형태)
   - §0-1 maestro 오케스트레이션 모드
   - §0-10 항시 4 워크트리 가동 룰
   - §1-1 워크트리 5개 생성

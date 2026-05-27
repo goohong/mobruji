@@ -11,8 +11,9 @@
 - [**`03-ENGINEERING_STANDARDS.md`**](./03-ENGINEERING_STANDARDS.md): 코드 컨벤션, 테스트 전략, 품질 게이트, 관측성 표준.
 
 ## 3) 운영 및 참조 문서
-- `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev/plan) 셋업·운영 런북.
-- `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스.
+- [**`10-multi-session-runbook.md`**](./10-multi-session-runbook.md): 다중 세션(be/fe/rev/plan) 셋업·운영 런북.
+- [**`11-memory-promote-tracking.md`**](./11-memory-promote-tracking.md): Claude 메모리 → 코드 promote 트래킹 매트릭스.
+- [**`12-helper-agent-runbook.md`**](./12-helper-agent-runbook.md): NCP Helper 운영 런북.
 - `CLAUDE.md`: Claude Code 세션 자동 로드 룰 요약 (비협상 핵심 룰).
 
 ---

@@ -11,7 +11,7 @@
 - **Vol 1: [GOVERNANCE](./docs/ai-harness/01-GOVERNANCE.md)** (보안, 브랜치, PR 프로토콜)
 - **Vol 2: [ARCHITECT](./docs/ai-harness/02-ARCHITECT_NOTE.md)** (도메인, BC, 설계 원칙)
 - **Vol 3: [STANDARDS](./docs/ai-harness/03-ENGINEERING_STANDARDS.md)** (컨벤션, 테스트, 품질 게이트)
-- **Vol 16: [HELPER](./docs/ai-harness/16-helper-agent-runbook.md)** (NCP Helper 운영 런북)
+- **Vol 12: [HELPER](./docs/ai-harness/12-helper-agent-runbook.md)** (NCP Helper 운영 런북)
 
 ## 3. 비협상 룰 (어기지 말 것)
 - **브랜칭**: `develop`에서 `<type>/<summary>-#<issue-number>` 분기. `main` 직접 푸시 금지.

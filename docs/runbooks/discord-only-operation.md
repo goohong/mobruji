@@ -214,7 +214,7 @@ DIGEST_CHANNEL_ID=<별 채널 ID, 옵션>
 - `docs/runbooks/ncp-maestro-setup.md` — nmae 기본 셋업
 - `docs/features/discord-driven-mobruji.md` — Discord bridge 원본 spec
 - `docs/features/rev-qa-protocol.md` — rev sub-agent QA 룰
-- `docs/ai-harness/11-multi-session-runbook.md` — be/fe/rev/plan 세션 룰
+- `docs/ai-harness/10-multi-session-runbook.md` — be/fe/rev/plan 세션 룰
 
 ## 9) 결정 로그
 - **2026-05-23 (사용자 결정 — 본 spec 도입 사유)**: 폰 Discord-only 운영. mac maestro(mmae) 종료해도 시스템 가동. nmae 단독 운영 안티패턴(사용자 query 무시) 해소 위해 helper 분리 도입.

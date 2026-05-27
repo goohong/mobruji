@@ -151,7 +151,7 @@ git pull
 ```
 
 ### B-11) 워크트리 4개 생성 (mobruji)
-기존 [멀티 세션 런북](../ai-harness/11-multi-session-runbook.md) 답습. maestro는 `~/mobruji`에서 가동, sub-agent는 워크트리에서.
+기존 [멀티 세션 런북](../ai-harness/10-multi-session-runbook.md) 답습. maestro는 `~/mobruji`에서 가동, sub-agent는 워크트리에서.
 ```bash
 cd ~/mobruji
 git worktree add ../mobruji-be develop
@@ -770,6 +770,6 @@ sudo -u mobruji docker system prune -af --volumes
 - [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) — Discord-driven maestro spec (#338)
 - [`docs/features/deployment-infrastructure.md`](../features/deployment-infrastructure.md) — 백/프론트 배포 spec (별 트랙)
 - [`docs/features/discord-daemon-hosting.md`](../features/discord-daemon-hosting.md) — Discord daemon 호스트 (본 ADR로 NCP 동거 갱신됨)
-- [`docs/ai-harness/11-multi-session-runbook.md`](../ai-harness/11-multi-session-runbook.md) — 멀티 세션 워크트리 운영
+- [`docs/ai-harness/10-multi-session-runbook.md`](../ai-harness/10-multi-session-runbook.md) — 멀티 세션 워크트리 운영
 - [`docs/runbooks/local-3tier-setup.md`](./local-3tier-setup.md) — 로컬 3-tier 가동 (대조군)
 - [`docs/ai-harness/04-security-policy.md`](../ai-harness/04-security-policy.md) — 시크릿/민감정보 정책

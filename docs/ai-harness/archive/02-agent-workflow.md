@@ -180,7 +180,7 @@ gh release create vX.Y.Z --generate-notes
 
 복수의 AI 에이전트가 같은 레포에서 동시에 동작할 수 있다. 충돌과 추적성 손실을 막기 위한 룰.
 
-> **현재 운영 형태 (2026-05-23 기준)**: maestro 1 + sub-agent 워크트리 4(be/fe/rev/plan), 총 **5 워크트리** 동시 가동. maestro가 단일 Claude 세션으로 오케스트레이션하고 `Agent` 도구로 각 워크트리에 sub-agent를 background 가동한다. 항시 가동 룰과 셋업은 [§11 multi-session-runbook §0-10](./11-multi-session-runbook.md#0-10-항시-4-워크트리-가동-룰)과 [ADR-0014](../decisions/0014-multi-agent-worktree-orchestration.md) 참조. (초기엔 Claude+Codex 2 에이전트 가정이었으나 Codex 미사용 + 워크트리 분리 패턴으로 진화)
+> **현재 운영 형태 (2026-05-23 기준)**: maestro 1 + sub-agent 워크트리 4(be/fe/rev/plan), 총 **5 워크트리** 동시 가동. maestro가 단일 Claude 세션으로 오케스트레이션하고 `Agent` 도구로 각 워크트리에 sub-agent를 background 가동한다. 항시 가동 룰과 셋업은 [§11 multi-session-runbook §0-10](./10-multi-session-runbook.md#0-10-항시-4-워크트리-가동-룰)과 [ADR-0014](../decisions/0014-multi-agent-worktree-orchestration.md) 참조. (초기엔 Claude+Codex 2 에이전트 가정이었으나 Codex 미사용 + 워크트리 분리 패턴으로 진화)
 
 ### 10-1) 1 브랜치 = 1 에이전트
 - 한 브랜치/PR에는 **한 에이전트만** 커밋한다. 다른 에이전트가 같은 브랜치에 직접 push 금지.
@@ -229,7 +229,7 @@ maestro 본진은 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 *
 구체 사이클 명명(§11 §0-4) / idle 룰(§0-5) / 사용자 결정 묶음(§0-6) / Discord 가시성(§0-6-1, §0-6-2) / 워크트리 정리(§0-7) / rev 코멘트 자동 등록(§0-9) / 항시 가동 점검 의무(§0-10)는 모두 §11에 정형화. 본 절은 §10 일관성 유지를 위한 한 줄 요약.
 
 ### 10-7) 다중 세션 실행 런북
-구체 셋업·운영 명령은 [`docs/ai-harness/11-multi-session-runbook.md`](./11-multi-session-runbook.md). 워크트리 5개 생성(maestro + be/fe/rev/plan), 라벨, 새 브랜치 시작 스크립트, 리뷰 세션 트리거, Projects v2 보드 연동, 항시 가동 룰까지 포함.
+구체 셋업·운영 명령은 [`docs/ai-harness/10-multi-session-runbook.md`](./10-multi-session-runbook.md). 워크트리 5개 생성(maestro + be/fe/rev/plan), 라벨, 새 브랜치 시작 스크립트, 리뷰 세션 트리거, Projects v2 보드 연동, 항시 가동 룰까지 포함.
 
 ### 10-8) 동기화 채널
 - **세션 간 시그널**: PR 라벨(`session:*`, `reviewed:*`, `ai:*`) + draft state + `gh pr list` 조회. 새 메커니즘 없이 GitHub state가 자연스러운 싱크 채널.

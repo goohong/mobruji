@@ -38,7 +38,7 @@ ADR-0012(관측성 = Grafana Cloud Free), ADR-0013(sessionId TTL = sliding 180d)
 2. **maestro 실행 단위**: **systemd unit (tmux 세션 부트스트랩 → 그 안에서 `claude` 실행)**. Phase 1은 수동 `tmux attach`로 검증, Phase 2부터 systemd unit으로 자동 복구. maestro/Discord bridge는 책임 분리(`mobruji-maestro.service` + `mobruji-discord-bridge.service`).
 3. **Anthropic API 인증**: **`ANTHROPIC_API_KEY` 환경변수** (`~/.bashrc` 또는 systemd unit `Environment=`). OAuth(`claude login`)는 headless 부적합. API key는 `console.anthropic.com` → API Keys에서 `mobruji-maestro` 라벨로 발급. 사용량은 Anthropic console에서 모니터링.
 4. **Discord daemon 동거**: maestro와 **같은 VM의 별 systemd unit**(`tools/discord-daemon/bot.py` 확장본). tmux bridge가 같은 호스트의 tmux 세션을 `send-keys` 해야 하므로 동거 강제. 1차 ADR이 가정했던 "별 호스트(macOS LaunchAgent)"는 폐기 — maestro를 NCP로 옮기면서 daemon도 NCP로 통합.
-5. **워크트리 5개 동시 사용**: `~/mobruji` + `~/mobruji-be` + `~/mobruji-fe` + `~/mobruji-rev` + `~/mobruji-plan` — 기존 멀티 세션 런북(`docs/ai-harness/11-multi-session-runbook.md`) 그대로 답습.
+5. **워크트리 5개 동시 사용**: `~/mobruji` + `~/mobruji-be` + `~/mobruji-fe` + `~/mobruji-rev` + `~/mobruji-plan` — 기존 멀티 세션 런북(`docs/ai-harness/10-multi-session-runbook.md`) 그대로 답습.
 6. **메모리 운영**: c2-g3a 4GB는 maestro(Node + Claude TUI ≈ 300MB) + sub-agent 동시 spike(최대 3개, 약 1GB) + tmux + Discord bot(Python venv ≈ 150MB) + OS = 약 2GB 상시. 여유 2GB. swap 1GB 활성화(spike 대비). 향후 sub-agent 동시 5개 또는 maestro transcript 무거워지면 swap 증설 또는 c2-g3a → c2-g3a 상위 사양으로 vertical scale.
 7. **시크릿 관리**: `ANTHROPIC_API_KEY`, `DISCORD_BOT_TOKEN`, `GITHUB_PAT`는 `mobruji` 유저 권한 0600 파일(`~/.bashrc` 또는 `/etc/mobruji/maestro.env`) — 평문 yml 금지(CLAUDE.md §4).
 8. **방화벽 (ACG)**: SSH 22 inbound만 허용, 나머지 outbound 전체 허용. Discord bot은 outbound WebSocket. GitHub API/Anthropic API도 outbound only. maestro VM에 inbound HTTP/HTTPS 노출 불필요(백/프론트 VM이 별도).
@@ -104,7 +104,7 @@ ADR-0012(관측성 = Grafana Cloud Free), ADR-0013(sessionId TTL = sliding 180d)
 
 - Feature Spec: [`docs/features/discord-driven-mobruji.md`](../features/discord-driven-mobruji.md) (maestro 24/7 가동 + tmux bridge), [`docs/features/deployment-infrastructure.md`](../features/deployment-infrastructure.md) (백/프론트 배포 묶음, 본 ADR과 별도 진행), [`docs/features/discord-daemon-hosting.md`](../features/discord-daemon-hosting.md) (Discord daemon 호스트 — 본 ADR에서 NCP 동거로 갱신).
 - 런북: [`docs/runbooks/ncp-maestro-setup.md`](../runbooks/ncp-maestro-setup.md) — **본 ADR의 셋업 절차** (Phase 1~3 + 트러블슈팅 + 보안).
-- 정합성: ADR-0012 (관측성 = Grafana Cloud Free, 단일 인스턴스 가정), ADR-0013 (sessionId TTL — multi-region 결정 시 영향), [`docs/ai-harness/11-multi-session-runbook.md`](../ai-harness/11-multi-session-runbook.md) (멀티 세션 워크트리 운영).
+- 정합성: ADR-0012 (관측성 = Grafana Cloud Free, 단일 인스턴스 가정), ADR-0013 (sessionId TTL — multi-region 결정 시 영향), [`docs/ai-harness/10-multi-session-runbook.md`](../ai-harness/10-multi-session-runbook.md) (멀티 세션 워크트리 운영).
 - 보안 룰: [`docs/ai-harness/04-security-policy.md`](../ai-harness/04-security-policy.md), CLAUDE.md §4.
 - 관련 이슈: #242 (관측성 베이스라인), #243 (v0.4 계정 시스템 — 본 ADR이 선행 인프라), #338 (discord-driven-mobruji spec), #340~#342 (PR B/C/D 트래커, 본 PR에서 갱신/연동 예정).
 - 후속 ADR 후보: 백/프론트 VM 사양 결정 ADR, multi-AZ HA ADR, managed DB 전환 ADR (모두 v0.4 트래픽/SLO 결정 후).

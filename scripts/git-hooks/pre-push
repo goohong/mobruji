@@ -10,7 +10,7 @@
 #
 # Why: rev 세션은 리뷰 전용(코드/문서 수정 금지). 사용자/AI 실수로 rev 워크트리에서
 #      코드 변경 후 push 하는 사고를 hook 단에서 차단한다.
-#      `docs/ai-harness/11-multi-session-runbook.md §2` 참고.
+#      `docs/ai-harness/10-multi-session-runbook.md §2` 참고.
 
 set -e
 

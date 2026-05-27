@@ -161,7 +161,7 @@ helper tmux session  (NCP, 신설, claude CLI)
 - [ ] **PR-B** — helper 초기 프롬프트 파일 `tools/helper/initial-prompt.md` (정중체 / 4단계 패턴 / 위임 패턴 / 루프 방어 룰 / 약어 nmae/mmae 명시, scope:infra)
 - [ ] **PR-C** — bot.py routing 변경: 사용자 Discord → helper tmux 우선, nmae 직접 send 폐지. helper pipe-pane raw push 로직 추가 (scope:infra)
 - [ ] **PR-D** — systemd unit `mobruji-helper-tmux.service` (Restart=always, EnvironmentFile, scope:infra, `needs-human-review`)
-- [ ] **PR-E** — 검증 시나리오 문서 `docs/ai-harness/16-helper-agent-runbook.md` + smoke test (사용자 query → helper ack → helper 자체 답 → nmae 위임 → nmae 응답 → helper 보강 push 6단계, scope:infra)
+- [ ] **PR-E** — 검증 시나리오 문서 `docs/ai-harness/12-helper-agent-runbook.md` + smoke test (사용자 query → helper ack → helper 자체 답 → nmae 위임 → nmae 응답 → helper 보강 push 6단계, scope:infra)
 
 ## 7) 테스트 전략
 - **단위**: bot.py routing 함수 (helper vs nmae 분기) + helper pipe-pane raw push (ANSI strip / 2000자 split) pytest 케이스
