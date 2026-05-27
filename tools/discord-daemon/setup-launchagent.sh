@@ -70,6 +70,23 @@ reload_agent() {
   launchctl kickstart -k "${target}/com.mobruji.discord-daemon"
 }
 
+# hook symlink ensure — `~/.mobruji/<hook>` 가 부재/regular file 이면 repo 내 hook
+# source 로 symlink 자동 생성 (PR #1154 helper-direct-work-guard 등). deploy.sh 와
+# 같은 공통 라이브러리 사용 (lib/hook_symlinks.sh, PR #1124).
+ensure_hooks() {
+  if [[ ! -f "$DAEMON_DIR/lib/hook_symlinks.sh" ]]; then
+    echo "[info] lib/hook_symlinks.sh 부재 — hook symlink ensure skip (PR #1124 머지 전 호환)."
+    return 0
+  fi
+  # setup script 가 실행되는 DAEMON_DIR = repo 내 hook source 의 진실.
+  # 사용자가 별도 HOOK_SOURCE_DIR 을 명시하지 않은 경우 DAEMON_DIR 을 사용한다.
+  export MOBRUJI_HOOK_SOURCE_DIR="${MOBRUJI_HOOK_SOURCE_DIR:-$DAEMON_DIR}"
+  # macOS 의 helper-direct-work-guard 등은 default link dir 이 ~/.mobruji 와 같다.
+  # shellcheck disable=SC1091
+  source "$DAEMON_DIR/lib/hook_symlinks.sh"
+  ensure_hook_symlinks
+}
+
 print_next_steps() {
   cat <<EOF
 
@@ -92,6 +109,7 @@ main() {
   ensure_venv
   ensure_env_file
   render_plist
+  ensure_hooks
   reload_agent
   print_next_steps
 }

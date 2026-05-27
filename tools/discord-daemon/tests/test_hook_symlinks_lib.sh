@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# test_deploy_hook_symlink.sh — deploy.sh hook symlink ensure bash e2e 테스트 (PR #1124).
+# test_hook_symlinks_lib.sh — lib/hook_symlinks.sh 공통 라이브러리 e2e 테스트 (PR #1124).
 #
-# 배경 (사용자 PR #1154 후속 자동화):
-#   PR #1154 머지 후 helper-direct-work-guard.sh 가 repo 안 파일 로 추가됨.
-#   기존엔 nmae 가 수동으로 ~/.mobruji/helper-direct-work-guard.sh 를 backup 후
-#   symlink 로 전환해야 했음. deploy.sh 에 hook symlink ensure 함수 추가하여
-#   deploy 마다 idempotent 하게 자동 동기화.
+# 배경:
+#   PR #1158 (deploy.sh hook symlink ensure 자동화) 의 ensure_hook_symlink(s) 함수를
+#   `lib/hook_symlinks.sh` 공통 라이브러리로 추출했다. deploy.sh / setup-gcp-systemd.sh /
+#   setup-launchagent.sh 가 모두 같은 라이브러리를 source 한다.
+#
+#   본 테스트는 라이브러리를 직접 source 하여 함수 동작을 검증한다 (deploy.sh sed 추출
+#   회피). test_deploy_hook_symlink.sh 의 거울 케이스를 라이브러리 직접 호출로 변환.
 #
 # 검증 시나리오 (모두 isolated tmpdir 안 — 실제 ~/.mobruji 건드리지 않음):
 #   1. link 부재 + source 존재 → symlink 신규 생성.
@@ -13,30 +15,19 @@
 #   3. 이미 올바른 symlink → skip (idempotent).
 #   4. 잘못된 target symlink → 재생성.
 #   5. broken symlink (target 부재) → 재생성.
-#   6. source 부재 → skip (PR 머지 전 hook 호환).
+#   6. source 부재 → skip.
 #   7. HOOK_SYMLINK_ENSURE=0 → 함수 전체 skip.
-#
-# 거울 룰: test_forum_modes.sh 와 동일 bash unittest 패턴 (Python 의존 회피).
+#   8. HOOK_LINK_DIR 자체 부재 → 전체 skip (사용자 환경 default dir 없는 경우).
+#   9. DRY_RUN=1 → 실제 파일 시스템 변경 없음.
 #
 # 종료코드: 모든 케이스 pass → 0. 임의 케이스 fail → 1.
 
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEPLOY_SH="$REPO_DIR/deploy.sh"
 LIB_PATH="$REPO_DIR/lib/hook_symlinks.sh"
-if [[ ! -f "$DEPLOY_SH" ]]; then
-  printf '[FAIL] deploy.sh 부재: %s\n' "$DEPLOY_SH"
-  exit 1
-fi
 if [[ ! -f "$LIB_PATH" ]]; then
   printf '[FAIL] lib/hook_symlinks.sh 부재: %s\n' "$LIB_PATH"
-  exit 1
-fi
-
-# deploy.sh 가 lib/hook_symlinks.sh 를 source 하는지 회귀 가드.
-if ! grep -q "source \"\$SCRIPT_DIR/lib/hook_symlinks.sh\"" "$DEPLOY_SH"; then
-  printf '[FAIL] deploy.sh 가 lib/hook_symlinks.sh 를 source 하지 않습니다 (PR #1124 lib 추출 회귀).\n'
   exit 1
 fi
 
@@ -51,41 +42,55 @@ _setup_tmpdir() {
   echo "$tmpdir"
 }
 
-# 함수 본체는 lib/hook_symlinks.sh 단일 진실 (PR #1124).
-# deploy.sh main flow 의 git/systemctl 사이드 이펙트는 source 하지 않음.
-
-_invoke_ensure() {
+_invoke_single() {
   local tmpdir=$1
   local hook=$2
+  local dry=${3:-0}
   LIB_PATH="$LIB_PATH" \
   HOOK_SOURCE_DIR="$tmpdir/source" \
   HOOK_LINK_DIR="$tmpdir/link" \
-  DRY_RUN=0 \
+  HOOK_SYMLINK_ENSURE=1 \
+  DRY_RUN="$dry" \
   HOOK_NAME_ARG="$hook" \
   bash -c '
-    set -euo pipefail
-    log() { printf "[deploy] %s\n" "$*"; }
-    run() { eval "$@"; }
-    # shellcheck disable=SC1090
+    set -uo pipefail
+    log() { printf "[lib-test] %s\n" "$*"; }
+    run() {
+      if [[ "$DRY_RUN" == "1" ]]; then
+        printf "[dry-run] %s\n" "$*"
+      else
+        eval "$@"
+      fi
+    }
+    # 라이브러리 source — log/run 정의 이후라 fallback 안 덮어쓴다.
+    # shellcheck disable=SC1091,SC1090
     source "$LIB_PATH"
     ensure_hook_symlink "$HOOK_NAME_ARG"
   '
 }
 
-_invoke_ensure_all() {
+_invoke_all() {
   local tmpdir=$1
   local hook_ensure=${2:-1}
+  local link_dir_override=${3:-}
+  local link_dir="${link_dir_override:-$tmpdir/link}"
   LIB_PATH="$LIB_PATH" \
   HOOK_SOURCE_DIR="$tmpdir/source" \
-  HOOK_LINK_DIR="$tmpdir/link" \
+  HOOK_LINK_DIR="$link_dir" \
   HOOK_SYMLINK_ENSURE="$hook_ensure" \
   DRY_RUN=0 \
   bash -c '
     set -uo pipefail
     HOOK_NAMES=(hook-a.sh hook-b.sh)
-    log() { printf "[deploy] %s\n" "$*"; }
-    run() { eval "$@"; }
-    # shellcheck disable=SC1090
+    log() { printf "[lib-test] %s\n" "$*"; }
+    run() {
+      if [[ "$DRY_RUN" == "1" ]]; then
+        printf "[dry-run] %s\n" "$*"
+      else
+        eval "$@"
+      fi
+    }
+    # shellcheck disable=SC1091,SC1090
     source "$LIB_PATH"
     ensure_hook_symlinks
   '
@@ -111,7 +116,7 @@ test_case_1_link_absent() {
   tmpdir=$(_setup_tmpdir)
   echo "# source content" > "$tmpdir/source/hook-a.sh"
 
-  _invoke_ensure "$tmpdir" "hook-a.sh" > /dev/null
+  _invoke_single "$tmpdir" "hook-a.sh" > /dev/null
 
   if [[ -L "$tmpdir/link/hook-a.sh" ]] \
      && [[ "$(readlink "$tmpdir/link/hook-a.sh")" == "$tmpdir/source/hook-a.sh" ]]; then
@@ -130,7 +135,7 @@ test_case_2_regular_file_backup() {
   echo "# source content" > "$tmpdir/source/hook-a.sh"
   echo "# regular file content (old)" > "$tmpdir/link/hook-a.sh"
 
-  _invoke_ensure "$tmpdir" "hook-a.sh" > /dev/null
+  _invoke_single "$tmpdir" "hook-a.sh" > /dev/null
 
   backup_count=$(find "$tmpdir/link" -maxdepth 1 -name 'hook-a.sh.bak.*' -type f | wc -l)
   if [[ -L "$tmpdir/link/hook-a.sh" ]] \
@@ -153,7 +158,7 @@ test_case_3_correct_symlink_skip() {
   mtime_before=$(stat -c '%Y' "$tmpdir/link/hook-a.sh" 2>/dev/null || stat -f '%m' "$tmpdir/link/hook-a.sh")
   sleep 1
 
-  _invoke_ensure "$tmpdir" "hook-a.sh" > /dev/null
+  _invoke_single "$tmpdir" "hook-a.sh" > /dev/null
 
   mtime_after=$(stat -c '%Y' "$tmpdir/link/hook-a.sh" 2>/dev/null || stat -f '%m' "$tmpdir/link/hook-a.sh")
   if [[ -L "$tmpdir/link/hook-a.sh" ]] \
@@ -174,7 +179,7 @@ test_case_4_wrong_target_symlink() {
   echo "# other source" > "$tmpdir/source/other.sh"
   ln -s "$tmpdir/source/other.sh" "$tmpdir/link/hook-a.sh"
 
-  _invoke_ensure "$tmpdir" "hook-a.sh" > /dev/null
+  _invoke_single "$tmpdir" "hook-a.sh" > /dev/null
 
   if [[ -L "$tmpdir/link/hook-a.sh" ]] \
      && [[ "$(readlink "$tmpdir/link/hook-a.sh")" == "$tmpdir/source/hook-a.sh" ]]; then
@@ -191,12 +196,9 @@ test_case_5_broken_symlink() {
   name="case_5_broken_symlink"
   tmpdir=$(_setup_tmpdir)
   echo "# source content" > "$tmpdir/source/hook-a.sh"
-  ln -s "$tmpdir/source/hook-a.sh" "$tmpdir/link/hook-a.sh"
-  # source 옆 다른 target 으로 broken 만들기
-  rm "$tmpdir/link/hook-a.sh"
   ln -s "$tmpdir/source/nonexistent.sh" "$tmpdir/link/hook-a.sh"
 
-  _invoke_ensure "$tmpdir" "hook-a.sh" > /dev/null
+  _invoke_single "$tmpdir" "hook-a.sh" > /dev/null
 
   if [[ -L "$tmpdir/link/hook-a.sh" ]] \
      && [[ "$(readlink "$tmpdir/link/hook-a.sh")" == "$tmpdir/source/hook-a.sh" ]] \
@@ -215,7 +217,7 @@ test_case_6_source_absent() {
   tmpdir=$(_setup_tmpdir)
   # source 없음
 
-  _invoke_ensure "$tmpdir" "hook-a.sh" > /dev/null
+  _invoke_single "$tmpdir" "hook-a.sh" > /dev/null
 
   if [[ ! -e "$tmpdir/link/hook-a.sh" ]] && [[ ! -L "$tmpdir/link/hook-a.sh" ]]; then
     _record "$name" PASS
@@ -233,9 +235,45 @@ test_case_7_disabled() {
   echo "# source content" > "$tmpdir/source/hook-a.sh"
   echo "# source content" > "$tmpdir/source/hook-b.sh"
 
-  _invoke_ensure_all "$tmpdir" "0" > /dev/null
+  _invoke_all "$tmpdir" "0" > /dev/null
 
   if [[ ! -e "$tmpdir/link/hook-a.sh" ]] && [[ ! -e "$tmpdir/link/hook-b.sh" ]]; then
+    _record "$name" PASS
+  else
+    _record "$name" FAIL
+  fi
+  rm -rf "$tmpdir"
+}
+
+# Case 8: HOOK_LINK_DIR 자체 부재 → 전체 skip
+test_case_8_link_dir_absent() {
+  local tmpdir name
+  name="case_8_link_dir_absent"
+  tmpdir=$(_setup_tmpdir)
+  echo "# source content" > "$tmpdir/source/hook-a.sh"
+  echo "# source content" > "$tmpdir/source/hook-b.sh"
+
+  # HOOK_LINK_DIR 을 존재하지 않는 경로로 override.
+  _invoke_all "$tmpdir" "1" "$tmpdir/missing-dir" > /dev/null
+
+  if [[ ! -e "$tmpdir/missing-dir" ]]; then
+    _record "$name" PASS
+  else
+    _record "$name" FAIL
+  fi
+  rm -rf "$tmpdir"
+}
+
+# Case 9: DRY_RUN=1 → 실제 파일 변경 없음
+test_case_9_dry_run() {
+  local tmpdir name
+  name="case_9_dry_run"
+  tmpdir=$(_setup_tmpdir)
+  echo "# source content" > "$tmpdir/source/hook-a.sh"
+
+  _invoke_single "$tmpdir" "hook-a.sh" "1" > /dev/null
+
+  if [[ ! -e "$tmpdir/link/hook-a.sh" ]] && [[ ! -L "$tmpdir/link/hook-a.sh" ]]; then
     _record "$name" PASS
   else
     _record "$name" FAIL
@@ -250,6 +288,8 @@ test_case_4_wrong_target_symlink
 test_case_5_broken_symlink
 test_case_6_source_absent
 test_case_7_disabled
+test_case_8_link_dir_absent
+test_case_9_dry_run
 
 printf '\n[SUMMARY] PASS=%d FAIL=%d\n' "$PASS" "$FAIL"
 if [[ "$FAIL" -gt 0 ]]; then
