@@ -169,14 +169,31 @@ export default function HistoryPage() {
   // 헤더 카피와 일치시키기 위한 alias — 이미 위에서 hasBackendEntries 로 계산했다.
   const isBackendSource = hasBackendEntries;
 
+  /*
+   * ADR-0018 단계 4 PR 3 — /history 페이지 토큰 swap (homepage PR #1137 패턴).
+   *
+   * swap 한 요소 (first-paint 핵심):
+   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
+   *  2) h1 (받은 추천 다시 보기) : text-zinc-900 dark:text-zinc-50 → --text-primary
+   *  3) HistoryCard ring/bg/radius : bg-white ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800
+   *     rounded-2xl → tokens
+   *  4) ProgressEmptyCta : bg-white border-zinc-300 dark:bg-zinc-900 dark:border-zinc-700
+   *     rounded-2xl + CTA bg-zinc-900 → tokens + brand-500/600
+   *  5) EmptyHistory : bg-zinc-50 dark:bg-zinc-950, h1 + CTA → tokens
+   *
+   * 미swap (후속 PR 양보):
+   *  - count live 영역 부제 (`text-zinc-600 dark:text-zinc-400`) — 텍스트 토큰 매핑 후속 더불어 결정.
+   *  - 삭제 button / 미리보기 button — secondary CTA 토큰 패턴 아직 미정.
+   *  - SongCard 등 자식 컴포넌트 — 본 페이지 범위 밖.
+   */
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
             History
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             받은 추천 다시 보기
           </h1>
           {/*
@@ -353,7 +370,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
     metaParts.push(`${entry.preferredBpm} BPM`);
 
   return (
-    <li className="flex flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
+    <li className="flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-4 ring-1 ring-[var(--border)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5">
           <time
@@ -417,21 +434,21 @@ function ProgressEmptyCta() {
   return (
     <section
       aria-labelledby="voice-range-progress-empty-heading"
-      className="flex flex-col gap-3 rounded-2xl border border-dashed border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
+      className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-dashed border-[var(--border)] bg-[var(--bg-base)] p-4"
     >
       <h2
         id="voice-range-progress-empty-heading"
-        className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+        className="text-base font-semibold text-[var(--text-primary)]"
       >
         음역 발전 그래프는 측정 2번부터
       </h2>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-[var(--text-secondary)]">
         같은 음역으로 두 번 이상 추천을 받으면 측정값의 변화를 그래프로 보여드릴게요.
         자동 측정을 한 번 더 시도해보세요.
       </p>
       <Link
         href="/voice-range/auto"
-        className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-[var(--brand-500)] px-4 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
       >
         더 측정해보기
       </Link>
@@ -441,17 +458,17 @@ function ProgressEmptyCta() {
 
 function EmptyHistory() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 text-center dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)] text-center">
       <div className="w-full max-w-md flex flex-col items-center gap-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           아직 받은 추천이 없어요
         </h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           음역대를 입력하고 추천을 한 번 받아보세요. 받은 추천이 여기에 기록됩니다.
         </p>
         <Link
           href="/voice-range"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--brand-500)] px-5 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
         >
           음역대 입력하러 가기
         </Link>
