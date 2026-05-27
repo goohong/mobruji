@@ -57,13 +57,24 @@
 
 ## 4. directive forum 즉시 등록 (구현/수정 지시 채택 시점)
 
-사용자가 코드 변경 / PR / sub-agent 작업을 지시하면 **채택 시점 즉시** directive forum 에 등록.
+사용자가 코드 변경 / PR / sub-agent 작업을 지시하면 **채택 시점 즉시** directive forum 에 등록. 2026-05-26 #1129 event-driven 재설계 — polling sync_loop 폐기. 트리거 3 시점 actor atomic 호출.
 
 - forum 채널: `#모부르지-지시` (`DIRECTIVE_BOARD_CHANNEL_ID`)
 - jsonl SoT: `~/.mobruji/directive-board.jsonl` (atomic write 만 — 수동 vim 금지)
-- 상태 전이: 진행 중 / 완료 / 대기 / 취소 / 차단 (Discord forum 태그)
-- 상태 변경 시 `discord-reply.sh --forum-retag <thread_id> directive "<태그>"` 호출 의무
 - 질문 / 단순 응답은 `#모부르지` (`MOBRUJI_CHANNEL_ID`) 에서 처리 (forum 등록 X)
+
+| 시점 | 호출 | 누락 시 사고 |
+|---|---|---|
+| (a) 지시 채택 시점 | `bash ~/.mobruji/directive_append.sh <msg_id> "<title>" [pr_url]` (jsonl append + forum-post atomic) | forum 미등록 → 사용자 가시화 X |
+| (b) sub-agent launch 시점 | `bash ~/.mobruji/directive_status.sh <id> in_progress [pr_url]` (jsonl + forum-retag + update-status atomic). `agent-launch-wrapper.sh` 가 자동 호출 — wrapper 미사용 폴백 시 helper 본체 직접 호출 | forum 태그 / 본문 stale |
+| (c) 완료 (PR 머지 등) | `bash ~/.mobruji/directive_status.sh <id> completed [pr_url]` | 완료 미반영 |
+| (기타 상태) 차단 / 취소 / 대기 | `bash ~/.mobruji/directive_status.sh <id> "<status>" [pr_url]` | 동일 |
+
+**누락 검출**: `helper-turn-start.sh` wrapper 가 turn 시작 시점에 jsonl ↔ Discord forum 태그 비교 + mismatch 발견 시 stdout visible warning. helper 본체가 warning 보고 즉시 정정 호출.
+
+**수동 Discord 본문 edit 금지** — Discord UI 손 수정은 desync. 반드시 헬퍼 호출.
+
+상세: `docs/features/directive-board-event-driven-redesign.md`.
 
 ## 5. reply target freeze (재돌입 race 가드)
 
