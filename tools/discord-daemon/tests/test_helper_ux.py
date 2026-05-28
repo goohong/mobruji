@@ -1,9 +1,10 @@
-"""helper UX infra 단위 테스트 (#880).
+"""helper UX infra 단위 테스트 (#880, reaction-only #1175).
 
 세 가지 기능을 한 PR 에 묶어 검증:
 
 1. **bot.py 1초 generic auto-ack** — on_message 진입 시 `BOT_AUTO_ACK=1` (default)
-   이면 generic ack 한 줄을 채널에 push, `BOT_AUTO_ACK=0` 이면 skip.
+   이면 사용자 메시지에 👀 emoji reaction 만 add (text/both mode 폐기 #1175).
+   `BOT_AUTO_ACK=0` 이면 skip.
 2. **reply.referenced_message forwarding** — `build_reply_context_prefix` 가
    답장 컨텍스트가 있을 때 prefix `[답장→ ...] <body>` 를 붙이고, 없으면 그대로.
 3. **discord-reply.sh thread mode** — 셸 스크립트 자체는 외부 Discord REST 호출이
@@ -235,86 +236,79 @@ class BotAutoAckTests(unittest.TestCase):
             asyncio.run(handler(message))
         return message
 
-    def test_auto_ack_mode_text_pushes_generic_ack(self) -> None:
-        # mode 명시 = text → 기존 채팅 ack push (legacy 경로 회귀 가드).
-        env = self._build_env(auto_ack="1", auto_ack_mode="text")
+    def test_auto_ack_enabled_adds_reaction_only(self) -> None:
+        # #1175: default 동작 = 사용자 메시지에 👀 reaction 만 add (auto-ack).
+        # 별도 채팅 ack push 없음 (채널 가독성 ↑).
+        # 매 사용자 메시지엔 별도 분기로 📌 (PIN_REACTION_EMOJI) 도 부착됨 — 본
+        # 테스트는 auto-ack 분기가 👀 를 add 했는지 만 검증.
+        env = self._build_env()
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=1
         )
         self._run_handler(env, message)
-        message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
-        message.add_reaction.assert_not_awaited()
+        message.channel.send.assert_not_awaited()
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
 
-    def test_auto_ack_disabled_skips_push(self) -> None:
+    def test_auto_ack_disabled_skips_reaction(self) -> None:
+        # BOT_AUTO_ACK=0 이면 auto-ack 👀 reaction 안 함. 📌 PIN marker 는
+        # auto-ack 와 무관한 별도 분기이므로 여전히 add 될 수 있음 — 여기선
+        # 👀 가 호출되지 않았다는 것만 검증.
         env = self._build_env(auto_ack="0")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=2
         )
         self._run_handler(env, message)
         message.channel.send.assert_not_awaited()
-        message.add_reaction.assert_not_awaited()
-
-    def test_auto_ack_default_mode_is_reaction(self) -> None:
-        # BOT_AUTO_ACK_MODE 미명시 → default=reaction. channel.send 안 호출, add_reaction 호출.
-        env = self._build_env()
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=3
-        )
-        self._run_handler(env, message)
-        message.channel.send.assert_not_awaited()
-        message.add_reaction.assert_awaited_once_with(
-            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
-        )
-
-    def test_auto_ack_mode_both_pushes_reaction_and_text(self) -> None:
-        env = self._build_env(auto_ack="1", auto_ack_mode="both")
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=4
-        )
-        self._run_handler(env, message)
-        message.add_reaction.assert_awaited_once_with(
-            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
-        )
-        message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertNotIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
 
     def test_auto_ack_emoji_override(self) -> None:
+        # BOT_AUTO_ACK_EMOJI env 로 다른 emoji 지정 가능.
         env = self._build_env(auto_ack_emoji="🔥")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=5
         )
         self._run_handler(env, message)
-        message.add_reaction.assert_awaited_once_with("🔥")
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn("🔥", calls)
+        self.assertNotIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+        message.channel.send.assert_not_awaited()
 
-    def test_auto_ack_unknown_mode_falls_back_to_default(self) -> None:
-        env = self._build_env(auto_ack_mode="invalid")
+    def test_auto_ack_default_constants(self) -> None:
+        # default emoji = 👀. text/both mode 관련 상수는 #1175 에서 폐기.
+        self.assertEqual(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "👀")
+        self.assertEqual(bot.BOT_AUTO_ACK_DEFAULT_ENABLED, "1")
+
+    def test_auto_ack_legacy_text_constants_removed(self) -> None:
+        # #1175 회귀 가드: text/both mode 관련 상수가 bot 모듈에서 제거됐는지 확인.
+        # 외부 import 잔존 시 본 테스트 실패 → cleanup 누락 알림.
+        self.assertFalse(
+            hasattr(bot, "BOT_AUTO_ACK_TEXT"),
+            "BOT_AUTO_ACK_TEXT 상수는 #1175 에서 폐기됐어야 합니다",
+        )
+        self.assertFalse(
+            hasattr(bot, "BOT_AUTO_ACK_MODE_DEFAULT"),
+            "BOT_AUTO_ACK_MODE_DEFAULT 는 #1175 에서 폐기됐어야 합니다",
+        )
+        self.assertFalse(
+            hasattr(bot, "BOT_AUTO_ACK_MODES_ALLOWED"),
+            "BOT_AUTO_ACK_MODES_ALLOWED 는 #1175 에서 폐기됐어야 합니다",
+        )
+
+    def test_auto_ack_mode_env_is_ignored(self) -> None:
+        # #1175: BOT_AUTO_ACK_MODE env 가 set 돼 있어도 reaction-only 동작.
+        # backward-compat — 사용자 운영 env 잔존 시에도 silent 깨짐 없음.
+        env = self._build_env(auto_ack_mode="text")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=6
         )
         self._run_handler(env, message)
-        # invalid → default(reaction) fallback. add_reaction 만 호출.
-        message.add_reaction.assert_awaited_once_with(
-            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
-        )
+        # text mode 무시 → channel.send 안 호출.
         message.channel.send.assert_not_awaited()
-
-    def test_auto_ack_default_constants(self) -> None:
-        # default mode = reaction / 기본 emoji = 👀 — env 가 비어도 본 상수가 적용된다.
-        self.assertEqual(bot.BOT_AUTO_ACK_MODE_DEFAULT, "reaction")
-        self.assertEqual(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "👀")
-        self.assertIn("text", bot.BOT_AUTO_ACK_MODES_ALLOWED)
-        self.assertIn("reaction", bot.BOT_AUTO_ACK_MODES_ALLOWED)
-        self.assertIn("both", bot.BOT_AUTO_ACK_MODES_ALLOWED)
-
-    def test_auto_ack_text_v2_phrasing_guard(self) -> None:
-        """BOT_AUTO_ACK_TEXT 문구 회귀 가드 (이슈 #943 v2).
-
-        사용자 정정 (2026-05-24): helper-nmae 협업 관계 표현 필수.
-        '🤖 helper bot' prefix + 'nmae 상태 확인' 두 substring 모두 포함해야 한다.
-        문구 자체 변경 시 본 가드 갱신 후 진행. text mode 가 살아 있는 한 본
-        가드는 유효 — reaction mode 가 default 가 되어도 text 경로 회귀 보호.
-        """
-        self.assertIn("🤖 helper bot", bot.BOT_AUTO_ACK_TEXT)
-        self.assertIn("nmae 상태 확인", bot.BOT_AUTO_ACK_TEXT)
+        # 👀 reaction 은 정상 add.
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
 
     # ------------------------------------------------------------------
     # secondary reaction (#1080) — nmae 점유 상태 emoji
@@ -404,21 +398,25 @@ class BotAutoAckTests(unittest.TestCase):
             self.assertEqual(result, "P")
 
     def test_secondary_reaction_disabled_by_default_skips(self) -> None:
-        # _build_env default = secondary_reaction_enabled="0" → 기존 회귀 가드.
-        env = self._build_env(auto_ack_mode="reaction")
+        # _build_env default = secondary_reaction_enabled="0".
+        # primary 👀 auto-ack + 📌 pin marker = 2회. secondary 안 함.
+        env = self._build_env()
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=10
         )
         self._run_handler(env, message)
-        # primary reaction 만 호출 (1회).
-        self.assertEqual(message.add_reaction.await_count, 1)
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
+        # secondary emoji (⚡⏳🕐) 부재 확인.
+        for secondary in ("⚡", "⏳", "🕐"):
+            self.assertNotIn(secondary, calls)
 
     def test_secondary_reaction_idle_adds_lightning(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
             self._write_cycle_status(cycle_path, occupied=0)
             env = self._build_env(
-                auto_ack_mode="reaction",
                 secondary_reaction_enabled="1",
                 cycle_status_path=str(cycle_path),
             )
@@ -426,19 +424,17 @@ class BotAutoAckTests(unittest.TestCase):
                 content="hello", channel_id=999, author_id=111, message_id=11
             )
             self._run_handler(env, message)
-            # primary 👀 + secondary ⚡ = 2회 호출.
-            self.assertEqual(message.add_reaction.await_count, 2)
+            # primary 👀 + secondary ⚡ + 📌 pin marker.
             calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertEqual(
-                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "⚡"]
-            )
+            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+            self.assertIn("⚡", calls)
+            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
 
     def test_secondary_reaction_partial_adds_hourglass(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
             self._write_cycle_status(cycle_path, occupied=2)
             env = self._build_env(
-                auto_ack_mode="reaction",
                 secondary_reaction_enabled="1",
                 cycle_status_path=str(cycle_path),
             )
@@ -446,18 +442,16 @@ class BotAutoAckTests(unittest.TestCase):
                 content="hello", channel_id=999, author_id=111, message_id=12
             )
             self._run_handler(env, message)
-            self.assertEqual(message.add_reaction.await_count, 2)
             calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertEqual(
-                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "⏳"]
-            )
+            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+            self.assertIn("⏳", calls)
+            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
 
     def test_secondary_reaction_full_adds_clock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
             self._write_cycle_status(cycle_path, occupied=4)
             env = self._build_env(
-                auto_ack_mode="reaction",
                 secondary_reaction_enabled="1",
                 cycle_status_path=str(cycle_path),
             )
@@ -465,16 +459,15 @@ class BotAutoAckTests(unittest.TestCase):
                 content="hello", channel_id=999, author_id=111, message_id=13
             )
             self._run_handler(env, message)
-            self.assertEqual(message.add_reaction.await_count, 2)
             calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertEqual(
-                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "🕐"]
-            )
+            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+            self.assertIn("🕐", calls)
+            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
 
     def test_secondary_reaction_file_missing_silent_skip(self) -> None:
-        # cycle-status.json 부재 → secondary skip (primary 만 1회).
+        # cycle-status.json 부재 → secondary skip.
+        # primary 👀 + 📌 만 호출. ⚡⏳🕐 부재.
         env = self._build_env(
-            auto_ack_mode="reaction",
             secondary_reaction_enabled="1",
             cycle_status_path="/nonexistent/cycle-status.json",
         )
@@ -482,7 +475,11 @@ class BotAutoAckTests(unittest.TestCase):
             content="hello", channel_id=999, author_id=111, message_id=14
         )
         self._run_handler(env, message)
-        self.assertEqual(message.add_reaction.await_count, 1)
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
+        for secondary in ("⚡", "⏳", "🕐"):
+            self.assertNotIn(secondary, calls)
 
     def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거

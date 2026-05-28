@@ -23,13 +23,13 @@ last_reviewed: 2026-05-24
 대상 액터: 오너 (폰 Discord 단독 사용), helper Claude CLI, bot.py daemon.
 
 ## 2) 사용자 시나리오
-- **시나리오 A (auto-ack)**: 오너가 "PR 머지해줘" 보냄 → bot.py 가 0.5초 안 `📥 받음 — helper 작업 중 (구체 ack 곧 도착)` push → helper 가 1~3초 안 자체 ack push ("PR #790 머지 작업 시작합니다") → thread stream → 본답.
+- **시나리오 A (auto-ack)**: 오너가 "PR 머지해줘" 보냄 → bot.py 가 0.5초 안 사용자 메시지에 👀 emoji reaction add (#1175 reaction-only) → helper 가 1~3초 안 자체 ack push ("PR #790 머지 작업 시작합니다") → thread stream → 본답.
 - **시나리오 B (thread stream)**: helper 가 ack 의 reply 로 thread 자동 생성. ack 메시지 아래 작은 thread 아이콘. 클릭하면 `[tool] gh pr view 790 — open, CI green` / `[tool] gh pr merge 790 --squash --delete-branch — exit 0` / `[tool] git status — clean` 같은 한 줄 stream. 본답은 메인 채널에 그대로 push.
 - **시나리오 C (reply 인식)**: 오너가 helper 가 보낸 "PR #790 머지 완료" 메시지에 Discord "답장" 으로 "고마워 다음 PR 도 부탁" 보냄 → bot.py 가 helper 에 `[답장→ PR #790 머지 완료] 고마워 다음 PR 도 부탁` 으로 forward → helper 가 어느 PR 작업의 후속 요청인지 즉시 파악.
 
 ## 3) 요구사항
 ### 기능 요구사항
-- [x] **F-1 bot.py 1초 generic auto-ack**: `BOT_AUTO_ACK=1` (default) 일 때 on_message 진입 즉시 `BOT_AUTO_ACK_TEXT` 한 줄을 채널에 push. `BOT_AUTO_ACK=0` 면 legacy 동작 (helper ack 만).
+- [x] **F-1 bot.py 1초 generic auto-ack**: `BOT_AUTO_ACK=1` (default) 일 때 on_message 진입 즉시 사용자 메시지에 👀 emoji reaction add (#1175 reaction-only — 별도 채팅 push 폐기, 채널 가독성 ↑). `BOT_AUTO_ACK=0` 면 legacy 동작 (helper ack 만). emoji override 는 `BOT_AUTO_ACK_EMOJI` env.
 - [x] **F-2 discord-reply.sh `--ack <문구>` 모드**: 메인 채널에 ack 메시지 push + 그 메시지에 thread 생성 (이름 = ack 첫 30자 + `HHMMSS`). stdout 으로 thread_id 만 출력. `~/.mobruji/helper-current-thread.txt` 에도 1줄 저장.
 - [x] **F-3 discord-reply.sh `--thread <id> <메시지>` 모드**: thread snowflake 를 channel id 처럼 사용해 push.
 - [x] **F-4 discord-reply.sh 기본 호출 호환**: `discord-reply.sh "<본문>"` (mode 없음) = 메인 채널 push 기존 호환.
@@ -50,7 +50,7 @@ last_reviewed: 2026-05-24
 - discord-reply.sh thread mode 2종 (`--ack` / `--thread`).
 - bot.py reply.referenced_message forwarding (prefix 추가).
 - pytest (auto-ack / reply prefix / mode dispatch).
-- .env.example 갱신 (`BOT_AUTO_ACK`).
+- .env.example 갱신 (`BOT_AUTO_ACK`, `BOT_AUTO_ACK_EMOJI` — #1175 에서 `BOT_AUTO_ACK_MODE` 폐기).
 - helper-agent.md 결정 로그 한 줄.
 
 ### 제외 (Out of Scope)
@@ -78,7 +78,7 @@ last_reviewed: 2026-05-24
         ▼
 bot.py on_message
    ├── (F-5) reply.referenced_message 있으면 prefix 부착
-   ├── (F-1) BOT_AUTO_ACK=1 이면 채널에 generic ack push
+   ├── (F-1) BOT_AUTO_ACK=1 이면 사용자 메시지에 👀 emoji reaction add (#1175)
    └── tmux send-keys -t helper:0.0 "<prefix+body>" Enter
         │
         ▼
@@ -101,7 +101,7 @@ helper 가 thread_id 잃지 않도록 `--ack` 모드는 `~/.mobruji/helper-curre
 ### 5-5) bot.py 변경 요약
 | 함수 / 위치 | 변경 |
 |---|---|
-| `BOT_AUTO_ACK_DEFAULT_ENABLED`, `BOT_AUTO_ACK_TEXT` | 신규 상수 |
+| `BOT_AUTO_ACK_DEFAULT_ENABLED`, `BOT_AUTO_ACK_EMOJI_DEFAULT` | 신규 상수 (#1175: 기존 `BOT_AUTO_ACK_TEXT` 폐기) |
 | `REPLY_CONTEXT_PREVIEW_LEN`, `REPLY_CONTEXT_PREFIX_TEMPLATE` | 신규 상수 |
 | `load_env()` | `BOT_AUTO_ACK` env 추가 |
 | `build_reply_context_prefix()` | 신규 함수 — 답장 prefix 조립 |
@@ -133,5 +133,6 @@ helper 가 thread_id 잃지 않도록 `--ack` 모드는 `~/.mobruji/helper-curre
 ## 9) 결정 로그
 - 2026-05-23: 초안 작성 + 단일 PR 구현 (status=draft → shipped 머지 후 갱신). 사용자 직접 요청 3건 (auto-ack 부활 / thread stream / reply 인식) 한 묶음 위임.
 - 2026-05-23: `BOT_AUTO_ACK` default = enabled. #807 에서 제거됐던 사유 (helper 구체 ack 가 충분) 가 실제 운영에선 bash chain latency 때문에 부적합 판명.
+- 2026-05-28 (#1175): auto-ack 동작을 reaction-only 로 단순화. 별도 채팅 ack 1건 push 가 채널 가독성 떨어뜨려 사용자 정정 → 사용자 메시지에 👀 emoji reaction 만 add. `BOT_AUTO_ACK_TEXT` / `BOT_AUTO_ACK_MODE` / `BOT_AUTO_ACK_MODES_ALLOWED` 상수 폐기. `BOT_AUTO_ACK_MODE` env 잔존 시 deprecation log 1회 + 무시 (backward-compat).
 - 2026-05-23: thread 생성 위치 = ack 메시지 reply. 매 ack 마다 새 thread (이전 thread 는 Discord 자동 24h archive 의존).
 - 2026-05-23: reply prefix 형식 = `[답장→ <30자 요약>] <body>`. message id 는 verbose 라 생략 (필요 시 후속 확장).

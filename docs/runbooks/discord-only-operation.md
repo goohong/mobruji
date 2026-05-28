@@ -175,7 +175,7 @@ tmux_send_payload(env["TMUX_TARGET_PANE"], user_msg)
 
 ### 5-1) 사용자 query → helper 즉시 답
 1. 사용자가 Discord에 "지금 뭐 하고 있어?" 보냄
-2. bot.py 1초 안 auto-ack: "📥 받음 — helper 작업 중 (구체 ack 곧 도착)" (`BOT_AUTO_ACK_TEXT`)
+2. bot.py 1초 안 auto-ack: 사용자 메시지에 👀 emoji reaction add (`BOT_AUTO_ACK_EMOJI`, default `👀`). 2026-05-28 (#1175) reaction-only — 별도 채팅 ack push 폐기.
 3. bot.py 가 helper pane(`TMUX_TARGET_PANE`) 에 send-keys 로 메시지 inject
 4. helper 가 tmux capture-pane 으로 nmae 상태 + `gh pr list` 수집 후 정중체 응답
 5. helper 가 `bash ~/.mobruji/discord-reply.sh "<응답 본문>"` 호출로 Discord 채널에 직접 push (10~30 초 안)
