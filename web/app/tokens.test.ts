@@ -352,4 +352,34 @@ describe("design tokens (ADR-0018)", () => {
       expect(allDark).toMatch(new RegExp(`${token}:`));
     }
   });
+
+  /*
+   * ADR-0018 단계 4 PR 14 — recommend/components 의 잔여 zinc hardcode 의미 토큰화
+   * 회귀 가드.
+   *
+   * `SongCard.tsx` + `SongDetailModal.tsx` + `SongDetailContent.tsx` 에서 추천
+   * 상세 모달 surface (zinc-50 / zinc-950), 본문 강조 텍스트 (zinc-700/300,
+   * zinc-800/200, zinc-600/400), ring/border 한 단계 깊은 페어 (zinc-200/zinc-800),
+   * 앨범 커버 placeholder 그라데이션 페어가 토큰으로 swap. 다크 모드 swap 은
+   * 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  it("recommend 상세 모달 의미 토큰 7종이 light + dark 모두 정의된다 (PR 14)", () => {
+    const requiredTokens = [
+      "--surface-detail-section",
+      "--text-body-strong",
+      "--text-body-emphasis",
+      "--text-detail-meta",
+      "--ring-soft-detail",
+      "--surface-cover-from",
+      "--surface-cover-to",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
 });

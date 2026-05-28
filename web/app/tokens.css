@@ -205,6 +205,48 @@
 
   --surface-step-bg: #e4e4e7; /* zinc-200 */
   --surface-step-fg: #3f3f46; /* zinc-700 */
+
+  /*
+   * Recommend 상세 모달 의미 토큰 (#1044 단계 4 PR 14) — `recommend/components/`
+   * (SongCard.tsx + SongDetailModal.tsx + SongDetailContent.tsx) 잔여 zinc
+   * hardcode 일괄 swap.
+   *
+   * 기존 hardcode 매핑 (light → dark):
+   *   섹션 표면 (음역 박스 / 추천 사유 박스):
+   *     bg-zinc-50 + dark:bg-zinc-950          → --surface-detail-section
+   *     `--bg-subtle` (zinc-50 / zinc-900) 와 dark 가 한 단계 다름 (zinc-900 vs
+   *     zinc-950) — 상세 박스가 카드 표면보다 더 깊은 surface 의도라 별 토큰.
+   *
+   *   본문 텍스트 강조 페어 (artist / matchReason 본문 / breakdown dd):
+   *     text-zinc-700 + dark:text-zinc-300     → --text-body-strong
+   *     `--text-secondary` (zinc-600 / zinc-300) 와 light 가 한 단계 다름 — caption
+   *     이 아닌 본문 의도라 별 토큰.
+   *
+   *   meta 강조 페어 (MetaCell value / BreakdownRow label):
+   *     text-zinc-800 + dark:text-zinc-200     → --text-body-emphasis
+   *     header 본문과 다른 weight (semibold meta 정보) 으로 한 단계 더 진한 톤.
+   *
+   *   score mono 페어 (작은 메타 score 표시):
+   *     text-zinc-600 + dark:text-zinc-400     → --text-detail-meta
+   *
+   *   ring / border 한 단계 깊은 페어 (이미지 ring / 액션 border):
+   *     ring-zinc-200 + dark:ring-zinc-800     → --ring-soft-detail
+   *     border-zinc-200 + dark:border-zinc-800 → --ring-soft-detail (border 동일)
+   *     `--border` (zinc-200 / zinc-700) 와 dark 한 단계 다름.
+   *
+   *   placeholder 그라데이션 페어 (앨범 커버 fallback):
+   *     from-zinc-200 to-zinc-300 + dark:from-zinc-800 dark:to-zinc-700
+   *                                             → --surface-cover-from / --surface-cover-to
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --surface-detail-section: #fafafa; /* zinc-50 */
+  --text-body-strong: #3f3f46; /* zinc-700 */
+  --text-body-emphasis: #27272a; /* zinc-800 */
+  --text-detail-meta: #52525b; /* zinc-600 */
+  --ring-soft-detail: #e4e4e7; /* zinc-200 */
+  --surface-cover-from: #e4e4e7; /* zinc-200 */
+  --surface-cover-to: #d4d4d8; /* zinc-300 */
 }
 
 /* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
@@ -261,6 +303,15 @@
 
   --surface-step-bg: #27272a; /* zinc-800 */
   --surface-step-fg: #e4e4e7; /* zinc-200 */
+
+  /* Recommend 상세 모달 의미 토큰 dark swap (PR 14) */
+  --surface-detail-section: #09090b; /* zinc-950 */
+  --text-body-strong: #d4d4d8; /* zinc-300 */
+  --text-body-emphasis: #e4e4e7; /* zinc-200 */
+  --text-detail-meta: #a1a1aa; /* zinc-400 */
+  --ring-soft-detail: #27272a; /* zinc-800 */
+  --surface-cover-from: #27272a; /* zinc-800 */
+  --surface-cover-to: #3f3f46; /* zinc-700 */
 }
 
 /* ───────── 2) Typography token ───────── */

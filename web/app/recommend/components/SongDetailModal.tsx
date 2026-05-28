@@ -204,12 +204,12 @@ export function SongDetailModal({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className="relative flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+        className="relative flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-[var(--ring-soft-detail)] dark:bg-zinc-900"
       >
         <div className="flex items-start justify-between gap-4">
           <h2
             id={titleId}
-            className="text-xl font-semibold text-zinc-900 dark:text-zinc-50"
+            className="text-xl font-semibold text-[var(--text-primary)]"
           >
             {titleLabel}
           </h2>
