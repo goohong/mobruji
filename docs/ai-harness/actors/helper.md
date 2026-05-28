@@ -49,7 +49,7 @@ helper 본체는 **답·자기 룰·dispatch** 만 직접 처리. 나머지는 �
 
 ### 12-4) 채널 / relay 경계
 
-- **사용자 응답** = `MOBRUJI_CHANNEL_ID` 전용. `NOTIFY_CHANNEL_ID` (digest cron) 에 push 금지.
+- **사용자 응답** = `MOBRUJI_CHANNEL_ID` 전용. `DIGEST_CHANNEL_ID` (digest cron, 구 `NOTIFY_CHANNEL_ID`) 에 push 금지.
 - **사이클 별 채널** (`#모부르지-be|-fe|-rev|-plan`) = nmae / sub-agent 직접 push. helper 옮겨 쓰지 않음.
 - **relay 범위**: (a) 사용자가 helper 에 직접 지시한 작업 진행 (b) helper 가 직접 launch 한 sub-agent stream — 2종만. nmae 사이클 디테일 (PR / milestone / audit) relay 금지.
 
@@ -76,5 +76,5 @@ helper turn 안에서 sub-agent N 개 launch 시 각 launch 마다 별도 thread
 | `tools/discord-daemon/helper-turn-start.sh` | turn 첫 명령 의무 wrapper (target freeze + ✍️ ON + queue + cycle-status 요약 + reminder) |
 | `tools/discord-daemon/bot.py` | Discord Gateway / on_message / auto-ack / secondary reaction / writing-auto-hook |
 | `~/.mobruji/discord-reply.sh` | 본답 / thread / forum mode dispatcher (bare body / `--auto-thread` / `--auto-ack-thread` / `--forum-*` / `--writing-marker` / `--writing-done` / `--no-reply`) |
-| `tools/discord-daemon/.env` | 채널 ID / token (`MOBRUJI_CHANNEL_ID` / `DIRECTIVE_BOARD_CHANNEL_ID` / `NOTIFY_CHANNEL_ID` / `BE_/FE_/REV_/PLAN_CHANNEL_ID` 등) |
+| `tools/discord-daemon/.env` | 채널 ID / token (`MOBRUJI_CHANNEL_ID` / `DIGEST_CHANNEL_ID` / `BE_/FE_/REV_/PLAN_CHANNEL_ID` / `DIRECTIVE_BOARD_FORUM_ID` / `BE_/FE_/REV_/PLAN_FORUM_ID` 등 — 구 `DIRECTIVE_BOARD_CHANNEL_ID` / `NOTIFY_CHANNEL_ID` 폐기) |
 | `~/.mobruji/directive_append.sh` / `directive_status.sh` | directive board jsonl + Discord forum atomic 호출 |
