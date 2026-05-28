@@ -26,7 +26,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo
@@ -1603,6 +1603,7 @@ def _maybe_add_cycle_counts_field(
         value=line,
         inline=False,
     )
+    embed.timestamp = now
 
 
 def _maybe_add_directive_board_field(
