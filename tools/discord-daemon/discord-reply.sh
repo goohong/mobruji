@@ -1699,7 +1699,22 @@ case "$MODE" in
     # #1121 (2026-05-26): 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 chunk split + 순차 push.
     # 단일 chunk (cap 이하) 인 경우 단일 push 동작과 동일 (split_long_message 가 1개
     # emit). 다중 chunk 시 첫 chunk 만 reply, 나머지는 standalone — 사이드바 가시성 ↑.
-    post_channel_message_chunked "$MSG" "$REPLY_TO_ID"
+    MAIN_PUSH_RESPONSE=$(post_channel_message_chunked "$MSG" "$REPLY_TO_ID")
+    printf '%s' "$MAIN_PUSH_RESPONSE"
+
+    # 2026-05-29 (PR helper-control-emoji-auto-attach): 본답 push 직후 ⏹/❓ control
+    # emoji 자동 부착 — 사용자가 emoji picker 없이 즉시 tap 가능. bot.py
+    # on_raw_reaction_add 가 ⏹ → tmux Ctrl-C / ❓ → 사유 설명 요청 처리.
+    # 환경 변수 MOBRUJI_CONTROL_EMOJI=0 시 skip (디버깅).
+    # graceful: reaction add 실패는 본답 push 자체 결과에 영향 없음.
+    if [[ "${MOBRUJI_CONTROL_EMOJI:-1}" == "1" ]]; then
+      MAIN_PUSH_MSG_ID=$(printf '%s' "$MAIN_PUSH_RESPONSE" | jq -r '.id // empty' 2>/dev/null || echo "")
+      if [[ -n "$MAIN_PUSH_MSG_ID" ]]; then
+        # ⏹ U+23F9 = E2 8F B9 / ❓ U+2753 = E2 9D 93
+        reaction_add "$MAIN_PUSH_MSG_ID" "%E2%8F%B9" || true
+        reaction_add "$MAIN_PUSH_MSG_ID" "%E2%9D%93" || true
+      fi
+    fi
 
     # #1095: 본답 push 직후 ✍️ remove — 답 작성 완료 가시화.
     # typing 은 Discord 자체 10초 timeout + 메시지 push 후 자동 종료.
