@@ -53,7 +53,7 @@ mode toggle UX 옵션 4종 중 **Discord buttons (interaction)** 채택. 사유:
 - [x] dedup — SQLite ledger key = `choice:{message_id}:{choice_idx}`. Gateway reconnect / 사용자 toggle reaction (remove → add) 시 재진입 차단.
 - [x] user mode file infra — `~/.mobruji/user-mode.txt` 단일 file (`AUTO` / `ASK`). 부재 / 잘못된 값 = `AUTO` (default).
 - [x] `helper-turn-start.sh` 가 mode 읽어 turn 시작 header 에 `===USER_MODE:AUTO|ASK===` marker emit. helper LLM 이 이 marker 보고 `--choices` 사용 여부 결정.
-- [ ] **(PR 2)** Discord buttons UI — `ModeToggleView` + persistent view + `on_interaction` handler + setup 자동화 (bot boot 시 채널 history scan → mode toggle message 없으면 자동 post).
+- [x] **(PR 2)** Discord buttons UI — `ModeToggleView` (discord.py 2.x `discord.ui.View` + `discord.ui.button` decorator, custom_id `mobruji-mode-ask` / `mobruji-mode-auto`, `timeout=None` persistent) + on_ready 의 자동 register (`client.add_view`) + history scan + 자동 post.
 
 ### 비기능 요구사항
 
@@ -267,6 +267,7 @@ button custom_id: `mobruji-mode-ask` / `mobruji-mode-auto`. message 본문 marke
 - 2026-05-28 — **결정 4**: timeout 미설정 (MVP). 사유: file scan 비용 작음 + 미응답 누적 패턴 실측 후 cleanup loop 도입 가능.
 - 2026-05-28 — **결정 5 (사용자)**: mode toggle UX = Discord buttons (interaction). 사유: 모바일 typing 0 + 시각적 현재 상태 명확 + reaction-choice click UX 와 일관. 옵션 4종 중 (reaction-pinned / slash-cmd / 자연어 / buttons) 선택.
 - 2026-05-28 — **결정 6**: PR 분할 — PR 1 = reaction-choice + mode file infra (helper 가 mode 인식 가능한 minimal layer), PR 2 = buttons UI. 사유: buttons impl 이 별도 분량 (interaction handler + persistent view + setup 자동화) 이고 PR 1 머지만으로도 helper 가 mode 인식하는 minimum 가치 발생.
+- 2026-05-28 — **결정 7 (PR 2 구현)**: 메시지 marker = `[MODE_TOGGLE_v1]` (history scan key, V suffix 로 향후 버전 분기 가능), button visual = 현재 mode → `ButtonStyle.success`(green) / 그 외 → `ButtonStyle.secondary`(grey), boot 시 자동 post (history limit=100), idempotent flag = `client._mode_toggle_view_attached` (reconnect 시 중복 register 차단). 사유: 사용자 setup friction 0 + 시각적 강조 자명.
 
 ## 10) 자율 결정 (사유)
 
