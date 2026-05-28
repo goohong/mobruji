@@ -60,8 +60,16 @@ jobs:
 
             const body = context.payload.pull_request.body || '';
             const hasSplitException = /분할\s*불가\s*사유/.test(body);
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            const isRelease = labels.includes('type:release');
 
             core.notice(`PR size (excluding lock/binary): +${added} / -${removed} (total ${total} LOC)`);
+
+            // release PR 은 본질적으로 분할 불가 (develop → main 누적 commits) — size 가드 면제.
+            if (isRelease) {
+              core.info('Release PR — size gate skipped (release PRs are intrinsically large and indivisible).');
+              return;
+            }
 
             if (total > 1000 && !hasSplitException) {
               core.setFailed(`PR exceeds 1000 LOC hard limit (${total}). Add "분할 불가 사유: ..." to PR body or split.`);
