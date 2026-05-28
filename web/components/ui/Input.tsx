@@ -43,10 +43,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const describedBy = [descId, errorId].filter(Boolean).join(" ") || undefined;
 
   const baseClasses =
-    "h-12 w-full rounded-2xl border bg-white px-4 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500";
+    "h-12 w-full rounded-2xl border bg-[var(--surface-input)] px-4 text-base text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2";
   const stateClasses = error
     ? "border-[var(--danger-border)] focus:border-[var(--danger-500)] focus:ring-[var(--danger-border)]"
-    : "border-zinc-200 focus:border-zinc-400 focus:ring-zinc-300 dark:border-zinc-800 dark:focus:border-zinc-600 dark:focus:ring-zinc-700";
+    : "border-[var(--border-input)] focus:border-[var(--border-input-focus)] focus:ring-[var(--ring-input-focus)]";
   const merged = [baseClasses, stateClasses, className ?? ""]
     .filter((v) => v.length > 0)
     .join(" ");
@@ -59,7 +59,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           className={
             labelHidden
               ? "sr-only"
-              : "text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              : "text-sm font-medium text-[var(--text-label)]"
           }
         >
           {label}

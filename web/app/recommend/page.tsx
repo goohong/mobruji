@@ -660,17 +660,17 @@ function describeSourceMethod(sourceMethod: VoiceRangeSourceMethod): {
       return {
         label: "마이크 측정",
         tone:
-          "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200",
+          "bg-[var(--badge-success-bg)] text-[var(--badge-success-fg)]",
       };
     case "OCTAVE_PICK":
       return {
         label: "직접 선택",
-        tone: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+        tone: "bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-fg)]",
       };
     case "SELF_REPORT":
       return {
         label: "자가 보고",
-        tone: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+        tone: "bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-fg)]",
       };
   }
 }

@@ -218,4 +218,49 @@ describe("design tokens (ADR-0018)", () => {
     // Arial hardcode 잔존 0 확인.
     expect(bodyBlock).not.toMatch(/Arial/);
   });
+
+  /*
+   * ADR-0018 단계 4 PR 10 — form / input + badge 의미 토큰 회귀 가드.
+   *
+   * `components/ui/Input.tsx` 의 zinc hardcode 6 페어 + `recommend/page.tsx`
+   * SourceMethodBadge 의 zinc/emerald 2 톤이 의미 토큰으로 swap 됐다. 다크 모드
+   * swap 도 토큰 자체 (`:where(html.dark)`) 에서 처리해 사용처는 `dark:` prefix
+   * 가 사라진다.
+   */
+  it("form / input 의미 토큰 6종이 light + dark 모두 정의된다 (PR 10)", () => {
+    const requiredTokens = [
+      "--surface-input",
+      "--text-placeholder",
+      "--text-label",
+      "--border-input",
+      "--border-input-focus",
+      "--ring-input-focus",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    // dark swap block 안에 같은 토큰들이 재정의됨.
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
+
+  it("badge 의미 토큰 4종 (neutral + success) light + dark 모두 정의된다 (PR 10)", () => {
+    const requiredTokens = [
+      "--badge-neutral-bg",
+      "--badge-neutral-fg",
+      "--badge-success-bg",
+      "--badge-success-fg",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
 });
