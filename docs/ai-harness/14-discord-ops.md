@@ -268,13 +268,20 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 | 채널 이름 | env 변수 | channel id | 사용 시점 |
 |---|---|---|---|
 | #모부르지 | `MOBRUJI_CHANNEL_ID` | 1506925497651560458 | 사용자 ↔ helper 양방향. bot auto-ack + helper 본답 + AskUser push |
-| #모부르지-지시 | `DIRECTIVE_BOARD_CHANNEL_ID` | (별도 신설) | 사용자 지시 directive-board. `--directive-board` mode (§helper-directive-board) |
-| #모부르지-be | `BE_CHANNEL_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
-| #모부르지-fe | `FE_CHANNEL_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
-| #모부르지-rev | `REV_CHANNEL_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 3단계 e2e 진행 |
-| #모부르지-plan | `PLAN_CHANNEL_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
+| #모부르지-지시 (forum) | `DIRECTIVE_BOARD_FORUM_ID` | 1507992370044600442 | 사용자 지시 directive-board. event-driven (PR #1129) — `directive_append.sh` / `directive_status.sh` 호출 |
+| #모부르지-be (forum) | `BE_CHANNEL_ID` / `BE_FORUM_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
+| #모부르지-fe (forum) | `FE_CHANNEL_ID` / `FE_FORUM_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
+| #모부르지-rev (forum) | `REV_CHANNEL_ID` / `REV_FORUM_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 3단계 e2e 진행 |
+| #모부르지-plan (forum) | `PLAN_CHANNEL_ID` / `PLAN_FORUM_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
 | #모부르지-digest | `DIGEST_CHANNEL_ID` | 1507617571384328312 | cron digest 본체 (5분 주기 4 사이클 aggregate) + cross-cycle decision |
 | #모부르지-알림 / -alert | `ALERT_CHANNEL_ID` | (별도) | cycle idle / future-ts ERROR / Claude usage 임계 |
+
+> **2026-05-28 정리 (이슈 #1190, directive 1508005814928019550)**: 구 텍스트 채널
+> `DIRECTIVE_BOARD_CHANNEL_ID` env 는 PR #1129 event-driven 전환으로 폐기 — `.env.example`
+> 에서 삭제됨. 사이클 채널 id (BE/FE/REV/PLAN_CHANNEL_ID) 는 forum 으로 전환 완료
+> 되었으며 같은 channel id 가 forum type 으로 운영됨. `discord-reply.sh --cycle-channel`
+> 은 forum adapter (PR #1155) 가 자동 감지. Discord UI 측 잔존 텍스트 채널 archive /
+> delete 는 사용자 결정 영역.
 
 ### actor 별 채널 사용 룰
 

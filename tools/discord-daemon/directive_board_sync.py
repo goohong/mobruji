@@ -441,7 +441,10 @@ def sync_once(
     """jsonl 1회 scan + 변경된 entry 만 PATCH + state 갱신.
 
     Args:
-        channel_id: directive-board Discord 채널 id (DIRECTIVE_BOARD_CHANNEL_ID).
+        channel_id: directive-board Discord 채널 id. PR #1129 event-driven 전환 후
+            `directive_board_sync_loop` 가 폐기되어 본 함수는 호출되지 않음 — 인자는
+            테스트 픽스처용으로만 유지 (구 텍스트 채널 id `DIRECTIVE_BOARD_CHANNEL_ID`
+            은 운영 .env 에서 제거 예정).
         token: Discord bot token (PATCH Authorization header).
         jsonl_path: directive-board.jsonl 경로.
         state_path: directive-board-sync state 경로.
