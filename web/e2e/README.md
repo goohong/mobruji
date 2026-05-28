@@ -11,11 +11,15 @@
 web/
 ├── playwright.config.ts   # Playwright 공식 config (chromium-only, baseURL=http://localhost:3000)
 └── e2e/
-    ├── README.md          # 본 문서
-    └── home.spec.ts       # S1 (홈 신규 사용자)  ← impl PR 1 범위
+    ├── README.md                  # 본 문서
+    ├── home.spec.ts               # S1 (홈 신규 사용자)              ← impl PR 1
+    ├── recommend.spec.ts          # S3 (추천 페이지 + fallback)      ← impl PR 2
+    ├── songs.spec.ts              # S4 (곡 검색 + 키워드)            ← impl PR 2
+    ├── voice-range.spec.ts        # S5 (음역대 입력 + 자동 측정 진입)  ← impl PR 2
+    └── tokens-regression.spec.ts  # S6 (다크) / S7 (라이트) 토큰 회귀 가드  ← impl PR 2
 ```
 
-후속 impl PR 2 에서 S2-S7 (`recommend.spec.ts` / `songs.spec.ts` / `voice-range.spec.ts` / `tokens-regression.spec.ts`) 추가 예정.
+후속 impl PR 3 에서 `.github/workflows/web-e2e.yml` 신설 + 본 spec 들이 CI 게이트로 동작.
 
 ## 로컬 실행
 
