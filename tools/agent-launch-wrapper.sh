@@ -107,6 +107,14 @@ if [[ $# -lt 1 ]]; then
   usage
 fi
 
+# spec: docs/features/cycle-forum-operation.md §5-3 — --register-pending mode 신설.
+# nmae 가 backlog 등록 시 호출. 첫 args = --register-pending 이면 mode 분기.
+MODE="launch"
+if [[ "${1:-}" == "--register-pending" ]]; then
+  MODE="register-pending"
+  shift
+fi
+
 WORKTREE="$1"
 shift
 
@@ -124,6 +132,10 @@ DESCRIPTION=""
 ECHO_PROMPT=""
 NO_CYCLE_PUSH=0
 REFRESH_BACKLOG="${CYCLE_BACKLOG_REFRESH_DEFAULT:-0}"
+# spec: cycle-forum-operation.md §5-4 — 기존 🟡 대기 thread 재사용 시 명시.
+# wrapper 가 retag 🟡 → ⏳ + 본문 [x] launch update.
+PENDING_THREAD_ID=""
+DIRECTIVE_ID=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -152,6 +164,14 @@ while [[ $# -gt 0 ]]; do
     --no-refresh-backlog)
       REFRESH_BACKLOG=0
       ;;
+    --pending-thread-id)
+      shift; [[ $# -gt 0 ]] || { echo "ERROR: --pending-thread-id requires value" >&2; exit 2; }
+      PENDING_THREAD_ID="$1"
+      ;;
+    --directive-id)
+      shift; [[ $# -gt 0 ]] || { echo "ERROR: --directive-id requires value" >&2; exit 2; }
+      DIRECTIVE_ID="$1"
+      ;;
     -h|--help)
       usage
       ;;
@@ -170,6 +190,95 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPDATE_SH="$SCRIPT_DIR/cycle-status/update.sh"
+
+# spec: docs/features/cycle-forum-operation.md §5-3
+# register-pending mode = nmae 가 backlog 등록 시 호출. cycle forum 에 🟡 대기
+# thread 신설 + template body. set-active / cycle-status update 는 skip (launch 안 함).
+# stdout: PENDING_THREAD_ID=<id> — nmae 가 cache (다음 launch 시 --pending-thread-id 전달).
+if [[ "$MODE" == "register-pending" ]]; then
+  if [[ -z "$TITLE" ]]; then
+    echo "ERROR: --register-pending mode 는 --title 필수" >&2
+    exit 2
+  fi
+
+  # discord-reply.sh resolve.
+  DISCORD_REPLY_SH="${DISCORD_REPLY_SH:-${HOME:-/tmp}/.mobruji/discord-reply.sh}"
+  if [[ ! -x "$DISCORD_REPLY_SH" ]]; then
+    ALT="$SCRIPT_DIR/discord-daemon/discord-reply.sh"
+    if [[ -x "$ALT" ]]; then
+      DISCORD_REPLY_SH="$ALT"
+    else
+      echo "ERROR: discord-reply.sh 부재 — pending thread 신설 불가" >&2
+      exit 5
+    fi
+  fi
+
+  PENDING_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
+  PENDING_DESC="${DESCRIPTION:-$TITLE}"
+
+  _build_pending_body() {
+    local _cycle="$1" _title="$2" _desc="$3" _ts="$4" _did="$5"
+    local _did_line=""
+    if [[ -n "$_did" ]]; then
+      _did_line="
+- directive: \`${_did}\`"
+    fi
+    cat <<EOF
+🛠️ **${_title}**
+
+💬 작업 / 의도
+${_desc}
+
+🆔 사이클: \`${_cycle}\` · 📋 PR: #—
+🕐 launch: 대기 중 · ⏱️ 진행 —
+
+📋 진행 (🟡 대기)
+- [ ] launch (nmae 위임)
+- [ ] 분석 / 설계
+- [ ] 구현
+- [ ] 검증 (lint / test / typecheck)
+- [ ] PR 생성
+- [ ] PR 머지
+
+✅ 결과 *(종결 시점에만 채워짐)*
+—
+
+⏭️ 다음 단계
+nmae launch 대기
+
+🔖 관련${_did_line}
+
+---
+_갱신: ${_ts} (등록)_
+EOF
+  }
+
+  PENDING_BODY="$(_build_pending_body "$WORKTREE" "$TITLE" "$PENDING_DESC" "$PENDING_TS_KST" "$DIRECTIVE_ID")"
+  # forum thread name = 🟡 prefix + title (사용자 sidebar 가시화).
+  PENDING_TITLE="🟡 ${TITLE}"
+  PENDING_TITLE="${PENDING_TITLE:0:99}"
+
+  PENDING_OUT=""
+  PENDING_RC=0
+  PENDING_OUT=$("$DISCORD_REPLY_SH" \
+    --forum-post-auto-tag "$WORKTREE" "$PENDING_TITLE" "$PENDING_BODY" 2>/dev/null) \
+    || PENDING_RC=$?
+
+  if [[ "$PENDING_RC" -ne 0 ]]; then
+    echo "ERROR: pending thread 신설 실패 (rc=$PENDING_RC, raw=$PENDING_OUT)" >&2
+    exit 6
+  fi
+
+  PENDING_THREAD_ID_RESULT=$(printf '%s' "$PENDING_OUT" | tr -d '\r' | awk 'NF{line=$0} END{print line}')
+  if [[ ! "$PENDING_THREAD_ID_RESULT" =~ ^[0-9]{17,20}$ ]]; then
+    echo "ERROR: pending thread 신설 응답 thread_id 누락 (raw=$PENDING_OUT)" >&2
+    exit 7
+  fi
+
+  printf 'PENDING_THREAD_ID=%s\n' "$PENDING_THREAD_ID_RESULT"
+  echo "agent-launch-wrapper.sh: --register-pending OK (cycle=$WORKTREE, thread=$PENDING_THREAD_ID_RESULT)" >&2
+  exit 0
+fi
 
 if [[ ! -x "$UPDATE_SH" ]]; then
   # update.sh 가 실행 권한 없거나 부재 — 환경 문제. wrapper fail (silent skip 금지).
