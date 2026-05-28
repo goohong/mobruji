@@ -56,6 +56,28 @@ inject 받으면 **다음 turn 시작 즉시**: 백로그 후보 1개 선정 →
   - (c) 완료 / 머지 → `directive_status.sh <id> completed [pr_url]`
 - 강제: `helper-turn-start.sh`(helper) + `agent-launch-wrapper.sh`(launch) 가 turn/launch 시작 시 jsonl ↔ forum mismatch warning. polling sync_loop 폐기 (#1129 — 자동 PATCH 불완전 + 5분 latency 가 desync 원인).
 
+### 11-7b) cycle forum 작업 등록 — `wrapper --register-pending` (spec: [[cycle-forum-operation]])
+
+**nmae 가 directive 분배 결정 시점에 cycle forum 의 🟡 대기 thread 신설 의무** (사용자 정정 2026-05-28 옵션 Y):
+
+```bash
+bash tools/agent-launch-wrapper.sh --register-pending <cycle> "<title>" \
+  [--description "..."] [--directive-id "..."]
+```
+
+동작:
+1. 해당 cycle forum 에 🟡 대기 thread 신설 (template 본문).
+2. stdout: `PENDING_THREAD_ID=<id>` — nmae 가 cache (다음 launch 시 `--pending-thread-id <id>` 전달).
+3. backlog single thread (`tools/cycle-backlog/upsert.sh`) 폐기 — individual thread 가 그 역할.
+
+**launch 시점에 기존 🟡 thread 재사용**:
+
+```bash
+bash tools/agent-launch-wrapper.sh <cycle> --title "..." --pending-thread-id <id>
+```
+
+wrapper 가 기존 thread retag 🟡 → ⏳ + 본문 update.
+
 ### 11-8) directive 백로그 운영 — nmae 가 owner (spec: [[directive-board-template-and-tags]])
 
 **매 사이클 시작 시 의무**:

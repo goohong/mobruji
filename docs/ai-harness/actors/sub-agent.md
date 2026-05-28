@@ -90,9 +90,59 @@ gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --la
 | plan | `session:plan` |
 | helper sub-agent | `session:helper` |
 
-### 1-11) Discord thread 진행 stream + cycle forum 본문 정제 (PR D, 2026-05-28)
+### 1-11) Cycle forum thread 진행 + 4 tag 자동 전이 (cycle-forum-operation 2026-05-28)
 
-cycle forum thread 본문은 `agent-launch-wrapper.sh` 가 launch 시점에 template 박음 (📋 진행 6 체크박스). **sub-agent 가 큰 milestone (분석 완료 / PR 생성 / PR 머지) 시 본문의 체크박스 [x] update + 댓글 append**:
+**spec**: `docs/features/cycle-forum-operation.md` SoT.
+
+**4 tag 라이프사이클** (모든 cycle 작업 = individual thread, backlog single thread 폐기):
+- 🟡 대기: nmae 가 `wrapper --register-pending` 호출 시 신설
+- ⏳ 진행: wrapper launch 시 기존 🟡 thread 재사용 + retag (코드 강제)
+- ✅ 완료: bot.py polling 자동 (PR 머지 detect, branch ↔ thread_id cache)
+- ❌ 실패: sub-agent / rev 명시 호출 — **`--reason` 필수**
+
+**sub-agent milestone 시 본문 PATCH (큰 milestone = PR 생성 / PR 머지 2건만)**:
+
+```bash
+# milestone 시 본문 PATCH — discord-reply.sh --forum-edit (PR 생성 / 머지 시점 의무)
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-edit "$LAUNCH_THREAD_ID" "$(cat <<'EOF'
+🛠️ **{...}**
+...
+📋 진행 ({현재 단계})
+- [x] launch — {launch_ts}
+- [x] 분석 / 설계 — {summary} ({ts})
+- [x] 구현 — branch={branch}
+- [x] 검증 — checkstyle+spotless+test green
+- [x] PR 생성 — #1234
+- [ ] PR 머지
+
+⏭️ 다음 단계
+PR rev 단계 1 통과 + auto-merge 대기
+
+🔖 관련
+- PR: #1234
+- directive: {id} (있으면)
+---
+_갱신: {ts}_
+EOF
+)"
+
+# 댓글 append = milestone 1줄 stream (이력 추적)
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "[milestone] PR #1234 생성"
+```
+
+본문 PATCH = 사용자가 thread 한 번 보면 어디까지 진행됐는지 즉시 파악. 댓글 = milestone 이력 추적.
+
+**❌ 종결 시 사유 강제** (rev / 사용자 HOLD 결정):
+```bash
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-retag <thread_id> <cycle> "실패" --reason "<사유>"
+```
+`--reason` 누락 시 exit 1 + 본문 `❌ 종결 사유: <reason>` 자동 PATCH.
+
+
+
+> 본 섹션은 `docs/features/cycle-forum-operation.md` 와 PR D 의 PATCH 룰 통합본. cycle forum 의 운영 모델 SoT 는 cycle-forum-operation.md 우선.
+
+cycle forum thread 본문은 `agent-launch-wrapper.sh` 가 launch 시점에 template 박음 (📋 진행 6 체크박스 + 결과 / 다음 단계 / 관련 섹션). **sub-agent 가 큰 milestone (PR 생성 / PR 머지) 시 본문의 체크박스 [x] update + 댓글 append**:
 
 ```bash
 # milestone 시 (예: PR 생성 후) 본문 PATCH — discord-reply.sh --forum-edit
