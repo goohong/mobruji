@@ -74,6 +74,19 @@ last_reviewed: YYYY-MM-DD
 - [ ] PR 1: ...
 - [ ] PR 2: ...
 
+### 보호 영역 변경 여부 (필수 명시)
+
+> CLAUDE.md §4 "AI 작업 보호 영역" 목록 (workflows / CODEOWNERS / migration /
+> .env / build files / Dockerfile / docker-compose / LICENSE) 변경 여부를
+> spec 단계에서 미리 박제합니다. rev 사이클은 본 항목을 가중도 정보로 활용 —
+> 보호 영역 변경 PR 은 추가 신중도 (의존 자식 PR 영향 분석 / 환경별 회귀 가드)
+> 를 권고합니다. 정보성 룰 — 본 항목 부재가 머지 차단을 유발하지는 않으나,
+> rev 단계 1 에서 "보호 영역 변경 미명시" 경고를 코멘트로 남길 수 있습니다.
+
+- 보호 영역 변경 여부: ☐ 없음 / ☐ 있음 — (해당 시) 변경 파일과 사유:
+  - 예: `backend/build.gradle` — Spring Boot 3.5.x 패치 버전 업, 의존성 lock 갱신.
+  - 예: `web/next.config.js` — `images.remotePatterns` CDN 도메인 추가.
+
 ## 7) 테스트 전략
 - 단위/통합/E2E 어떤 범위로 테스트할지
 - 외부 연동 mock 전략
