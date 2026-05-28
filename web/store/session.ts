@@ -144,32 +144,6 @@ export function randomUuidV4FromBytes(): string {
 }
 
 /**
- * `crypto.getRandomValues()` 16 byte 로 RFC 4122 v4 UUID 문자열을 만든다.
- *
- * - byte 6: 상위 4비트를 `0100` (v4) 로 고정.
- * - byte 8: 상위 2비트를 `10` (RFC 4122 variant) 로 고정.
- * - 결과 포맷: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx` (y ∈ {8,9,a,b}).
- *
- * `export` 인 이유: PR #769 fallback 패턴을 history store 의 `generateEntryId()` 가
- * 그대로 재사용한다 — sessionId / entry id 둘 다 RFC 4122 v4 보장이 필요해서다
- * (issue #422 후속, sessionId/requestId/entry-id 형식 일관성).
- */
-export function randomUuidV4FromBytes(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
-  return (
-    `${hex[0]}${hex[1]}${hex[2]}${hex[3]}-` +
-    `${hex[4]}${hex[5]}-` +
-    `${hex[6]}${hex[7]}-` +
-    `${hex[8]}${hex[9]}-` +
-    `${hex[10]}${hex[11]}${hex[12]}${hex[13]}${hex[14]}${hex[15]}`
-  );
-}
-
-/**
  * 기존 누적 리스트에 새 ID들을 덧붙여 정규화한다.
  *
  * - 중복은 가장 먼저 등장한 위치를 유지(Set + insertion order).
