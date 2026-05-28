@@ -76,6 +76,10 @@ tools/discord-daemon/venv/
 tools/discord-daemon/__pycache__/
 tools/discord-daemon/inbox.jsonl
 
+### Branch cleanup sweep (tools/branch-cleanup/sweep.sh) ###
+# dry-run plain-text 아티팩트 — 정식 report 는 tools/branch-cleanup/reports/*.md
+/sweep-report-*.txt
+
 # Phase 4 NCP dev 배포 (.env.dev.example 만 추적)
 .env.dev
 !.env.dev.example
