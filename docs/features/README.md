@@ -77,7 +77,9 @@ frontmatter의 `status` 필드로 추적한다.
 ## 7) 템플릿
 
 `_template.md`를 복사해서 시작한다. 모든 섹션을 다 채울 필요는 없지만,
-"범위/비범위", "오픈 질문", "결정 로그"는 비우지 말 것.
+"범위/비범위", "오픈 질문", "결정 로그"는 비우지 말 것. `§6 보호 영역
+변경 여부` 항목도 명시 의무 — 변경 없음이라도 ☐ 없음 체크. rev 사이클이
+가중도 정보로 활용한다 (정보성 — 부재가 머지 차단을 유발하지는 않음).
 
 ## 8) AI 에이전트 의무
 
@@ -119,6 +121,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [discord-reply-length-split](discord-reply-length-split.md) | discord-reply.sh length 2000 초과 split + retry | draft | 2026-05-26 |
 | [discord-status-push](discord-status-push.md) | Discord 상태 push 룰 (maestro 사이클 트레일) | approved | 2026-05-24 |
 | [event-action-mapping](event-action-mapping.md) | event-action-mapping | approved | 2026-05-26 |
+| [heartbeat-watchdog-initial-delay](heartbeat-watchdog-initial-delay.md) | Heartbeat watchdog initial delay 확장 (false-positive missing 회귀 fix) | draft | 2026-05-28 |
 | [helper-agent](helper-agent.md) | Helper Agent (nmae 영구 가동으로 mmae 대체 + 사용자 양방향 전담) | draft | 2026-05-23 |
 | [helper-direct-work-guard-subagent-context](helper-direct-work-guard-subagent-context.md) | helper-direct-work-guard sub-agent context 보강 | implementing | 2026-05-27 |
 | [helper-role-enforcement](helper-role-enforcement.md) | Helper Role Enforcement (relay-only 정의 + system prompt 강제 메커니즘) | draft | 2026-05-26 |
