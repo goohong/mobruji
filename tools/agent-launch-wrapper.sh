@@ -188,6 +188,26 @@ if ! "$UPDATE_SH" "${UPDATE_ARGS[@]}" >&2; then
   exit 4
 fi
 
+# ─── directive-board jsonl ↔ Discord forum mismatch detect (#1129 impl PR 3) ─
+#
+# spec: docs/features/directive-board-event-driven-redesign.md §4
+# CLAUDE.md §11-11.
+#
+# polling sync_loop 폐기 (PR #1129 impl PR 1) 후 actor 호출 누락 사고는
+# 발생 가능 (sub-agent reasoning interrupt, helper crash 등). sub-agent launch
+# 시작 시점에 jsonl 최근 N=20 entry ↔ Discord forum 태그 diff 를 출력해
+# nmae / sub-agent 가 즉시 정정 호출 (`directive_status.sh`) 할 수 있게 한다.
+#
+# graceful: diff 헬퍼 자체가 exit 0 보장. wrapper stdout 계약 (첫 블록 =
+# --echo-prompt 본문 또는 confirm 라인, 마지막 블록 = LAUNCH_THREAD_ID) 을
+# 깨지 않게 diff 헬퍼 stdout 은 wrapper stderr 로 redirect — Discord launch
+# thread / tmux pane / journal 에서는 visible, 호출자가 stdout grep 으로
+# prompt body 추출할 때는 섞이지 않는다.
+DIFF_SH="$SCRIPT_DIR/directive-board/jsonl-forum-diff.sh"
+if [[ -x "$DIFF_SH" ]]; then
+  "$DIFF_SH" --limit 20 >&2 2>&1 || true
+fi
+
 # ─── (선택) cycle 백로그 refresh — 2026-05-26 사용자 정정 박제 ───────────────
 #
 # 사용자: "각 agent 가 자기 계획이 있어야지. 백로그 보면서 작업 안 까먹고 다

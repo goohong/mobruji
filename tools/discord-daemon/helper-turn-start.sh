@@ -169,6 +169,32 @@ else
   echo "[5/7] queue: ?"
 fi
 
+# ─── 5b) directive-board jsonl ↔ Discord forum mismatch detect (#1129 PR 3) ─
+# spec: docs/features/directive-board-event-driven-redesign.md §4
+# polling sync_loop 폐기 후 actor 호출 누락 detect — helper turn 시작 시점에
+# 최근 20 entry 의 jsonl status 와 Discord forum tag 를 diff. mismatch 발견 시
+# visible [!] warning emit. helper 가 보고 즉시 정정 호출 (directive_status.sh).
+# graceful: diff 헬퍼 자체가 exit 0 보장. wrapper turn 안 깨짐.
+if [[ -n "${SCRIPT_DIR:-}" ]]; then
+  DIFF_SH_HTS="${SCRIPT_DIR}/../directive-board/jsonl-forum-diff.sh"
+else
+  # SCRIPT_DIR 미설정 (writing marker 분기 안 들어간 경우) — fallback resolve.
+  SCRIPT_SELF_HTS="${BASH_SOURCE[0]}"
+  if command -v readlink >/dev/null 2>&1; then
+    SCRIPT_RESOLVED_HTS=$(readlink -f "$SCRIPT_SELF_HTS" 2>/dev/null || echo "$SCRIPT_SELF_HTS")
+  else
+    SCRIPT_RESOLVED_HTS="$SCRIPT_SELF_HTS"
+  fi
+  DIFF_SH_HTS="$(dirname "$SCRIPT_RESOLVED_HTS")/../directive-board/jsonl-forum-diff.sh"
+fi
+if [[ -x "$DIFF_SH_HTS" ]]; then
+  DIFF_OUT=$("$DIFF_SH_HTS" --limit 20 2>/dev/null || true)
+  if [[ -n "$DIFF_OUT" ]]; then
+    # mismatch 있을 때만 출력 — 없는 케이스 silent (signal-to-noise ↑).
+    printf '%s\n' "$DIFF_OUT"
+  fi
+fi
+
 # ─── 6) 다음 액션 reminder ──────────────────────────────────────────────────
 echo "[6/7] 다음 액션 (docs/ai-harness/actors/helper.md §12-2): (a) queue append (b) 분류 (c) 답 first → 처리 (d) sub-agent dispatch (e) queue done + grep 0건 검증 (f) directive forum 등록 (지시 채택 시)"
 echo "[7/7] 본답 push 직후 (docs/ai-harness/actors/helper.md §12-2 step 6): discord-reply.sh --writing-done <target_id> 호출로 ✍️ OFF (또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook)"
