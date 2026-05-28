@@ -263,4 +263,66 @@ describe("design tokens (ADR-0018)", () => {
       expect(allDark).toMatch(new RegExp(`${token}:`));
     }
   });
+
+  /*
+   * ADR-0018 단계 4 PR 11 — 홈 + 에러 페이지 잔여 zinc hardcode 의미 토큰화.
+   *
+   * `app/page.tsx` (홈 보조 CTA + SecondaryNav + VoiceRangeSummary + FlowStep) +
+   * `app/error.tsx` (배경 + primary CTA + 보조 CTA + digest 식별자) 의 zinc
+   * hardcode 를 4 그룹 토큰 (disclaimer / secondary-cta / neutral-cta /
+   * surface-step) 으로 swap. 다크 모드 swap 은 토큰 자체 (`:where(html.dark)`)
+   * 가 책임 → 사용처는 `dark:` prefix 제거.
+   */
+  it("disclaimer 텍스트 토큰이 light + dark 모두 정의된다 (PR 11)", () => {
+    expect(tokens).toMatch(/--text-disclaimer:/);
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    expect(allDark).toMatch(/--text-disclaimer:/);
+  });
+
+  it("secondary CTA 의미 토큰 5종이 light + dark 모두 정의된다 (PR 11)", () => {
+    const requiredTokens = [
+      "--cta-secondary-bg",
+      "--cta-secondary-bg-hover",
+      "--cta-secondary-border",
+      "--cta-secondary-fg",
+      "--cta-secondary-ring",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
+
+  it("neutral CTA (검정/흰 invert) 의미 토큰 3종이 light + dark 모두 정의된다 (PR 11)", () => {
+    const requiredTokens = [
+      "--cta-neutral-bg",
+      "--cta-neutral-bg-hover",
+      "--cta-neutral-fg",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
+
+  it("step indicator surface 의미 토큰 2종이 light + dark 모두 정의된다 (PR 11)", () => {
+    const requiredTokens = ["--surface-step-bg", "--surface-step-fg"];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
 });
