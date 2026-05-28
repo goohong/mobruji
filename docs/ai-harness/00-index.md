@@ -9,6 +9,7 @@
 - 비적용: 타 레포 공통 정책, 조직 전사 정책
 
 ## 3) 문서 목록 (P0)
+- `docs/ai-harness/00-MANIFEST.md`: **Vol 0 — 라우팅 지도** (16개 문서를 4 볼륨 그룹으로 묶은 view + 에이전트별 주입 맵 + 작업 트랙 + 보고 프로토콜). 문서 대체 아님, 네비게이션/주입 인덱스.
 - `docs/ai-harness/01-harness-spec.md`: 하네스 실행 규격과 결정 규칙
 - `docs/ai-harness/02-agent-workflow.md`: 브랜치/PR/커밋/핸드오프 워크플로우
 - `docs/ai-harness/03-quality-gates.md`: 빌드/테스트 게이트와 실패 처리
@@ -29,6 +30,8 @@
 
 ## 3-1) 관련 자산
 - `prompts/`: 재사용 프롬프트 저장소 (운영 규칙은 `05-prompt-ops.md`)
+  - `prompts/feature-implementation.md`: BE/FE/Plan 기능 구현 위임 템플릿
+  - `prompts/review-qa.md`: Rev PR 사후 감사/QA 템플릿
 - `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/task.md`: PR/이슈 템플릿
 - `docs/features/`: 기능 단위 living 명세서 (Feature Spec). 프로세스는 `02-agent-workflow.md §9`
 - `docs/decisions/`: Architecture Decision Records (ADR). 횡단 결정의 영속 이력
