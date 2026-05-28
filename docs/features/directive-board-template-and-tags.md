@@ -352,6 +352,30 @@ nmae 가 `directive_status.sh in_progress <id> plan <reason>` 호출 → thread 
 
 기존 entry (polished field 부재) 처리: `select((.polished // false) == true)` = polished field 없으면 false 취급 → 무시. backfill 필요 시 별도 script `backfill-polish-tasks.sh` (follow-up) 가 모든 기존 entry 의 helper-queue polish task 재등록.
 
+#### PR E-1 — bot.py / mark-polished → nmae 자동 inject (2026-05-28)
+
+**사용자 정정 (2026-05-28)**: helper 가 사용자 메시지 받아 직접 nmae 위임 결정 (관찰됨: 17:28 "추천 400 → be / 다크모드 → fe" — relay-only 룰 위반). nmae 가 backlog-scan 호출 안 함 = 학습 의존 사고.
+
+**해결 (코드 강제)**: `mark-polished.sh` 가 polished=true 박은 직후 **nmae tmux pane 에 inject** — 학습 의존 ↓.
+
+```bash
+# mark-polished.sh 끝에 자동 호출:
+tmux send-keys -t "${MOBRUJI_NMAE_PANE:-mobruji:0.0}" \
+  "[directive] 새 polished directive ${ID} — backlog-scan + 분배 결정 의무. ..." \
+  Enter
+```
+
+**효과**:
+- helper sub-agent 정제 완료 → mark-polished.sh → polished=true + nmae inject 자동
+- nmae 가 directive 인식 학습 의존 X — tmux pane 에 강제 신호
+- helper 가 직접 위임하는 우회 path 와 무관 (PR E-2 가 helper 차단)
+
+**graceful**:
+- `MOBRUJI_NMAE_INJECT_ENABLED=0` → inject skip (테스트 / 로컬 dev 용)
+- tmux 부재 (macOS local) → skip
+- tmux session `mobruji` 부재 → skip
+- nmae 가 thinking 중이면 inject 가 tmux input queue 에 쌓임 → 다음 turn 처리
+
 #### plan 분석 모드 + 🟣 결정 대기 흐름 (사용자 결정 2026-05-28)
 
 **사용자 정정**: "plan 에게 문제 분석을 맡긴 케이스이니까 그 포럼에 plan 이 생각하는 해결책까지만 제시하고 작업 진행하지는 않는게 좋겠다. A안 B안 C안이 있는데 그중 ~를 추천합니다. 내가 거기다 ~로 해라고 댓글달면 다시 지시 포럼에 추가".
