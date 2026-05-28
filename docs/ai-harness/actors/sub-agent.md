@@ -180,6 +180,33 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 금지: `backend/**` / `web/**` 도메인 구현 (be/fe 영역, nmae 위임)
 - PR 라벨: `session:helper` 명시 부착 (브랜치 prefix 자유 — 자동 부착 룰이 모호)
 
+#### directive 본문 정제 task (spec [[directive-board-template-and-tags]] §5-6)
+
+**helper 본체가 매 turn-start 시 queue 의 `type=directive_polish` pending task 발견 → helper sub-agent batch launch**. 사용자 응답 우선 → 그 후 polish task 처리.
+
+**launch prompt 패턴** (helper 본체가 Agent 도구 호출):
+```
+공통 룰: docs/ai-harness/actors/sub-agent.md §2-helper. 역할 = helper sub-agent.
+
+Task: directive_polish batch (N건).
+
+pending list (helper-queue.jsonl 의 status=pending + type=directive_polish):
+- directive_id=<X>, thread_id=<A>, raw_body="<...>"
+- directive_id=<Y>, thread_id=<B>, raw_body="<...>"
+
+각 directive 마다:
+1. cycle-status.json 의 최근 사이클 상황 read (컨텍스트 파악)
+2. 한 줄 요약 + 1-2 문장 컨텍스트 + category 분류 (🎯 결정 / 🛠️ 작업 / 🐛 사고 / 💡 spec) 생성
+3. discord-reply.sh --forum-edit <thread_id> "<정제된 본문 (spec §5-3 정제 후 template)>" 호출
+4. discord-reply.sh --forum-retag <thread_id> directive "<category tag>" 호출
+
+완료 후 보고: 처리 N건, OK X건, fail Y건 + fail 사유.
+```
+
+**helper 본체가 sub-agent 보고 받은 후 helper-queue 의 처리 완료 task status: pending → done atomic update**.
+
+batch 효과: 1 launch 가 N task 처리 — launch overhead 분담. N=1 도 정상 동작 (overhead 그대로지만 흐름 일관). 한 turn 처리 한도 = max 5 (5+ 이면 다음 turn 에 남은 것 처리).
+
 ### 2-기획·이슈 등록
 
 be / fe / rev = **이슈 등록 금지** (nmae 보고만). plan 은 docs/spec/ADR 일환으로 직접 등록 가능.

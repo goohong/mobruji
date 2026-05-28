@@ -291,6 +291,42 @@ nmae 가 `directive_status.sh in_progress <id> plan <reason>` 호출 → thread 
 - sub-agent 가 PR 생성 시 body 에 `directive: 1509427220...` 또는 `Closes directive 1509427220...` 명시 (sub-agent.md 룰 추가).
 - PR 머지 webhook (`.github/workflows/directive-complete-on-merge.yml`) 이 pattern 매칭 → `directive_status.sh completed <id> <pr_url>` 호출 → 🟢 + 본문 [x] 완료 + PR URL 부착.
 
+#### helper sub-agent 정제 흐름 (PR D, 2026-05-28)
+
+사용자 정정: "pin 이 된건 좋은데, 그 이후에 속 내용을 채우고 인식하는 건 엔마에 역할인가? 추가된줄도 모르는거같애".
+
+**책임 분담**:
+- 📌 등록 = bot.py
+- **본문 정제 (한 줄 + 컨텍스트 + category tag) = helper sub-agent batch** (helper 본체 = relay only 보존)
+- 분배 결정 = nmae
+- 실제 구현 = be / fe sub-agent
+
+**왜 helper sub-agent**: helper 본체 = relay only ([[feedback-helper-relay-only]]) → 정제는 sub-agent 가 자연. nmae 가 정제하면 owner 룰 흐려짐 + nmae context ↑ ([[feedback-nmae-overload-signals]]).
+
+**흐름**:
+
+```text
+1. 사용자 📌 tap → bot.py _handle_pin_reaction → directive_append.sh → forum thread (🟡 대기, raw template)
+2. bot.py 가 ~/.mobruji/helper-queue.jsonl 에 polish task append:
+   {"type":"directive_polish","directive_id":"...","raw_body":"...","ts":"...","status":"pending"}
+3. helper 본체 다음 turn-start (helper-turn-start.sh) → queue scan → directive_polish pending count 가시화
+4. 사용자 응답 우선 → 그 후 polish pending 1+ 시 helper sub-agent batch launch (Agent 도구)
+5. helper sub-agent batch:
+   - N건 directive 본문 정제 (한 줄 요약 + 컨텍스트 1-2 문장 + category 분류)
+   - discord-reply.sh --forum-edit <thread_id> "<정제된 본문>"
+   - discord-reply.sh --forum-retag <thread_id> directive "<category tag>"
+   - stdout 보고 (처리 N건 / OK / fail)
+6. helper 본체가 sub-agent 보고 받은 후 queue task status: pending → done atomic
+7. nmae 가 다음 backlog-scan 호출 시 정제된 본문 + category tag 보고 분배 결정
+```
+
+**batch 효과**:
+- 1 helper sub-agent launch 가 N task 처리 — launch overhead 분담
+- N=1 도 정상 동작 (단일 launch, 흐름 일관)
+- 한 turn 처리 한도 max 5 (5+ 이면 다음 turn 에 남은 것 처리)
+
+**상세 룰**: `docs/ai-harness/actors/sub-agent.md §2-helper` 의 `directive 본문 정제 task` 섹션 SoT.
+
 #### plan 분석 모드 + 🟣 결정 대기 흐름 (사용자 결정 2026-05-28)
 
 **사용자 정정**: "plan 에게 문제 분석을 맡긴 케이스이니까 그 포럼에 plan 이 생각하는 해결책까지만 제시하고 작업 진행하지는 않는게 좋겠다. A안 B안 C안이 있는데 그중 ~를 추천합니다. 내가 거기다 ~로 해라고 댓글달면 다시 지시 포럼에 추가".
