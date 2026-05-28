@@ -55,6 +55,10 @@ if [[ -z "${HOOK_NAMES:-}" ]]; then
       # 반영 — 학습 의존 ↓, 코드 강제. spec: actors/sub-agent.md §2-helper / nmae §11-7.
       helper-launch.sh
       helper-role.md
+      # 2026-05-29: helper-tool-progress.sh — Claude Code PreToolUse hook.
+      # .claude/settings.json 의 hook command path 는 $HOME/.mobruji/helper-tool-progress.sh
+      # 고정 — repo 변경 즉시 반영을 위해 symlink 강제. spec: docs/features/helper-tool-visibility.md.
+      helper-tool-progress.sh
     )
   fi
 fi
