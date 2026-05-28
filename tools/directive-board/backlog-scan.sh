@@ -34,11 +34,18 @@ JSONL_PATH_DEFAULT="${HOME}/.mobruji/directive-board.jsonl"
 JSONL_PATH="${DIRECTIVE_BOARD_JSONL_PATH:-${JSONL_PATH_DEFAULT}}"
 
 CYCLE_FILTER=""
+INCLUDE_UNPOLISHED=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cycle)
       shift
       CYCLE_FILTER="${1:-}"
+      shift
+      ;;
+    --include-unpolished)
+      # race 가드 우회 (디버깅 / backfill 용도). default = polished=true 만.
+      # spec: docs/features/directive-board-template-and-tags.md §5-6 polished flag
+      INCLUDE_UNPOLISHED=1
       shift
       ;;
     -h|--help)
@@ -63,10 +70,16 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-# jq query — status="대기" entry filter + (선택) assigned_cycle 매칭.
+# jq query — status="대기" + (default) polished=true + (선택) assigned_cycle 매칭.
+# spec: docs/features/directive-board-template-and-tags.md §5-6 polished flag race 가드.
+# helper sub-agent 가 정제 후 mark-polished.sh 로 polished=true 박음. nmae 가
+# 정제 미완 raw 본문 보고 잘못 분배하는 race 방어. --include-unpolished 시 우회.
 JQ_FILTER='
   select(.status == "대기")
 '
+if [[ "${INCLUDE_UNPOLISHED}" -eq 0 ]]; then
+  JQ_FILTER="${JQ_FILTER} | select((.polished // false) == true)"
+fi
 if [[ -n "${CYCLE_FILTER}" ]]; then
   JQ_FILTER="${JQ_FILTER} | select(.assigned_cycle == \"${CYCLE_FILTER}\")"
 fi
@@ -88,7 +101,14 @@ if [[ -n "${ENTRIES}" ]]; then
   COUNT=$(echo "${ENTRIES}" | wc -l | tr -d ' ')
 fi
 
-echo "=== directive 백로그 (status=대기${CYCLE_FILTER:+, cycle=${CYCLE_FILTER}}) ==="
+FILTER_LABEL="status=대기"
+if [[ "${INCLUDE_UNPOLISHED}" -eq 0 ]]; then
+  FILTER_LABEL="${FILTER_LABEL}, polished=true"
+fi
+if [[ -n "${CYCLE_FILTER}" ]]; then
+  FILTER_LABEL="${FILTER_LABEL}, cycle=${CYCLE_FILTER}"
+fi
+echo "=== directive 백로그 (${FILTER_LABEL}) ==="
 echo "COUNT=${COUNT}"
 
 if [[ "${COUNT}" -eq 0 ]]; then
