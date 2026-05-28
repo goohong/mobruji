@@ -101,6 +101,7 @@ ADR 본문이 아닌 **부속 운영 가이드**(예: 1회성 마이그레이션
 | [0021](0021-worktree-count-evaluation.md) | 워크트리 개수 평가 — 4 워크트리 status quo 재확인 |
 | [0022](0022-work-cycle-simplification-retrospective.md) | work-cycle-simplification 회고 (stub — Phase 3 완료 후 본문) |
 | [0023](0023-workflow-main-sync.md) | workflow / unit file main 미동기화 사고 박제 + sync 전략 |
+| [0024](0024-loop-heartbeat-reliability.md) | Loop heartbeat reliability — `try/finally` 단일 종점 record 패턴 |
 
 > 번호 0020 은 비어 있음 (스킵). 0021 이 직후 번호.
 
