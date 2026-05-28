@@ -279,13 +279,25 @@ def load_env() -> dict[str, str]:
     """
     load_dotenv(Path(__file__).resolve().parent / ".env")
 
+    env: dict[str, str] = {}
+
+    # 0. 필수 인증/화이트리스트 — 누락 시 즉시 종료.
+    #    repository_dispatch 경로 폐기(#807)로 GITHUB_PAT/GITHUB_REPO 는 비필수.
+    required = ("DISCORD_BOT_TOKEN", "ALLOWED_USER_IDS")
+    missing = [key for key in required if not os.environ.get(key)]
+    if missing:
+        logger.error("필수 환경변수 누락: %s", ", ".join(missing))
+        sys.exit(1)
+    for key in required:
+        env[key] = os.environ[key]
+
     # 1. 채널 설정 (Phase 3: Multi-channel Architecture)
     # LOBBY (대화), FORUM (작업), STATUS (대시보드) 로 분리.
     # backward-compat: MOBRUJI_CHANNEL_ID 를 LOBBY 로, DIGEST 를 STATUS 로 매핑.
     lobby_raw = os.environ.get("LOBBY_CHANNEL_ID") or os.environ.get("MOBRUJI_CHANNEL_ID")
     forum_raw = os.environ.get("FORUM_CHANNEL_ID") or os.environ.get("MOBRUJI_CHANNEL_ID")
     status_raw = os.environ.get("STATUS_CHANNEL_ID") or os.environ.get("DIGEST_CHANNEL_ID") or os.environ.get("MOBRUJI_CHANNEL_ID")
-    
+
     if not lobby_raw:
         logger.error("필수 환경변수 누락: LOBBY_CHANNEL_ID (또는 MOBRUJI_CHANNEL_ID)")
         sys.exit(1)
@@ -293,6 +305,31 @@ def load_env() -> dict[str, str]:
     env["LOBBY_CHANNEL_ID"] = lobby_raw
     env["FORUM_CHANNEL_ID"] = forum_raw or lobby_raw
     env["STATUS_CHANNEL_ID"] = status_raw or lobby_raw
+    # 단일 채널 운영 / 후방호환을 위해 MOBRUJI_CHANNEL_ID 원본도 보존.
+    mobruji_raw = os.environ.get("MOBRUJI_CHANNEL_ID")
+    if mobruji_raw:
+        env["MOBRUJI_CHANNEL_ID"] = mobruji_raw
+    # DIGEST_CHANNEL_ID — digest/watchdog 알림 발사 채널 (#1019 rename).
+    # 우선순위: DIGEST_CHANNEL_ID > (legacy) NOTIFY_CHANNEL_ID > STATUS.
+    # (아래 CYCLE_NOTIFY_CHANNEL_ID 가 이 키를 참조하므로 먼저 설정해야 함.)
+    env["DIGEST_CHANNEL_ID"] = (
+        os.environ.get("DIGEST_CHANNEL_ID")
+        or os.environ.get("NOTIFY_CHANNEL_ID")
+        or env["STATUS_CHANNEL_ID"]
+    )
+
+    # 2. 인프라 키 — tmux 브리지 / 큐 / claude 실행 바이너리.
+    #    bot.py 자체는 helper 세션을 ensure (lobby helper). worker.py 가 nmae 세션 담당.
+    env["TMUX_SESSION_NAME"] = os.environ.get("TMUX_SESSION_NAME", "helper")
+    env["TMUX_TARGET_PANE"] = os.environ.get("TMUX_TARGET_PANE", "helper:0.0")
+    env["CLAUDE_BIN"] = os.environ.get("CLAUDE_BIN", "claude")
+    env["DEDUP_LEDGER_PATH"] = os.path.expanduser(
+        os.environ.get("DEDUP_LEDGER_PATH", "~/.mobruji/discord-bridge.sqlite")
+    )
+    env["DIGEST_ENABLED"] = os.environ.get("DIGEST_ENABLED", "1")
+    env["DIGEST_INTERVAL_SECONDS"] = os.environ.get(
+        "DIGEST_INTERVAL_SECONDS", str(DEFAULT_DIGEST_INTERVAL_SECONDS)
+    )
     env["CONTEXT_AUTO_CLEAR_ENABLED"] = os.environ.get(
         "CONTEXT_AUTO_CLEAR_ENABLED", CONTEXT_AUTO_CLEAR_DEFAULT_ENABLED
     )
@@ -2530,11 +2567,29 @@ def build_client(env: dict[str, str], ledger: OpLedger | None) -> discord.Client
     client = discord.Client(intents=intents)
 
     allowed_user_ids = parse_allowed_user_ids(env["ALLOWED_USER_IDS"])
-    
-    # 채널 ID 로드
-    lobby_channel_id = int(env["LOBBY_CHANNEL_ID"])
-    forum_channel_id = int(env["FORUM_CHANNEL_ID"])
-    status_channel_id = int(env["STATUS_CHANNEL_ID"])
+
+    # 채널 ID 로드 — load_env 산출(LOBBY/FORUM/STATUS) 우선, 단일 채널
+    # (MOBRUJI_CHANNEL_ID) env / 테스트 fixture 후방호환 fallback.
+    def _resolve_channel(*keys: str) -> int:
+        for key in keys:
+            value = env.get(key)
+            if value:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "채널 ID 파싱 실패 key=%s value=%r — 다음 fallback 시도",
+                        key,
+                        value,
+                    )
+                    continue
+        raise KeyError(keys[0])
+
+    lobby_channel_id = _resolve_channel("LOBBY_CHANNEL_ID", "MOBRUJI_CHANNEL_ID")
+    forum_channel_id = _resolve_channel("FORUM_CHANNEL_ID", "MOBRUJI_CHANNEL_ID")
+    status_channel_id = _resolve_channel(
+        "STATUS_CHANNEL_ID", "DIGEST_CHANNEL_ID", "MOBRUJI_CHANNEL_ID"
+    )
 
     session_name = env["TMUX_SESSION_NAME"]
     target_pane = env["TMUX_TARGET_PANE"]
@@ -2575,72 +2630,119 @@ def build_client(env: dict[str, str], ledger: OpLedger | None) -> discord.Client
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
-            
-        # 화이트리스트 검사
+
+        # 화이트리스트 검사.
         if message.author.id not in allowed_user_ids:
+            logger.info("허용되지 않은 사용자 무시: user_id=%s", message.author.id)
             return
 
-        # 1. 채널 분류 (Triage)
+        # 1. 채널 분류 (Triage) — lobby/forum/forum 내 쓰레드만 처리.
         is_lobby = message.channel.id == lobby_channel_id
         is_forum = message.channel.id == forum_channel_id
         is_thread_in_forum = (
-            isinstance(message.channel, discord.Thread) 
-            and message.channel.parent_id == forum_channel_id
+            isinstance(message.channel, discord.Thread)
+            and getattr(message.channel, "parent_id", None) == forum_channel_id
         )
-
         if not (is_lobby or is_forum or is_thread_in_forum):
             return
 
+        # 2. dedup claim — gc+mark 단일 트랜잭션(#909 F-3). 이후 단계(enqueue 등)
+        #    실패해도 claim 은 유지: 재처리 위험 > 단발 누락 비용.
         message_id = str(message.id)
         if ledger is not None and not ledger.claim(message_id):
+            logger.info("dedup hit: message_id=%s", message_id)
             return
 
-        # UI 피드백: 이모지
+        # 3. 👀 수신 표시.
         try:
             await message.add_reaction("👀")
-        except Exception: pass
+        except Exception:  # noqa: BLE001
+            pass
 
         original_body = message.content or ""
-        
-        # 2. 로비 로직 (Triage & Routing)
-        if is_lobby:
-            # 사용자가 로비에서 말을 걸면, 작업인지 일반 대화인지 분류 시도
-            # (현재는 단순화하여 모든 명령을 "새 쓰레드 생성" 으로 유도)
-            thread_name = f"Issue: {truncate_for_log(original_body, 30)}"
+
+        # 4. reply.referenced_message → "[답장→ <preview>] <body>" prefix (#880).
+        referenced_content: str | None = None
+        referenced_message = getattr(message, "referenced_message", None)
+        if referenced_message is not None:
+            ref_raw = getattr(referenced_message, "content", None)
+            if isinstance(ref_raw, str) and ref_raw.strip():
+                referenced_content = ref_raw
+        forwarded_text = build_reply_context_prefix(referenced_content, original_body)
+
+        ts_iso = message.created_at.astimezone(timezone.utc).isoformat()
+        append_inbox(
+            {
+                "text": forwarded_text,
+                "author": str(message.author.id),
+                "author_name": message.author.name,
+                "ts": ts_iso,
+                "message_id": message_id,
+                "channel_id": str(message.channel.id),
+            }
+        )
+        # #946: helper 본답 자동 reply 용 message_id 캐시 (invalid snowflake 는 내부 skip).
+        write_last_user_msg_id(message_id)
+
+        # 5. typing 표시 + 1초 generic auto-ack (#880). claim 이후라 실패해도
+        #    재처리 없음. typing context manager 진입 실패 시에도 ack 는 시도.
+        ack_sent = False
+        try:
+            async with message.channel.typing():
+                if bot_auto_ack_enabled:
+                    await message.channel.send(BOT_AUTO_ACK_TEXT)
+                    ack_sent = True
+        except Exception:  # noqa: BLE001
+            pass
+        if bot_auto_ack_enabled and not ack_sent:
             try:
-                forum_chan = client.get_channel(forum_channel_id)
-                if isinstance(forum_chan, discord.ForumChannel):
-                    thread_with_msg = await forum_chan.create_thread(
-                        name=thread_name,
-                        content=f"🚀 로비 요청으로부터 생성됨: {message.author.mention}\n지시사항: {original_body}",
-                    )
-                    new_thread = thread_with_msg.thread
-                    await message.reply(f"✅ 요청을 확인했습니다. 전용 쓰레드에서 작업을 진행합니다: {new_thread.mention}")
-                    
-                    # 큐 등록 (Lobby -> Forum 자동 위임)
-                    if ledger:
-                        ledger.enqueue_task(str(new_thread.id), str(message.author.id), {"text": original_body})
-                else:
-                    await message.reply("❌ Forum 채널을 찾을 수 없어 쓰레드를 생성하지 못했습니다.")
-            except Exception as exc:
-                logger.exception("로비 분류 처리 실패:")
-                await message.reply(f"❌ 작업 생성 중 오류 발생: {exc}")
-            return
+                await message.channel.send(BOT_AUTO_ACK_TEXT)
+            except Exception:  # noqa: BLE001
+                pass
 
-        # 3. 포럼/쓰레드 로직 (Immediate Queueing)
-        if is_forum or is_thread_in_forum:
+        # 6. 라우팅 + 큐 등록. 전체를 broad except 로 감싸 claim 유지 보장.
+        try:
             target_thread_id = str(message.channel.id)
-            if is_forum:
-                # 새 포스트 작성 시
-                thread_name = f"Issue: {truncate_for_log(original_body, 30)}"
-                try:
-                    thread_with_msg = await message.channel.create_thread(name=thread_name, content=f"🚀 작업 시작 (Task Queue 등록 완료)")
-                    target_thread_id = str(thread_with_msg.thread.id)
-                except Exception: pass
+            forum_chan = client.get_channel(forum_channel_id)
 
-            if ledger:
-                task_id = ledger.enqueue_task(target_thread_id, str(message.author.id), {"text": original_body})
-                logger.info("작업 큐 등록 완료: task_id=%d thread_id=%s", task_id, target_thread_id)
+            if is_lobby and isinstance(forum_chan, discord.ForumChannel):
+                # 로비 요청 → 전용 Forum 쓰레드 생성 후 그 쓰레드로 큐잉.
+                thread_name = f"Issue: {truncate_for_log(original_body, 30)}"
+                thread_with_msg = await forum_chan.create_thread(
+                    name=thread_name,
+                    content=(
+                        f"🚀 로비 요청으로부터 생성됨: {message.author.mention}\n"
+                        f"지시사항: {original_body}"
+                    ),
+                )
+                new_thread = thread_with_msg.thread
+                await message.reply(
+                    f"✅ 요청 확인 — 전용 쓰레드에서 진행합니다: {new_thread.mention}"
+                )
+                target_thread_id = str(new_thread.id)
+            elif is_forum and isinstance(message.channel, discord.ForumChannel):
+                # Forum 채널 새 포스트 → 쓰레드.
+                thread_with_msg = await message.channel.create_thread(
+                    name=f"Issue: {truncate_for_log(original_body, 30)}",
+                    content="🚀 작업 시작 (Task Queue 등록)",
+                )
+                target_thread_id = str(thread_with_msg.thread.id)
+            # else: forum 내 쓰레드 / 단일 채널 fallback → 해당 채널 그대로 큐잉.
+
+            if ledger is not None:
+                task_id = ledger.enqueue_task(
+                    target_thread_id,
+                    str(message.author.id),
+                    payload={"text": forwarded_text},
+                )
+                logger.info(
+                    "작업 큐 등록: task_id=%s thread_id=%s preview=%r",
+                    task_id,
+                    target_thread_id,
+                    truncate_for_log(forwarded_text),
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("on_message 라우팅/큐 등록 실패 (claim 유지):")
 
     return client
 

@@ -22,10 +22,12 @@ THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 
 # discord 는 가능한 한 실제 모듈을 사용 — embed 검증과 일관성 (#840).
+# 미설치 환경에서는 MagicMock 으로 stub (isinstance 검증 경로는 실제 모듈 전제).
 try:
     import discord as _real_discord  # noqa: F401
 except ImportError:
-    
+    sys.modules["discord"] = mock.MagicMock()
+
 # dotenv 는 단순 stub.
 if "dotenv" not in sys.modules:
     stub = mock.MagicMock()
@@ -39,7 +41,7 @@ class DedupLedgerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
         self.tmp.close()
-        self.ledger = bot.DedupLedger(self.tmp.name)
+        self.ledger = bot.OpLedger(self.tmp.name)
 
     def tearDown(self) -> None:
         os.unlink(self.tmp.name)
@@ -258,10 +260,11 @@ class ResolveDigestIntervalTests(unittest.TestCase):
 
 
 class DigestLoopTests(unittest.TestCase):
-    """digest_loop — initial push + delta + heartbeat 분기 검증.
+    """digest_loop — Dashboard Mode (edit-in-place) 분기 검증.
 
-    단순화본 시그니처: digest_loop(client, channel_id, *, interval, ...).
-    legacy github_repo / github_pat 인자 제거.
+    대시보드 모드(#840 / b8b776a): 최초 1회 send 후 동일 채널 메시지를 edit 하여
+    채널 noise 를 줄인다. signature 변동(delta) / heartbeat 경과 시에만 edit,
+    동일 signature + heartbeat 이내면 skip.
     """
 
     def _run_loop(
@@ -271,14 +274,27 @@ class DigestLoopTests(unittest.TestCase):
         interval: int = 900,
         heartbeat_seconds: int = 3600,
         clock_per_iter: int = 900,
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[str], list[str], list[int]]:
         sent: list[str] = []
+        edited: list[str] = []
         sleeps: list[int] = []
+
+        class FakeMessage:
+            def __init__(self_inner, mid):  # noqa: ANN001
+                self_inner.id = mid
+
+            async def edit(self_inner, *, embed=None):  # noqa: ANN001
+                edited.append(embed)
+                return self_inner
 
         class FakeChannel:
             async def send(self_inner, content=None, *, embed=None):  # noqa: ANN001
                 # 단순화본 #840: digest 는 embed 로 push. content 는 사용 안 함.
                 sent.append(embed if embed is not None else content)
+                return FakeMessage(12345)
+
+            async def fetch_message(self_inner, mid):  # noqa: ANN001
+                return FakeMessage(mid)
 
         class FakeClient:
             def get_channel(self_inner, channel_id):  # noqa: ANN001
@@ -305,34 +321,44 @@ class DigestLoopTests(unittest.TestCase):
             clock["t"] += clock_per_iter
             return float(clock["t"])
 
-        with mock.patch.object(bot, "read_cycle_status", return_value={}), \
-             mock.patch.object(bot, "format_cycle_digest", side_effect=fake_format), \
-             mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
-            with self.assertRaises(asyncio.CancelledError):
-                asyncio.run(
-                    bot.digest_loop(
-                        FakeClient(),
-                        channel_id=999,
-                        interval=interval,
-                        initial_delay=60,
-                        heartbeat_seconds=heartbeat_seconds,
-                        time_source=fake_clock,
+        # persistent msg-id 파일을 테스트 전용 임시 경로로 격리 (real ~/.mobruji 오염 방지).
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".msgid")
+        tmp.close()
+        os.unlink(tmp.name)  # 시작 시 파일 부재 → persistent_msg_id None
+        try:
+            with mock.patch.object(bot, "read_cycle_status", return_value={}), \
+                 mock.patch.object(bot, "format_cycle_digest", side_effect=fake_format), \
+                 mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
+                with self.assertRaises(asyncio.CancelledError):
+                    asyncio.run(
+                        bot.digest_loop(
+                            FakeClient(),
+                            channel_id=999,
+                            interval=interval,
+                            initial_delay=60,
+                            heartbeat_seconds=heartbeat_seconds,
+                            time_source=fake_clock,
+                            last_msg_id_path=tmp.name,
+                        )
                     )
-                )
-        return sent, sleeps
+        finally:
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
+        return sent, edited, sleeps
 
     def test_initial_always_pushes(self) -> None:
-        sent, sleeps = self._run_loop(
+        sent, edited, sleeps = self._run_loop(
             [("📊 A", "be=x|fe=y")],
             interval=60,
             heartbeat_seconds=3600,
             clock_per_iter=60,
         )
         self.assertEqual(sent, ["📊 A"])
+        self.assertEqual(edited, [])
         self.assertEqual(sleeps, [60, 60])  # initial_delay, interval
 
     def test_skips_when_signature_unchanged(self) -> None:
-        sent, _ = self._run_loop(
+        sent, edited, _ = self._run_loop(
             [
                 ("📊 A", "be=x"),
                 ("📊 A", "be=x"),
@@ -342,11 +368,12 @@ class DigestLoopTests(unittest.TestCase):
             heartbeat_seconds=3600,
             clock_per_iter=60,
         )
-        # 첫 iter 만 push, 나머지 skip.
+        # 첫 iter 만 send, 동일 signature 는 skip (edit 도 없음).
         self.assertEqual(sent, ["📊 A"])
+        self.assertEqual(edited, [])
 
     def test_delta_pushes_on_signature_change(self) -> None:
-        sent, _ = self._run_loop(
+        sent, edited, _ = self._run_loop(
             [
                 ("📊 A", "be=x"),
                 ("📊 B", "be=y"),
@@ -357,20 +384,23 @@ class DigestLoopTests(unittest.TestCase):
             heartbeat_seconds=3600,
             clock_per_iter=60,
         )
-        self.assertEqual(sent, ["📊 A", "📊 B", "📊 C"])
+        # 최초만 send, 이후 delta 는 edit-in-place.
+        self.assertEqual(sent, ["📊 A"])
+        self.assertEqual(edited, ["📊 B", "📊 C"])
 
     def test_heartbeat_pushes_after_silence(self) -> None:
-        sent, _ = self._run_loop(
+        sent, edited, _ = self._run_loop(
             [
-                ("📊 A", "be=x"),  # initial
+                ("📊 A", "be=x"),  # initial → send
                 ("📊 A", "be=x"),  # within heartbeat → skip
-                ("📊 A", "be=x"),  # heartbeat 경과 → push
+                ("📊 A", "be=x"),  # heartbeat 경과 → edit
             ],
             interval=900,
             heartbeat_seconds=1800,
             clock_per_iter=1000,
         )
-        self.assertEqual(sent, ["📊 A", "📊 A"])
+        self.assertEqual(sent, ["📊 A"])
+        self.assertEqual(edited, ["📊 A"])
 
 
 class OnMessageRoutingTests(unittest.TestCase):
