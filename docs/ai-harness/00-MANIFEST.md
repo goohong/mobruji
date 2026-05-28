@@ -6,16 +6,16 @@
 
 ---
 
-## 1. 문서 → 4 볼륨 그룹 (Navigation)
+## 1. 주제별 문서 그룹 (어디서 뭘 찾나)
 
-16개 평면 문서를 주제별 4 그룹으로 묶은 view (파일명/번호는 그대로 유지 — 교차 참조 보존).
+문서를 주제로 묶은 네비게이션 (파일명/번호는 그대로 — 교차 참조 보존). 아래 §2 가 이 그룹명으로 역할별 주입을 지정한다.
 
-| 볼륨 | 주제 | 포함 문서 |
+| 그룹 | 주제 | 문서 |
 |---|---|---|
-| **Vol 1 · Governance** | 브랜치/PR/커밋/품질게이트/보안/Spec 프로세스 | `01-harness-spec`, `02-agent-workflow`, `03-quality-gates`, `04-security-policy` |
-| **Vol 2 · Architect** | 도메인 모델/유비쿼터스 랭귀지/ERD/설계 결정 | `06-domain-model`, `docs/decisions/*` (ADR) |
-| **Vol 3 · Standards** | 코드 컨벤션/테스트/관측성/프롬프트 운영 | `08-code-conventions`, `07-testing-guide`, `10-observability`, `05-prompt-ops` |
-| **Vol 4 · Ops Runbook** | 세션/오케스트레이션/메모리/Discord/룰 강제 | `11-multi-session-runbook`, `12-sub-agent-prompt-template`, `13-memory-and-enforcement`, `14-discord-ops`, `actors/nmae-runbook`, `docs/helper-rules.md` |
+| **Governance** | 브랜치/PR/커밋/품질게이트/보안/Spec 프로세스 | `01-harness-spec`, `02-agent-workflow`, `03-quality-gates`, `04-security-policy` |
+| **Architect** | 도메인 모델/유비쿼터스 랭귀지/ERD/설계 결정 | `06-domain-model`, `docs/decisions/*` (ADR) |
+| **Standards** | 코드 컨벤션/테스트/관측성/프롬프트 운영 | `08-code-conventions`, `07-testing-guide`, `10-observability`, `05-prompt-ops` |
+| **Ops** | 세션/오케스트레이션/메모리/Discord/룰 강제 | `11-multi-session-runbook`, `12-sub-agent-prompt-template`, `13-memory-and-enforcement`, `14-discord-ops`, `actors/nmae-runbook`, `docs/helper-rules.md` |
 
 ## 2. 에이전트별 주입 맵 (Injection Map)
 
@@ -23,12 +23,12 @@ nmae 는 sub-agent launch 시 역할에 따라 아래 문서만 발췌 주입 (�
 
 | 역할 | 워크트리 | 필수 주입 | 보조 |
 |---|---|---|---|
-| **nmae** (오케스트레이터) | NCP `mobruji:0.0` | `actors/nmae-runbook.md` + CLAUDE.md §0~§10,§14,§16,§17 | Vol 1 |
-| **Plan** | `mobruji-plan` | Vol 1, Vol 2 | Vol 3 (형식 참조) |
-| **BE** | `mobruji-be` | Vol 1, Vol 3, `12-sub-agent-prompt-template §2 be` | Vol 2 (BC/엔티티) |
-| **FE** | `mobruji-fe` | Vol 1, Vol 3, `12-sub-agent-prompt-template §2 fe` | - |
-| **Rev** | `mobruji-rev` | Vol 1, Vol 3, `rev-e2e-3-stages.md` | Vol 2 (설계 의도) |
-| **Helper** | (mac `helper:0.0`) | `docs/helper-rules.md` (SoT), CLAUDE.md §12 | Vol 1 (말투) |
+| **nmae** (오케스트레이터) | NCP `mobruji:0.0` | `actors/nmae-runbook.md` + CLAUDE.md §0~§10,§14,§16,§17 | Governance |
+| **Plan** | `mobruji-plan` | Governance, Architect | Standards (형식 참조) |
+| **BE** | `mobruji-be` | Governance, Standards, `12-sub-agent-prompt-template §2 be` | Architect (BC/엔티티) |
+| **FE** | `mobruji-fe` | Governance, Standards, `12-sub-agent-prompt-template §2 fe` | - |
+| **Rev** | `mobruji-rev` | Governance, Standards, `rev-e2e-3-stages.md` | Architect (설계 의도) |
+| **Helper** | (mac `helper:0.0`) | `docs/helper-rules.md` (SoT) | Governance (말투) |
 
 > sub-agent 는 `docs/ai-harness/12-sub-agent-prompt-template.md` 한 개만 로드하면 공통+역할 룰이 모두 들어옵니다 (CLAUDE.md §13 포인터와 동일).
 
@@ -44,14 +44,17 @@ nmae 가 백로그/지시를 분류해 트랙을 결정합니다. 실제 사이�
 - **조건**: 명확한 버그 수정, 단순 UI/텍스트 변경, 파일 변경 < 3개, 기존 패턴 반복.
 - **흐름**: `BE`/`FE`(즉시 수정) → `Rev`(검증). Spec 생략 가능.
 
-## 4. 작업 템플릿 (prompts/)
+## 4. 에이전트 통신 계약 (command IN / report OUT)
 
-nmae/helper 가 sub-agent launch 시 prompt 본문에 사용하는 재사용 템플릿. 운영 규칙은 `05-prompt-ops.md`.
+> 에이전트 간 지시·보고의 **고정 규격**. 별도 템플릿 파일을 두지 않는다 — 규격은 **실제 launch 시 주입되는 SoT** 에만 둬야 지켜진다 (문서로 두면 스킵됨, `13-memory-and-enforcement.md` 철학).
 
-| 템플릿 | 용도 | 대상 |
-|---|---|---|
-| `prompts/feature-implementation.md` | 기능 구현/리팩터 위임 | BE / FE / Plan |
-| `prompts/review-qa.md` | PR 사후 감사/QA | Rev |
+**① 지시 IN (nmae → sub-agent)** — 강제: `tools/agent-launch-wrapper.sh` 가 set-active + 채널 알림 + (옵션) `--echo-prompt` 으로 launch 본문 emit. 필수 필드:
+`목표/이슈` · `워크트리(mobruji-<role>)` · `참조 Spec(또는 Fast Track 명시)` · `완료 기준(DoD)`. 역할별 상세 = `12-sub-agent-prompt-template.md §2`.
+
+**② 보고 OUT (sub-agent → nmae)** — 강제: `12-sub-agent-prompt-template.md §1` (launch 시 sub-agent 가 로드). 필수 필드:
+`PR URL` · `mergeable` · `품질 게이트 결과` · `보호 영역 여부` · **발견 사항(🔴/🟡/🟢)** · `다음 사이클 후보`.
+
+**③ 상태 공유 (서로)** — `cycle-status.json` (`tools/cycle-status/update.sh`) + `directive-board.jsonl` (`~/.mobruji/directive_*.sh`). 수동 편집 금지 — 헬퍼만.
 
 ## 5. 핸드오프 보고 프로토콜
 
