@@ -3166,6 +3166,166 @@ def format_rev_post_merge_discord(pr_numbers: list[int]) -> str:
     return REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE.format(pr_numbers=joined)
 
 
+# spec: docs/features/directive-board-template-and-tags.md §5-6 완료 자동화
+# PR B: PR 머지 webhook → directive_status.sh completed 자동 호출.
+# 사용자 정정 (2026-05-28): sub-agent PR body 에 `directive: <id>` 명시 → 머지 시 자동 status 전이.
+DIRECTIVE_PR_BODY_RE: Final = re.compile(
+    r"(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE
+)
+DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT: Final[int] = 300  # 5분
+DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "1h"
+DIRECTIVE_COMPLETE_GH_TIMEOUT_SECONDS: Final[int] = 60
+
+
+def extract_directive_ids_from_body(body: str) -> list[str]:
+    """PR body 에서 `directive: <id>` 또는 `Closes directive <id>` 매칭 list."""
+    if not body:
+        return []
+    matches = DIRECTIVE_PR_BODY_RE.findall(body)
+    # dedup 보존 순서.
+    seen: set[str] = set()
+    result: list[str] = []
+    for match in matches:
+        if match not in seen:
+            seen.add(match)
+            result.append(match)
+    return result
+
+
+def fetch_recent_merged_prs_with_body(
+    *,
+    search_window: str = DIRECTIVE_COMPLETE_SEARCH_WINDOW,
+    timeout_seconds: int = DIRECTIVE_COMPLETE_GH_TIMEOUT_SECONDS,
+    runner=subprocess.run,
+) -> list[dict]:
+    """develop base 최근 머지 PR + body 포함 list 반환."""
+    search_expr = f"merged:>{search_window} ago"
+    cmd = [
+        "gh", "pr", "list",
+        "--state", "merged",
+        "--base", "develop",
+        "--search", search_expr,
+        "--json", "number,url,body,mergedAt",
+        "--limit", "30",
+    ]
+    try:
+        result = runner(
+            cmd, check=False, capture_output=True, text=True, timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("directive_complete_on_merge: gh pr list 실패: %r", exc)
+        return []
+    if result.returncode != 0:
+        logger.warning(
+            "directive_complete_on_merge: gh pr list rc=%d stderr=%s",
+            result.returncode,
+            truncate_for_log(result.stderr or ""),
+        )
+        return []
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("directive_complete_on_merge: JSON 파싱 실패: %r", exc)
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [entry for entry in payload if isinstance(entry, dict)]
+
+
+async def directive_complete_on_merge_loop(
+    *,
+    poll_interval: int = DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
+    initial_delay: int = 30,
+    fetcher=None,
+) -> None:
+    """5분 polling — develop 머지 PR body 의 directive: <id> 매칭 시 자동 completed 전이.
+
+    spec: docs/features/directive-board-template-and-tags.md §5-6 완료 자동화 (PR B).
+
+    동작:
+      1. ``initial_delay`` 초 warmup.
+      2. ``poll_interval`` 마다 `gh pr list --merged --base develop --search merged:>1h ago` 호출.
+      3. 각 PR body grep `directive: <id>` regex → 매칭 id list.
+      4. 매칭 id 마다 `directive_status.sh completed <id> <pr_url>` subprocess.
+         sh 자체가 멱등 (이미 completed 면 no-op) — race / 중복 호출 안전.
+      5. graceful — gh CLI 실패 / 부재 시 다음 iter 재시도.
+      6. ``poll_interval <= 0`` → disabled.
+
+    Args:
+        fetcher: ``() -> list[dict]`` 콜러블. None 이면 기본 ``fetch_recent_merged_prs_with_body``.
+    """
+    if poll_interval <= 0:
+        logger.info("directive_complete_on_merge_loop disabled (poll_interval<=0)")
+        return
+
+    fetch = fetcher or fetch_recent_merged_prs_with_body
+    seen_prs: set[int] = set()  # 이번 process 내 처리 완료 PR 기억 (재호출 회피).
+
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
+
+    status_script = (
+        Path(__file__).resolve().parent / "directive_status.sh"
+    )
+
+    while True:
+        try:
+            record_loop_heartbeat("directive_complete_on_merge_loop")
+            prs = fetch()
+            for pr in prs:
+                pr_number = pr.get("number")
+                if not isinstance(pr_number, int) or pr_number in seen_prs:
+                    continue
+                body = pr.get("body") or ""
+                directive_ids = extract_directive_ids_from_body(body)
+                if not directive_ids:
+                    continue
+                pr_url = pr.get("url") or ""
+                logger.info(
+                    "directive_complete_on_merge: PR #%d body 에서 directive id 매칭: %s",
+                    pr_number,
+                    directive_ids,
+                )
+                for directive_id in directive_ids:
+                    if not status_script.exists():
+                        logger.warning(
+                            "directive_complete_on_merge: directive_status.sh 부재 — skip"
+                        )
+                        break
+                    try:
+                        subprocess.run(  # noqa: S603 — sibling script
+                            ["bash", str(status_script), directive_id, "completed", pr_url],
+                            check=False,
+                            timeout=15.0,
+                            capture_output=True,
+                        )
+                        logger.info(
+                            "directive_complete_on_merge: completed 호출: id=%s pr=#%d",
+                            directive_id,
+                            pr_number,
+                        )
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        logger.warning(
+                            "directive_complete_on_merge: status.sh 호출 실패 id=%s: %r",
+                            directive_id,
+                            exc,
+                        )
+                seen_prs.add(pr_number)
+                # set 크기 cap (메모리 부담 방어).
+                if len(seen_prs) > 200:
+                    # 가장 오래된 100개 제거 (단순 truncate).
+                    seen_prs = set(list(seen_prs)[100:])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("directive_complete_on_merge_loop iter 실패: %r", exc)
+
+        await asyncio.sleep(poll_interval)
+
+
 async def rev_post_merge_audit_loop(
     client: "discord.Client",
     digest_channel_id: int,
@@ -4565,6 +4725,18 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not rev_post_merge_audit_enabled:
             logger.info(
                 "rev_post_merge_audit_loop disabled (REV_POST_MERGE_AUDIT_LOOP=0)"
+            )
+
+        # PR B (2026-05-28) — directive completed 자동 전이.
+        # 5분 polling — develop 머지 PR body 의 `directive: <id>` 매칭 시 자동
+        # `directive_status.sh completed <id> <pr_url>` 호출. 멱등 — 이미 completed
+        # 면 sh 가 no-op. spec: directive-board-template-and-tags.md §5-6 완료 자동화.
+        if not hasattr(client, "_directive_complete_on_merge_task_started"):
+            client._directive_complete_on_merge_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(directive_complete_on_merge_loop())
+            logger.info(
+                "directive_complete_on_merge_loop launched: interval=%ds (5min polling)",
+                DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
             )
 
         # Claude API usage tracker loop (#1020).

@@ -632,5 +632,62 @@ class PinReactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args[3], "(빈 본문)")
 
 
+class DirectiveCompleteOnMergeTests(unittest.TestCase):
+    """PR B: directive_complete_on_merge_loop — PR body grep + completed 호출."""
+
+    def test_extract_directive_id_simple(self) -> None:
+        body = "Closes directive 1509466456230989926\n\n## Summary\nfoo"
+        ids = bot.extract_directive_ids_from_body(body)
+        self.assertEqual(ids, ["1509466456230989926"])
+
+    def test_extract_directive_id_colon_format(self) -> None:
+        body = "## Foo\ndirective: 1509427220802830336\nbar"
+        ids = bot.extract_directive_ids_from_body(body)
+        self.assertEqual(ids, ["1509427220802830336"])
+
+    def test_extract_directive_id_multiple(self) -> None:
+        body = "directive: 1111111111111\ndirective: 2222222222222\nCloses directive 3333333333333"
+        ids = bot.extract_directive_ids_from_body(body)
+        self.assertEqual(ids, ["1111111111111", "2222222222222", "3333333333333"])
+
+    def test_extract_directive_id_dedup_preserves_order(self) -> None:
+        body = "directive: 1111111111111\nCloses directive 1111111111111"
+        ids = bot.extract_directive_ids_from_body(body)
+        self.assertEqual(ids, ["1111111111111"])
+
+    def test_extract_directive_id_none_match(self) -> None:
+        body = "## Summary\nno directive id here\n"
+        ids = bot.extract_directive_ids_from_body(body)
+        self.assertEqual(ids, [])
+
+    def test_extract_directive_id_empty_body(self) -> None:
+        self.assertEqual(bot.extract_directive_ids_from_body(""), [])
+        self.assertEqual(bot.extract_directive_ids_from_body(None), [])  # type: ignore[arg-type]
+
+    def test_extract_directive_id_case_insensitive(self) -> None:
+        body = "DIRECTIVE: 1234567890123 / closes Directive 1234567890124"
+        ids = bot.extract_directive_ids_from_body(body)
+        self.assertIn("1234567890123", ids)
+        self.assertIn("1234567890124", ids)
+
+    def test_fetch_recent_merged_prs_graceful_on_gh_failure(self) -> None:
+        # subprocess.run mock — rc=1 simulating gh fail.
+        fake = mock.MagicMock()
+        fake.returncode = 1
+        fake.stdout = ""
+        fake.stderr = "error"
+        result = bot.fetch_recent_merged_prs_with_body(runner=mock.MagicMock(return_value=fake))
+        self.assertEqual(result, [])
+
+    def test_fetch_recent_merged_prs_json_parse(self) -> None:
+        fake = mock.MagicMock()
+        fake.returncode = 0
+        fake.stdout = '[{"number": 1234, "url": "https://github.com/x/y/pull/1234", "body": "directive: 999"}]'
+        result = bot.fetch_recent_merged_prs_with_body(runner=mock.MagicMock(return_value=fake))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["number"], 1234)
+        self.assertIn("directive: 999", result[0]["body"])
+
+
 if __name__ == "__main__":
     unittest.main()
