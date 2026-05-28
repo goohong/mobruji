@@ -520,5 +520,117 @@ class UserModeTests(unittest.TestCase):
             bot.write_user_mode("MAYBE", self.path)
 
 
+class PinReactionTests(unittest.IsolatedAsyncioTestCase):
+    """spec: docs/features/directive-pushpin-registration.md — 📌 reaction → directive 등록."""
+
+    def test_pin_emoji_constants(self) -> None:
+        self.assertEqual(bot.PIN_REACTION_EMOJI, "📌")
+        self.assertEqual(bot.PIN_REGISTERED_EMOJI, "✅")
+
+    async def test_handle_pin_reaction_skips_when_channel_missing(self) -> None:
+        client = mock.MagicMock()
+        client.get_channel.return_value = None
+        # 부재 channel → graceful return + warning. 예외 raise 금지.
+        await bot._handle_pin_reaction(
+            client=client,
+            channel_id=999,
+            message_id="123",
+            user_id=42,
+        )
+        client.get_channel.assert_called_once_with(999)
+
+    async def test_handle_pin_reaction_calls_append_script_and_attaches_check(
+        self,
+    ) -> None:
+        msg = mock.MagicMock()
+        msg.content = "release 머지 가도 될까요?"
+        msg.add_reaction = mock.AsyncMock()
+
+        channel = mock.MagicMock()
+        channel.fetch_message = mock.AsyncMock(return_value=msg)
+
+        client = mock.MagicMock()
+        client.get_channel.return_value = channel
+
+        # subprocess.run 가 rc=0 반환하도록 mock.
+        fake_result = mock.MagicMock()
+        fake_result.returncode = 0
+        fake_result.stderr = b""
+
+        # directive_append.sh 존재 여부도 mock (실제 파일 의존 X).
+        with mock.patch.object(bot.subprocess, "run", return_value=fake_result) as run, \
+             mock.patch.object(bot.Path, "exists", return_value=True):
+            await bot._handle_pin_reaction(
+                client=client,
+                channel_id=1506,
+                message_id="9001",
+                user_id=42,
+            )
+
+        run.assert_called_once()
+        call_args = run.call_args.args[0]
+        self.assertEqual(call_args[0], "bash")
+        self.assertTrue(call_args[1].endswith("directive_append.sh"))
+        self.assertEqual(call_args[2], "9001")
+        self.assertEqual(call_args[3], "release 머지 가도 될까요?")
+        # 성공 시 ✅ 부착 검증.
+        msg.add_reaction.assert_awaited_once_with(bot.PIN_REGISTERED_EMOJI)
+
+    async def test_handle_pin_reaction_skips_check_on_subprocess_failure(self) -> None:
+        msg = mock.MagicMock()
+        msg.content = "hello"
+        msg.add_reaction = mock.AsyncMock()
+
+        channel = mock.MagicMock()
+        channel.fetch_message = mock.AsyncMock(return_value=msg)
+
+        client = mock.MagicMock()
+        client.get_channel.return_value = channel
+
+        fake_result = mock.MagicMock()
+        fake_result.returncode = 1
+        fake_result.stderr = b"already registered"
+
+        with mock.patch.object(bot.subprocess, "run", return_value=fake_result), \
+             mock.patch.object(bot.Path, "exists", return_value=True):
+            await bot._handle_pin_reaction(
+                client=client,
+                channel_id=1506,
+                message_id="9001",
+                user_id=42,
+            )
+
+        # rc != 0 → ✅ 부착 skip.
+        msg.add_reaction.assert_not_called()
+
+    async def test_handle_pin_reaction_empty_body_uses_placeholder(self) -> None:
+        msg = mock.MagicMock()
+        msg.content = ""  # 빈 본문 (image-only 메시지 등)
+        msg.add_reaction = mock.AsyncMock()
+
+        channel = mock.MagicMock()
+        channel.fetch_message = mock.AsyncMock(return_value=msg)
+
+        client = mock.MagicMock()
+        client.get_channel.return_value = channel
+
+        fake_result = mock.MagicMock()
+        fake_result.returncode = 0
+
+        with mock.patch.object(bot.subprocess, "run", return_value=fake_result) as run, \
+             mock.patch.object(bot.Path, "exists", return_value=True):
+            await bot._handle_pin_reaction(
+                client=client,
+                channel_id=1506,
+                message_id="9001",
+                user_id=42,
+            )
+
+        # 빈 본문 → "(빈 본문)" placeholder 로 호출됐는지 확인.
+        run.assert_called_once()
+        call_args = run.call_args.args[0]
+        self.assertEqual(call_args[3], "(빈 본문)")
+
+
 if __name__ == "__main__":
     unittest.main()
