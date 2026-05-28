@@ -102,6 +102,7 @@ ADR 본문이 아닌 **부속 운영 가이드**(예: 1회성 마이그레이션
 | [0022](0022-work-cycle-simplification-retrospective.md) | work-cycle-simplification 회고 (stub — Phase 3 완료 후 본문) |
 | [0023](0023-workflow-main-sync.md) | workflow / unit file main 미동기화 사고 박제 + sync 전략 |
 | [0024](0024-loop-heartbeat-reliability.md) | Loop heartbeat reliability — `try/finally` 단일 종점 record 패턴 |
+| [0025](0025-directive-cleanup-option-b.md) | 잔존 directive 정리 — 옵션 B (분류 기반 자율 sweep) 채택 |
 
 > 번호 0020 은 비어 있음 (스킵). 0021 이 직후 번호.
 

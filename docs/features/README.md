@@ -110,6 +110,8 @@ frontmatter의 `status` 필드로 추적한다.
 | [cycle-backlog-and-auto-merge-hooks](cycle-backlog-and-auto-merge-hooks.md) | cycle-backlog-and-auto-merge-hooks | implemented | 2026-05-26 |
 | [deployment-infrastructure](deployment-infrastructure.md) | 운영 배포 인프라 (Phase 5 prod — NCP 별 VM + Cloudflare, ADR-0015 재결정 반영) | draft | 2026-05-24 |
 | [directive-board-event-driven-redesign](directive-board-event-driven-redesign.md) | directive board event-driven redesign | approved | 2026-05-27 |
+| [directive-board-stale-close-policy](directive-board-stale-close-policy.md) | Directive board stale entry 분류 + close 정책 (대기 long-running entry 정리) | draft | 2026-05-28 |
+| [directive-cleanup-option-b](directive-cleanup-option-b.md) | 잔존 directive 정리 — 옵션 B (분류 기반 자율 sweep + 정책 영속화) | draft | 2026-05-29 |
 | [directive-jsonl-mismatch-sweep](directive-jsonl-mismatch-sweep.md) | directive-board jsonl ↔ Discord mismatch 106건 자동 sweep + 지속 sync | draft | 2026-05-26 |
 | [discord-daemon-hosting](discord-daemon-hosting.md) | Discord 데몬 호스팅 (무료 24/7 옵션) | draft | 2026-05-23 |
 | [discord-driven-mobruji](discord-driven-mobruji.md) | Discord-driven maestro (tmux interactive + Discord bridge) | draft | 2026-05-24 |
