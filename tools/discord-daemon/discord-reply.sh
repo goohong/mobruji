@@ -506,6 +506,8 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --forum-comment <thread_id> \"<body>\"" >&2
   echo "  discord-reply.sh --forum-edit <thread_id> \"<new_body>\"" >&2
   echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan> \"<new_tag>\"" >&2
+  echo "  discord-reply.sh --update-status <thread_id> \"<status>\" [pr_url]" >&2
+  echo "  discord-reply.sh --forum-state-dump <directive|be|fe|rev|plan>" >&2
   echo "  discord-reply.sh --writing-marker <user_msg_id>" >&2
   echo "  discord-reply.sh --writing-done <user_msg_id>" >&2
   exit 1
@@ -723,6 +725,48 @@ case "$1" in
     FORUM_TAG="$4"
     # body 인자는 retag 에선 사용하지 않으나 MSG 빈값 가드 우회용 placeholder.
     MSG="(retag)"
+    NO_REPLY=1
+    ;;
+  --update-status)
+    # PR #1129 directive-board event-driven (impl PR 2) — directive forum thread
+    # starter message 본문 atomic 갱신. directive_status.sh 가 in_progress /
+    # completed 전이 시 호출.
+    #
+    # 형식: --update-status <thread_id> "<status>" [pr_url]
+    # 동작: forum_edit_starter 재사용 — PATCH /channels/{thread_id}/messages/{thread_id}.
+    #       본문 = "**상태**: <status>\n**갱신**: <KST timestamp>" + (pr_url 시 PR 줄 추가).
+    #       기존 starter content 를 완전히 대체 (Discord PATCH semantics).
+    # 한계: starter 본문에 사용자 작성 추가 정보가 있다면 본 갱신으로 덮어쓰임 —
+    #       directive_status.sh 호출자가 책임 (forum thread starter 는 시스템 message 가정).
+    MODE="update-status"
+    if [[ $# -lt 3 ]]; then
+      echo "discord-reply.sh: --update-status <thread_id> \"<status>\" [pr_url] 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    THREAD_ID="$2"
+    FORUM_TAG="$3"  # FORUM_TAG 변수를 status 문자열 임시 저장 — 신규 변수 추가 없이 재사용.
+    FORUM_TITLE="${4:-}"  # PR URL (선택). FORUM_TITLE 재사용.
+    MSG="(update-status placeholder)"
+    NO_REPLY=1
+    ;;
+  --forum-state-dump)
+    # PR #1129 directive-board event-driven (impl PR 2) — debug helper.
+    # forum 의 모든 active thread + applied tag name 을 jsonl 형식으로 stdout.
+    # wrapper (helper-turn-start.sh / agent-launch-wrapper.sh) 가 jsonl entry status
+    # 와 forum tag 비교해 mismatch detect.
+    #
+    # 형식: --forum-state-dump <directive|be|fe|rev|plan>
+    # 출력 (jsonl, 1 줄 per thread):
+    #   {"thread_id":"<id>","name":"<thread name>","tags":["<tag name>", ...]}
+    # 한계: GET /guilds/{guild_id}/threads/active 가 active thread 만 반환 — archive
+    #       된 thread 는 누락 (의도된 동작 — 누락 detect 는 최근 N=20 active entry 만 대상).
+    MODE="forum-state-dump"
+    if [[ $# -lt 2 ]]; then
+      echo "discord-reply.sh: --forum-state-dump <directive|be|fe|rev|plan> 형태로 입력해주세요" >&2
+      exit 1
+    fi
+    FORUM_ENV="$2"
+    MSG="(forum-state-dump placeholder)"
     NO_REPLY=1
     ;;
   --cycle-backlog-upsert)
@@ -1847,5 +1891,83 @@ case "$MODE" in
     if [[ "$BOT_WRITING_REACTION_ENABLED" == "1" ]]; then
       reaction_remove "$USER_MSG_ID" || true
     fi
+    ;;
+
+  update-status)
+    # PR #1129 directive-board event-driven (impl PR 2).
+    # forum thread starter message 본문을 status / KST timestamp / (선택) PR URL 로
+    # atomic 갱신. directive_status.sh 가 in_progress / completed 전이 시 호출.
+    # FORUM_TAG = status 문자열 / FORUM_TITLE = PR URL (선택).
+    STATUS_TEXT="$FORUM_TAG"
+    PR_URL_OPT="$FORUM_TITLE"
+    # KST timestamp (jsonl entry 의 last_updated_kst 와 동일 형식).
+    UPDATE_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
+    # starter body 빌드 — markdown 2~3 줄.
+    if [[ -n "$PR_URL_OPT" ]]; then
+      NEW_STARTER_BODY=$(printf '**상태**: %s\n**갱신**: %s\n**PR**: %s' \
+        "$STATUS_TEXT" "$UPDATE_TS_KST" "$PR_URL_OPT")
+    else
+      NEW_STARTER_BODY=$(printf '**상태**: %s\n**갱신**: %s' \
+        "$STATUS_TEXT" "$UPDATE_TS_KST")
+    fi
+    forum_edit_starter "$THREAD_ID" "$NEW_STARTER_BODY"
+    ;;
+
+  forum-state-dump)
+    # PR #1129 directive-board event-driven (impl PR 2) — debug / mismatch detect.
+    # forum 의 모든 active thread + tag 정보를 jsonl 형식으로 stdout.
+    DUMP_FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
+    DUMP_GUILD_ID="$DISCORD_GUILD_ID_VALUE"
+    if [[ -z "$DUMP_GUILD_ID" ]]; then
+      # forum channel fetch 로 guild_id 추출 (forum_find_active_thread_by_name 패턴).
+      CH_RESPONSE=$(curl -sS -X GET \
+        "https://discord.com/api/v10/channels/${DUMP_FORUM_ID}" \
+        -H "Authorization: Bot ${TOKEN}" \
+        -w $'\n%{http_code}' 2>/dev/null || true)
+      CH_STATUS="${CH_RESPONSE##*$'\n'}"
+      CH_PAYLOAD="${CH_RESPONSE%$'\n'*}"
+      if [[ "$CH_STATUS" =~ ^2[0-9][0-9]$ ]]; then
+        DUMP_GUILD_ID=$(printf '%s' "$CH_PAYLOAD" | jq -r '.guild_id // empty')
+      fi
+    fi
+    if [[ -z "$DUMP_GUILD_ID" || "$DUMP_GUILD_ID" == "null" ]]; then
+      echo "discord-reply.sh: --forum-state-dump — guild_id 추출 실패 (forum=$FORUM_ENV)" >&2
+      exit 1
+    fi
+    # forum 의 available_tags name → id 매핑을 먼저 가져와 thread.applied_tags
+    # (id 배열) 를 name 배열로 변환. -w 로 status code separator 명시 — fake curl
+    # 응답 형식 (body\nstatus) 과 일치.
+    TAG_MAP_RESPONSE=$(curl -sS -X GET \
+      "https://discord.com/api/v10/channels/${DUMP_FORUM_ID}" \
+      -H "Authorization: Bot ${TOKEN}" \
+      -w $'\n%{http_code}' 2>/dev/null || true)
+    TAG_MAP_STATUS="${TAG_MAP_RESPONSE##*$'\n'}"
+    TAG_MAP_PAYLOAD="${TAG_MAP_RESPONSE%$'\n'*}"
+    if [[ "$TAG_MAP_STATUS" =~ ^2[0-9][0-9]$ ]]; then
+      TAG_MAP_JSON=$(printf '%s' "$TAG_MAP_PAYLOAD" \
+        | jq -c '(.available_tags // []) | map({(.id): .name}) | add // {}')
+    else
+      TAG_MAP_JSON='{}'
+    fi
+    # guild active threads 조회.
+    DUMP_RESPONSE=$(curl -sS -X GET \
+      "https://discord.com/api/v10/guilds/${DUMP_GUILD_ID}/threads/active" \
+      -H "Authorization: Bot ${TOKEN}" \
+      -w $'\n%{http_code}' 2>/dev/null || true)
+    DUMP_STATUS="${DUMP_RESPONSE##*$'\n'}"
+    DUMP_PAYLOAD="${DUMP_RESPONSE%$'\n'*}"
+    if [[ ! "$DUMP_STATUS" =~ ^2[0-9][0-9]$ ]]; then
+      echo "discord-reply.sh: --forum-state-dump — guild threads 조회 실패 (status=$DUMP_STATUS)" >&2
+      echo "$DUMP_PAYLOAD" >&2
+      exit 1
+    fi
+    # jsonl 출력: {thread_id, name, tags: [tag name array]}.
+    printf '%s' "$DUMP_PAYLOAD" \
+      | jq -c --arg pid "$DUMP_FORUM_ID" --argjson m "$TAG_MAP_JSON" \
+          '.threads[]? | select(.parent_id == $pid) | {
+             thread_id: .id,
+             name: .name,
+             tags: ((.applied_tags // []) | map($m[.] // null) | map(select(. != null)))
+           }'
     ;;
 esac
