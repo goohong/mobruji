@@ -74,6 +74,12 @@ USER_MODE_VALID: Final[tuple[str, ...]] = ("AUTO", "ASK")
 PIN_REACTION_EMOJI: Final[str] = "📌"
 PIN_REGISTERED_EMOJI: Final[str] = "✅"
 
+# spec: helper-control + tool-visibility (2026-05-29)
+# 사용자 control emoji — 사용자가 helper 답 작성 메시지에 tap 시 bot 가 동작 수행.
+# 추천: minimal 2개 (자율 default 룰 보존, [[feedback-autonomous-default]]).
+CONTROL_STOP_EMOJI: Final[str] = "⏹"  # SIGINT — helper claude tmux pane Ctrl-C
+CONTROL_WHY_EMOJI: Final[str] = "❓"  # 다음 turn 에 helper 가 직전 작업/결정 사유 설명
+
 # Discord keycap number emoji → 0-based index (1️⃣ = 0, 🔟 = 9).
 # 1-9 = digit + VS16 + keycap (U+FE0F U+20E3). 🔟 = U+1F51F.
 NUMBER_KEYCAP_TO_INDEX: Final[dict[str, int]] = {
@@ -1126,6 +1132,56 @@ def scan_assigned_directives_for_cycle(cycle: str, timeout: float = 5.0) -> str:
     if not output or "COUNT=0" in output:
         return ""
     return output
+
+
+async def _post_control_ack(
+    client: discord.Client,
+    channel_id: int,
+    message_id: str,
+    thread_name: str,
+    ack_text: str,
+) -> str:
+    """control emoji (⏹/❓) tap 시 그 메시지에 thread 생성 + ack 메시지 push.
+
+    spec: helper-control + tool-visibility (2026-05-29) — 사용자 정정 "어쨌든 부가
+    응답은 다 스레드로정리". 모든 control emoji 부가 응답을 그 메시지의 thread 안에
+    모아 사용자 추적 용이.
+
+    fail-soft: thread 생성 실패 시 ack 만 채널로 reply (graceful).
+
+    Returns: thread_id (str) — helper ❓ 응답 시 inject text marker 로 사용. 실패 시 "".
+    """
+    channel = client.get_channel(channel_id)
+    if channel is None:
+        logger.warning("control ack: channel %d 미발견 — skip", channel_id)
+        return ""
+    try:
+        message = await channel.fetch_message(int(message_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("control ack: fetch_message 실패 msg=%s exc=%r", message_id, exc)
+        return ""
+
+    thread = getattr(message, "thread", None)
+    if thread is None:
+        try:
+            thread = await message.create_thread(name=thread_name[:100])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "control ack: create_thread 실패 msg=%s exc=%r — reply fallback",
+                message_id, exc,
+            )
+            try:
+                await channel.send(ack_text, reference=message)
+            except Exception as send_exc:  # noqa: BLE001
+                logger.warning("control ack: reply fallback 실패 — %r", send_exc)
+            return ""
+    try:
+        await thread.send(ack_text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("control ack: thread.send 실패 thread=%s exc=%r",
+                       getattr(thread, "id", "?"), exc)
+        return ""
+    return str(getattr(thread, "id", ""))
 
 
 async def _handle_pin_reaction(
@@ -5227,6 +5283,73 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             return
 
         emoji_str = str(raw_payload.emoji)
+
+        # ⏹ helper 작업 중단 (2026-05-29) — helper claude tmux pane 에 Ctrl-C send.
+        # 사용자가 helper 답 작성 메시지 / 작업 중간 메시지에 ⏹ tap → 즉시 SIGINT.
+        # ack 는 그 메시지의 thread 에 정리 (사용자 추적 용이).
+        if emoji_str == CONTROL_STOP_EMOJI:
+            stop_dedup_key = f"stop:{raw_payload.message_id}"
+            if ledger is not None and not ledger.claim(stop_dedup_key):
+                return
+            helper_pane = os.environ.get("MOBRUJI_HELPER_PANE", "helper:0.0")
+            try:
+                subprocess.run(  # noqa: S603 — tmux fixed
+                    ["tmux", "send-keys", "-t", helper_pane, "C-c"],
+                    check=False, timeout=5.0, capture_output=True,
+                )
+                logger.info("⏹ helper stop: pane=%s user=%s msg=%s",
+                            helper_pane, raw_payload.user_id, raw_payload.message_id)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.warning("⏹ helper stop tmux 실패: %r", exc)
+            await _post_control_ack(
+                client=client,
+                channel_id=raw_payload.channel_id,
+                message_id=str(raw_payload.message_id),
+                thread_name="⏹ 중단",
+                ack_text="⏹ 중단 신호 처리됨 — helper claude 인스턴스 Ctrl-C send 완료.",
+            )
+            return
+
+        # ❓ "이건 왜?" (2026-05-29) — 다음 turn 에 helper 가 직전 작업 사유 설명.
+        # 사용자 메시지로 synthetic inbox entry 추가 + tmux send → helper 가 처리.
+        # ack + helper 응답은 그 메시지의 thread 에 정리 (사용자 추적 용이).
+        # thread_id 를 inject text 에 marker `[reply_thread=ID]` 로 전달 — helper 가 다음
+        # turn 에서 discord-reply.sh --thread-id <ID> 로 그 thread 안에 응답.
+        if emoji_str == CONTROL_WHY_EMOJI:
+            why_dedup_key = f"why:{raw_payload.message_id}"
+            if ledger is not None and not ledger.claim(why_dedup_key):
+                return
+            thread_id = await _post_control_ack(
+                client=client,
+                channel_id=raw_payload.channel_id,
+                message_id=str(raw_payload.message_id),
+                thread_name="❓ 사유 설명",
+                ack_text="❓ 사유 설명 요청 — helper 가 다음 turn 에 이 스레드 안에 답합니다.",
+            )
+            thread_marker = (
+                f"[reply_thread={thread_id}] " if thread_id else ""
+            )
+            synthetic_text = (
+                f"{thread_marker}[❓ 사용자 질문] 직전 message_id={raw_payload.message_id} 의 "
+                "작업 / 결정 사유를 1-3 줄로 짧게 설명해 주세요. "
+                "(helper 본체 = relay only, 단순 reasoning recap 만)"
+            )
+            ts_iso = datetime.now(timezone.utc).isoformat()
+            payload: dict[str, str] = {
+                "text": synthetic_text,
+                "author": str(raw_payload.user_id),
+                "author_name": "<control-why>",
+                "ts": ts_iso,
+                "message_id": why_dedup_key,
+                "channel_id": str(raw_payload.channel_id),
+            }
+            logger.info("❓ helper why: msg=%s user=%s thread=%s",
+                        raw_payload.message_id, raw_payload.user_id, thread_id)
+            append_inbox(payload)
+            write_last_user_msg_id(str(raw_payload.message_id))
+            if ensure_tmux_session(session_name, claude_bin):
+                tmux_send_payload(target_pane, synthetic_text)
+            return
 
         # 📌 directive 등록 분기 (spec: directive-pushpin-registration.md).
         # 사용자가 자기 / helper 메시지에 📌 tap → directive_append.sh 호출 → forum 등록 → ✅ 부착.
