@@ -1,12 +1,12 @@
 ---
 feature: Bridge 배포 dir 분리 (옵션 A 근본 fix)
 slug: bridge-deployment-dir-separation
-status: approved
+status: shipped
 owner: @mobruji-maestro
 scope: infra
 related_issues: [1109, 1126]
 related_prs: [1126]
-last_reviewed: 2026-05-26
+last_reviewed: 2026-05-28
 ---
 
 # Bridge 배포 dir 분리 (옵션 A 근본 fix)
@@ -247,8 +247,8 @@ rollback 후 무엇이 실패했는지 사후 분석. 본 spec 의 §5 절을 �
 
 - [x] PR 1 (plan PR #1126): docs/features/bridge-deployment-dir-separation.md 작성.
 - [x] PR 1b (be PR — 본 spec 동반): bot.py 에 ``verify_deploy_dir`` fail-fast 검증 + ``tools/discord-daemon/deploy.sh`` helper 추가. spec 본문도 develop 도달 보장. 코드 변경만 — sudo / systemd 변경 없음.
-- [ ] PR 2 (infra, nmae 직접): NCP 호스트에서 전용 dir clone + venv 신설 + .env symlink + unit file 수정. 사용자 sudo 권한 필요 → nmae 가 검증 단계까지 가시화. ``deploy.sh`` 첫 실행 검증 포함.
-- [ ] PR 3 (docs, plan follow-up): 검증 결과 본 spec §9 결정 로그 추가. status approved → implementing → shipped 전이.
+- [x] PR 2 (infra, mmae 직접 실행 2026-05-28): NCP 호스트에서 전용 dir clone (`/home/mobruji/mobruji-bridge` develop single-branch) + venv 신설 + .env symlink + unit file path 3건 swap. 본 PR 은 repo 내 unit 템플릿 (`tools/discord-daemon/mobruji-discord-bridge.service`) 도 같이 갱신해서 다음 setup 시 회귀 차단. ``verify_deploy_dir`` warn → ok 전이 로그로 검증.
+- [x] PR 3 (docs, 본 PR 동반): status approved → shipped 전이 + §9 결정 로그 추가.
 
 ## 8) 테스트 전략
 
@@ -263,6 +263,7 @@ rollback 후 무엇이 실패했는지 사후 분석. 본 spec 의 §5 절을 �
 
 - 2026-05-26 — 초안 작성 (plan sub-agent, 이슈 #1109). status=approved. 사용자 결정 (2026-05-26 15:05 KST): 옵션 A (전용 dir 신설) 채택. 본 spec 의 §5-3 gotcha 별 권고 (venv 옵션 A1 / .env 옵션 B2 / symlink 보존) 는 plan sub-agent 자율 결정 — nmae 가 PR 2 진행 시 검증 후 반영 권고. follow-up 이슈로 사용자 재확인 가능.
 - 2026-05-26 — be sub-agent (PR 1b) 가 spec 동반 코드 추가. (a) ``bot.verify_deploy_dir`` — bot.py main() 시작부에서 ``__file__`` 의 ancestor 가 ``MOBRUJI_BRIDGE_DEPLOY_DIR`` (default ``/home/mobruji/mobruji-bridge``) 인지 확인. mode: off / warn (default) / strict — 마이그레이션 중에는 warn 으로 dual-run, NCP 전환 완료 후 strict 전환. (b) ``tools/discord-daemon/deploy.sh`` — ``git fetch && git reset --hard origin/develop && sudo systemctl restart`` 절차 자동화 + 안전 가드 (.git 존재 / 브랜치 검증 / dry-run / journal 출력). 결정 사유: NCP 호스트 전환 (PR 2) 이전에도 develop 에 코드가 도달하면 즉시 마이그레이션 가능 + verify 함수가 추후 rollback / fallback 시 잘못된 dir 실행 사고를 가시화. 5-3 gotcha 별 권고값과 충돌 없음.
+- 2026-05-28 — PR 2 실행 (mmae 본진 직접): NCP 호스트에서 옵션 A 전환 완료. (a) `/home/mobruji/mobruji-bridge` clone (`--branch develop --single-branch` + `git config remote.origin.fetch +refs/heads/develop:refs/remotes/origin/develop`) — 5-3 결정 1 (clone). (b) `tools/discord-daemon/venv` 별도 생성, `requirements.txt` 설치 — 5-3 결정 2 (venv A1). (c) `.env` 메인 repo 향 symlink — 5-3 결정 3 (B2). (d) `/etc/systemd/system/mobruji-discord-bridge.service` 의 WorkingDirectory / EnvironmentFile / ExecStart 3 라인 path swap (backup `.bak-2026-05-28`). (e) `daemon-reload && systemctl restart` → `bridge deploy dir OK — bot.py=/home/mobruji/mobruji-bridge/... expected=/home/mobruji/mobruji-bridge mode=warn` journal 로그 확인 + Discord Gateway 재연결 + 7 loop 정상 재기동 (digest / cycle_idle_watch / rev_post_merge_audit / thread_cleanup / directive_register_watch / heartbeat_watch / context_auto_clear). repo 내 unit 템플릿 (`tools/discord-daemon/mobruji-discord-bridge.service`) 도 본 PR 에서 같이 path swap — setup-gcp-systemd.sh 재실행 시 회귀 차단. status approved → shipped 전이. PR 3 본 변경 동반.
 
 ## 10) 자율 결정 (사유)
 
@@ -292,3 +293,4 @@ rollback 후 무엇이 실패했는지 사후 분석. 본 spec 의 §5 절을 �
 
 - 2026-05-26 — 초안 작성 (plan sub-agent, 이슈 #1109). status=approved. 사용자 옵션 A 결정 박제 + 5 검증 단계 + rollback plan + 3 gotcha 권고. follow-up PR 2 (infra, nmae 직접) 의존성 명시.
 - 2026-05-26 — be sub-agent (PR 1b) 동반 코드 추가: ``bot.verify_deploy_dir`` (off / warn / strict 3-mode), ``tools/discord-daemon/deploy.sh`` helper. 작업 분할 §7 에 PR 1b 추가. related_issues 에 #1126 / related_prs 에 #1126 박제.
+- 2026-05-28 — PR 2 (mmae 본진 직접 실행) + PR 3 (본 spec status approved → shipped) bundle. NCP 옵션 A 전환 완료 — `/home/mobruji/mobruji-bridge` clone + venv + .env symlink + unit path swap. repo 내 unit 템플릿도 같이 정정해 setup-gcp-systemd.sh 재실행 시 회귀 차단. §7 PR 2/3 체크박스 완료, §9 결정 로그 PR 2 entry 추가. last_reviewed: 2026-05-26 → 2026-05-28.
