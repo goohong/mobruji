@@ -35,6 +35,7 @@
 - 권장: 변경 +400 LOC 이내 (테스트/생성 파일 제외)
 - 초과 시: PR 본문에 분할 불가 사유를 명시하고 리뷰어에게 미리 공지
 - 1000 LOC 초과 PR은 원칙적으로 분할한다 (대규모 리네임/포맷 변경 제외)
+- **`type:release` PR 면제**: release PR (develop → main) 은 본질적으로 누적 commits 의 거대 단일 머지라 분할 불가능. `pr-size-check.yml` 이 `type:release` 라벨 보유 PR 의 size 가드를 자동 skip.
 
 ## 4) 게이트 실패 처리
 - 필수 게이트 실패 시 머지 차단
