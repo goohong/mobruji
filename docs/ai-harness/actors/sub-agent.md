@@ -196,6 +196,20 @@ bash ~/.mobruji/directive_status.sh <directive_id_or_thread_id> completed [pr_ur
 
 jsonl entry status + Discord forum 태그 retag + body PR URL 을 atomic. directive 가 아닌 (단순 사이클 후속 백로그) 경우 skip.
 
+### 1-13b) PR body 에 `cycle-forum:` 명시 의무 (PR cf-3, cycle-forum-operation §5-5)
+
+sub-agent 가 PR 생성 시 **PR body 에 다음 라인 의무 명시**:
+
+```text
+cycle-forum: <be|fe|rev|plan>:<thread_id>
+```
+
+예: `cycle-forum: be:1509466456230989926`
+
+bot.py `cycle_thread_complete_on_merge_loop` 가 PR 머지 시 PR body grep + 매칭된 thread 자동 ✅ retag. 누락 시 사용자 forum sidebar 에서 작업 ⏳ 상태 그대로 — 가시화 사고.
+
+thread_id 출처: nmae 가 launch 시 wrapper 가 emit 한 `LAUNCH_THREAD_ID=<id>` (cycle channel push) 또는 `PENDING_THREAD_ID=<id>` (register-pending). nmae 가 sub-agent launch prompt 에 inherit.
+
 ### 1-14) watchdog inject 대응 — sub-agent 입장은 §4 보고 양식만 책임
 
 nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본인은 자기 완료 보고 시 §4 "다음 사이클 후보" 를 제시해 nmae 가 단계 1 후보를 1초 안에 선정할 수 있게 돕는 것이 1차 방어선.

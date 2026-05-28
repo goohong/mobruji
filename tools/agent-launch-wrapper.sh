@@ -440,6 +440,26 @@ FORUM_BODY="$(_build_cycle_template_body "$WORKTREE" "$ANNOUNCE_BODY" "$ANNOUNCE
 # 보존해 fallback 결정에 사용. stdout 마지막 줄 = thread_id.
 FORUM_OUT=""
 FORUM_RC=0
+
+# spec: cycle-forum-operation.md §5-4 (PR cf-4) — --pending-thread-id 명시 시
+# 기존 🟡 thread 재사용 + retag 🟡 → ⏳ + 본문 update (forum-edit). 신규 thread X.
+if [[ -n "$PENDING_THREAD_ID" && "$PENDING_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
+  # retag — forum thread 의 tag 변경. graceful (실패 시 stderr warning + 진행).
+  if ! "$DISCORD_REPLY_SH" --forum-retag "$PENDING_THREAD_ID" "$WORKTREE" "진행" \
+      >/dev/null 2>&1; then
+    echo "agent-launch-wrapper.sh: --pending-thread-id retag 실패 thread=$PENDING_THREAD_ID — graceful" >&2
+  fi
+  # 본문 update — launch 시점 정보 박힘.
+  if ! "$DISCORD_REPLY_SH" --forum-edit "$PENDING_THREAD_ID" "$FORUM_BODY" \
+      >/dev/null 2>&1; then
+    echo "agent-launch-wrapper.sh: --pending-thread-id 본문 update 실패 thread=$PENDING_THREAD_ID — graceful" >&2
+  fi
+  # LAUNCH_THREAD_ID = pending thread (sub-agent inherit).
+  printf 'LAUNCH_THREAD_ID=%s\n' "$PENDING_THREAD_ID"
+  printf 'CYCLE_CHANNEL_MSG_ID=%s\n' "$PENDING_THREAD_ID"
+  exit 0
+fi
+
 FORUM_OUT=$("$DISCORD_REPLY_SH" \
   --forum-post-auto-tag "$WORKTREE" "$FORUM_TITLE" "$FORUM_BODY" 2>/dev/null) \
   || FORUM_RC=$?
