@@ -132,7 +132,7 @@ superseded_by: []
 ## References
 
 - 이슈 #1074 — 본 ADR + 통합 PR
-- `docs/ai-harness/16-memory-vs-code-enforcement.md` — 메모리 vs 코드 책임 분리 spec (PR #1060 머지)
+- `docs/ai-harness/13-memory-and-enforcement.md` — 메모리 vs 코드 책임 분리 spec (PR #1060 머지)
 - `docs/features/clear-pre-hook.md` — `/clear` 직전 doc-check 강제 (PR #1066 머지)
 - `docs/features/event-action-mapping.md` — 본 ADR 의 동반 spec
 - `docs/features/work-cycle-refactor.md` — 본 ADR 의 마이그 spec

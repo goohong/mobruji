@@ -327,5 +327,5 @@ maestro는 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상
 ### 10-8) 동기화 채널
 - **세션 간 시그널**: PR 라벨(`session:*`, `reviewed:*`, `ai:*`) + draft state + `gh pr list` 조회. 새 메커니즘 없이 GitHub state가 자연스러운 싱크 채널.
 - **사람 대시보드**: GitHub Projects v2(`mobruji` 보드). PR/이슈 자동 등록은 `.github/workflows/auto-add-to-project.yml`. Status/Session 필드로 칸반 + 필터.
-- **모바일/외부 모니터링**: Discord webhook (`docs/ai-harness/14-discord-notify-setup.md` / `docs/features/discord-status-push.md`). maestro 자율 사이클 trail이 GitHub events 경유로 #모부르지 채널에 push.
+- **모바일/외부 모니터링**: Discord webhook (`docs/ai-harness/14-discord-ops.md` / `docs/features/discord-status-push.md`). maestro 자율 사이클 trail이 GitHub events 경유로 #모부르지 채널에 push.
 - `docs/backlog.md`는 폐기되었다(2026-05-21). 대체: Projects v2 보드 + 영속 결정은 `docs/decisions/` ADR로.

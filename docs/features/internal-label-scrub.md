@@ -287,7 +287,7 @@ linter 호출 위치:
 ## 10) 관련 문서
 
 - `CLAUDE.md §11 nmae directive-board update flow` — directive-board jsonl SoT 룰
-- `docs/ai-harness/16-memory-vs-code-enforcement.md` — 메모리 vs 코드 분리 원칙
+- `docs/ai-harness/13-memory-and-enforcement.md` — 메모리 vs 코드 분리 원칙
 - `tools/discord-daemon/directive_board_sync.py` — sync_loop 코드
 - 메모리 [[feedback-nmae-directive-board-update-flow]] [[feedback-nmae-forum-channel-enforce]] [[feedback-helper-directive-board]]
 - 관련 PR: #1042 (`--directive-edit` mode), #1047 (sync_loop)
