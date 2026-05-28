@@ -1,7 +1,7 @@
 # Discord Ops — Notify 셋업 + 메시지/명령/Forum (구 14+15 통합)
 
 > 2026-05-28 `14-discord-notify-setup` + `15-discord-message-templates` 통합.
-> **채널 라우팅(per-cycle / digest) SoT = `actors/nmae.md` §11-10 + `docs/ai-harness/actors/helper.md`.** 본 문서의 채널 매핑은 참조용 — 충돌 시 그쪽 우선.
+> **채널 라우팅(per-cycle / digest) SoT = `actors/nmae.md` §11-6 + `docs/ai-harness/actors/helper.md`.** 본 문서의 채널 매핑은 참조용 — 충돌 시 그쪽 우선.
 > **실제 push 동작은 `tools/discord-daemon/bot.py` + `~/.mobruji/discord-reply.sh` 코드가 강제.** 본 문서는 셋업 절차 + 메시지 카테고리/명령 syntax 레퍼런스.
 
 ---
@@ -295,7 +295,7 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
   - cycle idle / future-ts ERROR → ALERT (fallback DIGEST → MOBRUJI).
   - directive_board mismatch → cron digest 한 줄 + (잔존 시) ALERT.
 
-상세 룰: 메모리 [[feedback-nmae-per-cycle-channel]] / CLAUDE.md §11-9.
+상세 룰: 메모리 [[feedback-nmae-per-cycle-channel]] / `actors/nmae.md` §11-6.
 
 ## §2 메시지 카테고리
 
@@ -488,7 +488,7 @@ bash /home/mobruji/.mobruji/discord-reply.sh \
 - **cron digest signature** — `directive forum 대기 카운트` 추가 (be sub-agent 후속 PR).
 - **directive_board_sync_loop (P11)** — jsonl `forum_thread_id` 인식 + forum 본문 PATCH 자동화 (본 PR 범위 외).
 
-관련 룰: `CLAUDE.md §11-9` + 메모리 `[[feedback-nmae-forum-channel-enforce]]` `[[feedback-nmae-per-cycle-channel]]` `[[feedback-nmae-directive-board-update-flow]]`.
+관련 룰: `actors/nmae.md §11-6` + 메모리 `[[feedback-nmae-forum-channel-enforce]]` `[[feedback-nmae-per-cycle-channel]]` `[[feedback-nmae-directive-board-update-flow]]`.
 
 ## §7 변경 이력
 
