@@ -48,6 +48,13 @@ if [[ -z "${HOOK_NAMES:-}" ]]; then
       helper-turn-start.sh
       discord-reply.sh
       nmae-discord-push.sh
+      # PR E-2 (2026-05-28): helper launch system prompt SoT sync 강제.
+      # repo 의 helper-role.md = relay-only strict 룰 (코드 변경/분배 결정 금지).
+      # 기존엔 NCP runtime 의 옛 system prompt (덜 strict) 가 ~/.mobruji/helper-role.md
+      # 에 남아 있어 helper 가 분배 결정 (17:28 사고). symlink 강제로 repo 변경 즉시
+      # 반영 — 학습 의존 ↓, 코드 강제. spec: actors/sub-agent.md §2-helper / nmae §11-7.
+      helper-launch.sh
+      helper-role.md
     )
   fi
 fi
