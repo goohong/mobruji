@@ -150,6 +150,15 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   - 단계 3 (release 후 production) — `rev-prod-pass` / `regression:prod` 라벨
   - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-3-stages.md` SoT**
 - **감사 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
+- **flock 의존 shell test 실행 시 wrapper 의무** (PR #1194, 이슈 #1192): macOS rev 환경에 `flock` 명령 부재로 lock 의존 shell test 가 false-fail 하는 사고 (rev #1175 보고: 14건 false-fail) 가 박제됨. lock 의존 shell test 는 **반드시 `tools/rev-queue/flock-fallback.sh exec` wrapper 통해 실행** — 로컬 flock 가용 시 직접 실행, 부재 시 자동 NCP ssh fallback (`MOBRUJI_NCP_HOST` 설정 시) 또는 graceful warning + exit 3. 직접 호출 금지. 상세: `tools/rev-queue/README.md §flock-fallback.sh`.
+
+  ```bash
+  # 검증 명령 예시 (macOS rev 환경 false-fail 방지)
+  bash tools/rev-queue/flock-fallback.sh detect tests/lock-dependent-test.sh  # exit 0=의존 1=비의존 2=파일없음
+  MOBRUJI_NCP_HOST=user@ncp-host \
+    bash tools/rev-queue/flock-fallback.sh exec tests/lock-dependent-test.sh   # 자동 fallback
+  ```
+
 - 발견 사항은 PR 코멘트만. 이슈 등록은 nmae.
 
 ### 2-plan (mobruji-plan)
