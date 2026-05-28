@@ -4,8 +4,8 @@ slug: agent-launch-wrapper-enforcement
 status: draft
 owner: @goohong
 scope: infra
-related_issues: ["#1008", "#1106", "#1117"]
-related_prs: ["#1181"]
+related_issues: [1008, 1106, 1117]
+related_prs: [1181]
 last_reviewed: 2026-05-28
 ---
 
