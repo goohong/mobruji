@@ -43,7 +43,7 @@ assignees: []
 - [ ] (backend) `cd backend && ./gradlew checkstyleMain spotlessCheck test` 통과
 - [ ] (web) `cd web && npm run lint && npm run typecheck` 통과
 - [ ] PR 본문에 `AS-IS` / `TO-BE` 작성
-- [ ] 라벨 부여 (`type:*`, `scope:*`, `ai-generated`, 필요 시 `needs-human-review`)
+- [ ] 라벨 부여 (`type:*`, `scope:*`, `ai-generated`)
 - [ ] (해당 시) Feature Spec 상태/결정 로그 갱신
 
 ## 6) 참고

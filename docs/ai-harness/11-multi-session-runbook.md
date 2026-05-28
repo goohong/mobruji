@@ -22,7 +22,7 @@
 - 다른 워크트리/maestro 건드리지 마
 - 메모리(`~/.claude/projects/*/memory/`) 쓰기 금지
 - `--no-verify`로 hook 우회 금지
-- 보호 영역 변경 시 `needs-human-review` 라벨 부여
+- 보호 영역 = 정보성 분류 (2026-05-28 `needs-human-review` 라벨 폐지, rev sub-agent 가 review 대행)
 
 > 위 5줄 공통 룰은 매번 반복하지 말고 prompt에 다음 한 줄만 박는다:
 > `공통 룰은 docs/ai-harness/actors/sub-agent.md 따른다. 역할은 <be|fe|rev|plan>.`
@@ -358,7 +358,7 @@ rev sub-agent 가 매 사이클 시작 시 `bash tools/rev-queue/rev-queue.sh al
 
 처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-3-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
 
-**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `needs-human-review` / `type:release`.
+**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `type:release` (2026-05-28 `needs-human-review` whitelist 폐지).
 
 상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-3-stages.md`, CLAUDE.md §4 품질 게이트.
 

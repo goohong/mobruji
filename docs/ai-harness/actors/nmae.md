@@ -69,6 +69,6 @@ inject 받으면 **다음 turn 시작 즉시**: 백로그 후보 1개 선정 →
 | **rev** | `/home/mobruji/mobruji-rev` | **수정 금지** (PR 코멘트만) | read-only 실행 검증. 매 사이클 첫 액션 `tools/rev-queue/rev-queue.sh all` |
 | **plan** | `/home/mobruji/mobruji-plan` | `docs/**` `.github/**` (보호 영역 라벨) | 없음 |
 
-- 공통 비협상: 워크트리 격리 + 동시 1 ([[feedback-worktree-lock]]) / 메모리 직접 수정 금지(nmae 만 갱신) / 사용자 wait state 금지 — 자율 결정 default ([[feedback-sub-agent-no-user-wait]]) / hook 우회(`--no-verify`) 금지 / `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) / 보호 영역 변경 시 `needs-human-review` / session 라벨 (be→backend, fe→frontend, rev→review, plan→plan).
+- 공통 비협상: 워크트리 격리 + 동시 1 ([[feedback-worktree-lock]]) / 메모리 직접 수정 금지(nmae 만 갱신) / 사용자 wait state 금지 — 자율 결정 default ([[feedback-sub-agent-no-user-wait]]) / hook 우회(`--no-verify`) 금지 / `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) / 보호 영역 = 정보성 분류 (라벨 의무 폐지 2026-05-28, rev 대행) / session 라벨 (be→backend, fe→frontend, rev→review, plan→plan).
 - **be**: 새 엔드포인트 성공 케이스 E2E(RestAssured) 필수, DDD 계층 침범 금지. **rev**: 3단계 e2e — 단계 1 머지 전 / 2 develop 후 / 3 release 후 ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]). **plan**: docs/ADR/spec 만, 구현 코드 금지.
 - git 가드: stash pop conflict 후 working tree 마커 잔존 → service crash, 별도 restore 필수 ([[feedback-stash-drop-unmerged-file]]).
