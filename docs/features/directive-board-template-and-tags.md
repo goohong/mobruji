@@ -73,6 +73,7 @@ last_reviewed: 2026-05-28
 |---|---|---|
 | 🟡 대기 | 등록 직후 default | `directive_append.sh` |
 | 🔵 진행 중 | sub-agent / nmae / 사용자 작업 중 | `directive_status.sh in_progress` |
+| **🟣 결정 대기** | plan 분석 완료, 사용자 결정 대기 (§5-6 plan 분석 모드) | `directive_status.sh awaiting_decision` |
 | 🟢 완료 | PR 머지 / 결정 적용 | `directive_status.sh completed` 또는 PR 머지 webhook |
 | 🔴 폐기 | 취소 / reject | `directive_status.sh dropped` |
 | ⚪ 보류 | defer (timeline 미정) | `directive_status.sh deferred` |
@@ -290,6 +291,75 @@ nmae 가 `directive_status.sh in_progress <id> plan <reason>` 호출 → thread 
 - sub-agent 가 PR 생성 시 body 에 `directive: 1509427220...` 또는 `Closes directive 1509427220...` 명시 (sub-agent.md 룰 추가).
 - PR 머지 webhook (`.github/workflows/directive-complete-on-merge.yml`) 이 pattern 매칭 → `directive_status.sh completed <id> <pr_url>` 호출 → 🟢 + 본문 [x] 완료 + PR URL 부착.
 
+#### plan 분석 모드 + 🟣 결정 대기 흐름 (사용자 결정 2026-05-28)
+
+**사용자 정정**: "plan 에게 문제 분석을 맡긴 케이스이니까 그 포럼에 plan 이 생각하는 해결책까지만 제시하고 작업 진행하지는 않는게 좋겠다. A안 B안 C안이 있는데 그중 ~를 추천합니다. 내가 거기다 ~로 해라고 댓글달면 다시 지시 포럼에 추가".
+
+**plan 의 2 모드**:
+
+| 모드 | 출력 위치 | 조건 |
+|---|---|---|
+| **가벼운 분석** | directive thread 본문 PATCH (옵션 + 추천) | 단순 결정 분기 / 한 사이클 분석 가능. 모호 directive (분배 분기 d) 의 주 path. |
+| **무거운 spec** | `docs/features/<slug>.md` + PR | 큰 기능 / 다중 PR / 검토 필요. 분배 분기 (a)(b)(c) 의 주 path. |
+
+plan 이 directive 받으면 일단 가벼운 분석 시도 → spec 까지 필요하면 자체 escalate (사용자에게 thread 본문에 "추가 spec 필요" 명시).
+
+**가벼운 분석 thread 본문 format**:
+
+```text
+📌 **{원본 directive title}**
+
+💬 원본
+> {원본 본문}
+
+🆔 `{msg_id}` · 👤 <@{user}> · 🕐 {KST}
+
+🧠 컨텍스트 (plan 분석)
+{직전 사이클 / 작업 상황 / 문제 정의 1-2 문장}
+
+📊 분석 — 해결 방법 후보
+- **A안**: {제목} — {간단 설명, 장단점}
+- **B안**: {제목} — {간단 설명, 장단점}
+- **C안**: {제목} — {간단 설명, 장단점}
+
+✅ **추천**: {A|B|C}안 — {추천 사유 (cost / 효과 / risk)}
+
+📋 진행 (🟣 결정 대기)
+- [x] 분석 / 위임 결정 — nmae
+- [x] 옵션 발굴 + 추천 — plan
+- [ ] **사용자 결정 대기** ← 이 thread 안에 댓글로 알려주세요 (예: "B로 해줘")
+
+🔖 관련
+- 후속 directive (자동 등록 예정)
+
+---
+_갱신: {KST} (plan 분석 1회)_
+```
+
+**규칙**:
+- plan 은 **작업 진행 X** — 분석 + 추천만. 실제 구현은 사용자 결정 후 별도 sub-agent (be / fe) 위임.
+- plan 분석 완료 시 status: 🔵 → **🟣 결정 대기**.
+
+**사용자 댓글 → 새 directive 자동 등록 가드**:
+
+bot.py 가 forum thread 안 댓글 detect 시 다음 모든 조건 충족 → 자동 `directive_append.sh` 호출:
+
+1. thread 가 directive forum 채널 (`DIRECTIVE_BOARD_FORUM_ID`) 안
+2. thread 의 현재 status tag = 🟣 **결정 대기**
+3. 댓글 author = `allowed_user_ids` 안
+4. 댓글 본문 길이 > 1자 (단순 reaction / 짧은 ack 제외)
+5. **같은 thread + 사용자의 첫 댓글만** — 두 번째 댓글부터 일반 thread 댓글 처리 (등록 X)
+
+가드 통과 시:
+- 새 directive entry 생성 — `parent_directive_id: <원본 directive id>` 필드 박힘
+- 원본 thread status: 🟣 → 🔵 진행 중 (또는 🟢 완료 — 사용자 결정에 따라 다음 단계)
+- nmae 가 새 directive 의 동사+대상 명확성 보고 be/fe 직접 위임
+
+**부모-자식 cascade**:
+
+- 자식 directive 완료 (🟢) 시 → 부모 directive 도 자동 🟢 전이 (또는 사용자 명시 보존 결정 시 🔵 → 🟢 수동).
+- 부모 thread 본문에 자식 PR URL + 결과 cross-link.
+
 ### 5-7) Forum tag setup (사용자 수동, 1회)
 
 Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 채널 설정 → Tags 9개 추가:
@@ -312,6 +382,7 @@ Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 
 - [ ] **PR B** (follow-up): PR 머지 webhook 자동 `completed` 전이 — `.github/workflows/directive-complete-on-merge.yml` 신규 + sub-agent.md 룰 (`directive: <id>` PR body 명시 의무).
 - [ ] **PR C** (follow-up): cycle-specific auto-inject — `directive-board.jsonl` 의 `assigned_cycle` 필드 + nmae watchdog (또는 bot.py `cycle_idle_watch_loop`) 가 cycle idle 시 그 cycle 의 🟡 directive 자동 inject.
 - [ ] **PR D** (follow-up): helper 자동 정제 hook — 등록 직후 helper 가 다음 turn 에 thread 본문 PATCH (정제 한 줄 + 컨텍스트 + category tag).
+- [ ] **PR E** (follow-up): plan 분석 모드 + 🟣 결정 대기 status + 사용자 댓글 자동 등록 가드 + parent/child cascade. spec §5-6 plan 분석 모드 + §5-2 status 6종 (🟣 추가) 구현. plan 룰 (`actors/sub-agent.md §2-plan` 또는 `actors/plan.md`) update + `directive_status.sh awaiting_decision` 신규 + `bot.py` thread comment handler (가드 5조건) + parent_directive_id 필드.
 - [ ] PR 2-bot-user-id (follow-up): `bot.py _handle_pin_reaction` 에 `DIRECTIVE_USER_ID` env 전달. PR #1204 머지 후.
 - [ ] PR 6-cross-link (follow-up): 4 사이클 cross-link.
 - [ ] PR 7-auto-ensure (선택): forum available_tags bot 자동 ensure.
@@ -340,6 +411,10 @@ Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 
 - 2026-05-28 — **결정 6 (사용자)**: cycle-specific auto-inject. cycle 별 assigned directive 가 그 cycle idle 시 자동 처리 (사용자: "프론트가 놀고있다 그러면 알아서 가져가야지"). `assigned_cycle` 필드 + nmae watchdog 자동 inject.
 - 2026-05-28 — **결정 7**: 자동화 우선순위 자율 (사용자: "둘다 구현되기만 하면 되니까 순서는 상관없어"). PR A/B/C/D 병행 가능.
 - 2026-05-28 — **결정 8 (사용자)**: plan 위임 기준에 **(d) 모호 directive — 문제 정의 / 해결 선택지 발굴 자체가 필요한 경우** 추가. 사용자: "내가 뱉은 말이 ~를 해결해 인데 누가 담당할 작업인지 애매하고, 어떤 선택지들로 해결을 할 수 있나 고민해서 문제를 설정하고 고민하는 과정이 필요하다면 plan". 동사 × 대상 명확성 2x2 휴리스틱 명문화. 모호 directive 를 be/fe 직접 위임하면 sub-agent 가 결정 부담 → 정합성 위험.
+- 2026-05-28 — **결정 9 (사용자)**: plan 분석 모드 분리. 사용자: "plan 에게 문제 분석을 맡긴 케이스이니까 그 포럼에 plan 이 생각하는 해결책까지만 제시하고 작업 진행하지는 않는게 좋겠다. A안 B안 C안이 있는데 그중 ~를 추천합니다. 내가 거기다 ~로 해라고 댓글달면 다시 지시 포럼에 추가". plan 의 2 모드 (가벼운 분석 vs 무거운 spec) 명문화. 가벼운 분석 = thread 본문 PATCH + 옵션 발굴 + 추천 + status 🟣 결정 대기.
+- 2026-05-28 — **결정 10 (사용자)**: 🟣 결정 대기 status 신규 추가 (총 status 6종). plan 분석 완료 후 사용자 결정 대기 lock 역할. sidebar filter 가능.
+- 2026-05-28 — **결정 11 (사용자, 옵션 2 채택)**: 사용자 댓글 → 새 directive 자동 등록. 가드 5조건 (directive forum / status=🟣 / allowed user / 본문 >1자 / 첫 댓글). status 🟣 lock 이 false-positive 방어 — 일반 thread 댓글은 영향 X.
+- 2026-05-28 — **결정 12**: parent_directive_id 필드 + cascade — 자식 완료 시 부모 자동 🟢.
 
 ## 10) 자율 결정 (사유)
 
