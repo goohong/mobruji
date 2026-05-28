@@ -79,7 +79,7 @@ gh secret set DISCORD_WEBHOOK_URL --repo goohong/mobruji
 ## 5) 운영 시 유의
 
 - **하드코딩 금지**: webhook URL은 secret으로만. `.github/workflows/`에 URL 박지 말 것 (보호 영역).
-- **노이즈 관리**: 알림이 너무 많아지면 `on:` 트리거에서 빼거나 `if:` 조건으로 라벨/브랜치 필터링 추가. 예: `if: contains(github.event.pull_request.labels.*.name, 'needs-human-review')` 만 발송하도록 좁히기.
+- **노이즈 관리**: 알림이 너무 많아지면 `on:` 트리거에서 빼거나 `if:` 조건으로 라벨/브랜치 필터링 추가. 예: `if: contains(github.event.pull_request.labels.*.name, 'type:release')` 만 발송하도록 좁히기 (2026-05-28 `needs-human-review` 라벨 폐지).
 - **민감정보**: 이슈/PR 제목·본문에 secret/토큰/사용자 음역대 원문이 들어가지 않도록 주의 (`docs/ai-harness/04-security-policy.md`). 알림에 그대로 노출된다.
 - **장애 시**: Discord webhook 자체 장애나 GitHub Actions 큐 지연 가능. 알림은 "best-effort 모니터링"이고 단일 SoT 아님. 진짜 상태는 GitHub에서 확인.
 
@@ -205,7 +205,7 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 
 - `DISCORD_BOT_TOKEN` 등 시크릿 키는 **automation 금지** (자동 diff 알림에도 값 포함 금지).
 - 운영자가 secret 저장소 (1Password / NCP secret 등) 에서 직접 복사·붙여넣기.
-- 시크릿 키가 추가/rotation 된 PR 은 `needs-human-review` 라벨 + 본문에 운영자 액션 명시 의무.
+- 시크릿 키가 추가/rotation 된 PR 은 본문에 운영자 액션 명시 의무 (rev sub-agent 가 review 대행, 2026-05-28 `needs-human-review` 라벨 폐지).
 
 ### 9-4) drift 자동 감지 후보 (다음 사이클)
 

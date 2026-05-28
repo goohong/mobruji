@@ -57,10 +57,13 @@
 - PR 제목: `type(scope): 제목`
   - `type`: `feat` `fix` `docs` `style` `refactor` `test` `chore`
   - `scope` (final): `user` `song` `recommendation` `voice` `infra` `web` `feedback`
-- PR 생성 **직후** 라벨: `type:*`, `scope:*`, (AI 작성 시) `ai-generated`, (보호 영역 변경 시) `needs-human-review`.
+- PR 생성 **직후** 라벨: `type:*`, `scope:*`, (AI 작성 시) `ai-generated`.
 - 1명 승인 후 **Squash merge**. `develop → main` 릴리즈는 **Merge commit** (§8).
 
-### AI 작업 보호 영역 (변경 시 `needs-human-review` 라벨 — self-merge 가능)
+### AI 작업 보호 영역 — 정보성 분류 (라벨 의무 폐지 2026-05-28)
+**중요 정정 (2026-05-28)**: `needs-human-review` 라벨 개념 폐지. 사유: rev sub-agent 가 사용자 review 를 대행하므로 별도 라벨 분기 불필요 + 다른 agent 에게 혼동 유발. **모든 PR 은 rev 사이클 통과 의무** ([[feedback-rev-e2e-always]]) — release 머지만 사용자 명시 확인 ([[feedback-rev-release-gate]]).
+
+아래 경로는 **정보 표시용** 으로 유지 (변경 시 rev 사이클이 추가 신중도 가중) — 라벨 의무는 없음:
 - `.github/workflows/**`, `.github/CODEOWNERS`
 - `**/db/migration/**`, `**/resources/db/**`
 - `**/application*.yml`, `**/application*.properties`, `.env*`

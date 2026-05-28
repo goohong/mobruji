@@ -25,7 +25,7 @@ name: Auto Set Session on Project
 #
 # PROJECT_TOKEN 없거나 보드 item이 아직 add되지 않았으면 graceful skip.
 #
-# 보호 영역(.github/workflows/**) — 변경 시 needs-human-review 라벨 필수.
+# 보호 영역(.github/workflows/**) — rev sub-agent 가 review 대행 (2026-05-28 `needs-human-review` 폐지).
 
 on:
   pull_request:

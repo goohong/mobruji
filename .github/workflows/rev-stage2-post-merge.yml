@@ -24,8 +24,8 @@ name: Rev Stage 2 Post-Merge Audit Queue
 #     기능 cover — 본 workflow 는 *즉시성* 보강 (머지 직후 push).
 #
 # 라벨 보호:
-#   - 본 workflow 는 .github/workflows/** 보호 영역 → 신설 PR 은
-#     `needs-human-review` 라벨 필수.
+#   - 본 workflow 는 .github/workflows/** 정보성 보호 영역. rev sub-agent
+#     review 대행 (2026-05-28 `needs-human-review` 폐지).
 #
 # 관련:
 #   - 메모리 [[feedback-rev-e2e-always]]

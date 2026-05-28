@@ -59,16 +59,16 @@ nmae 가 sub-agent launch 시 prompt 첫 줄에 한 줄만 박는다:
 
 `git push --no-verify` / `git commit --no-verify` / `--no-gpg-sign` 등 금지. hook 실패 → 원인 수정 → 재커밋. 우회 필요한 정당한 사유 있으면 nmae 사전 보고.
 
-### 1-8) 보호 영역 라벨 — `needs-human-review` 부착 의무
+### 1-8) 보호 영역 — 정보성 분류 (라벨 의무 폐지 2026-05-28)
 
-다음 경로 변경 시 PR 라벨 필수 (CLAUDE.md §4 SoT, 트림 X):
+다음 경로 변경은 PR title / scope 에서 명확히 신호 (CLAUDE.md §4 SoT). **rev sub-agent 가 review 대행하므로 별도 라벨 부착 의무 없음** ([[feedback-needs-human-review-deprecated]]):
 
 - `.github/workflows/**`, `.github/CODEOWNERS`, `**/db/migration/**`, `**/resources/db/**`
 - `**/application*.yml`, `.env*`, `backend/build.gradle*`, `backend/gradle/**`
-- `web/next.config.*`, `web/package.json`, **lockfile 전체** (devDep only diff 도 보호 영역, [[feedback-lockfile-protected]])
+- `web/next.config.*`, `web/package.json`, **lockfile 전체**
 - `Dockerfile`, `docker-compose*.yml`, `LICENSE`
 
-`.github/workflows/auto-label.yml` 가 자동 부착 — 부착 실패 시 워크플로우 자체 fail (머지 차단). 라벨은 머지 시까지 유지 — 임의 제거 금지.
+`.github/workflows/auto-label.yml` 가 변경 감지 시 core.notice 로 visibility 만 제공 (라벨 자동 부착 / check fail 폐지). rev 사이클이 다른 PR 과 동일하게 통과 의무 — release 머지만 사용자 명시 확인.
 
 ### 1-9) PR 생성 표준 — `--base develop` 강제 ([[feedback-pr-base-develop]])
 
@@ -138,7 +138,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 품질 게이트: `cd /home/mobruji/mobruji-fe/web && npm run lint && npm run typecheck && npm test && npm run build`
 - API 호출 = `web/src/lib/api/` 집중. `NEXT_PUBLIC_*` / 서버 전용 구분.
 - **의존성 설치 / `node_modules` 조작 절대 금지** ([[feedback-npm-install-symlink-swap]]) — `npm install` / `npm ci` / `pnpm install` / `yarn` / `rm` / `mv` / `ln` 모두 금지. symlink 보존이 필수. 누락 (`Cannot find module …`) 시 nmae 보고 + 사이클 일시 정지.
-- `web/package.json` / lockfile 변경 = 보호 영역 (`needs-human-review`).
+- `web/package.json` / lockfile 변경 = 정보성 보호 영역 (라벨 의무 폐지 2026-05-28, rev 가 review 대행).
 
 ### 2-rev (mobruji-rev)
 
@@ -205,7 +205,7 @@ be / fe / rev = **이슈 등록 금지** (nmae 보고만). plan 은 docs/spec/AD
 - PR URL + draft/ready + mergeable (yes/no/UNKNOWN)
 - 변경 한 줄 요약 (코드 dump 금지)
 - 품질 게이트 결과 (be: checkstyle+spotless+test / fe: lint+typecheck+test+build / plan: 해당 없음)
-- 보호 영역 변경 여부 + `needs-human-review` 부착 여부
+- 보호 영역 변경 여부 (정보성 — 라벨 의무 폐지 2026-05-28)
 
 ### 4-2) 발견 사항 분류
 

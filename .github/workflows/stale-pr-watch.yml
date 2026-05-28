@@ -28,8 +28,8 @@ name: Stale PR Watch
 #
 # 안전망:
 #   - workflow_dispatch input `dry_run=true` 시 라벨/코멘트/push skip + 후보만 print.
-#   - 본 workflow 자체는 `.github/workflows/**` 보호 영역 → 신설 PR 은
-#     `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+#   - 본 workflow 자체는 `.github/workflows/**` 정보성 보호 영역 — rev sub-agent
+#     review 대행 (2026-05-28, `needs-human-review` 라벨 폐지).
 #
 # 관련:
 #   - 사용자 정정 (2026-05-26 12:24 KST)
@@ -121,9 +121,9 @@ jobs:
                 data.mergeable === 'MERGEABLE' &&
                 labels.includes('reviewed:claude') &&
                 !labels.includes('rev:hold') &&
-                !labels.includes('needs-human-review') &&
                 ageHours >= 6
               ) {
+                // 2026-05-28: `needs-human-review` 면제 폐지 — 라벨 자체 폐지.
                 category = 'auto-merge-missed';
                 reason = `MERGEABLE + reviewed:claude 인데 ${ageHours}h+ 방치 — auto-merge workflow 점검 필요`;
                 labelToAdd = 'stale:auto-merge-missed';

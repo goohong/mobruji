@@ -21,9 +21,10 @@ name: Auto-merge on Rev Pass
 # 조건 (모두 AND):
 #   - 라벨 `reviewed:claude` 포함
 #   - 라벨 `rev:hold` 없음 (rev audit HOLD — author rebase 대기)
-#   - 라벨 `needs-human-review` 없음 (보호 영역 — 사용자 사후 리뷰 필수)
 #   - 라벨 `scope:release` 없음 (release PR — 사용자 수동 머지)
 #   - 라벨 `do-not-merge` 없음 (escape hatch)
+#
+# 2026-05-28: `needs-human-review` 차단 라벨 폐지 — rev sub-agent 가 review 대행.
 #   - PR.draft == false
 #   - PR.mergeable == "MERGEABLE" (GraphQL 응답)
 #   - PR base == develop (release PR 머지 사고 방지 — develop 만 대상)
@@ -35,8 +36,8 @@ name: Auto-merge on Rev Pass
 # 안전망:
 #   - workflow_dispatch 로 dry-run 가능 — input `dry_run=true` 시 머지 호출
 #     skip + 후보 list 만 print.
-#   - 본 workflow 자체는 `.github/workflows/**` 보호 영역 → 신설 PR 은
-#     `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+#   - 본 workflow 자체는 `.github/workflows/**` 정보성 보호 영역 — rev sub-agent 가
+#     review 대행 (2026-05-28 정책 변경, `needs-human-review` 라벨 폐지).
 #
 # 관련:
 #   - 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]
@@ -100,9 +101,9 @@ jobs:
             core.info(`Candidate PRs: ${candidates.join(', ') || '(none)'}`);
 
             // 차단 라벨 — 하나라도 있으면 자동 머지 skip.
+            // 2026-05-28: `needs-human-review` 제거 (rev sub-agent 가 review 대행).
             const blockLabels = [
               'rev:hold',
-              'needs-human-review',
               'scope:release',
               'do-not-merge',
             ];
