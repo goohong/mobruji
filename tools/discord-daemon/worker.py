@@ -22,35 +22,54 @@ from bot import OpLedger, tmux_send_payload, ensure_tmux_session
 # 설정 (환경변수)
 DEDUP_LEDGER_PATH = os.environ.get("DEDUP_LEDGER_PATH", os.path.expanduser("~/.mobruji/discord-bridge.sqlite"))
 TMUX_SESSION_NAME = os.environ.get("TMUX_SESSION_NAME", "mobruji")
+# nmae 워커 pane — 기본 {session}:0.0. 명시 override 가능.
+TMUX_TARGET_PANE = os.environ.get("TMUX_TARGET_PANE", f"{TMUX_SESSION_NAME}:0.0")
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/usr/local/bin/claude")
 POLL_INTERVAL = 5
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
 logger = logging.getLogger("mobruji-worker")
 
+
+def format_worker_inject(task: dict) -> str:
+    """nmae pane 에 주입할 thread-aware 프롬프트를 만듭니다.
+
+    spec docs/features/discord-forum-ops-v2.md §2: 워커가 작업을 인지하면 nmae 가
+    "어느 Discord 쓰레드 작업인지" 알고 그 쓰레드로 결과를 회신해야 한다. 큐에
+    payload.text 만 넘기면 nmae 가 thread context 를 잃으므로, task_id 와
+    discord_thread_id 를 prefix 로 동봉한다. (실제 쓰레드 회신 = Feedback Bridge,
+    Phase 3.)
+    """
+    task_id = task["task_id"]
+    thread_id = task["thread_id"]
+    text = task.get("payload", {}).get("text", "")
+    return (
+        f"[task #{task_id} | discord-thread {thread_id}] {text}\n"
+        f"(완료 시 위 thread 로 결과 요약 회신)"
+    )
+
+
 def process_task(ledger: OpLedger, task: dict):
     task_id = task["task_id"]
     thread_id = task["thread_id"]
-    payload = task["payload"]
-    text = payload.get("text", "")
 
-    logger.info("작업 시작: task_id=%d thread_id=%s", task_id, thread_id)
-    
+    logger.info("작업 시작: task_id=%s thread_id=%s", task_id, thread_id)
+
     # 1. tmux 세션 보장
     ensure_tmux_session(TMUX_SESSION_NAME, CLAUDE_BIN)
-    
-    # 2. 작업 수행 (현재는 tmux 로 전달)
-    # TODO: 향후에는 각 작업별로 별도 컨테이너나 격리된 worktree 에서 claude 를 실행하도록 확장 가능
-    success = tmux_send_payload(f"{TMUX_SESSION_NAME}:0.0", text)
-    
+
+    # 2. 작업 수행 (현재는 tmux 로 nmae 에 전달). thread context 동봉.
+    # TODO: 향후 작업별 격리 worktree 에서 claude 실행으로 확장 가능.
+    success = tmux_send_payload(TMUX_TARGET_PANE, format_worker_inject(task))
+
     if success:
-        logger.info("작업 수행 완료 (전달 성공): task_id=%d", task_id)
-        # 작업이 '완료'된 것은 에이전트의 응답까지 확인해야 하므로, 
-        # 여기서는 '전달됨(DISPATCHED)' 또는 '진행중(WORKING)' 상태를 유지.
-        # 실제 완료 처리는 Feedback Bridge 가 수행하도록 설계 가능.
+        logger.info("작업 수행 완료 (전달 성공): task_id=%s", task_id)
+        # 작업이 '완료'된 것은 에이전트의 응답까지 확인해야 하므로,
+        # 여기서는 '진행중(WORKING)' 상태를 유지.
+        # 실제 완료 처리는 Feedback Bridge 가 수행하도록 설계 (Phase 3).
         ledger.update_task_status(task_id, "WORKING", result="Dispatched to tmux")
     else:
-        logger.error("작업 수행 실패: task_id=%d", task_id)
+        logger.error("작업 수행 실패: task_id=%s", task_id)
         ledger.update_task_status(task_id, "FAILED", result="Tmux send-keys failed")
 
 def main():
