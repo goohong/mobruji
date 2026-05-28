@@ -1,5 +1,5 @@
 ---
-feature: Discord reaction-기반 선택지 응답 + user mode toggle (AUTO / ASK)
+feature: Discord reaction-기반 선택지 응답 + user mode toggle (AUTO / ASK) + slash commands (/mode /status /pause /resume)
 slug: discord-reaction-choice-input
 status: approved
 owner: @mobruji-maestro
@@ -283,6 +283,65 @@ button custom_id: `mobruji-mode-ask` / `mobruji-mode-auto`. message 본문 marke
 - 메모리: [[feedback-discord-reaction-emoji-clarity]] (이전 사용자 confusion — 본 spec 의 UX 명료화 연관) / [[project-discord-channel]] / [[feedback-discord-tone-formal]].
 - Discord docs — `MESSAGE_REACTION_ADD` Gateway event, `PUT /channels/{ch}/messages/{msg}/reactions/{emoji}/@me`.
 
+## 5-9) Discord slash command UI — `/mode` `/status` `/pause` `/resume` (PR 1+, 추가)
+
+> 사용자 추가 요구 2026-05-28: 모드 toggle 외에도 4-사이클 상태 조회 + sweep 일괄 보류/해제를 Discord native slash command UI 로 제공. PR 2 의 buttons UI 와 독립 — buttons 는 mode toggle 만 cover, slash command 는 mode 외 3개 (status/pause/resume) 까지 cover + mode 도 choices 입력으로 cover.
+
+### 5-9-1) 명령 4개 정의
+
+| command | choices / args | 동작 |
+|---|---|---|
+| `/mode <choice: AUTO\|ASK>` | `app_commands.Choice` (AUTO / ASK) | `~/.mobruji/user-mode.txt` 를 선택 값으로 atomic write. 응답 = 현재 mode ephemeral. |
+| `/status` | 인자 없음 | `~/.mobruji/cycle-status.json` 읽어 be/fe/rev/plan 4 워크트리 in_progress + last_completed 1줄 요약 ephemeral. |
+| `/pause` | 인자 없음 | `~/.mobruji/bot-paused.txt` 에 `1\n` write — sweep / 자동 launch 보류 flag. 응답 = "보류 상태로 전환했습니다" ephemeral. |
+| `/resume` | 인자 없음 | `~/.mobruji/bot-paused.txt` 삭제 (없으면 graceful skip) — flag 해제. 응답 = "보류를 해제했습니다" ephemeral. |
+
+`ephemeral=True`: 명령 응답은 호출자만 보임 — #모부르지 채널 누적 메시지 회피. 단순 ack용.
+
+### 5-9-2) storage 결정 (자율)
+
+- `/mode` storage = 기존 `~/.mobruji/user-mode.txt` **재사용** (PR 1 file infra 와 동일 SoT). 추가 file 신설 X.
+- `/pause` `/resume` storage = **별도** `~/.mobruji/bot-paused.txt` 단일 file. 존재 = paused, 부재 = active. cycle-status.json 손대지 않음 — CLAUDE.md §11-3 "cycle-status.json 보호" 룰 + nmae watchdog 충돌 회피.
+- `/pause` 실제 sweep / launch 보류 동작은 본 PR 범위 외 — flag 만 신설. follow-up: nmae cycle_idle_watch_loop / agent-launch-wrapper.sh 가 호출 전 paused.txt 체크 (별도 PR).
+
+### 5-9-3) bot.py 구현 흐름
+
+- `discord.Client` (기존) + `discord.app_commands.CommandTree(client)` 추가 (`commands.Bot` 마이그레이션 X — 기존 on_message / on_ready / on_raw_reaction_add 그대로 유지).
+- `@tree.command(name="mode", description="...")` + `@app_commands.choices(choice=[Choice(name="AUTO", value="AUTO"), Choice(name="ASK", value="ASK")])` 데코레이터.
+- `/status` `/pause` `/resume` 각각 `@tree.command()`.
+- `on_ready` 안에서 1회 `await tree.sync()` — guild 전역 등록. dev 환경 `MOBRUJI_GUILD_ID` env 있으면 guild 한정 sync (즉시 반영). 미설정 시 global sync (Discord propagation 최대 1h).
+- 권한: `ALLOWED_USER_IDS` env 의 사용자만 통과 — `interaction.user.id` 비교. 외부 사용자 = ephemeral 권한 거부 응답.
+- `/pause` `/resume` 의 file mode: `0o600` (read_user_mode 와 동일 secret 가드).
+
+### 5-9-4) helper 추출 함수 (test 가능 단위)
+
+- `read_paused_flag(path: Path = ~/.mobruji/bot-paused.txt) -> bool` — file 존재 여부만.
+- `write_paused_flag(paused: bool, path) -> None` — True = atomic write `"1\n"`, False = unlink (없으면 skip).
+- `format_status_summary(cycle_status: dict | None) -> str` — `read_cycle_status` 결과를 4줄 요약 (각 워크트리 1줄). None → "cycle-status.json 미발견 또는 손상".
+
+slash command callback 본문은 위 3 함수 + `read_user_mode` / `write_user_mode` (기존) 의 thin wrapper. callback 자체는 mock interaction 단위 테스트.
+
+### 5-9-5) 테스트 (단위)
+
+- `read_paused_flag` 부재 → False, 존재 → True.
+- `write_paused_flag` True → file 존재 + content `"1\n"`. False → unlink. 부재에서 False 호출 → graceful.
+- `format_status_summary` None → 명시적 sentinel string. 정상 dict → 4 워크트리 모두 포함 + in_progress title prefix 포함.
+- slash command callback 4종 mock `discord.Interaction` 으로 호출 — allowed user OK / disallowed user 거부 / file side-effect 검증 / `interaction.response.send_message` ephemeral=True 호출 확인.
+
+### 5-9-6) backward compat / rollout
+
+- 기존 on_message / on_raw_reaction_add / digest_loop 등 전부 영향 없음 — 별도 path.
+- `tree.sync()` 실패 (network / 권한) → logger.warning + bot 본체 진입 계속. slash command 자체 미가용 상태로 시작 — 사용자가 자유 텍스트 / reaction-pin 으로 fallback.
+- 사용자 측 rollout: NCP deploy 후 Discord client 에서 슬래시 입력 시 자동 명령 hint 표시 (global sync 후).
+
+### 5-9-7) rollback
+
+문제 시:
+1. `tree.command` 4개 데코레이터 함수 body 시작에 `return` 추가 → 재시작.
+2. 또는 develop revert + `tools/discord-daemon/deploy.sh`.
+3. `~/.mobruji/bot-paused.txt` 는 운영자가 수동 unlink 로 cleanup.
+
 ## 13) 변경 이력
 
 - 2026-05-28 — 초안 작성 + PR 1 (사양 + 구현 + 테스트). status=approved (사용자 요청 직접 응답).
+- 2026-05-28 — §5-9 추가: Discord slash command UI (`/mode` `/status` `/pause` `/resume`) — PR 1 후속, buttons UI (PR 2) 와 병행. directive (A).

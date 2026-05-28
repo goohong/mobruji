@@ -69,6 +69,11 @@ CHOICE_PROMPTS_PATH: Final[Path] = Path.home() / ".mobruji" / "choice-prompts.js
 USER_MODE_PATH: Final[Path] = Path.home() / ".mobruji" / "user-mode.txt"
 USER_MODE_DEFAULT: Final[str] = "AUTO"
 USER_MODE_VALID: Final[tuple[str, ...]] = ("AUTO", "ASK")
+# spec: docs/features/discord-reaction-choice-input.md §5-9
+# `/pause` `/resume` slash command sweep 보류 flag. 존재 = paused, 부재 = active.
+# 실제 sweep / launch 보류 동작은 follow-up PR — flag 만 신설.
+BOT_PAUSED_PATH: Final[Path] = Path.home() / ".mobruji" / "bot-paused.txt"
+BOT_PAUSED_FILE_MODE: Final[int] = 0o600
 # spec: docs/features/directive-pushpin-registration.md
 # 📌 = directive 등록 후보 marker (bot 자동 부착 + 사용자 tap = 등록 trigger).
 # ✅ = directive 등록 완료 시각화.
@@ -1192,6 +1197,77 @@ async def _post_control_ack(
                        getattr(thread, "id", "?"), exc)
         return ""
     return str(getattr(thread, "id", ""))
+
+
+def read_paused_flag(path: Path = BOT_PAUSED_PATH) -> bool:
+    """bot-paused.txt 존재 여부만 반환. content 는 무시.
+
+    spec: docs/features/discord-reaction-choice-input.md §5-9-2
+    """
+    return path.exists()
+
+
+def write_paused_flag(paused: bool, path: Path = BOT_PAUSED_PATH) -> None:
+    """paused=True → atomic write ``"1\\n"``. False → unlink (부재 시 graceful skip).
+
+    spec: docs/features/discord-reaction-choice-input.md §5-9-4
+    """
+    if paused:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text("1\n", encoding="utf-8")
+        os.replace(tmp, path)
+        try:
+            os.chmod(path, BOT_PAUSED_FILE_MODE)
+        except OSError as exc:
+            logger.warning("bot-paused.txt chmod 실패: %s", exc)
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning("bot-paused.txt unlink 실패: %s", exc)
+
+
+def format_status_summary(cycle_status: dict | None) -> str:
+    """`/status` slash command 응답용 4 워크트리 1줄 요약.
+
+    spec: docs/features/discord-reaction-choice-input.md §5-9-4
+
+    None / 부재 / 손상 → sentinel string. dict → be/fe/rev/plan 순서 4줄.
+    각 줄: ``<ws>: <in_progress 1줄> | last=<pr> <title>``.
+    in_progress 가 None 이면 ``idle``, dict 면 title (또는 task) 사용.
+    """
+    if cycle_status is None:
+        return "cycle-status.json 미발견 또는 손상"
+
+    lines: list[str] = []
+    for worktree in NMAE_WORKTREES:
+        entry = cycle_status.get(worktree) or {}
+        in_progress = entry.get("in_progress")
+        if in_progress is None:
+            active_label = "idle"
+        elif isinstance(in_progress, dict):
+            title = (
+                in_progress.get("title")
+                or in_progress.get("task")
+                or "(제목 없음)"
+            )
+            active_label = str(title).strip() or "(빈 title)"
+        else:
+            active_label = str(in_progress).strip() or "(빈 in_progress)"
+
+        last = entry.get("last_completed") or {}
+        if isinstance(last, dict) and last:
+            last_pr = last.get("pr") or "-"
+            last_title = (last.get("title") or "").strip() or "(제목 없음)"
+            last_label = f"{last_pr} {last_title}"
+        else:
+            last_label = "없음"
+
+        lines.append(f"{worktree}: {active_label} | last={last_label}")
+    return "\n".join(lines)
 
 
 async def _handle_pin_reaction(
@@ -4674,6 +4750,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
+    # spec: docs/features/discord-reaction-choice-input.md §5-9
+    # `/mode` `/status` `/pause` `/resume` slash command 등록 — CommandTree 는
+    # discord.Client 위에 별도로 attach (commands.Bot 마이그레이션 회피).
+    tree = discord.app_commands.CommandTree(client)
 
     allowed_user_ids = parse_allowed_user_ids(env["ALLOWED_USER_IDS"])
     try:
@@ -5035,6 +5115,102 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     # multi-pane (#855). plural CSV 우선, singular 후방호환.
     context_pane_targets = resolve_pane_targets(env.get("TMUX_PANE_TARGETS"))
 
+    # ─────────────────────────────────────────────────────────────────────
+    # Slash commands (spec: docs/features/discord-reaction-choice-input.md §5-9)
+    # `/mode <AUTO|ASK>` `/status` `/pause` `/resume`.
+    # ALLOWED_USER_IDS 외 사용자 = ephemeral 권한 거부 응답.
+    # ─────────────────────────────────────────────────────────────────────
+    slash_guild_raw = env.get("MOBRUJI_GUILD_ID", "")
+    try:
+        slash_guild_id = int(slash_guild_raw) if slash_guild_raw else 0
+    except ValueError:
+        logger.warning(
+            "MOBRUJI_GUILD_ID 정수 아님(%r) — global sync 로 fallback", slash_guild_raw
+        )
+        slash_guild_id = 0
+
+    def _check_allowed(interaction: discord.Interaction) -> bool:
+        """allowed_user_ids 외 사용자 = ephemeral 거부 응답 + False."""
+        if interaction.user.id in allowed_user_ids:
+            return True
+        # 거부 응답은 await 호출부에서 일관 처리하기 위해 False 만 반환.
+        return False
+
+    async def _deny(interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            "권한이 없습니다.", ephemeral=True
+        )
+
+    @tree.command(
+        name="mode",
+        description="자율 모드 toggle — AUTO (자율) 또는 ASK (질문 받음).",
+    )
+    @discord.app_commands.choices(
+        choice=[
+            discord.app_commands.Choice(name="AUTO", value="AUTO"),
+            discord.app_commands.Choice(name="ASK", value="ASK"),
+        ]
+    )
+    async def _slash_mode(
+        interaction: discord.Interaction,
+        choice: discord.app_commands.Choice[str],
+    ) -> None:
+        if not _check_allowed(interaction):
+            await _deny(interaction)
+            return
+        try:
+            write_user_mode(choice.value)
+        except ValueError as exc:
+            await interaction.response.send_message(
+                f"mode 변경 실패: {exc}", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            f"user mode = {choice.value} 로 변경했습니다.", ephemeral=True
+        )
+
+    @tree.command(
+        name="status",
+        description="4 사이클 (be/fe/rev/plan) cycle-status.json 한 줄 요약.",
+    )
+    async def _slash_status(interaction: discord.Interaction) -> None:
+        if not _check_allowed(interaction):
+            await _deny(interaction)
+            return
+        cycle_status = read_cycle_status(cycle_status_path)
+        summary = format_status_summary(cycle_status)
+        # cycle-status.json 모든 줄을 보존하려면 backtick code block.
+        await interaction.response.send_message(
+            f"```\n{summary}\n```", ephemeral=True
+        )
+
+    @tree.command(
+        name="pause",
+        description="sweep / 자동 launch 일괄 보류 flag 신설.",
+    )
+    async def _slash_pause(interaction: discord.Interaction) -> None:
+        if not _check_allowed(interaction):
+            await _deny(interaction)
+            return
+        write_paused_flag(True)
+        await interaction.response.send_message(
+            "보류 상태로 전환했습니다 (`~/.mobruji/bot-paused.txt`).",
+            ephemeral=True,
+        )
+
+    @tree.command(
+        name="resume",
+        description="sweep / 자동 launch 보류 flag 해제.",
+    )
+    async def _slash_resume(interaction: discord.Interaction) -> None:
+        if not _check_allowed(interaction):
+            await _deny(interaction)
+            return
+        write_paused_flag(False)
+        await interaction.response.send_message(
+            "보류를 해제했습니다.", ephemeral=True
+        )
+
     @client.event
     async def on_ready() -> None:  # noqa: D401
         logger.info(
@@ -5070,6 +5246,27 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             forum_channel_ids["rev"] or "unset",
             forum_channel_ids["plan"] or "unset",
         )
+        # spec §5-9-3 — slash command 1회 sync. reconnect 시 중복 호출 방지.
+        # MOBRUJI_GUILD_ID 설정 시 guild 한정 sync (즉시 반영), 미설정 시 global
+        # (Discord propagation 최대 1h). 실패 시 warning + 본체 계속.
+        if not hasattr(client, "_slash_tree_synced"):
+            client._slash_tree_synced = True  # type: ignore[attr-defined]
+            try:
+                if slash_guild_id:
+                    guild_obj = discord.Object(id=slash_guild_id)
+                    tree.copy_global_to(guild=guild_obj)
+                    synced = await tree.sync(guild=guild_obj)
+                    logger.info(
+                        "slash commands guild sync OK: guild=%d count=%d",
+                        slash_guild_id,
+                        len(synced),
+                    )
+                else:
+                    synced = await tree.sync()
+                    logger.info("slash commands global sync OK: count=%d", len(synced))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("slash command tree.sync 실패 (graceful): %r", exc)
+
         if digest_enabled and not hasattr(client, "_digest_task_started"):
             # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
             client._digest_task_started = True  # type: ignore[attr-defined]

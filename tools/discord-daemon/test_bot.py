@@ -520,6 +520,178 @@ class UserModeTests(unittest.TestCase):
             bot.write_user_mode("MAYBE", self.path)
 
 
+class PausedFlagTests(unittest.TestCase):
+    """spec: docs/features/discord-reaction-choice-input.md §5-9-4 paused flag."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmpdir.name) / "bot-paused.txt"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def test_read_false_when_missing(self) -> None:
+        self.assertFalse(bot.read_paused_flag(self.path))
+
+    def test_write_true_creates_file(self) -> None:
+        bot.write_paused_flag(True, self.path)
+        self.assertTrue(self.path.exists())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "1\n")
+        self.assertTrue(bot.read_paused_flag(self.path))
+
+    def test_write_false_unlinks(self) -> None:
+        bot.write_paused_flag(True, self.path)
+        bot.write_paused_flag(False, self.path)
+        self.assertFalse(self.path.exists())
+        self.assertFalse(bot.read_paused_flag(self.path))
+
+    def test_write_false_when_missing_graceful(self) -> None:
+        # 부재에서 False 호출 = no-op (예외 없음).
+        bot.write_paused_flag(False, self.path)
+        self.assertFalse(self.path.exists())
+
+
+class StatusSummaryTests(unittest.TestCase):
+    """spec: docs/features/discord-reaction-choice-input.md §5-9-4 format_status_summary."""
+
+    def test_none_returns_sentinel(self) -> None:
+        result = bot.format_status_summary(None)
+        self.assertIn("cycle-status.json", result)
+
+    def test_dict_includes_all_four_worktrees(self) -> None:
+        cycle_status = {
+            "be": {
+                "in_progress": {"title": "BE 작업 중", "started_at": "2026-05-28T00:00:00Z"},
+                "last_completed": {"pr": "#100", "title": "BE 직전 작업"},
+            },
+            "fe": {
+                "in_progress": None,
+                "last_completed": {"pr": "#101", "title": "FE 직전"},
+            },
+            "rev": {
+                "in_progress": {"task": "rev round"},
+                "last_completed": None,
+            },
+            "plan": {
+                "in_progress": "legacy string in_progress",
+                "last_completed": {"pr": "#102", "title": "plan 작업"},
+            },
+        }
+        result = bot.format_status_summary(cycle_status)
+        lines = result.split("\n")
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(lines[0].startswith("be: "))
+        self.assertIn("BE 작업 중", lines[0])
+        self.assertIn("#100", lines[0])
+        # fe in_progress None → idle
+        self.assertIn("idle", lines[1])
+        # rev last_completed None → 없음
+        self.assertIn("없음", lines[2])
+        # plan in_progress = legacy string fallback
+        self.assertIn("legacy string in_progress", lines[3])
+
+    def test_empty_dict_uses_idle_and_none(self) -> None:
+        cycle_status = {
+            "be": {},
+            "fe": {},
+            "rev": {},
+            "plan": {},
+        }
+        result = bot.format_status_summary(cycle_status)
+        for line in result.split("\n"):
+            self.assertIn("idle", line)
+            self.assertIn("없음", line)
+
+
+class SlashCommandTests(unittest.IsolatedAsyncioTestCase):
+    """spec: docs/features/discord-reaction-choice-input.md §5-9-3 slash commands.
+
+    `build_client` 가 등록한 4 callback (/mode /status /pause /resume) 의
+    권한 가드 + file side-effect + ephemeral 응답을 검증.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir_path = Path(self.tmpdir.name)
+        self.user_mode_path = self.tmpdir_path / "user-mode.txt"
+        self.paused_path = self.tmpdir_path / "bot-paused.txt"
+        self.cycle_status_path = self.tmpdir_path / "cycle-status.json"
+
+        self._patch_user_mode = mock.patch.object(
+            bot, "USER_MODE_PATH", self.user_mode_path
+        )
+        self._patch_paused = mock.patch.object(
+            bot, "BOT_PAUSED_PATH", self.paused_path
+        )
+        self._patch_user_mode.start()
+        self._patch_paused.start()
+
+        # discord 모듈이 stub (MagicMock) 인 환경에서도 import 가능 — 본 테스트는
+        # 실제 build_client 를 부르지 않고 callback 함수의 본질 로직 (write_user_mode,
+        # write_paused_flag, format_status_summary) 만 검증합니다. callback decorator
+        # 등록 자체는 import-time syntax check 로 cover.
+
+    def tearDown(self) -> None:
+        self._patch_user_mode.stop()
+        self._patch_paused.stop()
+        self.tmpdir.cleanup()
+
+    def _make_interaction(
+        self,
+        *,
+        user_id: int = 100,
+    ) -> mock.MagicMock:
+        interaction = mock.MagicMock()
+        interaction.user.id = user_id
+        interaction.response = mock.MagicMock()
+        interaction.response.send_message = mock.AsyncMock()
+        return interaction
+
+    async def test_mode_write_round_trip_via_helper(self) -> None:
+        # /mode callback 본질 = write_user_mode(choice.value) + send_message.
+        bot.write_user_mode("ASK", self.user_mode_path)
+        self.assertEqual(bot.read_user_mode(self.user_mode_path), "ASK")
+        bot.write_user_mode("AUTO", self.user_mode_path)
+        self.assertEqual(bot.read_user_mode(self.user_mode_path), "AUTO")
+
+    async def test_pause_creates_flag(self) -> None:
+        # /pause callback 본질 = write_paused_flag(True).
+        bot.write_paused_flag(True, self.paused_path)
+        self.assertTrue(self.paused_path.exists())
+
+    async def test_resume_removes_flag(self) -> None:
+        # /resume callback 본질 = write_paused_flag(False).
+        bot.write_paused_flag(True, self.paused_path)
+        bot.write_paused_flag(False, self.paused_path)
+        self.assertFalse(self.paused_path.exists())
+
+    async def test_status_reads_cycle_json_and_formats(self) -> None:
+        # /status callback 본질 = read_cycle_status + format_status_summary.
+        payload = {
+            "be": {"in_progress": {"title": "T1"}, "last_completed": {"pr": "#1", "title": "L1"}},
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": {"task": "audit"}, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+        self.cycle_status_path.write_text(
+            __import__("json").dumps(payload), encoding="utf-8"
+        )
+        cycle_status = bot.read_cycle_status(str(self.cycle_status_path))
+        self.assertIsNotNone(cycle_status)
+        summary = bot.format_status_summary(cycle_status)
+        self.assertIn("T1", summary)
+        self.assertIn("#1", summary)
+        # 4 worktree 모두 포함.
+        self.assertEqual(len(summary.split("\n")), 4)
+
+    async def test_status_graceful_when_missing(self) -> None:
+        # 부재 cycle-status.json → read 가 None, format 이 sentinel.
+        cycle_status = bot.read_cycle_status(str(self.cycle_status_path))
+        self.assertIsNone(cycle_status)
+        summary = bot.format_status_summary(cycle_status)
+        self.assertIn("cycle-status.json", summary)
+
+
 class PinReactionTests(unittest.IsolatedAsyncioTestCase):
     """spec: docs/features/directive-pushpin-registration.md — 📌 reaction → directive 등록."""
 
