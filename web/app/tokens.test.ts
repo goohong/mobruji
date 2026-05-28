@@ -325,4 +325,31 @@ describe("design tokens (ADR-0018)", () => {
       expect(allDark).toMatch(new RegExp(`${token}:`));
     }
   });
+
+  /*
+   * ADR-0018 단계 4 PR 12 — voice-range/auto wizard 의 잔여 zinc/emerald/amber
+   * hardcode 의미 토큰화 회귀 가드.
+   *
+   * `voice-range/auto/page.tsx` 에서 "안정/불안정" badge, mic level meter, progress
+   * track, "감지 중" signal 텍스트가 토큰으로 swap. `badge-success` (PR 10) 와
+   * `badge-warning` 페어를 함께 — dark 매핑이 한 단계 다른 `--text-signal-active`
+   * (emerald-700 / emerald-300) 와 `--meter-track-bg` (zinc-200 / zinc-800) 도 새
+   * 정의. 다크 모드 swap 은 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  it("badge warning + meter + signal 의미 토큰 4종이 light + dark 모두 정의된다 (PR 12)", () => {
+    const requiredTokens = [
+      "--badge-warning-bg",
+      "--badge-warning-fg",
+      "--meter-track-bg",
+      "--text-signal-active",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
 });

@@ -137,6 +137,31 @@
   --badge-success-fg: #047857; /* emerald-700 */
 
   /*
+   * Badge warning + meter/signal 의미 토큰 (#1044 단계 4 PR 12) — voice-range/auto
+   * 측정 wizard 의 안정성 indicator / mic level / progress track 매핑.
+   *
+   * 기존 hardcode 매핑:
+   *   bg-amber-100 text-amber-700 + dark:bg-amber-900/50 dark:text-amber-200
+   *                                           → --badge-warning-bg / --badge-warning-fg
+   *   meter / progress track:
+   *     bg-zinc-200 + dark:bg-zinc-800        → --meter-track-bg
+   *   "감지 중" 텍스트:
+   *     text-emerald-700 + dark:text-emerald-300
+   *                                           → --text-signal-active
+   *
+   * `--badge-success-fg` (emerald-700/200) 와 `--text-signal-active`
+   * (emerald-700/300) 는 dark 가 한 단계 다름 (chip 안정성 vs 텍스트 신호 강조)
+   * 라 별도 토큰. `--meter-track-bg` (zinc-200/zinc-800) 는 `--border`
+   * (zinc-200/zinc-700) 와 dark 가 한 단계 다름.
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --badge-warning-bg: #fef3c7; /* amber-100 */
+  --badge-warning-fg: #b45309; /* amber-700 */
+  --meter-track-bg: #e4e4e7; /* zinc-200 */
+  --text-signal-active: #047857; /* emerald-700 */
+
+  /*
    * 홈 + 에러 페이지 의미 토큰 (#1044 단계 4 PR 11) — `app/page.tsx` + `app/error.tsx`
    * 잔여 hardcode 일괄 swap.
    *
@@ -214,6 +239,12 @@
   --badge-neutral-fg: #d4d4d8; /* zinc-300 */
   --badge-success-bg: rgba(6, 78, 59, 0.5); /* emerald-900/50 */
   --badge-success-fg: #a7f3d0; /* emerald-200 */
+
+  /* Badge warning + meter/signal 의미 토큰 dark swap (PR 12) */
+  --badge-warning-bg: rgba(120, 53, 15, 0.5); /* amber-900/50 */
+  --badge-warning-fg: #fde68a; /* amber-200 */
+  --meter-track-bg: #27272a; /* zinc-800 */
+  --text-signal-active: #6ee7b7; /* emerald-300 */
 
   /* 홈 + 에러 페이지 의미 토큰 dark swap (PR 11) */
   --text-disclaimer: #71717a; /* zinc-500 — 의도적 균일 (light/dark 같음) */

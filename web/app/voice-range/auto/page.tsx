@@ -298,16 +298,16 @@ export default function AutoVoiceRangePage({
   }, [lowMidi, highMidi]);
 
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             자동 측정
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             마이크로 음역대 측정하기
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="text-sm text-[var(--text-secondary)]">
             마이크 권한이 필요해요. 음역 측정에만 사용하고 audio 데이터는 서버로
             업로드하지 않습니다 (브라우저 내부에서만 처리).
           </p>
@@ -330,7 +330,7 @@ export default function AutoVoiceRangePage({
         </div>
         <section
           aria-label="음역대 자동 측정"
-          className="flex flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+          className="flex flex-col gap-6 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-6 shadow-[var(--shadow-sm)] ring-1 ring-[var(--border)]"
         >
           {step === "PERMISSION" ? (
             <PermissionStep
@@ -384,7 +384,7 @@ function PermissionStep({
 }: PermissionStepProps) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p className="text-sm text-[var(--text-label)]">
         준비되면 아래 버튼을 눌러 측정을 시작하세요. 낮은 음 5초 → 높은 음 5초
         순으로 진행됩니다.
       </p>
@@ -439,10 +439,10 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+      <h2 className="text-lg font-semibold text-[var(--text-primary)]">
         {phaseLabel}을 5초간 발성해주세요
       </h2>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="text-sm text-[var(--text-secondary)]">
         편한 모음(예: &quot;아&quot;) 으로 길게 내주세요.
       </p>
       {/*
@@ -450,7 +450,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         해제. 카운트다운 <p aria-live="polite"> 와 page 상단 status region 만
         남겨서 SR announce 채널을 단순화한다.
       */}
-      <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+      <div className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4">
         <div className="flex items-center justify-between">
           <span className="text-xs uppercase tracking-widest text-[var(--text-caption)]">
             현재 음
@@ -459,8 +459,8 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
             data-testid="stability-badge"
             className={
               sample?.isStable
-                ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200"
-                : "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/50 dark:text-amber-200"
+                ? "rounded-full bg-[var(--badge-success-bg)] px-2 py-0.5 text-xs font-medium text-[var(--badge-success-fg)]"
+                : "rounded-full bg-[var(--badge-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--badge-warning-fg)]"
             }
           >
             {sample?.isStable ? "안정" : "불안정"}
@@ -490,7 +490,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               data-testid="signal-status"
               className={
                 hasSignal
-                  ? "text-xs text-emerald-700 dark:text-emerald-300"
+                  ? "text-xs text-[var(--text-signal-active)]"
                   : "text-xs text-[var(--text-caption)]"
               }
             >
@@ -498,7 +498,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
             </span>
           </div>
           <div
-            className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
+            className="h-2 w-full overflow-hidden rounded-full bg-[var(--meter-track-bg)]"
             role="meter"
             aria-label="마이크 입력 레벨"
             aria-valuemin={0}
@@ -509,8 +509,8 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               data-testid="mic-level-bar"
               className={
                 sample?.isStable
-                  ? "h-full bg-emerald-500 transition-[width] duration-100"
-                  : "h-full bg-amber-500 transition-[width] duration-100"
+                  ? "h-full bg-[var(--success-500)] transition-[width] duration-100"
+                  : "h-full bg-[var(--warning-500)] transition-[width] duration-100"
               }
               style={{ width: `${levelPercent}%` }}
             />
@@ -519,7 +519,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
       </div>
       <div className="flex flex-col gap-1">
         <div
-          className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
+          className="h-2 w-full overflow-hidden rounded-full bg-[var(--meter-track-bg)]"
           role="progressbar"
           aria-label={`${phaseLabel} 측정 진행률`}
           aria-valuemin={0}
@@ -528,12 +528,12 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         >
           <div
             data-testid="measure-progress-bar"
-            className="h-full bg-zinc-900 transition-[width] duration-100 dark:bg-zinc-50"
+            className="h-full bg-[var(--cta-neutral-bg)] transition-[width] duration-100"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
         <p
-          className="text-center text-sm text-zinc-600 dark:text-zinc-400"
+          className="text-center text-sm text-[var(--text-secondary)]"
           aria-live="polite"
         >
           남은 시간 {remainingSec}초
@@ -573,10 +573,10 @@ function ResultStep({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           측정 결과
         </h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           필요하면 슬라이더로 ±보정 후 저장하세요. 결과가 마음에 안 들면 다시
           측정할 수 있어요.
         </p>
@@ -640,8 +640,8 @@ interface ConfidenceBadgeProps {
 
 function ConfidenceBadge({ label, result }: ConfidenceBadgeProps) {
   const tone = result?.confirmed
-    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200"
-    : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-200";
+    ? "bg-[var(--badge-success-bg)] text-[var(--badge-success-fg)]"
+    : "bg-[var(--badge-warning-bg)] text-[var(--badge-warning-fg)]";
   const text = result?.confirmed ? "안정" : "낮음 — 재측정 권장";
   return (
     <div className="flex items-center justify-between">
@@ -666,10 +666,8 @@ function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
   return (
     <label className="flex flex-col gap-2 text-sm">
       <div className="flex items-center justify-between">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">
-          {label}
-        </span>
-        <span className="tabular-nums text-zinc-900 dark:text-zinc-50">
+        <span className="font-medium text-[var(--text-label)]">{label}</span>
+        <span className="tabular-nums text-[var(--text-primary)]">
           {midiToCombinedNoteName(value)} · MIDI {value}
         </span>
       </div>
@@ -681,7 +679,7 @@ function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
         onChange={(event) => onChange(Number(event.target.value))}
         data-testid={testId}
         aria-label={label}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-zinc-200 accent-zinc-900 dark:bg-zinc-700 dark:accent-zinc-50"
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--border)] accent-[var(--cta-neutral-bg)]"
       />
     </label>
   );
