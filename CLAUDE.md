@@ -8,9 +8,9 @@
 
 | actor | 추가로 읽을 문서 (이것만) |
 |---|---|
-| **nmae** (NCP `mobruji:0.0`) | `docs/ai-harness/actors/nmae-runbook.md` |
-| **helper** (mac `helper:0.0`) | `docs/helper-rules.md` (+ §15 doc-check) |
-| **be / fe / rev / plan** (sub-agent) | `docs/ai-harness/12-sub-agent-prompt-template.md` (§1 공통 + §2 자기 역할) |
+| **nmae** (NCP `mobruji:0.0`) | `docs/ai-harness/actors/nmae.md` |
+| **helper** (mac `helper:0.0`) | `docs/ai-harness/actors/helper.md` (+ §15 doc-check) |
+| **be / fe / rev / plan** (sub-agent) | `docs/ai-harness/actors/sub-agent.md` (§1 공통 + §2 자기 역할) |
 | 라우팅/주입 맵 전반 | `docs/ai-harness/00-MANIFEST.md` |
 
 - 강제는 **prose 가 아니라 코드** — bot.py watchdog loop + `tools/agent-launch-wrapper.sh` / `cycle-status/update.sh` / `discord-daemon/helper-turn-start.sh` wrapper (`docs/ai-harness/13-memory-and-enforcement.md` 철학).
@@ -37,8 +37,8 @@
 - `docs/ai-harness/08-code-conventions.md` — **코드 컨벤션 전체**
 - `docs/ai-harness/10-observability.md` — 로깅/메트릭/트레이싱
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 런북
-- `docs/ai-harness/12-sub-agent-prompt-template.md` — **sub-agent launch single SoT (§13 위임)**
-- `docs/helper-rules.md` — **helper 본체 비협상 룰 single SoT (§12 위임, 2026-05-26 #1085)**
+- `docs/ai-harness/actors/sub-agent.md` — **sub-agent launch single SoT (§13 위임)**
+- `docs/ai-harness/actors/helper.md` — **helper 본체 비협상 룰 single SoT (§12 위임, 2026-05-26 #1085)**
 - `docs/ai-harness/13-memory-and-enforcement.md` — 메모리 promote/tracking
 - `docs/ai-harness/14-discord-ops.md` — Discord 셋업 + 메시지/명령/Forum (구 14+15)
 - `docs/decisions/` — ADR
@@ -149,15 +149,15 @@ cd web && npm run dev                                                   # FE 실
 
 ---
 
-## 11) nmae 전용 룰 → `docs/ai-harness/actors/nmae-runbook.md`
+## 11) nmae 전용 룰 → `docs/ai-harness/actors/nmae.md`
 
 > **NCP nmae 세션만 로드.** 3중 watchdog / inject 대응 절차 / cycle-status 보호 / idle note / 4-사이클 / status 채널 라우팅 / directive-board event-driven flow (구 §11-1~11-11). 강제는 bot.py watchdog loop + `tools/agent-launch-wrapper.sh` + `tools/cycle-status/update.sh`.
 
-## 12) helper 전용 룰 → `docs/helper-rules.md` (단일 SoT)
+## 12) helper 전용 룰 → `docs/ai-harness/actors/helper.md` (단일 SoT)
 
-> **mac helper 세션만 로드.** 채널 경계 / ack(bot.py 처리) / 매 turn 4단계 / thread / 정중체 / 빈 메시지 분류 등. CLAUDE.md 거울 폐지 (#1085) — `docs/helper-rules.md` + `tools/discord-daemon/helper-turn-start.sh` 두 채널로 강제.
+> **mac helper 세션만 로드.** 채널 경계 / ack(bot.py 처리) / 매 turn 4단계 / thread / 정중체 / 빈 메시지 분류 등. CLAUDE.md 거울 폐지 (#1085) — `docs/ai-harness/actors/helper.md` + `tools/discord-daemon/helper-turn-start.sh` 두 채널로 강제.
 
-## 13) sub-agent 룰 → `docs/ai-harness/12-sub-agent-prompt-template.md` (단일 SoT)
+## 13) sub-agent 룰 → `docs/ai-harness/actors/sub-agent.md` (단일 SoT)
 
 > **be/fe/rev/plan sub-agent launch 시 이 한 문서만 로드** (§1 공통 + §2 역할별). 역할↔워크트리↔품질게이트 quick-ref + git 사고 가드 포함. 역할 매핑/주입은 `docs/ai-harness/00-MANIFEST.md`.
 ## 14) mmae/nmae/helper context% 자기 emit

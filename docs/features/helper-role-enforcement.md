@@ -19,7 +19,7 @@ last_reviewed: 2026-05-26
 
 - helper 도입 spec(`docs/features/helper-agent.md`) 은 helper 의 책임을 정의했지만,
   실제 운영에서 helper 가 "사용자가 시킨 작업" 을 자기 본체 reasoning 으로 처리하려는
-  경향이 반복되었다. 메모리/CLAUDE.md/`docs/helper-rules.md` 에 룰을 박제했으나
+  경향이 반복되었다. 메모리/CLAUDE.md/`docs/ai-harness/actors/helper.md` 에 룰을 박제했으나
   **학습 의존** 이라는 한계가 남아 있었다.
 - 사용자 정정 (2026-05-26):
   > "helper 본체는 코드/머지/조사/스크립트 실행 일체 금지. 무조건 nmae 위임. 메모리

@@ -33,7 +33,7 @@ last_reviewed: 2026-05-24
 - [x] (#956) Discord push 에 reason / idle_since 노출 — STRICT 라벨 분리.
 - [x] (#972) **escalation**: 같은 워크트리 inject 3회 연속 후 in_progress 여전히 NULL → MOBRUJI_CHANNEL_ID 직접 사용자 push (debounce 1h, env `CYCLE_INJECT_ESCALATION_THRESHOLD=3` default).
 - [x] (#972) nmae 가 inject 받았을 때 in_progress 갱신하면 escalation counter 자동 리셋.
-- [x] (#972) sub-agent prompt template (`docs/ai-harness/12-sub-agent-prompt-template.md` §1) 에 watchdog inject 대응 4단계 의무 절차 명문화.
+- [x] (#972) sub-agent prompt template (`docs/ai-harness/actors/sub-agent.md` §1) 에 watchdog inject 대응 4단계 의무 절차 명문화.
 
 ### 비기능 요구사항
 - 알림 spam 방지: 워크트리 별 last_alert_at 캐시 + 15분 debounce.

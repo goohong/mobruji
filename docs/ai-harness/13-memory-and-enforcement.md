@@ -244,7 +244,7 @@
 - `docs/features/event-action-mapping.md` — ADR-0019 의 동반 spec. event ↔ action 매핑 + state machine + failure modes.
 - `docs/features/work-cycle-refactor.md` — ADR-0019 의 5단계 마이그 plan (운영 break 0).
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 운영 런북
-- `docs/ai-harness/12-sub-agent-prompt-template.md` — sub-agent 룰 SoT
+- `docs/ai-harness/actors/sub-agent.md` — sub-agent 룰 SoT
 - `docs/ai-harness/13-memory-promote-tracking.md` — 메모리 → 코드 promote 트래킹
 - `docs/features/nmae-cycle-watchdog.md` — watchdog inject 절차 (코드 강제 사례)
 - `tools/cycle-status/README.md` — cycle-status.json 헬퍼 (코드 강제 사례)

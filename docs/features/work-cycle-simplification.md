@@ -99,7 +99,7 @@ ADR-0019 채택 원칙:
   - `tools/gh-wrapper.sh` (PATH 우선 wrapper) — `gh pr create` 호출 시 post-hook `discord-reply.sh --forum-comment $LAUNCH_THREAD_ID "🔀 PR #<num>: <title>"` 자동
 - **(c) 동작 검증 metric**: **사이클 당 milestone forum-comment ≥ 3** (보통: 1. 시작 / 2. commit push / 3. PR 생성 / 4. PR 머지 — 최소 3건 보장). `LAUNCH_THREAD_ID` env 가 sub-agent 환경에 inject 되어 있다는 전제 (Hook 1 의 thread_id 가 sub-agent 에 passthrough).
 - **(d) 위반 사례 (사고 박제)**: plan sub-agent 가 spec draft 작성 후 git commit + push 까지 했는데 forum thread 는 launch 알림 1건만 — 사용자 입장 진행 silent. LLM 가 milestone push 까먹음. 5분 룰 안 분할 사이클에서도 동일.
-- **(e) 구현 후 expected**: sub-agent 가 명시적으로 `discord-reply.sh --forum-comment` 호출 안 해도 git commit 자체가 forum-comment 한 줄 자동 emit. PR 생성도 동일. agent 의 prompt 룰 (12-sub-agent-prompt-template.md §1 Discord thread stream) 은 보조 — 코드 hook 이 강제.
+- **(e) 구현 후 expected**: sub-agent 가 명시적으로 `discord-reply.sh --forum-comment` 호출 안 해도 git commit 자체가 forum-comment 한 줄 자동 emit. PR 생성도 동일. agent 의 prompt 룰 (actors/sub-agent.md §1 Discord thread stream) 은 보조 — 코드 hook 이 강제.
 
 ### 4-3) Hook 3 — helper-current-target.txt freeze race 강제 wrapper
 

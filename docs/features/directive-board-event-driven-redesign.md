@@ -84,7 +84,7 @@ last_reviewed: 2026-05-27
 
 | 시점 | 호출 | actor |
 |---|---|---|
-| sub-agent 완료 보고 시점 | `bash ~/.mobruji/directive_status.sh <msg_id_or_thread_id> completed [pr_url]` | sub-agent (`12-sub-agent-prompt-template.md` 강제) 또는 nmae ack 시점 |
+| sub-agent 완료 보고 시점 | `bash ~/.mobruji/directive_status.sh <msg_id_or_thread_id> completed [pr_url]` | sub-agent (`actors/sub-agent.md` 강제) 또는 nmae ack 시점 |
 | PR 머지 직후 | 동일 (멱등 호출) | nmae (auto-merge 시점) |
 
 `directive_status.sh completed` 동작:
@@ -136,17 +136,17 @@ polling sync_loop 폐기 후에도 actor 호출 누락 사고는 발생 가능 (
 | `tools/discord-daemon/helper-turn-start.sh` | turn 시작 시점 mismatch detect | impl PR 3 (be) |
 | `~/.mobruji/discord-reply.sh` | `--forum-state-dump directive` mode 신설 (state 비교 API) | impl PR 2 (helper-launched) |
 | `~/.mobruji/directive-board-sync.json` | 폐기 | impl PR 1 (be) |
-| `docs/helper-rules.md` §4 | 트리거 3 시점 actor atomic 호출 명시 + polling 폐기 표기 | 본 SPEC PR |
+| `docs/ai-harness/actors/helper.md` §4 | 트리거 3 시점 actor atomic 호출 명시 + polling 폐기 표기 | 본 SPEC PR |
 | `CLAUDE.md` §11-11 | 트리거 3 시점 표 + polling 폐기 + 누락 detect | 본 SPEC PR |
 | `CLAUDE.md` §12-3 step 5 (helper sub-agent launch) | `directive_status.sh in_progress` 호출 명시 (wrapper 가 자동이지만 폴백 명시) | 본 SPEC PR |
-| `docs/ai-harness/12-sub-agent-prompt-template.md` | sub-agent 완료 보고 시점 `directive_status.sh completed` 호출 의무 | 본 SPEC PR |
+| `docs/ai-harness/actors/sub-agent.md` | sub-agent 완료 보고 시점 `directive_status.sh completed` 호출 의무 | 본 SPEC PR |
 | 메모리 `nmae/feedback_directive_board_update_flow.md` | polling sync → event-driven 으로 정정 | nmae 갱신 권고 (본 PR 본문 명시) |
 
 ## §7 PR 분담
 
 | PR | 작업 | 담당 |
 |---|---|---|
-| 본 SPEC PR | docs/features 신설 + CLAUDE.md §11-11 + §12-3 + docs/helper-rules.md + 12-sub-agent-prompt-template.md 갱신 + 메모리 정정 권고 | plan (본 사이클) |
+| 본 SPEC PR | docs/features 신설 + CLAUDE.md §11-11 + §12-3 + docs/ai-harness/actors/helper.md + actors/sub-agent.md 갱신 + 메모리 정정 권고 | plan (본 사이클) |
 | impl PR 1 — bot.py sync_loop 제거 | `bot.py directive_board_sync_loop` / `directive_status_sync_loop` 함수 제거 + `on_message` 안 `directive_append.sh` 호출 추가 + `directive-board-sync.json` 폐기 | be (후속 사이클) |
 | impl PR 2 — helper script 신설 | `directive_append.sh` / `directive_status.sh` 신설 + `discord-reply.sh --forum-state-dump directive` mode 신설 + pytest 5건 | helper-launched 또는 be (후속) |
 | impl PR 3 — wrapper 누락 detect | `agent-launch-wrapper.sh` + `helper-turn-start.sh` 안 jsonl ↔ Discord diff + visible warning | be (후속) |

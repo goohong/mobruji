@@ -135,7 +135,7 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 |---|---|---|
 | (a) 지시 발생 — directive 분류 시 | `bash ~/.mobruji/directive_append.sh <msg_id> "<title>" [pr_url]` (jsonl append + forum-post atomic) | bot.py `on_message` / helper / nmae |
 | (b) 위임 — sub-agent launch | `bash ~/.mobruji/directive_status.sh <id> in_progress [pr_url]` (jsonl + forum-retag + update-status atomic) | nmae / helper / `agent-launch-wrapper.sh` 강제 |
-| (c) 완료 — sub-agent 완료 보고 / PR 머지 | `bash ~/.mobruji/directive_status.sh <id> completed [pr_url]` | sub-agent (`12-sub-agent-prompt-template.md` 강제) / nmae |
+| (c) 완료 — sub-agent 완료 보고 / PR 머지 | `bash ~/.mobruji/directive_status.sh <id> completed [pr_url]` | sub-agent (`actors/sub-agent.md` 강제) / nmae |
 
 - **수동 Discord 본문 edit 금지** — Discord UI 손 수정은 desync. 반드시 헬퍼 호출.
 - **폐기 (#1129)**: bot.py `directive_board_sync_loop` / `directive_status_sync_loop` 함수 + `~/.mobruji/directive-board-sync.json` 캐시 + cron digest `directive_board_mismatch=N` 한 줄. polling sync 자체가 desync 원인 (사용자 2026-05-26 정정: 자동 PATCH 불완전 + 5분 latency).
@@ -148,9 +148,9 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 
 ## 부록) sub-agent launch quick-ref (구 CLAUDE.md §13)
 
-> nmae 가 be/fe/rev/plan sub-agent 를 launch 할 때 참조. 상세 SoT 는 `docs/ai-harness/12-sub-agent-prompt-template.md`.
+> nmae 가 be/fe/rev/plan sub-agent 를 launch 할 때 참조. 상세 SoT 는 `docs/ai-harness/actors/sub-agent.md`.
 
-> **상세는 `docs/ai-harness/12-sub-agent-prompt-template.md` 단일 SoT**. 본 섹션은 nmae/helper 가 sub-agent launch 시점에 의존하는 비협상 룰만 요약.
+> **상세는 `docs/ai-harness/actors/sub-agent.md` 단일 SoT**. 본 섹션은 nmae/helper 가 sub-agent launch 시점에 의존하는 비협상 룰만 요약.
 > 메모리 actor: `subagent` (공통) / `rev` (rev 전용).
 
 ### 13-1) 공통 룰 포인터 — `12-template §1`
@@ -163,7 +163,7 @@ Discord watchdog push 도 reason 표시 — STRICT 라벨 분리 + 워크트리�
 - hook 우회 금지 (`--no-verify` 등)
 - 보호 영역 변경 시 `needs-human-review` 라벨
 - `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) — default=main 사고 가드
-- 라벨 자기 점검 (type/scope/ai-generated/ai:claude/`session:<backend|frontend|review|plan|helper>`) — session 라벨 부착 의무 (이슈 #1002 / `.github/workflows/auto-label.yml` 추론 fallback). sub-agent role → 라벨 매핑: be → `session:backend`, fe → `session:frontend`, rev → `session:review`, plan → `session:plan`, helper → `session:helper` (`docs/ai-harness/12-sub-agent-prompt-template.md §1 PR session 라벨 부착 의무` 표 참조)
+- 라벨 자기 점검 (type/scope/ai-generated/ai:claude/`session:<backend|frontend|review|plan|helper>`) — session 라벨 부착 의무 (이슈 #1002 / `.github/workflows/auto-label.yml` 추론 fallback). sub-agent role → 라벨 매핑: be → `session:backend`, fe → `session:frontend`, rev → `session:review`, plan → `session:plan`, helper → `session:helper` (`docs/ai-harness/actors/sub-agent.md §1 PR session 라벨 부착 의무` 표 참조)
 - 완료 보고 시 PR URL + mergeable + 게이트 + 보호 영역 + 발견 사항 (🔴/🟡/🟢) + 다음 사이클 후보
 
 ### 13-2) 역할별 룰 포인터 — `12-template §2`

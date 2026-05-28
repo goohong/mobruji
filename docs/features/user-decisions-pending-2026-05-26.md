@@ -74,8 +74,8 @@ last_reviewed: 2026-05-26
 - **§13-1** (sub-agent 공통 룰): 15+ 줄 (워크트리 격리 / 한 워크트리 1 sub-agent / reasoning 5분 / 메모리 직접 수정 금지 / wait state 금지 / hook 우회 / 보호 영역 / base=develop / 라벨 / 완료 보고).
 - **SoT** (PR #1085 / agent role enforcement 후):
   - helper-role.md 본문 (system prompt 강제)
-  - `docs/helper-rules.md` (상세 SoT)
-  - `docs/ai-harness/12-sub-agent-prompt-template.md` (sub-agent SoT)
+  - `docs/ai-harness/actors/helper.md` (상세 SoT)
+  - `docs/ai-harness/actors/sub-agent.md` (sub-agent SoT)
 
 ### 3-2) trade-off
 
@@ -86,11 +86,11 @@ last_reviewed: 2026-05-26
 | 신규 actor 학습 | 중간 — docs read 1회 추가 | 높음 — CLAUDE.md 본문만 읽어도 OK |
 | 갱신 비용 | 낮음 — docs 1곳 | 높음 — 본문 + docs 두 곳 |
 
-### 3-3) 권고: **§12-1 핵심 4-5줄 + 상세 docs/helper-rules.md / §13-1 핵심 워크트리·lock + 상세 12-template.md**
+### 3-3) 권고: **§12-1 핵심 4-5줄 + 상세 docs/ai-harness/actors/helper.md / §13-1 핵심 워크트리·lock + 상세 12-template.md**
 
 **제안 슬림화 (§12-1)**:
 ```markdown
-### 12-1) 채널 / 권한 경계 (상세: `docs/helper-rules.md`)
+### 12-1) 채널 / 권한 경계 (상세: `docs/ai-harness/actors/helper.md`)
 
 - 채널: `MOBRUJI_CHANNEL_ID` (#모부르지) 전용
 - helper 본체 = 사용자 응답 + 자체 수정 (룰/CLAUDE.md/메모리/bot.py 사용자 응답 라인)
@@ -98,11 +98,11 @@ last_reviewed: 2026-05-26
 - 표현: "launch 하겠습니다" 금지 → "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다"
 - 사이클 별 채널 (#모부르지-be/-fe/-rev/-plan) 직접 push 금지 — nmae / sub-agent 만 사용
 ```
-→ 50+ 줄 → 6 줄. 본문 나머지는 `docs/helper-rules.md` 로 이전 (이미 mirror SoT).
+→ 50+ 줄 → 6 줄. 본문 나머지는 `docs/ai-harness/actors/helper.md` 로 이전 (이미 mirror SoT).
 
 **제안 슬림화 (§13-1)**:
 ```markdown
-### 13-1) sub-agent 공통 룰 (상세: `docs/ai-harness/12-sub-agent-prompt-template.md`)
+### 13-1) sub-agent 공통 룰 (상세: `docs/ai-harness/actors/sub-agent.md`)
 
 - 워크트리 격리 (`cd /home/mobruji/mobruji-<role>`)
 - 한 워크트리 = 동시 1 sub-agent ([[feedback-worktree-lock]])

@@ -67,7 +67,7 @@ frontmatter `status` enum / `related_prs` 형식 / `related_issues` 형식을 �
 - [ ] **F1-a (단순 안내 강화)**: validator fail 메시지에 `_template.md` 링크 + frontmatter snippet 포함
   - 현재: `"<basename>: missing frontmatter (--- block)"`
   - TO-BE: 위 + `\n→ docs/features/_template.md 1-18 line 을 복사해 frontmatter 추가 필요. 예시:\n---\nfeature: <name>\nslug: <slug>\nstatus: draft\nowner: @<gh>\nscope: <infra|...>\nrelated_issues: []\nrelated_prs: []\nlast_reviewed: YYYY-MM-DD\n---`
-- [ ] **F1-b (sub-agent prompt template 보강)**: `docs/ai-harness/12-sub-agent-prompt-template.md` plan 역할
+- [ ] **F1-b (sub-agent prompt template 보강)**: `docs/ai-harness/actors/sub-agent.md` plan 역할
   안에 "신규 spec 작성 시 첫 줄은 반드시 `---`" 명시 — plan sub-agent 의 학습 의존 ↓.
 
 #### F2. chicken-and-egg 선제 exception (Layer 2 — defensive)
@@ -117,7 +117,7 @@ frontmatter `status` enum / `related_prs` 형식 / `related_issues` 형식을 �
 | 파일 | 변경 | 담당 PR |
 |---|---|---|
 | `.github/workflows/spec-status-check.yml` (job `validate`) | F1-a (메시지 강화) + F2 (ADDED exception) + F3-a (notice) | be impl PR |
-| `docs/ai-harness/12-sub-agent-prompt-template.md` | F1-b (plan 역할 frontmatter 첫 줄 의무) | plan follow-up PR |
+| `docs/ai-harness/actors/sub-agent.md` | F1-b (plan 역할 frontmatter 첫 줄 의무) | plan follow-up PR |
 | `docs/features/README.md` §10 | F3-b (ADDED self-reference exception 1 줄) | plan follow-up PR |
 
 ### 5-2) workflow 변경 sketch (be impl PR 참고용 — 본 spec 은 코드 변경 X)
@@ -190,7 +190,7 @@ plan sub-agent
 |---|---|---|---|
 | 1 (본 spec PR) | plan | `docs/features/validate-workflow-related-prs-exception.md` 신설 | 본 사이클 |
 | 2 (impl) | be | `.github/workflows/spec-status-check.yml` F1-a + F2 + F3-a | `needs-human-review` 라벨 (보호 영역) |
-| 3 (follow-up docs) | plan | `12-sub-agent-prompt-template.md` F1-b + README.md §10 F3-b | 별도 PR |
+| 3 (follow-up docs) | plan | `actors/sub-agent.md` F1-b + README.md §10 F3-b | 별도 PR |
 
 PR 2 는 보호 영역 (`.github/workflows/**`) — `needs-human-review` 라벨 + self-merge 가능 (CLAUDE.md §4).
 

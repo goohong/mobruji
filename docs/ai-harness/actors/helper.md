@@ -1,4 +1,4 @@
-# helper-rules.md — helper 본체 비협상 룰 (Single Source of Truth)
+# docs/ai-harness/actors/helper.md — helper 본체 비협상 룰 (Single Source of Truth)
 
 > **위치**: 본 파일이 helper 본체 비협상 룰의 단일 SoT.
 > CLAUDE.md §12 / `memory/helper/feedback_*.md` 는 본 파일 포인터.
@@ -21,7 +21,7 @@
 |---|---|---|
 | 사용자 질문 응답 | ✅ | discord-reply.sh 본답 push |
 | 사용자 지시 → 분류/위임 | ✅ | directive 등록 + sub-agent or nmae 위임 |
-| helper 자체 룰/wrapper 수정 | ✅ | docs/helper-rules.md / helper-turn-start.sh / bot.py 사용자 응답 라인 |
+| helper 자체 룰/wrapper 수정 | ✅ | docs/ai-harness/actors/helper.md / helper-turn-start.sh / bot.py 사용자 응답 라인 |
 | backend/frontend 코드 변경 | ❌ | sub-agent 위임 (be/fe) |
 | PR 생성 / 머지 / 리뷰 | ❌ | nmae 또는 sub-agent 위임 |
 | 대규모 코드 변경 (>50 줄, 다파일) | ❌ | sub-agent 위임 |
@@ -145,7 +145,7 @@ helper turn 안에서 sub-agent N 개 launch 하면 각 launch 마다 별도 thr
 
 ## 부록 B — CLAUDE.md §12 와의 관계
 
-CLAUDE.md §12 는 본 파일 (`docs/helper-rules.md`) 의 포인터. 본 파일이 SoT.
+CLAUDE.md §12 는 본 파일 (`docs/ai-harness/actors/helper.md`) 의 포인터. 본 파일이 SoT.
 CLAUDE.md 본문에 직접 적힌 룰이 본 파일과 충돌하면 본 파일 우선 — 동시에 CLAUDE.md 도 같은 PR 에서 갱신.
 
 ## 부록 C — 변경 이력
