@@ -29,20 +29,34 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
     safeLog.error("[recommend] unhandled error", error);
   }, [error]);
 
+  /*
+   * ADR-0018 단계 4 PR 11 — error boundary 토큰 swap.
+   *
+   * swap 한 요소 (6개):
+   *  1) <main> 배경 : `bg-zinc-50 dark:bg-zinc-950` → `--bg-subtle`
+   *  2) h1 : `text-zinc-900 dark:text-zinc-50` → `--text-primary`
+   *  3) 안내 p : `text-zinc-600 dark:text-zinc-400` → `--text-secondary`
+   *  4) digest ref : `text-zinc-500 dark:text-zinc-500` → `--text-disclaimer`
+   *  5) "다시 시도" 버튼 : 검정/흰 invert CTA → `--cta-neutral-*`
+   *  6) "홈으로" link : 보조 CTA → `--cta-secondary-*` (bg 없는 변형)
+   *
+   * 다크 모드: tokens.css 의 `:where(html.dark)` selector 가 토큰값을 자동
+   * swap → 사용처에서 `dark:` prefix 제거.
+   */
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-6 py-12 text-center dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-6 py-12 text-center">
       <div className="w-full max-w-md flex flex-col items-center gap-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           문제가 발생했습니다
         </h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           잠시 후 다시 시도해 주세요. 문제가 계속되면 음역대 입력부터 다시
           진행하면 도움이 됩니다.
         </p>
         {error.digest ? (
           <p
             aria-label="에러 식별자"
-            className="font-mono text-xs text-zinc-500 dark:text-zinc-500"
+            className="font-mono text-xs text-[var(--text-disclaimer)]"
           >
             ref: {error.digest}
           </p>
@@ -51,13 +65,13 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
           <button
             type="button"
             onClick={reset}
-            className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--cta-neutral-bg)] px-5 text-sm font-medium text-[var(--cta-neutral-fg)] hover:bg-[var(--cta-neutral-bg-hover)]"
           >
             다시 시도
           </button>
           <Link
             href="/"
-            className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 px-5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-[var(--cta-secondary-border)] px-5 text-sm font-medium text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
           >
             홈으로
           </Link>

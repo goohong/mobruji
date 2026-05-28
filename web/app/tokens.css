@@ -135,6 +135,51 @@
   --badge-neutral-fg: #3f3f46; /* zinc-700 */
   --badge-success-bg: #d1fae5; /* emerald-100 */
   --badge-success-fg: #047857; /* emerald-700 */
+
+  /*
+   * 홈 + 에러 페이지 의미 토큰 (#1044 단계 4 PR 11) — `app/page.tsx` + `app/error.tsx`
+   * 잔여 hardcode 일괄 swap.
+   *
+   * 그룹 1 — disclaimer 텍스트 (익명 안내 / digest 식별자 등 의도적 흐림):
+   *   text-zinc-500 + dark:text-zinc-500 → --text-disclaimer
+   *   `--text-caption` (zinc-500 / zinc-400) 과 light/dark 매핑이 다름 (dark 도
+   *   동일 zinc-500 유지) — 보조 안내문구는 다크에서 강조하지 않는 디자인 의도.
+   *
+   * 그룹 2 — secondary CTA (보조 액션 버튼, border + bg + text + hover 페어):
+   *   border-zinc-300 + bg-white + text-zinc-700 + hover:bg-zinc-100
+   *   + dark:border-zinc-700 + dark:bg-zinc-900 + dark:text-zinc-200
+   *   + dark:hover:bg-zinc-800 + focus:ring-zinc-500
+   *   → --cta-secondary-{bg,bg-hover,border,fg,ring}
+   *   home page "직접 입력으로 시작" / "음역대 다시 측정" / error page "홈으로".
+   *
+   * 그룹 3 — neutral CTA (검정/흰 invert CTA — fallback 다시 시도 등 brand 와 별):
+   *   bg-zinc-900 + text-white + hover:bg-zinc-700
+   *   + dark:bg-zinc-50 + dark:text-zinc-900 + dark:hover:bg-zinc-200
+   *   → --cta-neutral-{bg,bg-hover,fg}
+   *   error page "다시 시도" 버튼.
+   *
+   * 그룹 4 — step indicator surface (FlowStep 번호 원형 chip):
+   *   bg-zinc-200 + text-zinc-700 + dark:bg-zinc-800 + dark:text-zinc-200
+   *   → --surface-step-{bg,fg}
+   *   `--badge-neutral-*` 와 light 톤이 한 단계 다름 (zinc-200 vs zinc-100) —
+   *   step indicator 는 chip 보다 약간 진한 surface 의도라 별 토큰으로 분리.
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --text-disclaimer: #71717a; /* zinc-500 */
+
+  --cta-secondary-bg: #ffffff; /* white */
+  --cta-secondary-bg-hover: #f4f4f5; /* zinc-100 */
+  --cta-secondary-border: #d4d4d8; /* zinc-300 */
+  --cta-secondary-fg: #3f3f46; /* zinc-700 */
+  --cta-secondary-ring: #71717a; /* zinc-500 */
+
+  --cta-neutral-bg: #18181b; /* zinc-900 */
+  --cta-neutral-bg-hover: #3f3f46; /* zinc-700 */
+  --cta-neutral-fg: #ffffff; /* white */
+
+  --surface-step-bg: #e4e4e7; /* zinc-200 */
+  --surface-step-fg: #3f3f46; /* zinc-700 */
 }
 
 /* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
@@ -169,6 +214,22 @@
   --badge-neutral-fg: #d4d4d8; /* zinc-300 */
   --badge-success-bg: rgba(6, 78, 59, 0.5); /* emerald-900/50 */
   --badge-success-fg: #a7f3d0; /* emerald-200 */
+
+  /* 홈 + 에러 페이지 의미 토큰 dark swap (PR 11) */
+  --text-disclaimer: #71717a; /* zinc-500 — 의도적 균일 (light/dark 같음) */
+
+  --cta-secondary-bg: #18181b; /* zinc-900 */
+  --cta-secondary-bg-hover: #27272a; /* zinc-800 */
+  --cta-secondary-border: #3f3f46; /* zinc-700 */
+  --cta-secondary-fg: #e4e4e7; /* zinc-200 */
+  --cta-secondary-ring: #71717a; /* zinc-500 — 균일 outline */
+
+  --cta-neutral-bg: #fafafa; /* zinc-50 */
+  --cta-neutral-bg-hover: #e4e4e7; /* zinc-200 */
+  --cta-neutral-fg: #18181b; /* zinc-900 */
+
+  --surface-step-bg: #27272a; /* zinc-800 */
+  --surface-step-fg: #e4e4e7; /* zinc-200 */
 }
 
 /* ───────── 2) Typography token ───────── */
