@@ -125,7 +125,7 @@ cd web && npm run dev                                                   # FE 실
 - 의존성 부재로 불가능 → 사용자 보고. 단순 누락 → 구현 완료. **하드코딩/stub "일단 넘어가기" 금지**.
 
 **PR 생성 직후**:
-- [ ] `type:*` / `scope:*` 라벨 / (AI) `ai-generated` / (보호 영역) `needs-human-review`
+- [ ] `type:*` / `scope:*` 라벨 / (AI) `ai-generated` / `ai:claude` / `session:<role>` (보호 영역 = 정보성 분류, 라벨 의무 폐지 2026-05-28 — §4 참조)
 - [ ] `gh pr create --body` 로 새로 쓴 경우 템플릿 AI 체크리스트 블록 수동 채우기
 
 ## 8) 릴리즈 (develop → main)

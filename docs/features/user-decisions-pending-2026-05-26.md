@@ -109,7 +109,7 @@ last_reviewed: 2026-05-26
 - 메모리 직접 수정 금지 (nmae 만 갱신)
 - 사용자 wait state 금지 ([[feedback-sub-agent-no-user-wait]])
 - `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]])
-- 보호 영역 변경 시 `needs-human-review` 라벨
+- 보호 영역 = 정보성 분류 (라벨 의무 폐지 2026-05-28, PR #1202 — rev sub-agent 가 review 대행)
 - 완료 보고: PR URL / mergeable / 게이트 / 발견 (🔴/🟡/🟢) / 다음 후보
 ```
 → 15+ 줄 → 8 줄.
@@ -145,7 +145,7 @@ last_reviewed: 2026-05-26
 **구체 강화안**:
 - `fe.md`: "npm install 실행 금지 — 외부 디스크 symlink 보존 ([[feedback-npm-install-symlink-swap]] 사고 박제). 누락 시 nmae 보고." 한 줄 추가.
 - `rev.md`: "release 전 모든 type:* PR `reviewed:claude` 라벨 필수 ([[feedback-rev-release-gate]])" + "매 사이클 첫 액션 `tools/rev-queue/rev-queue.sh all` ([[feedback-rev-e2e-always]])" 두 줄 추가.
-- `be.md`: "보호 영역 (`backend/build.gradle*`, `**/db/migration/**`, `**/application*.yml`) 변경 시 `needs-human-review` 라벨" 한 줄 추가.
+- `be.md`: "보호 영역 (`backend/build.gradle*`, `**/db/migration/**`, `**/application*.yml`) 변경 시 rev 사이클이 추가 신중도 가중 — 정보성 분류, 라벨 의무 폐지 2026-05-28 PR #1202" 한 줄 추가.
 - `plan.md`: "프로덕션 코드 금지 (현행 유지)" + "feature spec frontmatter 의무 (`_template.md` 복제, related_prs 즉시 추가)" 한 줄 추가.
 
 ### 4-4) Alternative
@@ -282,7 +282,7 @@ last_reviewed: 2026-05-26
 - (d) 병행 — monthly + release tag 직전.
 
 ### 8-5) 후속 PR
-- be 사이클: `feat(infra): .github/workflows/branch-cleanup-monthly.yml 신설 (#1127-followup)` — `needs-human-review` 라벨 (보호 영역).
+- be 사이클: `feat(infra): .github/workflows/branch-cleanup-monthly.yml 신설 (#1127-followup)` — 정보성 보호 영역 (라벨 의무 폐지 2026-05-28 PR #1202).
 
 ---
 
@@ -332,7 +332,7 @@ last_reviewed: 2026-05-26
 6. **Q6 후속**: `feat(infra): closed issue stale-cleanup-YYYY-QN 라벨 180 일 임계`
    - 파일: `tools/branch-cleanup/issue-stale.sh` (신규).
 7. **Q7 후속**: `feat(infra): .github/workflows/branch-cleanup-monthly.yml 신설`
-   - 파일: `.github/workflows/branch-cleanup-monthly.yml`. **`needs-human-review` 라벨 의무** (보호 영역).
+   - 파일: `.github/workflows/branch-cleanup-monthly.yml`. **정보성 보호 영역** (라벨 의무 폐지 2026-05-28 PR #1202 — rev 사이클이 추가 신중도 가중).
 
 총 7 PR. plan 3 / be 4 분담.
 
