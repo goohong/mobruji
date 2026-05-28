@@ -1092,6 +1092,42 @@ def write_user_mode(mode: str, path: Path = USER_MODE_PATH) -> None:
     os.replace(tmp, path)
 
 
+def scan_assigned_directives_for_cycle(cycle: str, timeout: float = 5.0) -> str:
+    """주어진 cycle 에 assigned + polished 된 🟡 대기 directive list 출력.
+
+    spec: docs/features/directive-board-template-and-tags.md §5-6 + actors/nmae.md §11-8
+    cycle idle inject 시점에 자동 호출 (PR C). nmae 가 학습 의존 없이 cycle 별
+    assigned directive 우선 처리 가능.
+
+    backlog-scan.sh --cycle <cycle> subprocess 호출. 실패는 graceful (빈 str 반환).
+    """
+    script_path = (
+        Path(__file__).resolve().parent.parent / "directive-board" / "backlog-scan.sh"
+    )
+    if not script_path.exists():
+        return ""
+    try:
+        result = subprocess.run(  # noqa: S603 — script path hardcoded sibling
+            ["bash", str(script_path), "--cycle", cycle],
+            check=False,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.warning(
+            "backlog-scan --cycle=%s 호출 실패 (graceful): %r", cycle, exc
+        )
+        return ""
+    if result.returncode != 0:
+        return ""
+    # COUNT=0 이면 의미 없음 (assigned directive 없음).
+    output = result.stdout.strip()
+    if not output or "COUNT=0" in output:
+        return ""
+    return output
+
+
 async def _handle_pin_reaction(
     client: discord.Client,
     channel_id: int,
@@ -2920,6 +2956,29 @@ async def cycle_idle_watch_loop(
             workspaces_label = ", ".join(e["workspace"] for e in fresh_idle)
             today = now_provider().strftime("%Y-%m-%d")
 
+            # spec: docs/features/directive-board-template-and-tags.md §5-6
+            # cycle idle + 그 cycle 에 assigned + polished directive 있으면 backlog-scan
+            # 결과를 inject text 에 부착 (PR C — cycle-specific auto-inject).
+            # nmae 가 학습 의존 없이 cycle 별 directive 우선 launch 가능.
+            def _build_assigned_directive_footer(entries: list[dict]) -> str:
+                if not entries:
+                    return ""
+                lines: list[str] = []
+                seen_cycles: set[str] = set()
+                for _entry in entries:
+                    _cycle = _entry.get("workspace")
+                    if not _cycle or _cycle in seen_cycles:
+                        continue
+                    seen_cycles.add(_cycle)
+                    _scan = scan_assigned_directives_for_cycle(_cycle)
+                    if _scan:
+                        lines.append(
+                            f"[assigned directive — cycle={_cycle}]\n{_scan}"
+                        )
+                if not lines:
+                    return ""
+                return "\n\n" + "\n\n".join(lines)
+
             if strict_idle:
                 strict_label = ", ".join(e["workspace"] for e in strict_idle)
                 strict_summary = _format_idle_summary(strict_idle)
@@ -2928,6 +2987,7 @@ async def cycle_idle_watch_loop(
                     workspaces=strict_label,
                     summary=strict_summary,
                 )
+                strict_text += _build_assigned_directive_footer(strict_idle)
                 tmux_inject_text(inject_target, strict_text)
             if soft_idle:
                 soft_label = ", ".join(e["workspace"] for e in soft_idle)
@@ -2937,6 +2997,7 @@ async def cycle_idle_watch_loop(
                     workspaces=soft_label,
                     summary=soft_summary,
                 )
+                soft_text += _build_assigned_directive_footer(soft_idle)
                 tmux_inject_text(inject_target, soft_text)
             if fresh_stale_active:
                 stale_label = ", ".join(e["workspace"] for e in fresh_stale_active)
