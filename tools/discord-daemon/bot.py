@@ -3237,6 +3237,14 @@ DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT: Final[int] = 300  # 5분
 DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "1h"
 DIRECTIVE_COMPLETE_GH_TIMEOUT_SECONDS: Final[int] = 60
 
+# spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3)
+# PR 머지 시 cycle forum thread 자동 ✅ 전이. sub-agent 가 PR body 에 명시:
+#   cycle-forum: <be|fe|rev|plan>:<thread_id>
+# bot.py polling 이 grep + discord-reply.sh --forum-retag <id> <cycle> "완료" 호출.
+CYCLE_FORUM_PR_BODY_RE: Final = re.compile(
+    r"cycle-forum:\s*(be|fe|rev|plan):(\d{17,20})", re.IGNORECASE
+)
+
 
 def extract_directive_ids_from_body(body: str) -> list[str]:
     """PR body 에서 `directive: <id>` 또는 `Closes directive <id>` 매칭 list."""
@@ -3383,6 +3391,94 @@ async def directive_complete_on_merge_loop(
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("directive_complete_on_merge_loop iter 실패: %r", exc)
+
+        await asyncio.sleep(poll_interval)
+
+
+def extract_cycle_forum_refs_from_body(body: str) -> list[tuple[str, str]]:
+    """PR body 에서 `cycle-forum: <cycle>:<thread_id>` regex 매칭 list.
+
+    spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3).
+    Returns: [(cycle, thread_id), ...] — dedup 보존 순서.
+    """
+    if not body:
+        return []
+    matches = CYCLE_FORUM_PR_BODY_RE.findall(body)
+    seen: set[tuple[str, str]] = set()
+    result: list[tuple[str, str]] = []
+    for cycle, thread_id in matches:
+        key = (cycle.lower(), thread_id)
+        if key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+async def cycle_thread_complete_on_merge_loop(
+    *,
+    poll_interval: int = DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
+    initial_delay: int = 30,
+    fetcher=None,
+) -> None:
+    """5분 polling — PR body 의 cycle-forum: <cycle>:<thread_id> 매칭 시 자동 ✅ retag.
+
+    spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3). PR B 자매 — 같은 fetcher / seen cap / heartbeat.
+    """
+    if poll_interval <= 0:
+        logger.info("cycle_thread_complete_on_merge_loop disabled (poll_interval<=0)")
+        return
+
+    fetch = fetcher or fetch_recent_merged_prs_with_body
+    seen_prs: set[int] = set()
+    reply_script = Path.home() / ".mobruji" / "discord-reply.sh"
+
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
+
+    while True:
+        try:
+            record_loop_heartbeat("cycle_thread_complete_on_merge_loop")
+            prs = fetch()
+            for pr in prs:
+                pr_number = pr.get("number")
+                if not isinstance(pr_number, int) or pr_number in seen_prs:
+                    continue
+                body = pr.get("body") or ""
+                refs = extract_cycle_forum_refs_from_body(body)
+                if not refs:
+                    continue
+                if not reply_script.exists():
+                    logger.warning(
+                        "cycle_thread_complete_on_merge: discord-reply.sh 부재 — skip"
+                    )
+                    break
+                logger.info(
+                    "cycle_thread_complete_on_merge: PR #%d body 에서 cycle-forum 매칭: %s",
+                    pr_number, refs,
+                )
+                for cycle, thread_id in refs:
+                    try:
+                        subprocess.run(  # noqa: S603
+                            ["bash", str(reply_script),
+                             "--forum-retag", thread_id, cycle, "완료"],
+                            check=False, timeout=15.0, capture_output=True,
+                        )
+                        logger.info(
+                            "cycle_thread_complete_on_merge: ✅ retag cycle=%s thread=%s pr=#%d",
+                            cycle, thread_id, pr_number,
+                        )
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        logger.warning(
+                            "cycle_thread_complete_on_merge: forum-retag 실패 thread=%s: %r",
+                            thread_id, exc,
+                        )
+                seen_prs.add(pr_number)
+                if len(seen_prs) > 200:
+                    seen_prs = set(list(seen_prs)[100:])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cycle_thread_complete_on_merge_loop iter 실패: %r", exc)
 
         await asyncio.sleep(poll_interval)
 
@@ -4797,6 +4893,17 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(directive_complete_on_merge_loop())
             logger.info(
                 "directive_complete_on_merge_loop launched: interval=%ds (5min polling)",
+                DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
+            )
+
+        # PR cf-3 (2026-05-29) — cycle forum thread ✅ 자동 retag.
+        # 5분 polling — PR body 의 cycle-forum: <cycle>:<thread_id> 매칭 시 자동
+        # discord-reply.sh --forum-retag <id> <cycle> "완료" 호출. spec: cycle-forum-operation.md §5-5.
+        if not hasattr(client, "_cycle_thread_complete_on_merge_task_started"):
+            client._cycle_thread_complete_on_merge_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(cycle_thread_complete_on_merge_loop())
+            logger.info(
+                "cycle_thread_complete_on_merge_loop launched: interval=%ds (5min polling)",
                 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
             )
 

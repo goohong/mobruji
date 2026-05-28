@@ -689,5 +689,52 @@ class DirectiveCompleteOnMergeTests(unittest.TestCase):
         self.assertIn("directive: 999", result[0]["body"])
 
 
+class CycleForumThreadCompleteOnMergeTests(unittest.TestCase):
+    """PR cf-3: cycle_thread_complete_on_merge_loop — PR body grep + retag."""
+
+    def test_extract_cycle_forum_simple(self) -> None:
+        body = "Closes #1234\ncycle-forum: be:1509466456230989926\n"
+        refs = bot.extract_cycle_forum_refs_from_body(body)
+        self.assertEqual(refs, [("be", "1509466456230989926")])
+
+    def test_extract_cycle_forum_multiple(self) -> None:
+        body = (
+            "cycle-forum: be:1111111111111111111\n"
+            "cycle-forum: fe:2222222222222222222\n"
+        )
+        refs = bot.extract_cycle_forum_refs_from_body(body)
+        self.assertEqual(len(refs), 2)
+        self.assertIn(("be", "1111111111111111111"), refs)
+        self.assertIn(("fe", "2222222222222222222"), refs)
+
+    def test_extract_cycle_forum_dedup(self) -> None:
+        body = (
+            "cycle-forum: be:1111111111111111111\n"
+            "cycle-forum: be:1111111111111111111\n"
+        )
+        refs = bot.extract_cycle_forum_refs_from_body(body)
+        self.assertEqual(refs, [("be", "1111111111111111111")])
+
+    def test_extract_cycle_forum_case_insensitive(self) -> None:
+        body = "CYCLE-FORUM: BE:1234567890123456789"
+        refs = bot.extract_cycle_forum_refs_from_body(body)
+        self.assertEqual(refs, [("be", "1234567890123456789")])
+
+    def test_extract_cycle_forum_none_match(self) -> None:
+        self.assertEqual(bot.extract_cycle_forum_refs_from_body(""), [])
+        self.assertEqual(
+            bot.extract_cycle_forum_refs_from_body("no cycle forum ref here"),
+            [],
+        )
+
+    def test_extract_cycle_forum_invalid_cycle_skipped(self) -> None:
+        body = "cycle-forum: xx:1234567890123456789"
+        self.assertEqual(bot.extract_cycle_forum_refs_from_body(body), [])
+
+    def test_extract_cycle_forum_short_thread_id_skipped(self) -> None:
+        body = "cycle-forum: be:1234"
+        self.assertEqual(bot.extract_cycle_forum_refs_from_body(body), [])
+
+
 if __name__ == "__main__":
     unittest.main()
