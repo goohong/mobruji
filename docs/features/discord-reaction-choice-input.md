@@ -238,7 +238,7 @@ button custom_id: `mobruji-mode-ask` / `mobruji-mode-auto`. message 본문 marke
 ## 7) 작업 분할
 
 - [x] PR 1 (본 spec + 구현): spec 작성 + bot.py event handler + discord-reply.sh `--choices` mode + helper-turn-start.sh USER_MODE marker + mode file read/write helper + 단위 테스트. mid-sized single PR.
-- [ ] PR 2 (follow-up): Discord buttons mode toggle UI — `ModeToggleView` + persistent view + `on_interaction` + boot 시 history scan + 자동 post. PR 1 deploy 후 시작.
+- [x] PR 2 (follow-up): Discord buttons mode toggle UI — `ModeToggleView` + persistent view + `on_interaction` + boot 시 history scan + 자동 post. PR 1 deploy 후 시작.
 - [ ] PR 3 (follow-up, optional): timeout / 만료 cleanup loop — `choice-prompts.jsonl` rotate (실측 후 필요 시).
 - [ ] PR 4 (follow-up, optional): emoji 의미 명료화 (예: 범례 push, [[feedback-discord-reaction-emoji-clarity]] 연계).
 
@@ -267,6 +267,7 @@ button custom_id: `mobruji-mode-ask` / `mobruji-mode-auto`. message 본문 marke
 - 2026-05-28 — **결정 4**: timeout 미설정 (MVP). 사유: file scan 비용 작음 + 미응답 누적 패턴 실측 후 cleanup loop 도입 가능.
 - 2026-05-28 — **결정 5 (사용자)**: mode toggle UX = Discord buttons (interaction). 사유: 모바일 typing 0 + 시각적 현재 상태 명확 + reaction-choice click UX 와 일관. 옵션 4종 중 (reaction-pinned / slash-cmd / 자연어 / buttons) 선택.
 - 2026-05-28 — **결정 6**: PR 분할 — PR 1 = reaction-choice + mode file infra (helper 가 mode 인식 가능한 minimal layer), PR 2 = buttons UI. 사유: buttons impl 이 별도 분량 (interaction handler + persistent view + setup 자동화) 이고 PR 1 머지만으로도 helper 가 mode 인식하는 minimum 가치 발생.
+- 2026-05-28 — **결정 7 (PR 2)**: marker = `[MODE_TOGGLE_v1]` (history scan key) / button custom_id = `mobruji-mode-{ask,auto}` / button style = 현재 mode → `ButtonStyle.success` (green), 그 외 → `ButtonStyle.secondary` (grey) / idempotent flag `_mode_toggle_view_attached` 로 reconnect 시 중복 register 차단 / `ensure_mode_toggle_message` 가 boot 1회 호출 (기존 message 발견 시 auto-post skip, `client.add_view` 는 message_id 없이 register — discord.py 가 custom_id 매칭으로 라우팅). View `timeout=None` (persistent). 사유: bot restart 후에도 button click 가능 + 채널 1건 메시지 보장.
 
 ## 10) 자율 결정 (사유)
 
@@ -286,3 +287,4 @@ button custom_id: `mobruji-mode-ask` / `mobruji-mode-auto`. message 본문 marke
 ## 13) 변경 이력
 
 - 2026-05-28 — 초안 작성 + PR 1 (사양 + 구현 + 테스트). status=approved (사용자 요청 직접 응답).
+- 2026-05-28 — PR 2 (buttons UI) 구현 + 테스트. `MODE_TOGGLE_MARKER` + `build_mode_toggle_content` + `ModeToggleView` (persistent, 2 button) + `find_mode_toggle_message` + `ensure_mode_toggle_message` (boot 시 1회). 단위 테스트 9건 (총 62 tests passing, 회귀 0). 사용자 NCP setup = `tools/discord-daemon/deploy.sh` 후 bot 재시작 1회 (boot scan 이 mode-toggle message 자동 post). closed PR #1203 코드 100% 재활용 (stacked PR 1 base conflict 후 develop base fresh start).

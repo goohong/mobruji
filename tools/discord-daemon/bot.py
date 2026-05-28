@@ -1194,6 +1194,177 @@ async def _post_control_ack(
     return str(getattr(thread, "id", ""))
 
 
+# ─── Discord buttons mode toggle (PR 2) ──────────────────────────────────────
+# spec: docs/features/discord-reaction-choice-input.md §5-8 PR 2
+# 사용자 결정 (2026-05-28): Discord buttons (interaction) — 모바일 typing 0 + 시각화.
+
+MODE_TOGGLE_MARKER: Final[str] = "[MODE_TOGGLE_v1]"
+MODE_TOGGLE_HISTORY_SCAN_LIMIT: Final[int] = 100
+
+
+def build_mode_toggle_content(current_mode: str) -> str:
+    """Discord message content for mode toggle (marker + visualization).
+
+    버튼은 본 함수 책임 밖 (``ModeToggleView`` 가 별도 부착). 본 함수는 사용자 가시
+    본문만 build. Bot 부팅 시 채널 history 매칭 marker = ``MODE_TOGGLE_MARKER`` (첫 줄).
+    """
+    normalized = current_mode.strip().upper()
+    if normalized not in USER_MODE_VALID:
+        normalized = USER_MODE_DEFAULT
+    if normalized == "ASK":
+        ask_marker, auto_marker = "🟢", "⚪"
+    else:
+        ask_marker, auto_marker = "⚪", "🟢"
+    return (
+        f"{MODE_TOGGLE_MARKER}\n"
+        f"**mobruji helper 응답 mode** — 현재 **{normalized}**\n"
+        f"{ask_marker} **ASK** — helper 가 결정 분기점에서 `--choices` 적극 활용\n"
+        f"{auto_marker} **AUTO** — helper 자율 진행 (default)\n"
+        "아래 button tap 으로 toggle (반영은 helper 다음 turn 부터)."
+    )
+
+
+class ModeToggleView(discord.ui.View):
+    """Discord persistent View — 2 button (ASK/AUTO) toggle.
+
+    spec: docs/features/discord-reaction-choice-input.md §5-8 (PR 2).
+
+    Persistent (``timeout=None``) — bot restart 후에도 button click 가능.
+    부팅 시 ``client.add_view(view)`` 로 register → discord.py 가 custom_id 매칭으로
+    interaction 라우팅. 메시지 자체는 ``ensure_mode_toggle_message`` 가 보장.
+    """
+
+    def __init__(self, allowed_user_ids: "set[int] | frozenset[int]") -> None:
+        super().__init__(timeout=None)
+        self._allowed_user_ids = allowed_user_ids
+        self._refresh_styles(read_user_mode())
+
+    def _refresh_styles(self, current_mode: str) -> None:
+        """button style 을 ``current_mode`` 에 맞춰 success(green) / secondary(grey) 갱신."""
+        target_id = f"mobruji-mode-{current_mode.strip().lower()}"
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            child.style = (
+                discord.ButtonStyle.success
+                if child.custom_id == target_id
+                else discord.ButtonStyle.secondary
+            )
+
+    async def _on_toggle(
+        self, interaction: discord.Interaction, new_mode: str
+    ) -> None:
+        """button callback 공통 path — allowed 검증 → file write → message edit."""
+        if interaction.user.id not in self._allowed_user_ids:
+            await interaction.response.send_message(
+                "권한이 없습니다.", ephemeral=True
+            )
+            return
+        try:
+            write_user_mode(new_mode)
+        except (OSError, ValueError) as exc:
+            logger.warning("mode toggle write 실패: mode=%r exc=%r", new_mode, exc)
+            await interaction.response.send_message(
+                f"mode 변경 실패: {exc}", ephemeral=True
+            )
+            return
+        logger.info(
+            "mode toggle: user=%s new_mode=%s", interaction.user.id, new_mode
+        )
+        self._refresh_styles(new_mode)
+        await interaction.response.edit_message(
+            content=build_mode_toggle_content(new_mode), view=self
+        )
+
+    @discord.ui.button(
+        label="ASK",
+        style=discord.ButtonStyle.secondary,
+        custom_id="mobruji-mode-ask",
+    )
+    async def _ask_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,  # noqa: ARG002 — discord.py callback signature
+    ) -> None:
+        await self._on_toggle(interaction, "ASK")
+
+    @discord.ui.button(
+        label="AUTO",
+        style=discord.ButtonStyle.secondary,
+        custom_id="mobruji-mode-auto",
+    )
+    async def _auto_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,  # noqa: ARG002
+    ) -> None:
+        await self._on_toggle(interaction, "AUTO")
+
+
+async def find_mode_toggle_message(
+    channel,  # noqa: ANN001 — discord.TextChannel | discord.Thread (duck-typed)
+    bot_user_id: int,
+    limit: int = MODE_TOGGLE_HISTORY_SCAN_LIMIT,
+):
+    """채널 history 마지막 ``limit`` 건에서 bot 자신이 post 한 mode toggle marker 검색.
+
+    매칭 = ``MODE_TOGGLE_MARKER`` 로 시작하는 본문 + author == bot. 없으면 ``None``.
+    history fetch / iter 실패는 graceful — warning + None.
+    """
+    try:
+        async for msg in channel.history(limit=limit):
+            author = getattr(msg, "author", None)
+            author_id = getattr(author, "id", None)
+            if author_id != bot_user_id:
+                continue
+            content = getattr(msg, "content", "") or ""
+            if content.startswith(MODE_TOGGLE_MARKER):
+                return msg
+    except Exception as exc:  # noqa: BLE001 — graceful fallback
+        logger.warning("mode toggle message scan 실패: %r", exc)
+    return None
+
+
+async def ensure_mode_toggle_message(
+    client: discord.Client,
+    target_channel_id: int,
+    view: "ModeToggleView",
+) -> None:
+    """채널에 mode toggle message 가 있는지 확인 + 없으면 자동 post.
+
+    bot boot 시 1회 호출. 기존 message 가 있으면 skip (persistent view 가
+    ``client.add_view`` 로 이미 register 되어 있어 자동 라우팅 됨).
+    실패는 graceful — warning + return (on_ready 흐름 차단 금지).
+    """
+    bot_user = getattr(client, "user", None)
+    if bot_user is None:
+        logger.warning("mode toggle ensure: client.user 미존재 — skip")
+        return
+    channel = client.get_channel(target_channel_id)
+    if channel is None:
+        logger.warning(
+            "mode toggle ensure: channel %d 미발견 — skip", target_channel_id
+        )
+        return
+    existing = await find_mode_toggle_message(channel, bot_user.id)
+    if existing is not None:
+        logger.info(
+            "mode toggle message 기존 발견 (auto-post skip): msg_id=%s",
+            existing.id,
+        )
+        return
+    try:
+        content = build_mode_toggle_content(read_user_mode())
+        posted = await channel.send(content=content, view=view)
+        logger.info(
+            "mode toggle message 신규 post: msg_id=%s mode=%s",
+            posted.id,
+            read_user_mode(),
+        )
+    except Exception as exc:  # noqa: BLE001 — graceful
+        logger.warning("mode toggle message post 실패: %r", exc)
+
+
 async def _handle_pin_reaction(
     client: discord.Client,
     channel_id: int,
@@ -5355,6 +5526,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not heartbeat_watch_enabled:
             logger.info(
                 "heartbeat_watch_loop disabled (HEARTBEAT_WATCH_ENABLED=0)"
+            )
+
+        # Mode toggle buttons UI (PR 2, spec discord-reaction-choice-input §5-8).
+        # Persistent view register (timeout=None) + 채널 history scan → 자동 post.
+        # idempotent: reconnect 시 on_ready 재호출되어도 1회만 진행.
+        if not hasattr(client, "_mode_toggle_view_attached"):
+            client._mode_toggle_view_attached = True  # type: ignore[attr-defined]
+            mode_view = ModeToggleView(allowed_user_ids)
+            client.add_view(mode_view)
+            client.loop.create_task(
+                ensure_mode_toggle_message(client, target_channel_id, mode_view)
+            )
+            logger.info(
+                "mode toggle persistent view attached "
+                "(custom_ids: mobruji-mode-ask, mobruji-mode-auto)"
             )
 
     @client.event

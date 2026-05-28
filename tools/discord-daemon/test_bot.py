@@ -736,5 +736,91 @@ class CycleForumThreadCompleteOnMergeTests(unittest.TestCase):
         self.assertEqual(bot.extract_cycle_forum_refs_from_body(body), [])
 
 
+class ModeToggleContentTests(unittest.TestCase):
+    """spec: docs/features/discord-reaction-choice-input.md §5-8 PR 2 — buttons UI."""
+
+    def test_content_starts_with_marker(self) -> None:
+        content = bot.build_mode_toggle_content("AUTO")
+        self.assertTrue(content.startswith(bot.MODE_TOGGLE_MARKER))
+
+    def test_content_marks_auto_when_auto(self) -> None:
+        content = bot.build_mode_toggle_content("AUTO")
+        # AUTO 행에 🟢, ASK 행에 ⚪.
+        self.assertIn("🟢 **AUTO**", content)
+        self.assertIn("⚪ **ASK**", content)
+        self.assertIn("현재 **AUTO**", content)
+
+    def test_content_marks_ask_when_ask(self) -> None:
+        content = bot.build_mode_toggle_content("ASK")
+        self.assertIn("🟢 **ASK**", content)
+        self.assertIn("⚪ **AUTO**", content)
+        self.assertIn("현재 **ASK**", content)
+
+    def test_content_invalid_falls_back_to_auto(self) -> None:
+        content = bot.build_mode_toggle_content("MAYBE")
+        self.assertIn("현재 **AUTO**", content)
+
+    def test_content_case_insensitive(self) -> None:
+        content_lower = bot.build_mode_toggle_content("ask")
+        self.assertIn("현재 **ASK**", content_lower)
+
+
+class FindModeToggleMessageTests(unittest.IsolatedAsyncioTestCase):
+    """채널 history scan 으로 mode toggle marker 매칭 메시지 검색."""
+
+    def _make_msg(self, author_id: int, content: str) -> mock.MagicMock:
+        msg = mock.MagicMock()
+        msg.author = mock.MagicMock()
+        msg.author.id = author_id
+        msg.content = content
+        return msg
+
+    def _make_channel_with_history(self, msgs: list) -> mock.MagicMock:
+        channel = mock.MagicMock()
+
+        async def _hist(limit: int = 100):  # noqa: ARG001 — async generator
+            for m in msgs:
+                yield m
+
+        channel.history = lambda **kwargs: _hist(**kwargs)
+        return channel
+
+    async def test_returns_existing_marker_message(self) -> None:
+        bot_id = 999
+        target = self._make_msg(bot_id, f"{bot.MODE_TOGGLE_MARKER}\nbody")
+        other = self._make_msg(bot_id, "different content")
+        channel = self._make_channel_with_history([other, target])
+        result = await bot.find_mode_toggle_message(channel, bot_id)
+        self.assertIs(result, target)
+
+    async def test_skips_other_author(self) -> None:
+        bot_id = 999
+        # bot 이 아닌 사용자가 marker 같은 메시지 보낸 경우 무시.
+        impostor = self._make_msg(123, f"{bot.MODE_TOGGLE_MARKER}\nfake")
+        channel = self._make_channel_with_history([impostor])
+        result = await bot.find_mode_toggle_message(channel, bot_id)
+        self.assertIsNone(result)
+
+    async def test_returns_none_when_no_marker(self) -> None:
+        bot_id = 999
+        m1 = self._make_msg(bot_id, "hello")
+        m2 = self._make_msg(bot_id, "world")
+        channel = self._make_channel_with_history([m1, m2])
+        result = await bot.find_mode_toggle_message(channel, bot_id)
+        self.assertIsNone(result)
+
+    async def test_graceful_on_history_exception(self) -> None:
+        bot_id = 999
+
+        async def _bad_hist(**kwargs):  # noqa: ARG001
+            raise RuntimeError("history fetch failed")
+            yield  # pragma: no cover — required for async generator marker
+
+        channel = mock.MagicMock()
+        channel.history = _bad_hist
+        result = await bot.find_mode_toggle_message(channel, bot_id)
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()
