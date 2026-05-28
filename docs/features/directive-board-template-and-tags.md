@@ -213,7 +213,63 @@ directive_status.sh completed <id> <pr_url>
 🔵 → 🟢 tag swap + 본문 [x] 완료 + PR URL
 ```
 
-### 5-6) Forum tag setup (사용자 수동, 1회)
+### 5-6) 백로그 운영 모델 (사용자 결정 2026-05-28)
+
+**사용자 정정**: "이렇게 등록해둔 directive forum 은 어디서 추적 관리해서 진행해? 큰 작업이면 plan, 작은 변경이면 be-fe 에게 넘어가서 해결되었음/구현되었음이 확인되면 완료가 표시되는 프로세스가 이어져야 유의미".
+
+**핵심**: directive 등록 후 자동으로 추적 / 분배 / 완료 프로세스가 흘러가야 의미. nmae 가 백로그 owner.
+
+#### 책임 분담
+
+| actor | 역할 |
+|---|---|
+| **사용자** | 📌 tap 으로 등록. 폐기 / 보류 명시 결정 시 helper 통해 신호. |
+| **bot.py** | event 처리 — 📌 reaction → 등록 (PR #1204), PR merge webhook → status 전이 (follow-up). |
+| **nmae** | **백로그 owner**. 매 사이클 시작 시 🟡 대기 entry scan + 분배 결정 + 위임 (사유 명시 의무) + 완료 추적. |
+| **sub-agent (be/fe/rev/plan)** | nmae 위임 받은 단일 사이클 작업. PR body 에 `directive: <id>` 명시. |
+| **helper** | relay only — directive 자체 추적은 nmae 책임. |
+
+#### 분배 분기 (nmae 판단)
+
+| 분기 | 기준 | 위임 |
+|---|---|---|
+| **plan** | 신규 기능 개발 OR 단순 기능 개선을 넘어선 작업 OR 신중하게 고민해야 하는 작업 (신규 도메인 / 다중 PR / 외부 연동 / spec 필요) | plan 사이클 — spec 작성 후 be/fe 분기 |
+| **be** | backend 모듈 단일 변경 / API 변경 / DB 마이그레이션 / 단순 기능 개선 | be 사이클 직접 |
+| **fe** | frontend UI 변경 / 컴포넌트 / 디자인 토큰 / 단순 기능 개선 | fe 사이클 직접 |
+| **rev** | 사고 / 회귀 / 버그 root cause 분석 필요 | rev 사이클 |
+| **즉시 반영** | 의사결정 / 단순 결정 (옵션 채택 등) | nmae 가 cycle 위임 없이 즉시 반영 |
+
+#### plan 위임 시 사유 명시 의무
+
+사용자 정정: "plan 에게 위임했다면 그 이유를 적어줬으면 좋겠어. 위임 사유: 큰 기능이라서 / 변경점이 ~라서 이런 거".
+
+nmae 가 `directive_status.sh in_progress <id> plan <reason>` 호출 → thread 본문에 다음 형식 박힘:
+
+```text
+📋 진행 (🔵 진행 중)
+- [x] 분석 / 위임 결정 — nmae
+- [ ] 실행 — **owner: plan**
+  - **사유**: {reason — 예: "신규 도메인 추가 (X-Y 추천 엔진), 다중 PR 예상, 사용자 검토 필요"}
+  - **위임 시각**: {KST}
+- [ ] 결과 반영
+```
+
+**be / fe / rev 위임 시도 사유 명시 권장** (의무 X, 운영 안전). 단순 위임은 owner 만 박아도 충분.
+
+#### Cycle-specific auto-inject
+
+사용자 정정: "프론트에 할당된 작업이 있는데 프론트가 놀고있다 그러면 알아서 가져가야지".
+
+- nmae 가 directive 분배 결정 시 `directive-board.jsonl` entry 에 `assigned_cycle: "fe"` 필드 박음.
+- nmae watchdog (또는 bot.py `cycle_idle_watch_loop`) 이 cycle idle 검출 시 그 cycle 에 assigned 된 🟡 대기 entry 우선 inject.
+- 사용자 부재 / autonomous loop 시 cycle 자동 처리 — [[feedback-autonomous-loop]] 의 자연스러운 확장.
+
+#### 완료 자동화
+
+- sub-agent 가 PR 생성 시 body 에 `directive: 1509427220...` 또는 `Closes directive 1509427220...` 명시 (sub-agent.md 룰 추가).
+- PR 머지 webhook (`.github/workflows/directive-complete-on-merge.yml`) 이 pattern 매칭 → `directive_status.sh completed <id> <pr_url>` 호출 → 🟢 + 본문 [x] 완료 + PR URL 부착.
+
+### 5-7) Forum tag setup (사용자 수동, 1회)
 
 Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 채널 설정 → Tags 9개 추가:
 - 🟡 대기 / 🔵 진행 중 / 🟢 완료 / 🔴 폐기 / ⚪ 보류
@@ -230,13 +286,14 @@ Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 
 
 ## 7) 작업 분할
 
-- [x] PR 1 (본 PR): `directive_append.sh` template 함수 + spec. minimal — sh 1 파일 + spec.
-- [ ] PR 2 (follow-up): `bot.py _handle_pin_reaction` 에 `DIRECTIVE_USER_ID` env 전달. PR #1204 머지 후.
-- [ ] PR 3 (follow-up): `directive_status.sh` tag 전이 + 본문 PATCH.
-- [ ] PR 4 (follow-up): helper 자동 정제 hook / rule.
-- [ ] PR 5 (follow-up): PR 머지 webhook 자동 status 전이.
-- [ ] PR 6 (follow-up): 4 사이클 cross-link.
-- [ ] PR 7 (선택): forum available_tags bot 자동 ensure.
+- [x] PR 1 (본 PR): `directive_append.sh` template 함수 + spec (운영 모델 §5-6 포함). minimal — sh 1 파일 + spec.
+- [ ] **PR A** (follow-up): nmae 룰 + backlog scan + `directive_status.sh in_progress` reason arg 확장 — `actors/nmae.md` update (백로그 owner / 분배 / plan 위임 사유 명시) + `tools/directive-board/backlog-scan.sh` 신규 + `directive_status.sh in_progress <id> <cycle> [reason]` 확장.
+- [ ] **PR B** (follow-up): PR 머지 webhook 자동 `completed` 전이 — `.github/workflows/directive-complete-on-merge.yml` 신규 + sub-agent.md 룰 (`directive: <id>` PR body 명시 의무).
+- [ ] **PR C** (follow-up): cycle-specific auto-inject — `directive-board.jsonl` 의 `assigned_cycle` 필드 + nmae watchdog (또는 bot.py `cycle_idle_watch_loop`) 가 cycle idle 시 그 cycle 의 🟡 directive 자동 inject.
+- [ ] **PR D** (follow-up): helper 자동 정제 hook — 등록 직후 helper 가 다음 turn 에 thread 본문 PATCH (정제 한 줄 + 컨텍스트 + category tag).
+- [ ] PR 2-bot-user-id (follow-up): `bot.py _handle_pin_reaction` 에 `DIRECTIVE_USER_ID` env 전달. PR #1204 머지 후.
+- [ ] PR 6-cross-link (follow-up): 4 사이클 cross-link.
+- [ ] PR 7-auto-ensure (선택): forum available_tags bot 자동 ensure.
 
 ## 8) 테스트 전략
 
@@ -258,6 +315,9 @@ Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 
 - 2026-05-28 — **결정 2**: category 4 (결정 / 작업 / 사고 / spec). 사유: mobruji 실제 directive 95% cover, 6+ 는 over-engineering.
 - 2026-05-28 — **결정 3**: minimal template + helper 자동 정제 (점진 보강). 사유: 사용자 typing 0, [[feedback-autonomous-default]] 일치, helper LLM 책임.
 - 2026-05-28 — **결정 4**: cycle cross-link / PR 머지 webhook 자동 전이는 follow-up PR. 사유: 본 PR 은 template MVP 만 — 한 번에 너무 큰 변경 회피.
+- 2026-05-28 — **결정 5 (사용자)**: 백로그 운영 모델 명문화. nmae = 백로그 owner. 분배 분기 = plan (신규 / 초과 / 신중) / be / fe / rev / 즉시 반영. **plan 위임 시 사유 명시 의무** (사용자: "위임 사유: 큰 기능이라서 / 변경점이 ~라서").
+- 2026-05-28 — **결정 6 (사용자)**: cycle-specific auto-inject. cycle 별 assigned directive 가 그 cycle idle 시 자동 처리 (사용자: "프론트가 놀고있다 그러면 알아서 가져가야지"). `assigned_cycle` 필드 + nmae watchdog 자동 inject.
+- 2026-05-28 — **결정 7**: 자동화 우선순위 자율 (사용자: "둘다 구현되기만 하면 되니까 순서는 상관없어"). PR A/B/C/D 병행 가능.
 
 ## 10) 자율 결정 (사유)
 
@@ -279,3 +339,4 @@ Discord `#모부르지-지시` (DIRECTIVE_BOARD_FORUM_ID `1507992370044600442`) 
 ## 13) 변경 이력
 
 - 2026-05-28 — 초안 작성 + PR 1 (sh template + spec). status=approved (사용자 직접 정정 응답).
+- 2026-05-28 — spec 보강 (PR 1 commit 추가): §5-6 백로그 운영 모델 (책임 분담 / 분배 분기 / plan 위임 사유 명시 / cycle-specific auto-inject / 완료 자동화) + §7 follow-up PR scope 4건 (A-D) 재정리 + §9 결정 5/6/7 추가. 사용자 정정 직접 반영.
