@@ -13,10 +13,9 @@
    - mismatch state 였다가 last_updated 변경 시 retry (1건).
    - patch_func 예외 → errors 카운트 (1건).
 6. ``directive_board_summary`` — total/ok/mismatch 카운트 (1건).
-7. ``directive_board_sync_loop`` (asyncio mock) —
-   - 정상 1 iter (1건).
-   - poll_interval=0 → 즉시 return (1건).
-   - channel_id 빈 문자열 → 즉시 return (1건).
+7. ``directive_board_sync_loop`` — PR #1140 event-driven 전환으로 폐기.
+   해당 SyncLoopTest 클래스는 제거. ``directive_board_sync_once`` 모듈 함수는
+   유지되며 별도 PR (helper script `directive_status.sh`) 에서 재사용 가능.
 """
 
 from __future__ import annotations
@@ -1135,96 +1134,11 @@ class SummaryTest(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# directive_board_sync_loop (async)
+# directive_board_sync_loop — PR #1140 event-driven 전환으로 폐기.
+# 기존 SyncLoopTest 3건 (poll_interval=0 / empty channel / one_iter_then_cancel)
+# 은 모두 제거. ``directive_board_sync_once`` 자체는 모듈 함수로 유지되므로
+# §5 SyncOnceTest 가 여전히 cover.
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-class SyncLoopTest(unittest.TestCase):
-    def test_poll_interval_zero_returns_immediately(self) -> None:
-        import bot
-
-        async def go():
-            await asyncio.wait_for(
-                bot.directive_board_sync_loop(
-                    client=mock.MagicMock(),
-                    channel_id="C",
-                    token="x",
-                    jsonl_path=Path("/tmp/__nope.jsonl"),
-                    state_path=Path("/tmp/__nope_state.json"),
-                    poll_interval=0,
-                ),
-                timeout=1.0,
-            )
-
-        asyncio.run(go())
-
-    def test_empty_channel_returns_immediately(self) -> None:
-        import bot
-
-        async def go():
-            await asyncio.wait_for(
-                bot.directive_board_sync_loop(
-                    client=mock.MagicMock(),
-                    channel_id="",
-                    token="x",
-                    jsonl_path=Path("/tmp/__nope.jsonl"),
-                    state_path=Path("/tmp/__nope_state.json"),
-                    poll_interval=300,
-                ),
-                timeout=1.0,
-            )
-
-        asyncio.run(go())
-
-    def test_one_iter_then_cancel(self) -> None:
-        import bot
-
-        with tempfile.TemporaryDirectory() as tmpd:
-            jsonl = Path(tmpd) / "dir.jsonl"
-            state = Path(tmpd) / "state.json"
-            _write_jsonl(
-                jsonl,
-                [
-                    {
-                        "message_id": "M1",
-                        "last_updated_kst": "T1",
-                        "summary": "a",
-                    }
-                ],
-            )
-
-            call_count = {"n": 0}
-
-            def fake_sync_once(**kwargs):
-                call_count["n"] += 1
-                result = dbs.SyncResult(scanned=1, patched=1)
-                return result
-
-            async def go():
-                with mock.patch.object(
-                    bot, "directive_board_sync_once", side_effect=fake_sync_once
-                ):
-                    task = asyncio.create_task(
-                        bot.directive_board_sync_loop(
-                            client=mock.MagicMock(),
-                            channel_id="C",
-                            token="x",
-                            jsonl_path=jsonl,
-                            state_path=state,
-                            poll_interval=300,
-                            initial_delay=0,
-                        )
-                    )
-                    # 1 iter 돌아갈 시간만 yield.
-                    await asyncio.sleep(0.05)
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-            asyncio.run(go())
-            self.assertGreaterEqual(call_count["n"], 1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
