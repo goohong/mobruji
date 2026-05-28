@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 import {
+  THEME_CHANGE_EVENT,
   THEME_DARK_CLASS,
   THEME_INIT_SCRIPT,
   THEME_STORAGE_KEY,
@@ -144,6 +145,47 @@ describe("useTheme", () => {
       mqlStub.matches = true;
       changeListener?.({ matches: true } as MediaQueryListEvent);
     });
+    expect(result.current.isDark).toBe(true);
+  });
+});
+
+/**
+ * 같은 탭 broadcast 회귀 가드 (이슈 #1170 다크모드 무반응 root cause 2).
+ *
+ * 직전 구현은 `new StorageEvent("storage", {key, newValue})` 로 같은 탭 listener
+ * 에게 알렸다. 그러나 spec 상 `EventInit` 우회로 만들어진 StorageEvent 의 `key`
+ * 필드가 일부 production browser 에서 누락된 채 fire 되는 회귀가 있었다
+ * (`subscribe` 안의 `event.key === THEME_STORAGE_KEY` 필터가 false 가 되어
+ * useSyncExternalStore re-read 가 일어나지 않음 → React state stale).
+ *
+ * 이 가드는 `setMode` 가 `THEME_CHANGE_EVENT` custom event 도 함께 fire 해서
+ * subscribe 가 그 채널로도 re-read 하는지 확인한다.
+ */
+describe("useTheme — same-tab broadcast (#1170)", () => {
+  it("setMode 호출 시 THEME_CHANGE_EVENT 가 같은 탭에서 fire 된다", () => {
+    const listener = vi.fn();
+    window.addEventListener(THEME_CHANGE_EVENT, listener);
+    try {
+      const { result } = renderHook(() => useTheme());
+      act(() => {
+        result.current.setMode("dark");
+      });
+      expect(listener).toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(THEME_CHANGE_EVENT, listener);
+    }
+  });
+
+  it("THEME_CHANGE_EVENT 만으로도 useTheme 가 re-read 한다 (StorageEvent 의존 X)", () => {
+    // setMode 우회: localStorage 직접 변경 + custom event 만 dispatch.
+    // subscribe 가 custom event 채널을 listen 해야 mode 가 업데이트된다.
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.mode).toBe("system");
+    act(() => {
+      window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+      window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+    });
+    expect(result.current.mode).toBe("dark");
     expect(result.current.isDark).toBe(true);
   });
 });
