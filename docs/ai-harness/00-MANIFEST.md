@@ -23,6 +23,7 @@ nmae 는 sub-agent launch 시 역할에 따라 아래 문서만 발췌 주입 (�
 
 | 역할 | 워크트리 | 필수 주입 | 보조 |
 |---|---|---|---|
+| **nmae** (오케스트레이터) | NCP `mobruji:0.0` | `actors/nmae-runbook.md` + CLAUDE.md §0~§10,§14,§16,§17 | Vol 1 |
 | **Plan** | `mobruji-plan` | Vol 1, Vol 2 | Vol 3 (형식 참조) |
 | **BE** | `mobruji-be` | Vol 1, Vol 3, `12-sub-agent-prompt-template §2 be` | Vol 2 (BC/엔티티) |
 | **FE** | `mobruji-fe` | Vol 1, Vol 3, `12-sub-agent-prompt-template §2 fe` | - |

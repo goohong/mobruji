@@ -32,6 +32,7 @@
 - `prompts/`: 재사용 프롬프트 저장소 (운영 규칙은 `05-prompt-ops.md`)
   - `prompts/feature-implementation.md`: BE/FE/Plan 기능 구현 위임 템플릿
   - `prompts/review-qa.md`: Rev PR 사후 감사/QA 템플릿
+- `docs/ai-harness/actors/`: **actor 전용 런북** (해당 actor 만 로드 — universal 노이즈 제거, 2026-05-28). `nmae-runbook.md` (구 CLAUDE.md §11). helper 는 `docs/helper-rules.md`, sub-agent 는 `12-sub-agent-prompt-template.md` 가 각각 자기 SoT. 라우팅 표는 `CLAUDE.md §0` / `00-MANIFEST.md`.
 - `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/task.md`: PR/이슈 템플릿
 - `docs/features/`: 기능 단위 living 명세서 (Feature Spec). 프로세스는 `02-agent-workflow.md §9`
 - `docs/decisions/`: Architecture Decision Records (ADR). 횡단 결정의 영속 이력
