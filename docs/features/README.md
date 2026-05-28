@@ -127,6 +127,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [helper-writing-marker-timing-fix](helper-writing-marker-timing-fix.md) | helper writing marker timing fix | implementing | 2026-05-27 |
 | [internal-label-scrub](internal-label-scrub.md) | 내부 ID 라벨 scrub (A1/B2/D1 → user-friendly paraphrase 분리) | draft | 2026-05-24 |
 | [librosa-ci-build-monitoring](librosa-ci-build-monitoring.md) | librosa CI 빌드 시간 모니터링 + 캐싱 전략 | draft | 2026-05-24 |
+| [loop-heartbeat-reliability](loop-heartbeat-reliability.md) | Loop heartbeat reliability — `record_loop_heartbeat` "skip on continue" 패턴 일소 (try/finally 단일 종점) | draft | 2026-05-28 |
 | [maestro-auto-wake](maestro-auto-wake.md) | maestro 자동 wake 사이클 (idle 시 self-perpetuating + secondary backup) | approved | 2026-05-24 |
 | [ncp-dev-deployment](ncp-dev-deployment.md) | Phase 4 — NCP maestro VM에 mobruji dev 환경 docker 격리 배포 | shipped | 2026-05-24 |
 | [ncp-maestro-resilience](ncp-maestro-resilience.md) | NCP maestro 전체 사이클 멈춤 위험 점검 + 회복 자동화 | approved | 2026-05-23 |
