@@ -281,17 +281,51 @@ if [[ ! -x "$DISCORD_REPLY_SH" ]]; then
 fi
 
 # launch 알림 본문 — description 우선, 없으면 title. forum thread 본문은
-# 운영자가 클릭해 들어왔을 때 worktree / task / launch 시각 즉시 보이도록 멀티라인.
+# 운영자가 클릭해 들어왔을 때 sub-agent 가 어떤 작업 / 어디까지 진행 / 다음 단계
+# 즉시 파악되도록 template 본문 (spec: docs/features/directive-board-template-and-tags.md §5-6).
 ANNOUNCE_BODY="${DESCRIPTION:-$TITLE}"
-LAUNCH_TS="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')"
+LAUNCH_TS_ISO="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')"
+LAUNCH_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
 FORUM_TITLE="sub-agent launch ($WORKTREE) — ${ANNOUNCE_BODY}"
 # Discord forum thread name 은 100 char 제한 — 잘라 안전.
 FORUM_TITLE="${FORUM_TITLE:0:99}"
-FORUM_BODY="$(printf 'worktree: %s\ntitle: %s\nstarted: %s' \
-  "$WORKTREE" "$ANNOUNCE_BODY" "$LAUNCH_TS")"
-if [[ -n "$TASK" ]]; then
-  FORUM_BODY="$(printf '%s\ntask: %s' "$FORUM_BODY" "$TASK")"
-fi
+
+# spec: directive-board-template-and-tags.md §5-6 cycle forum thread template.
+# 사용자 정정 (2026-05-28): "각 subagent forum 들도 무슨 작업하는지 솔직히 나는
+# 잘 모르겠어. 같은 이치로 내용 정제가 필요". launch 시점에 template 박아
+# sub-agent 가 진행되며 [x] update / 댓글 append. 정제 hook 별도 launch X.
+_build_cycle_template_body() {
+  local _worktree="$1" _title="$2" _desc="$3" _task="$4" _ts_kst="$5"
+  local _task_line=""
+  if [[ -n "$_task" ]]; then
+    _task_line="
+**Task**: ${_task}"
+  fi
+  cat <<EOF
+🛠️ **${_title}**
+
+💬 작업
+${_desc}${_task_line}
+
+🆔 사이클: \`${_worktree}\` · 🕐 launch: ${_ts_kst}
+
+📋 진행
+- [x] launch (nmae 위임)
+- [ ] 분석 / 설계
+- [ ] 구현
+- [ ] 검증 (lint / test / typecheck)
+- [ ] PR 생성
+- [ ] PR 머지
+
+🔖 관련
+- (sub-agent 가 milestone 시 PR / 이슈 / directive 링크 추가)
+
+---
+_갱신: ${_ts_kst} (launch 시점)_
+EOF
+}
+
+FORUM_BODY="$(_build_cycle_template_body "$WORKTREE" "$ANNOUNCE_BODY" "$ANNOUNCE_BODY" "$TASK" "$LAUNCH_TS_KST")"
 
 # 1차: --forum-post-auto-tag (Discord forum channel POST). stderr 는 tee 로
 # 보존해 fallback 결정에 사용. stdout 마지막 줄 = thread_id.

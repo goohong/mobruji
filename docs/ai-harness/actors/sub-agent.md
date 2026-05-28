@@ -90,7 +90,38 @@ gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --la
 | plan | `session:plan` |
 | helper sub-agent | `session:helper` |
 
-### 1-11) Discord thread 진행 stream
+### 1-11) Discord thread 진행 stream + cycle forum 본문 정제 (PR D, 2026-05-28)
+
+cycle forum thread 본문은 `agent-launch-wrapper.sh` 가 launch 시점에 template 박음 (📋 진행 6 체크박스). **sub-agent 가 큰 milestone (분석 완료 / PR 생성 / PR 머지) 시 본문의 체크박스 [x] update + 댓글 append**:
+
+```bash
+# milestone 시 (예: PR 생성 후) 본문 PATCH — discord-reply.sh --forum-edit
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-edit "$LAUNCH_THREAD_ID" "$(cat <<'EOF'
+🛠️ **{...기존 title...}**
+...
+📋 진행
+- [x] launch
+- [x] 분석 / 설계 — {짧은 요약}
+- [x] 구현 — branch={...}
+- [x] 검증 — checkstyle+spotless+test green
+- [x] PR 생성 — #1234
+- [ ] PR 머지
+
+🔖 관련
+- PR: #1234
+- directive: {id} (있으면)
+---
+_갱신: {ts}_
+EOF
+)"
+
+# 댓글 append 는 milestone 1 줄 stream (기존 패턴 유지)
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "[milestone] PR #1234 생성"
+```
+
+본문 PATCH = 사용자가 thread 한 번 보면 어디까지 진행됐는지 즉시 파악 (사용자 정정 2026-05-28). 댓글 = milestone 이력 추적.
+
+
 
 nmae/helper 가 `--auto-ack-thread` 로 사전 thread 생성 → `~/.mobruji/last-launch-thread.txt` atomic write. sub-agent 권장 호출 (file 자동 read, hallucination 우회):
 
