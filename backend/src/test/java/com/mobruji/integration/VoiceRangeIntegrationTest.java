@@ -336,5 +336,47 @@ class VoiceRangeIntegrationTest {
             assertThat(voiceRangeRepository.findBySessionId(bodySessionId)).isEmpty();
             assertThat(voiceRangeRepository.findBySessionId(headerSessionId)).isEmpty();
         }
+
+        /*
+         * directive 1508668399423590541 — 추천 결과 400 회귀 (production 2026-05-28 evidence).
+         *
+         * <p>root cause: legacy localStorage `sess_<ts>_<rand>` (PR #991 이전 fallback) 가
+         * /recommend → /api/v1/voice-ranges/{sessionId} GET 까지 그대로 흘러 SessionAuthGuard
+         * bootstrap 옵션 (a) 로 통과 → voice-range API 가 stale sessionId 를 echo →
+         * /api/v1/recommendations POST 에서 RecommendationCreateRequest.sessionId @Pattern
+         * 400. FE 가 ensureSessionId 형식 가드 (PR #1112) 를 RecommendPage 에서 호출하지 않아
+         * 우회.
+         *
+         * <p>BE 차원 차단: SessionAuthGuard.verify() 에 UUIDv4 형식 가드 추가 → invalid format
+         * 진입 시점에 401 (현재 PR). FE 는 401 처리 (NoSessionFallback) → 사용자가 /voice-range
+         * 진입 → ensureSessionId 가 새 UUIDv4 발급 → 정상 funnel 재진입. recommend POST 가 stale
+         * sessionId 호출 자체를 못 함.
+         */
+        @Test
+        @DisplayName("GET: path sessionId legacy `sess_<ts>_<rand>` 형식 → 401 (directive 1508668399423590541)")
+        void get_legacyFallbackFormat_returns401() {
+            final String staleSessionId = "sess_mpi2bqkh_jpnmqpag";
+
+            given()
+                    .header("X-Session-Id", staleSessionId)
+                    .when()
+                    .get("/api/v1/voice-ranges/" + staleSessionId)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value())
+                    .body("message", org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(staleSessionId)));
+        }
+
+        @Test
+        @DisplayName("GET: path sessionId UUIDv4 형식이지만 대문자 hex → 401 (소문자 hex only)")
+        void get_uppercaseHexUuid_returns401() {
+            final String uppercase = "550E8400-E29B-41D4-A716-446655448FFF";
+
+            given()
+                    .header("X-Session-Id", uppercase)
+                    .when()
+                    .get("/api/v1/voice-ranges/" + uppercase)
+                    .then()
+                    .statusCode(HttpStatus.UNAUTHORIZED.value());
+        }
     }
 }
