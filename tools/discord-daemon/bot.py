@@ -61,6 +61,28 @@ from directive_detect import (
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
 INBOX_FILE_MODE: Final[int] = 0o600
+
+# spec: docs/features/discord-reaction-choice-input.md
+# `--choices` mode 의 register/consume event log + user mode toggle.
+CHOICE_PROMPTS_PATH: Final[Path] = Path.home() / ".mobruji" / "choice-prompts.jsonl"
+USER_MODE_PATH: Final[Path] = Path.home() / ".mobruji" / "user-mode.txt"
+USER_MODE_DEFAULT: Final[str] = "AUTO"
+USER_MODE_VALID: Final[tuple[str, ...]] = ("AUTO", "ASK")
+# Discord keycap number emoji → 0-based index (1️⃣ = 0, 🔟 = 9).
+# 1-9 = digit + VS16 + keycap (U+FE0F U+20E3). 🔟 = U+1F51F.
+NUMBER_KEYCAP_TO_INDEX: Final[dict[str, int]] = {
+    "1️⃣": 0,
+    "2️⃣": 1,
+    "3️⃣": 2,
+    "4️⃣": 3,
+    "5️⃣": 4,
+    "6️⃣": 5,
+    "7️⃣": 6,
+    "8️⃣": 7,
+    "9️⃣": 8,
+    "\U0001f51f": 9,
+}
+
 MAX_TEXT_PREVIEW_LEN: Final[int] = 80
 # inbox.jsonl 에 저장되는 사용자 메시지 본문 최대 길이 (#909 F-1).
 # PII/민감 본문이 평문으로 디스크에 남는 위험을 완화 — 백업/디버깅 용도 한정.
@@ -960,6 +982,111 @@ def append_inbox(payload: dict[str, str]) -> None:
             handle.write(json.dumps(truncated_payload, ensure_ascii=False) + "\n")
     except OSError as exc:
         logger.warning("inbox.jsonl write 실패: %s", exc)
+
+
+# ─── reaction-choice + user mode helpers ──────────────────────────────────────
+# spec: docs/features/discord-reaction-choice-input.md
+
+
+def parse_choice_emoji(emoji_str: str) -> int | None:
+    """Discord raw reaction emoji string → 0-based choice index.
+
+    Args:
+        emoji_str: ``str(discord.PartialEmoji)`` 또는 동등. 예 ``"1️⃣"``, ``"🔟"``.
+
+    Returns:
+        0-based index (1️⃣=0, 🔟=9) — 매칭되는 keycap 인 경우. None — 미매칭.
+    """
+    return NUMBER_KEYCAP_TO_INDEX.get(emoji_str)
+
+
+def lookup_choice_prompt(
+    message_id: str,
+    path: Path = CHOICE_PROMPTS_PATH,
+) -> dict | None:
+    """choice-prompts.jsonl 에서 active register entry 조회.
+
+    같은 ``message_id`` 의 ``event="consume"`` row 가 있으면 used → None 반환.
+    file 부재 / OS 오류 / JSON 손상 line → graceful None.
+
+    Args:
+        message_id: bot 이 post 한 choice prompt 의 Discord message snowflake.
+        path: choice-prompts.jsonl 경로 (테스트 override 용).
+    """
+    if not path.exists():
+        return None
+
+    register: dict | None = None
+    consumed = False
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("message_id") != message_id:
+                    continue
+                event = entry.get("event")
+                if event == "register":
+                    register = entry
+                elif event == "consume":
+                    consumed = True
+    except OSError:
+        return None
+
+    if consumed or register is None:
+        return None
+    return register
+
+
+def mark_choice_consumed(
+    message_id: str,
+    choice_idx: int,
+    user_id: str,
+    path: Path = CHOICE_PROMPTS_PATH,
+) -> None:
+    """choice-prompts.jsonl 에 ``event="consume"`` row append (append-only)."""
+    entry = {
+        "event": "consume",
+        "message_id": message_id,
+        "choice_idx": choice_idx,
+        "user_id": user_id,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning("choice-prompts.jsonl consume write 실패: %s", exc)
+
+
+def read_user_mode(path: Path = USER_MODE_PATH) -> str:
+    """user-mode.txt 읽어 ``AUTO`` 또는 ``ASK`` 반환. 부재/잘못된 값 → ``AUTO``."""
+    if not path.exists():
+        return USER_MODE_DEFAULT
+    try:
+        raw = path.read_text(encoding="utf-8").strip().upper()
+    except OSError:
+        return USER_MODE_DEFAULT
+    return raw if raw in USER_MODE_VALID else USER_MODE_DEFAULT
+
+
+def write_user_mode(mode: str, path: Path = USER_MODE_PATH) -> None:
+    """user-mode.txt atomic write. mode 가 유효하지 않으면 raise ValueError."""
+    normalized = mode.strip().upper()
+    if normalized not in USER_MODE_VALID:
+        raise ValueError(
+            f"user mode {mode!r} 가 유효하지 않음 (허용: {USER_MODE_VALID})"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(normalized + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def write_last_user_msg_id(message_id: str) -> None:
@@ -4687,6 +4814,84 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.warning(
                 "tmux send-keys 실패 — 메시지 dropped (claim 유지): id=%s",
                 message_id,
+            )
+            return
+
+    @client.event
+    async def on_raw_reaction_add(
+        raw_payload: discord.RawReactionActionEvent,
+    ) -> None:
+        # spec: docs/features/discord-reaction-choice-input.md
+        # keycap reaction (1️⃣–🔟) 으로 사용자 선택지 응답 처리.
+        # 다른 채널 / 다른 사용자 / 다른 emoji / 미등록 message → early return.
+        if raw_payload.channel_id != target_channel_id:
+            return
+        if raw_payload.user_id not in allowed_user_ids:
+            return
+        # bot self reaction skip (pre-attach 1️⃣–🔟 시 자기 자신 trigger 방지).
+        bot_user = getattr(client, "user", None)
+        if bot_user is not None and raw_payload.user_id == bot_user.id:
+            return
+
+        emoji_str = str(raw_payload.emoji)
+        choice_idx = parse_choice_emoji(emoji_str)
+        if choice_idx is None:
+            return
+
+        bot_msg_id = str(raw_payload.message_id)
+        register = lookup_choice_prompt(bot_msg_id)
+        if register is None:
+            return  # not a registered choice prompt or already consumed
+
+        choices = register.get("choices") or []
+        if not isinstance(choices, list) or choice_idx >= len(choices):
+            return
+        label = str(choices[choice_idx])
+
+        # dedup — Gateway reconnect / 사용자 toggle reaction race 가드.
+        dedup_key = f"choice:{bot_msg_id}:{choice_idx}"
+        if ledger is not None and not ledger.claim(dedup_key):
+            return
+
+        mark_choice_consumed(
+            message_id=bot_msg_id,
+            choice_idx=choice_idx,
+            user_id=str(raw_payload.user_id),
+        )
+
+        synthetic_text = f"[choice {choice_idx + 1}/{len(choices)}] {label}"
+        ts_iso = datetime.now(timezone.utc).isoformat()
+        payload: dict[str, str] = {
+            "text": synthetic_text,
+            "author": str(raw_payload.user_id),
+            "author_name": "<reaction-choice>",
+            "ts": ts_iso,
+            "message_id": dedup_key,
+            "channel_id": str(raw_payload.channel_id),
+        }
+
+        logger.info(
+            "choice reaction received: bot_msg=%s idx=%d label=%r user=%s",
+            bot_msg_id,
+            choice_idx,
+            label,
+            raw_payload.user_id,
+        )
+
+        append_inbox(payload)
+        # helper 답 push 시 reply target = choice prompt message (시각적 연결).
+        write_last_user_msg_id(bot_msg_id)
+
+        if not ensure_tmux_session(session_name, claude_bin):
+            logger.warning(
+                "choice reaction tmux 세션 확보 실패 — dropped: bot_msg=%s",
+                bot_msg_id,
+            )
+            return
+        if not tmux_send_payload(target_pane, synthetic_text):
+            logger.warning(
+                "choice reaction tmux send 실패 — dropped: bot_msg=%s",
+                bot_msg_id,
             )
             return
 

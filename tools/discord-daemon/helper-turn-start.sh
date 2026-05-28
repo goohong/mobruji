@@ -44,11 +44,24 @@ TARGET_FILE="${MOBRUJI_DIR}/helper-current-target.txt"
 CYCLE_STATUS_FILE="${MOBRUJI_DIR}/cycle-status.json"
 USER_PRESENCE_FILE="${MOBRUJI_DIR}/user-presence.json"
 QUEUE_FILE="${MOBRUJI_DIR}/helper-queue.jsonl"
+USER_MODE_FILE="${MOBRUJI_DIR}/user-mode.txt"
 
 HAS_JQ=0
 if command -v jq >/dev/null 2>&1; then
   HAS_JQ=1
 fi
+
+# ─── USER_MODE marker — spec: docs/features/discord-reaction-choice-input.md ───
+# AUTO (default, 자율) / ASK (질문 받는 mode). file 부재/잘못된 값 = AUTO.
+# helper LLM 이 이 marker 보고 `--choices` 사용 여부 결정.
+user_mode="AUTO"
+if [[ -r "$USER_MODE_FILE" ]]; then
+  raw_mode=$(head -1 "$USER_MODE_FILE" 2>/dev/null | tr -d '[:space:]' | tr 'a-z' 'A-Z')
+  if [[ "$raw_mode" == "ASK" || "$raw_mode" == "AUTO" ]]; then
+    user_mode="$raw_mode"
+  fi
+fi
+echo "===USER_MODE:${user_mode}==="
 
 echo "=== helper turn-start (#1014) ==="
 

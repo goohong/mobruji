@@ -404,5 +404,121 @@ class OnMessageRoutingTests(unittest.TestCase):
         self.assertIsNotNone(client)
 
 
+class ChoicePromptTests(unittest.TestCase):
+    """spec: docs/features/discord-reaction-choice-input.md — reaction-choice helpers."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmpdir.name) / "choice-prompts.jsonl"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def test_parse_choice_emoji_keycaps(self) -> None:
+        cases = [
+            ("1️⃣", 0),
+            ("2️⃣", 1),
+            ("3️⃣", 2),
+            ("4️⃣", 3),
+            ("5️⃣", 4),
+            ("6️⃣", 5),
+            ("7️⃣", 6),
+            ("8️⃣", 7),
+            ("9️⃣", 8),
+            ("\U0001f51f", 9),
+        ]
+        for emoji, expected_idx in cases:
+            with self.subTest(emoji=emoji):
+                self.assertEqual(bot.parse_choice_emoji(emoji), expected_idx)
+
+    def test_parse_choice_emoji_non_keycap_returns_none(self) -> None:
+        self.assertIsNone(bot.parse_choice_emoji("👀"))
+        self.assertIsNone(bot.parse_choice_emoji("0️⃣"))
+        self.assertIsNone(bot.parse_choice_emoji(""))
+        self.assertIsNone(bot.parse_choice_emoji("hello"))
+
+    def test_lookup_choice_prompt_missing_file(self) -> None:
+        self.assertIsNone(bot.lookup_choice_prompt("999", path=self.path))
+
+    def _write_register(self, message_id: str, choices: list[str]) -> None:
+        import json as _json
+
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(
+                _json.dumps(
+                    {
+                        "event": "register",
+                        "message_id": message_id,
+                        "channel_id": "C1",
+                        "choices": choices,
+                        "ts": "2026-05-28T00:00:00Z",
+                    }
+                )
+                + "\n"
+            )
+
+    def test_lookup_choice_prompt_active(self) -> None:
+        self._write_register("M1", ["yes", "no"])
+        result = bot.lookup_choice_prompt("M1", path=self.path)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["choices"], ["yes", "no"])
+
+    def test_lookup_choice_prompt_consumed_returns_none(self) -> None:
+        self._write_register("M1", ["yes", "no"])
+        bot.mark_choice_consumed(
+            message_id="M1", choice_idx=0, user_id="U1", path=self.path
+        )
+        self.assertIsNone(bot.lookup_choice_prompt("M1", path=self.path))
+
+    def test_lookup_choice_prompt_ignores_other_message_ids(self) -> None:
+        self._write_register("M2", ["a"])
+        self.assertIsNone(bot.lookup_choice_prompt("M1", path=self.path))
+
+    def test_lookup_choice_prompt_corrupt_lines_graceful(self) -> None:
+        with self.path.open("w", encoding="utf-8") as fh:
+            fh.write("not-json-line\n")
+            fh.write("\n")
+        self._write_register("M1", ["a"])
+        result = bot.lookup_choice_prompt("M1", path=self.path)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["choices"], ["a"])
+
+
+class UserModeTests(unittest.TestCase):
+    """spec: docs/features/discord-reaction-choice-input.md — user mode toggle file."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmpdir.name) / "user-mode.txt"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def test_read_default_when_missing(self) -> None:
+        self.assertEqual(bot.read_user_mode(self.path), "AUTO")
+
+    def test_read_default_when_invalid(self) -> None:
+        self.path.write_text("HELLO\n", encoding="utf-8")
+        self.assertEqual(bot.read_user_mode(self.path), "AUTO")
+
+    def test_read_ask_case_insensitive(self) -> None:
+        self.path.write_text("ask\n", encoding="utf-8")
+        self.assertEqual(bot.read_user_mode(self.path), "ASK")
+
+    def test_read_auto_normalized(self) -> None:
+        self.path.write_text(" auto ", encoding="utf-8")
+        self.assertEqual(bot.read_user_mode(self.path), "AUTO")
+
+    def test_write_round_trip(self) -> None:
+        bot.write_user_mode("ASK", self.path)
+        self.assertEqual(bot.read_user_mode(self.path), "ASK")
+        bot.write_user_mode("auto", self.path)
+        self.assertEqual(bot.read_user_mode(self.path), "AUTO")
+
+    def test_write_invalid_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            bot.write_user_mode("MAYBE", self.path)
+
+
 if __name__ == "__main__":
     unittest.main()
