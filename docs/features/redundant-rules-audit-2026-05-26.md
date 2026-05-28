@@ -173,14 +173,14 @@ last_reviewed: 2026-05-26
 
 ### 2-11) "보호 영역 변경 시 needs-human-review 라벨"
 
-**현재 위치**:
+**현재 위치** (audit 작성 시점, 2026-05-26):
 - ① nmae-role.md "보호 영역(systemd/.env/CI/build) 변경 PR 은 needs-human-review + infra 라벨"
 - ② CLAUDE.md §4 AI 작업 보호 영역 (전체 리스트)
 - ④ docs `docs/ai-harness/01-harness-spec.md §6`
 
-**판단**: ② 전체 보호 영역 리스트가 SoT. ① 요약. ④ docs 상세. **보존**.
+**판단 (audit 시점)**: ② 전체 보호 영역 리스트가 SoT. ① 요약. ④ docs 상세. **보존**.
 
-**권고**: **보존**.
+**상태 변경 (2026-05-28, PR #1202)**: `needs-human-review` 라벨 개념 폐지. rev sub-agent 가 사용자 review 를 대행하므로 별도 라벨 분기 불필요 + 다른 agent 에게 혼동 유발. 보호 영역 = 정보성 분류로 격하 (라벨 의무 폐지). 모든 PR rev 사이클 통과 의무 — release 머지만 사용자 명시 확인. 본 audit §2-11 항목은 historical 보존.
 
 ---
 

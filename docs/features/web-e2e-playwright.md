@@ -228,7 +228,7 @@ jobs:
   - `web/e2e/home.spec.ts` 신설 (S1)
   - `npm run test:e2e` script 추가
   - `.gitignore` `playwright-report/` `test-results/` 추가
-  - **보호 영역**: `web/package.json` / `web/package-lock.json` 변경 → `needs-human-review` 라벨
+  - **보호 영역** (정보성, 라벨 의무 폐지 2026-05-28 — rev sub-agent 가 review 대행): `web/package.json` / `web/package-lock.json` 변경 — rev 사이클이 추가 신중도 가중
 - [ ] **impl PR 2 (type:feat scope:web)**: 나머지 smoke 시나리오 (S2-S6/S7)
   - `web/e2e/recommend.spec.ts` (S3)
   - `web/e2e/songs.spec.ts` (S4)
@@ -239,7 +239,7 @@ jobs:
   - `.github/workflows/web-e2e.yml` 신설 (§5-4 옵션 A)
   - `actions/cache@v4` Playwright browser binary 캐시
   - Playwright HTML report artifact upload
-  - **보호 영역**: `.github/workflows/**` → `needs-human-review` 라벨
+  - **보호 영역** (정보성, 라벨 의무 폐지 2026-05-28): `.github/workflows/**` — rev 사이클이 추가 신중도 가중
 - [ ] **docs PR (type:docs scope:infra)**: rev-e2e-3-stages §3 trigger 명문화 (impl PR 1 머지 후)
 - [ ] **ADR 필요 여부 검토 (선택)**: §9 결정 로그 — Playwright = 외부 도구 도입. ADR-NNNN 신설 권고는 본 spec 자체 결정으로 갈음 (Vitest / RestAssured 와 같은 단순 도구 도입). 별도 ADR 불요.
 

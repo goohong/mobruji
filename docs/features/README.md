@@ -3,6 +3,8 @@
 기능 단위의 **living document** 저장소. 한 번 쓰고 끝나는 구현 계획이 아니라,
 기능이 존재하는 동안 계속 유지·갱신되는 명세서다.
 
+> **Note (2026-05-28, PR #1202 follow-up)**: 본 디렉토리 안 spec 다수에 `needs-human-review` 라벨 언급이 historical 컨텍스트로 남아 있습니다. **해당 라벨은 2026-05-28 폐지** — rev sub-agent 가 사용자 review 를 대행하므로 별도 라벨 부착 의무 없습니다. 보호 영역 (`CLAUDE.md §4`) 은 정보성 분류로 유지되며 rev 사이클이 추가 신중도 가중 처리합니다. 실제 PR 작성 시 `needs-human-review` 라벨 부착 X. spec 본문의 historical mention 은 작성 시점 컨텍스트로 그대로 보존 (loaded 문서 아님 — 후속 spec 갱신 PR 에서 점진적 정정).
+
 ## 1) 왜 필요한가
 
 - **합의 이력**: 요구사항/설계 결정을 누가 언제 왜 내렸는지 한 파일에 모음
