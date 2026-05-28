@@ -155,6 +155,44 @@ esac
 rm -rf "$TMP6"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Case 8: mark-polished — MOBRUJI_NMAE_INJECT_ENABLED=0 → inject skip (graceful).
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Case 8: nmae inject disable (MOBRUJI_NMAE_INJECT_ENABLED=0)"
+TMP8="$(mktemp -d)"
+JSONL8="$TMP8/board.jsonl"
+echo '{"message_id":"M_CCC","polished":false}' > "$JSONL8"
+
+OUT8=$(DIRECTIVE_BOARD_JSONL_PATH="$JSONL8" MOBRUJI_NMAE_INJECT_ENABLED=0 bash "$MARK_SCRIPT" "M_CCC" 2>&1)
+_assert_eq "Case 8 disable exit 0" "0" "$?"
+_assert_contains "Case 8 inject disabled 메시지" "nmae inject disabled" "$OUT8"
+POLISHED8=$(jq -r '.polished' "$JSONL8")
+_assert_eq "Case 8 polished=true (jsonl update 정상)" "true" "$POLISHED8"
+rm -rf "$TMP8"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 9: mark-polished — tmux 부재 / session 부재 graceful skip.
+# (mac local 환경 default = tmux 있지만 session mobruji 부재 → skip)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Case 9: nmae inject 부재 session graceful skip"
+TMP9="$(mktemp -d)"
+JSONL9="$TMP9/board.jsonl"
+echo '{"message_id":"M_DDD","polished":false}' > "$JSONL9"
+
+# 부재 session 지정 → graceful skip.
+OUT9=$(DIRECTIVE_BOARD_JSONL_PATH="$JSONL9" \
+  MOBRUJI_NMAE_PANE="non-existent-session-xyz:0.0" \
+  bash "$MARK_SCRIPT" "M_DDD" 2>&1)
+_assert_eq "Case 9 부재 session exit 0 (graceful)" "0" "$?"
+# tmux 가 있으면 "session 부재 skip" / 없으면 "tmux 부재 skip" — 둘 중 하나.
+case "$OUT9" in
+  *"session"*"부재"*|*"tmux"*"부재"*) _assert_eq "Case 9 graceful skip 메시지" "graceful" "graceful" ;;
+  *) _assert_eq "Case 9 graceful skip 메시지" "graceful" "$(echo "$OUT9" | tail -c 200)" ;;
+esac
+POLISHED9=$(jq -r '.polished' "$JSONL9")
+_assert_eq "Case 9 polished=true (jsonl update 정상)" "true" "$POLISHED9"
+rm -rf "$TMP9"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 결과
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""

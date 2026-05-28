@@ -96,4 +96,40 @@ trap 'rm -f "${JSONL_TMP}"' EXIT
 } 9>>"${JSONL_PATH}.lock"
 
 echo "mark-polished OK: id=${ID_ARG} polished=true (race 가드 해제 — nmae backlog-scan picker 가능)" >&2
+
+# spec: docs/features/directive-board-template-and-tags.md §5-6 + actors/nmae.md §11-8
+# nmae tmux pane 에 즉시 inject — 학습 의존 ↓ 코드 강제 (PR E-1).
+# polished=true 된 시점에 nmae 가 backlog-scan + 4 분기 분배 결정하도록 명시 신호.
+# helper 가 직접 nmae 위임하는 relay-only 룰 우회 path 와 별개로 정확한 picker
+# trigger 보장. helper 차단은 PR E-2 (system prompt 강제).
+NMAE_PANE="${MOBRUJI_NMAE_PANE:-mobruji:0.0}"
+NMAE_INJECT_ENABLED="${MOBRUJI_NMAE_INJECT_ENABLED:-1}"
+
+if [[ "${NMAE_INJECT_ENABLED}" != "1" ]]; then
+  echo "mark-polished: nmae inject disabled (MOBRUJI_NMAE_INJECT_ENABLED=0)" >&2
+  exit 0
+fi
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "mark-polished: tmux 부재 — nmae inject skip (graceful)" >&2
+  exit 0
+fi
+
+# session 이름 = pane 이름의 ':' 앞 부분.
+NMAE_SESSION="${NMAE_PANE%:*}"
+if ! tmux has-session -t "${NMAE_SESSION}" 2>/dev/null; then
+  echo "mark-polished: tmux session ${NMAE_SESSION} 부재 — nmae inject skip (graceful)" >&2
+  exit 0
+fi
+
+INJECT_MSG="[directive] 새 polished directive ${ID_ARG} — backlog-scan + 분배 결정 의무. bash tools/directive-board/backlog-scan.sh 호출 후 4 분기 휴리스틱 적용 (actors/nmae.md §11-8). plan 위임 시 사유 명시 의무."
+
+# 본문 + Enter 별도 send (tmux send-keys 의 한 줄 묶음이 종종 submit 안 됨 — 관찰됨).
+if tmux send-keys -t "${NMAE_PANE}" "${INJECT_MSG}" 2>/dev/null && \
+   tmux send-keys -t "${NMAE_PANE}" Enter 2>/dev/null; then
+  echo "mark-polished: nmae inject OK (pane=${NMAE_PANE}, id=${ID_ARG})" >&2
+else
+  echo "mark-polished: nmae inject 실패 (pane=${NMAE_PANE} 권한 또는 race)" >&2
+fi
+
 exit 0
