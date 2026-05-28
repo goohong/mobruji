@@ -6,7 +6,7 @@
 # spec: docs/features/directive-board-event-driven-redesign.md §3 (b) (c)
 #
 # 사용:
-#   directive_status.sh <id> <new_status> [pr_url]
+#   directive_status.sh <id> <new_status> [pr_url] [cycle] [reason]
 #
 # args:
 #   <id>          — directive entry 식별자. JSONL 의 message_id /
@@ -14,6 +14,12 @@
 #   <new_status>  — in_progress | completed (그 외 거부)
 #                   in_progress → 한국어 "진행 중" / completed → "완료" 매핑.
 #   [pr_url]      — 선택. 관련 PR URL.
+#   [cycle]       — 선택 (in_progress 일 때만 의미). 위임 cycle:
+#                   plan | be | fe | rev | nmae. jsonl 의 assigned_cycle 필드.
+#                   spec: directive-board-template-and-tags.md §5-6 백로그 운영.
+#   [reason]      — 선택 (cycle 부여 시 권장 / **plan 위임 시 의무**).
+#                   사용자 정정 (2026-05-28): "plan 에게 위임했다면 그 이유를 적어줬으면".
+#                   jsonl 의 delegation_reason 필드. 예: "신규 도메인, 다중 PR 예상".
 #
 # 동작:
 #   1. status 검증 — in_progress / completed 만 허용. 그 외 exit 1.
@@ -42,7 +48,7 @@ JSONL_PATH_DEFAULT="${HOME}/.mobruji/directive-board.jsonl"
 JSONL_PATH="${DIRECTIVE_BOARD_JSONL_PATH:-${JSONL_PATH_DEFAULT}}"
 
 usage() {
-  echo "usage: directive_status.sh <id> <in_progress|completed> [pr_url]" >&2
+  echo "usage: directive_status.sh <id> <in_progress|completed> [pr_url] [cycle] [reason]" >&2
   exit 64
 }
 
@@ -53,9 +59,18 @@ fi
 ID_ARG="$1"
 NEW_STATUS="$2"
 PR_URL="${3:-}"
+CYCLE_ARG="${4:-}"
+REASON_ARG="${5:-}"
 
 if [[ -z "${ID_ARG}" || -z "${NEW_STATUS}" ]]; then
   usage
+fi
+
+# spec: directive-board-template-and-tags.md §5-6 — plan 위임 사유 명시 의무.
+# in_progress + cycle=plan + reason 비어있음 시 warning (강제 X — backward compat).
+if [[ "${NEW_STATUS}" == "in_progress" && "${CYCLE_ARG}" == "plan" && -z "${REASON_ARG}" ]]; then
+  echo "directive_status: WARNING — plan 위임 시 사유 명시 권장 (spec §5-6). \
+[reason] 5번째 인자 또는 명시 필요. 빈 reason 으로 진행." >&2
 fi
 
 # status 검증 — 명시 화이트리스트.
@@ -119,7 +134,9 @@ trap 'rm -f "${JSONL_TMP}"' EXIT
         --arg status "${STATUS_KO}" \
         --arg ts "${TS_KST}" \
         --arg pr "${PR_URL}" \
-        --arg new_status "${NEW_STATUS}" '
+        --arg new_status "${NEW_STATUS}" \
+        --arg cycle "${CYCLE_ARG}" \
+        --arg reason "${REASON_ARG}" '
     if (
       (.message_id // "") == $id
       or (.source_queue_msg_id // "") == $id
@@ -129,6 +146,8 @@ trap 'rm -f "${JSONL_TMP}"' EXIT
       | .last_updated_kst = $ts
       | (if $new_status == "completed" then .completed_kst = $ts else . end)
       | (if $pr != "" then .related_pr = $pr else . end)
+      | (if $cycle != "" then .assigned_cycle = $cycle else . end)
+      | (if $reason != "" then .delegation_reason = $reason else . end)
     else
       .
     end
