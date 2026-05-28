@@ -73,6 +73,39 @@ rev sub-agent prompt (`docs/ai-harness/actors/sub-agent.md §2-rev`) 매 사이�
 
 ```bash
 bash tools/rev-queue/tests/test_rev_queue.sh
+bash tools/rev-queue/tests/test_flock_fallback.sh
 ```
 
-gh CLI mock 으로 stage1 빈/하나/여러 시나리오 + stage2 정상 시나리오 검증.
+`test_rev_queue.sh` — gh CLI mock 으로 stage1 빈/하나/여러 시나리오 + stage2 정상 시나리오 검증.
+`test_flock_fallback.sh` — flock 부재 환경 simulate + ssh mock + 인자 forward + graceful warning 19 케이스.
+
+## flock-fallback.sh — macOS rev false-fail 자동 우회 (이슈 #1192)
+
+macOS rev 환경에 `flock` 명령 부재로 lock 의존 shell test 가 false-fail 하는 사고 (rev #1175 보고: 14건 false-fail → NCP 재실행으로 PR 본문 수치 (37/0) 일치 확인). rev sub-agent 가 매번 수동 ssh NCP 하던 작업을 헬퍼로 자동화.
+
+```bash
+# 1. 스크립트가 flock 의존인지 검사 (exit 0 = 의존, 1 = 비의존, 2 = 파일 없음)
+bash tools/rev-queue/flock-fallback.sh detect <script-path>
+
+# 2. 자동 fallback 실행 — 로컬 flock 있으면 직접 실행, 없으면 NCP ssh
+MOBRUJI_NCP_HOST=user@ncp-host \
+  bash tools/rev-queue/flock-fallback.sh exec <script-path> [args...]
+```
+
+동작:
+1. `command -v flock` → 가용 시 그대로 로컬 실행 (인자 forward + exit code 보존)
+2. flock 부재 + 스크립트가 flock 비의존 → 로컬 실행 (불필요 ssh 회피)
+3. flock 부재 + flock 의존 → `MOBRUJI_NCP_HOST` 로 ssh 실행 (`MOBRUJI_NCP_REPO_PATH` default `/home/mobruji/mobruji`)
+4. NCP host 미설정 시 graceful warning + 3가지 수동 우회 안내 (ssh 직접 / 환경변수 설정 / `brew install util-linux`) + exit 3
+
+환경변수:
+- `MOBRUJI_NCP_HOST=<user@host>` — ssh 대상. 미설정 시 fallback 비활성화
+- `MOBRUJI_NCP_REPO_PATH=<path>` — NCP 측 저장소 경로 (default `/home/mobruji/mobruji`)
+- `SSH_BIN=<path>` — ssh 명령 (default `ssh`, 테스트 mock 주입용)
+- `FLOCK_FALLBACK_FORCE_REMOTE=1` — 강제 NCP fallback (디버그/테스트용)
+
+rev sub-agent 권장 통합 (lock 의존 shell test 실행 시):
+```bash
+bash tools/rev-queue/flock-fallback.sh exec tests/lock-dependent-test.sh
+# → 환경에 맞춰 로컬 또는 NCP 자동 선택
+```
