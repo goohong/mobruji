@@ -68,6 +68,12 @@ CHOICE_PROMPTS_PATH: Final[Path] = Path.home() / ".mobruji" / "choice-prompts.js
 USER_MODE_PATH: Final[Path] = Path.home() / ".mobruji" / "user-mode.txt"
 USER_MODE_DEFAULT: Final[str] = "AUTO"
 USER_MODE_VALID: Final[tuple[str, ...]] = ("AUTO", "ASK")
+# spec: docs/features/directive-pushpin-registration.md
+# 📌 = directive 등록 후보 marker (bot 자동 부착 + 사용자 tap = 등록 trigger).
+# ✅ = directive 등록 완료 시각화.
+PIN_REACTION_EMOJI: Final[str] = "📌"
+PIN_REGISTERED_EMOJI: Final[str] = "✅"
+
 # Discord keycap number emoji → 0-based index (1️⃣ = 0, 🔟 = 9).
 # 1-9 = digit + VS16 + keycap (U+FE0F U+20E3). 🔟 = U+1F51F.
 NUMBER_KEYCAP_TO_INDEX: Final[dict[str, int]] = {
@@ -1087,6 +1093,79 @@ def write_user_mode(mode: str, path: Path = USER_MODE_PATH) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(normalized + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+async def _handle_pin_reaction(
+    client: discord.Client,
+    channel_id: int,
+    message_id: str,
+    user_id: int,
+) -> None:
+    """📌 reaction tap → directive_append.sh 호출 → 성공 시 ✅ 부착.
+
+    spec: docs/features/directive-pushpin-registration.md
+
+    fail-soft (graceful): fetch / subprocess / add_reaction 각 단계 모두 예외 격리 —
+    on_raw_reaction_add 흐름 차단 금지. 실패 시 warning 만 emit.
+    """
+    channel = client.get_channel(channel_id)
+    if channel is None:
+        logger.warning("📌 pin: channel %d 미발견 — skip", channel_id)
+        return
+    try:
+        message = await channel.fetch_message(int(message_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "📌 pin: fetch_message 실패 msg_id=%s exc=%r", message_id, exc
+        )
+        return
+
+    summary = (getattr(message, "content", "") or "").strip()[:80] or "(빈 본문)"
+
+    append_script = Path(__file__).resolve().parent / "directive_append.sh"
+    if not append_script.exists():
+        logger.warning(
+            "📌 pin: directive_append.sh 부재 — skip: %s", append_script
+        )
+        return
+    try:
+        result = subprocess.run(  # noqa: S603 — script path hardcoded sibling
+            ["bash", str(append_script), message_id, summary],
+            check=False,
+            timeout=10.0,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "📌 pin: directive_append.sh rc=%d stderr=%r",
+                result.returncode,
+                result.stderr[:200] if result.stderr else b"",
+            )
+            return
+    except subprocess.TimeoutExpired:
+        logger.warning("📌 pin: directive_append timeout (10s) msg_id=%s", message_id)
+        return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "📌 pin: directive_append 호출 실패 msg_id=%s exc=%r",
+            message_id,
+            exc,
+        )
+        return
+
+    logger.info(
+        "📌 pin registered: msg_id=%s user=%s summary=%r",
+        message_id,
+        user_id,
+        summary,
+    )
+
+    try:
+        await message.add_reaction(PIN_REGISTERED_EMOJI)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "📌 pin: ✅ 부착 실패 msg_id=%s exc=%r", message_id, exc
+        )
 
 
 def write_last_user_msg_id(message_id: str) -> None:
@@ -4651,19 +4730,15 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
         write_last_user_msg_id(message_id)
 
-        # #1071: directive 자동 분류 + jsonl 기록.
-        # 사용자 frustration "내가 지시한 거 왜 지시 forum에 추가 안해" 직접 fix.
-        # 메시지 텍스트를 regex 분류 후 ~/.mobruji/directive-detect.jsonl 에 append.
-        # helper turn-start wrapper / watchdog 이 본 jsonl 로 누락 탐지.
-        # 실패는 warning 만 — forwarding 흐름 차단 금지.
+        # #1071 / PR #1140: directive classify + jsonl 로그 (자동 등록 path 폐지).
         #
-        # PR #1140 (event-driven 전환): directive 분류 (`class in DIRECTIVE_CLASSES`)
-        # 시점에 `directive_append.sh` 도 호출 — `directive-board.jsonl` 에 entry
-        # 추가 + Discord forum thread 생성. polling sync_loop 폐기 대체. 본 호출이
-        # bot.py = dumb conduit 의 핵심 — 멱등하므로 helper / nmae 의 manual 호출과
-        # 충돌 없음.
-        detect_class: str | None = None
-        detect_summary: str = ""
+        # 2026-05-28 정정 (spec: docs/features/directive-pushpin-registration.md):
+        # classify 결과의 `directive_append.sh` **자동 호출 path 폐지**.
+        # 사유: 한국어 regex 한계로 false-positive 다발 ("잔존 작업들 어떻게 정리할래?"
+        # → directive-mixed → 자동 등록 같은 의도 misalignment). 등록은 사용자가
+        # 📌 reaction tap 으로만 명시 trigger — `on_raw_reaction_add` 의 📌 분기 참조.
+        # classify 자체는 유지 — directive-detect.jsonl 로그가 회고 / 통계 / 미래 LLM
+        # 추천에 활용 가능. 자동 등록만 제거.
         try:
             detect_entry = make_detect_entry(
                 message_id=message_id,
@@ -4673,60 +4748,17 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
             append_detect_entry(DIRECTIVE_DETECT_PATH_DEFAULT, detect_entry)
             if detect_entry["class"] in DIRECTIVE_CLASSES:
-                detect_class = str(detect_entry["class"])
-                detect_summary = str(detect_entry["summary"])
                 logger.info(
-                    "directive-detect classify: id=%s class=%s summary=%r",
+                    "directive-detect classify (log only — auto-register 폐지 2026-05-28): "
+                    "id=%s class=%s summary=%r",
                     message_id,
-                    detect_class,
-                    detect_summary,
+                    detect_entry["class"],
+                    detect_entry["summary"],
                 )
         except OSError as exc:
             logger.warning(
                 "directive-detect append 실패: id=%s exc=%r", message_id, exc
             )
-
-        # PR #1140: directive 분류 시점에 directive_append.sh 호출 (event-driven).
-        # 멱등 — 동일 msg_id 재호출 시 no-op (script 안 grep 가드).
-        # subprocess timeout 5s — Discord REST API 응답 + JSONL append 충분.
-        # 실패는 warning 만 — on_message forwarding 흐름 차단 금지.
-        if detect_class is not None:
-            try:
-                append_script = (
-                    Path(__file__).resolve().parent / "directive_append.sh"
-                )
-                if append_script.exists():
-                    subprocess.run(  # noqa: S603 — script path hardcoded sibling
-                        [
-                            "bash",
-                            str(append_script),
-                            message_id,
-                            detect_summary or original_body[:80],
-                        ],
-                        check=False,
-                        timeout=5.0,
-                        capture_output=True,
-                    )
-                    logger.info(
-                        "directive_append invoked: id=%s class=%s",
-                        message_id,
-                        detect_class,
-                    )
-                else:
-                    logger.warning(
-                        "directive_append.sh 부재 — event-driven 호출 skip: %s",
-                        append_script,
-                    )
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    "directive_append timeout (5s): id=%s", message_id
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "directive_append 호출 실패: id=%s exc=%r",
-                    message_id,
-                    exc,
-                )
 
         # bot.py 1초 generic auto-ack (#880) — helper 자체 ack 까지 bash chain
         # latency 5+초 깜깜이 해소.
@@ -4800,6 +4832,25 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     exc_info=True,
                 )
 
+        # 📌 directive 등록 후보 marker (spec: directive-pushpin-registration.md).
+        # 매 사용자 메시지에 📌 자동 부착 (passive). 사용자가 추적 원하는 메시지에서
+        # 📌 tap 시 `on_raw_reaction_add` 의 📌 분기가 directive_append.sh 호출.
+        # emoji picker 부담 0 + retro-register 가능 (시간 지난 메시지도 박을 수 있음).
+        try:
+            await message.add_reaction(PIN_REACTION_EMOJI)
+            logger.info(
+                "📌 pin marker OK: message_id=%s emoji=%s",
+                message_id,
+                PIN_REACTION_EMOJI,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "📌 pin marker 부착 실패: message_id=%s exc=%r",
+                message_id,
+                exc,
+                exc_info=True,
+            )
+
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
         # #909 F-3: claim 으로 이미 마킹됐기 때문에 여기서 실패해도 unclaim 하지
@@ -4834,6 +4885,25 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             return
 
         emoji_str = str(raw_payload.emoji)
+
+        # 📌 directive 등록 분기 (spec: directive-pushpin-registration.md).
+        # 사용자가 자기 / helper 메시지에 📌 tap → directive_append.sh 호출 → forum 등록 → ✅ 부착.
+        # bot 이 미리 부착해 둔 📌 위에 사용자가 self-react = 자연 신호.
+        if emoji_str == PIN_REACTION_EMOJI:
+            target_msg_id = str(raw_payload.message_id)
+            pin_dedup_key = f"pin:{target_msg_id}"
+            if ledger is not None and not ledger.claim(pin_dedup_key):
+                logger.info("📌 pin dedup hit: msg_id=%s", target_msg_id)
+                return
+            await _handle_pin_reaction(
+                client=client,
+                channel_id=raw_payload.channel_id,
+                message_id=target_msg_id,
+                user_id=raw_payload.user_id,
+            )
+            return
+
+        # keycap (1️⃣–🔟) 선택지 응답 분기.
         choice_idx = parse_choice_emoji(emoji_str)
         if choice_idx is None:
             return
