@@ -5249,6 +5249,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 exc_info=True,
             )
 
+        # ⏹ control emoji 자동 부착 (2026-05-29).
+        # 사용자 정정: "stop button은 내가 보낸 메세지에 붙는게 맞는거같은데".
+        # ⏹ 의 의미 = 이 명령으로 시작된 helper 작업 중단 → 사용자 자기 메시지에 부착.
+        # tap 시 on_raw_reaction_add 의 ⏹ branch 가 helper claude 에 Ctrl-C send.
+        # (❓ 는 helper 답 메시지에 부착 — discord-reply.sh 가 처리.)
+        try:
+            await message.add_reaction(CONTROL_STOP_EMOJI)
+            logger.info(
+                "⏹ control marker OK: message_id=%s emoji=%s",
+                message_id,
+                CONTROL_STOP_EMOJI,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "⏹ control marker 부착 실패: message_id=%s exc=%r",
+                message_id,
+                exc,
+                exc_info=True,
+            )
+
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
         # #909 F-3: claim 으로 이미 마킹됐기 때문에 여기서 실패해도 unclaim 하지
