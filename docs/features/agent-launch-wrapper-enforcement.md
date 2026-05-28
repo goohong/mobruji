@@ -83,13 +83,13 @@ last_reviewed: 2026-05-26
 
 - 사용자 정정 인용 (2026-05-26): "사이클 launch 가 #모부르지 채널에서도 한 줄
   보였으면 좋겠다. 디테일은 per-cycle channel 이지만 가시화는 사용자 메인 채널에."
-- 본 룰은 §11-8 (`[[feedback-nmae-status-channel]]`) "#모부르지 leak 금지" 와 충돌
+- 본 룰은 `actors/nmae.md` §11-6 (`[[feedback-nmae-status-channel]]`) "#모부르지 leak 금지" 와 충돌
   같지만 차이가 있다 — leak 금지는 **디테일** 디테일, 가시화는 **한 줄 요약**.
   본 spec 은 다음 규칙으로 분리한다:
   - per-cycle channel: launch 본문 (title / task / thread 생성 / milestone stream)
   - #모부르지 채널: **하루 1-2 회 본진 활동 요약** 만 (cron digest 가 cover)
   - 또는 nmae 가 wrapper 호출 직후 **명시적으로 사용자에게 보고할 일** 이 있을 때
-    "<ws> 사이클 — <한 줄>" 만 1회 push (§11-9 예외 2 와 일치)
+    "<ws> 사이클 — <한 줄>" 만 1회 push (`actors/nmae.md` §11-6 예외 2 와 일치)
 - bot.py 가 wrapper log mismatch 감지 시 #모부르지 채널에 warning push 하는 것이
   본 레이어의 핵심.
 
@@ -97,14 +97,14 @@ last_reviewed: 2026-05-26
 
 §6 참조.
 
-## 3) CLAUDE.md 연결 (§11-2 / §11-6)
+## 3) `actors/nmae.md` 연결 (§11-2 / §11-5)
 
 - §11-2 "watchdog inject 대응 의무 절차" 의 단계 2 행이 이미 wrapper 를 "권장" 으로
   명시한다. 본 spec 은 "권장" → **"의무"** 로 격상하는 근거를 제공한다.
-- §11-6 "Sub-agent launch / 통지 / Discord 가시화" 의 "launch 까먹기 절대 금지" 와
+- §11-5 "launch / 통지 / autonomous wake" 의 "launch 까먹기 절대 금지" 와
   "launch 직후 즉시 discord-reply.sh push" 룰을 wrapper 가 한 번에 강제한다 —
   학습 의존 영역을 wrapper 가 흡수.
-- CLAUDE.md 본문 갱신은 별도 PR 로 처리 (본 spec 머지 후 wrapper 의무 격상 PR).
+- `actors/nmae.md` 본문 갱신은 별도 PR 로 처리 (본 spec 머지 후 wrapper 의무 격상 PR).
 
 ## 4) 사용자 정정 인용
 

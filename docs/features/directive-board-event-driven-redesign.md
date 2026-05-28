@@ -176,6 +176,6 @@ PR 진행 순서: 1 (필수 — 폐기 먼저) → 2 (신설) → 3 (보조 dete
 - PR #1041 — directive board / update-status mode 도입
 - PR #1122 — `directive_board_sync` forum thread route 자동 라우팅
 - `docs/features/directive-jsonl-mismatch-sweep.md` — 1회성 sweep (별도 PR)
-- CLAUDE.md §11-11 directive-board update flow
+- `docs/ai-harness/actors/nmae.md` §11-7 directive-board update flow
 - 메모리 `nmae/feedback_directive_board_update_flow.md`
 - 메모리 `nmae/feedback_forum_channel_enforce.md`
