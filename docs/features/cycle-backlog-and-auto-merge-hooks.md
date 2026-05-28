@@ -1,7 +1,7 @@
 ---
 feature: cycle-backlog-and-auto-merge-hooks
 slug: cycle-backlog-and-auto-merge-hooks
-status: implemented
+status: shipped
 owner: @goohong
 scope: infra
 related_issues: []
