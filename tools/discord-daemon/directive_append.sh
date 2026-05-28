@@ -98,6 +98,8 @@ build_template_body() {
 
 🔖 관련 *(없음 — 진행되며 helper 가 추가)*
 
+🤖 helper 정제 대기 (nmae 분배 보류 — race 가드)
+
 ---
 _갱신: ${_ts_kst}_
 EOF
@@ -148,6 +150,7 @@ ENTRY_JSON=$(jq -nc \
     ts: $ts,
     summary: $summary,
     status: "대기",
+    polished: false,
     message_id: $msg_id,
     last_updated_kst: $last_updated,
     source_queue_msg_id: $src_msg

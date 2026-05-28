@@ -327,6 +327,31 @@ nmae 가 `directive_status.sh in_progress <id> plan <reason>` 호출 → thread 
 
 **상세 룰**: `docs/ai-harness/actors/sub-agent.md §2-helper` 의 `directive 본문 정제 task` 섹션 SoT.
 
+#### polished flag — race 가드 (사용자 정정 2026-05-28)
+
+사용자 정정: "지금 처럼 아직 내용이 채워지기 이전에 엔마가 백로그 들여다보면 문제가 생기니까, 내용 있을 때만 물어가는 작업도 필요하겠다".
+
+**문제**: 사용자 📌 tap → directive 등록 (raw 본문, polished=false) → nmae 가 backlog-scan 으로 들고 가 분배 시도 → raw 본문 보고 잘못된 cycle 위임 / 정제 미완 entry 와 race.
+
+**해결**: directive entry 의 `polished` boolean field + nmae picker 가드.
+
+- **directive entry schema 확장**: `directive_append.sh` 가 새 entry 등록 시 `polished: false` 박음.
+- **helper sub-agent 정제 완료 의무**: `bash tools/directive-board/mark-polished.sh <id>` 호출 → `polished=true` + `last_updated_kst` 갱신.
+- **nmae picker 가드**: `backlog-scan.sh` default filter = `select((.polished // false) == true)`. polished=false 무시. `--include-unpolished` 옵션으로 디버깅 / backfill 시 우회.
+- **사용자 가시화**: directive thread 본문 template footer 에 `🤖 helper 정제 대기 (nmae 분배 보류 — race 가드)` line. polish 완료 후 helper sub-agent 가 `--forum-edit` 으로 line 제거.
+
+**race 가드 흐름**:
+```text
+1. bot.py 📌 등록 → polished=false + raw template + "🤖 정제 대기" footer
+2. helper-queue polish task append (pending)
+3. helper 본체 turn-start → polish 1+ 시 helper sub-agent batch launch
+4. helper sub-agent → 정제 + forum-edit + forum-retag + mark-polished.sh
+5. mark-polished.sh → jsonl polished=true 박음 (race 가드 해제)
+6. nmae backlog-scan → polished=true 만 list → 정제 완료된 entry 만 분배 결정
+```
+
+기존 entry (polished field 부재) 처리: `select((.polished // false) == true)` = polished field 없으면 false 취급 → 무시. backfill 필요 시 별도 script `backfill-polish-tasks.sh` (follow-up) 가 모든 기존 entry 의 helper-queue polish task 재등록.
+
 #### plan 분석 모드 + 🟣 결정 대기 흐름 (사용자 결정 2026-05-28)
 
 **사용자 정정**: "plan 에게 문제 분석을 맡긴 케이스이니까 그 포럼에 plan 이 생각하는 해결책까지만 제시하고 작업 진행하지는 않는게 좋겠다. A안 B안 C안이 있는데 그중 ~를 추천합니다. 내가 거기다 ~로 해라고 댓글달면 다시 지시 포럼에 추가".

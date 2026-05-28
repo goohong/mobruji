@@ -236,6 +236,8 @@ pending list (helper-queue.jsonl 의 status=pending + type=directive_polish):
 
 **helper 본체가 sub-agent 보고 받은 후 helper-queue 의 처리 완료 task status: pending → done atomic update**.
 
+**helper sub-agent 의 정제 완료 의무**: 각 directive 정제 후 `bash tools/directive-board/mark-polished.sh <directive_id>` 호출 — jsonl 의 `polished=true` 박힘. nmae 가 `backlog-scan.sh` default filter (polished=true 만) 통해 정제 완료된 entry 만 분배 → race 가드. 누락 시 nmae 가 영원히 무시 (default filter 가 polished=false 차단).
+
 batch 효과: 1 launch 가 N task 처리 — launch overhead 분담. N=1 도 정상 동작 (overhead 그대로지만 흐름 일관). 한 turn 처리 한도 = max 5 (5+ 이면 다음 turn 에 남은 것 처리).
 
 ### 2-기획·이슈 등록
