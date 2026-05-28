@@ -374,6 +374,118 @@ rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름**
 
 > **새 endpoint 추가 시**: backend PR에서 본 §5-7 을 같은 PR로 갱신한다. 갱신 없는 endpoint는 rev sub-agent가 grep을 다시 하게 되어 wall-clock 손실 + 미QA 위험.
 
+### 5-9) 단계 별 보고 템플릿 + Discord push 차등 (2026-05-28)
+
+**사용자 정정 (2026-05-28)**: "rev 가 진행한 작업이 정확히 어떤 건지(코드 리뷰, QA, 2차 E2E 등) 잘 모르겠어. 뒤에서 동작하다보니. 작업 흐름이나 보고를 체계화하면 좋을 것 같은데". 단계 별 통일된 보고 format + Discord 가시화 차등 도입.
+
+[[rev-e2e-3-stages]] §3 의 3 단계 작업이 사용자에게 가시화 안 됨. 본 절 = 사용자 가시화 강화.
+
+#### 5-9-1) 단계 1 — PR 머지 전 (코드 리뷰)
+
+**PR 코멘트 템플릿** (§5-6 의 단순 1줄 format 보강 / 검색 패턴 `rev단계1:` 추가):
+
+```markdown
+## rev 단계 1 — 코드 리뷰
+
+### 검증 항목
+- [x] 코드 변경 범위 / 의도 일치
+- [x] 비기능 매트릭스 (보안 / 성능 / 회귀 risk)
+- [x] DDD 계층 침범 / 도메인 일관성
+- [x] 테스트 커버 (성공 + 실패 케이스)
+- [x] CLAUDE.md / spec 룰 준수
+
+### 결과
+🟢 PASS — {summary 한 줄}
+
+### 발견
+- (없음 또는) {발견 + 후속 제안 / issue 등록 권장 list}
+
+rev단계1: 🟢 PASS · {PR title 30자}
+```
+
+**Discord push (단계 1)**: cycle forum 채널 (`REV_FORUM_ID`) 의 round thread — `✅ reviewed:claude #N — 코드 리뷰 통과, 머지 후보` 1줄. 사용자 가시화 가치 낮음 — cycle forum 만.
+
+#### 5-9-2) 단계 2 — develop 머지 후 (회귀 검증)
+
+**PR 코멘트 템플릿**:
+
+```markdown
+## rev 단계 2 — develop 회귀 검증
+
+### 실행 환경
+{local 3-tier / dev 서버 / staging — §5-4 결정}
+
+### 실행 시나리오
+- {시나리오 1}: {결과}
+- {시나리오 2}: {결과}
+
+### 결과
+🟢 PASS — {summary}
+
+### 측정 (해당 시)
+- p95 latency: {ms}
+- 에러율: {%}
+
+rev단계2: 🟢 PASS · #N · dev OK
+```
+
+**Discord push (단계 2)**: **DIGEST 채널 (`DIGEST_CHANNEL_ID`)** 에 1줄 push — `✅ rev단계2 #N — develop 회귀 없음 (dev smoke OK)`. 사용자가 "방금 머지된 게 안전한지" 즉시 알 수 있게.
+
+#### 5-9-3) 단계 3 — release 후 (production smoke)
+
+**PR 코멘트 템플릿**:
+
+```markdown
+## rev 단계 3 — production smoke
+
+### 실행
+- production URL: {url}
+- 시나리오: {S1/S2/...}
+
+### 결과
+🟢 PASS — {summary}
+
+rev단계3: 🟢 PASS · #N · prod OK
+```
+
+**Discord push (단계 3)**: **DIGEST 채널** + release 직후라 사용자 attention 가치 최대 — `✅ rev단계3 #N — production 안정`. DIGEST 의무.
+
+#### 5-9-4) ❌ 발견 시 가시화 (단계 무관)
+
+🔴 BLOCK 또는 e2e FAIL 발견 시:
+1. **DIGEST 채널** 에 ❌ push (예: `🔴 rev단계{N} #M — {요약} · 사고 가능`)
+2. **사용자 마지막 메시지에 reply 형태** 로 동일 본문 push (`discord-reply.sh` bare body mode — `LAST_USER_MSG_ID` 기반 자동 reply). 사용자 attention 즉시.
+3. nmae 에 fix 사이클 launch 요청 (rev → maestro hotline).
+
+#### 5-9-5) round 종료 wrapper — `tools/rev-queue/round-summary.sh`
+
+**rev sub-agent 매 round 종료 시점에 호출 의무**:
+
+```bash
+bash tools/rev-queue/round-summary.sh <round_id>
+```
+
+wrapper 가 묶는 동작 (학습 의존 ↓ 강제 메커니즘 — [[feedback-evidence-based-root-cause]]):
+1. `rev-queue.jsonl` scan → 이번 round 의 단계 1/2/3 별 PASS / HOLD / FAIL count 산출
+2. round 내 등록된 후속 issue 번호 list 추출
+3. 단계 1 = cycle forum (`REV_FORUM_ID`), 단계 2/3 = DIGEST 채널 (`DIGEST_CHANNEL_ID`) push 분기 (§5-9-1/2/3)
+4. ❌ 있으면 사용자 메시지 reply 추가 push (§5-9-4)
+5. 보고 format 통일 — script 가 일관 출력 (사용자가 매 round 같은 format)
+
+**출력 format 예 (DIGEST 채널)**:
+
+```text
+rev round 12 종료
+─────────────────
+단계 1 (PR 머지 전): 3 PASS / 1 HOLD #1203
+단계 2 (develop 후): 5 PASS / 1 ❌ #1196 (issue #1234 등록)
+단계 3 (release 후): 2 PASS
+
+후속 issue: #1234
+```
+
+**누락 감지**: rev round 종료 후 wrapper 미호출 시 nmae 의 다음 backlog scan 에서 jsonl 의 round 종료 ts 없음 발견 → 가시화 push. (보강 강제 메커니즘은 follow-up — 단계 1 wrapper script 우선.)
+
 ### 5-8) release gate 연계
 
 `develop → main` release 머지 전 rev 세션이 다음을 수행:

@@ -150,6 +150,12 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   - 단계 3 (release 후 production) — `rev-prod-pass` / `regression:prod` 라벨
   - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-3-stages.md` SoT**
 - **감사 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
+- **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 단계 1 = cycle forum push / 단계 2,3 = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴).
+- **round 종료 wrapper 호출 의무** (강제 메커니즘): rev 매 round 종료 직전 다음 명령 호출. 누락 = 사용자 가시화 X.
+  ```bash
+  bash tools/rev-queue/round-summary.sh <round_id>
+  ```
+  wrapper 가 jsonl scan + 단계 별 push 분기 + ❌ 사용자 reply 자동. 상세: `rev-qa-protocol.md §5-9-5`.
 - **flock 의존 shell test 실행 시 wrapper 의무** (PR #1194, 이슈 #1192): macOS rev 환경에 `flock` 명령 부재로 lock 의존 shell test 가 false-fail 하는 사고 (rev #1175 보고: 14건 false-fail) 가 박제됨. lock 의존 shell test 는 **반드시 `tools/rev-queue/flock-fallback.sh exec` wrapper 통해 실행** — 로컬 flock 가용 시 직접 실행, 부재 시 자동 NCP ssh fallback (`MOBRUJI_NCP_HOST` 설정 시) 또는 graceful warning + exit 3. 직접 호출 금지. 상세: `tools/rev-queue/README.md §flock-fallback.sh`.
 
   ```bash
