@@ -17,6 +17,9 @@ bash tools/rev-queue/rev-queue.sh stage3   # 최근 release PR (rev-prod-pass �
 bash tools/rev-queue/rev-queue.sh all      # 세 stage 모두
 ```
 
+> rev sub-agent 가 lock 의존 shell test 를 실행할 때는 `flock-fallback.sh exec` wrapper 의무.
+> 직접 실행은 macOS rev 환경에서 false-fail (이슈 #1192, PR #1194). 상세: [§flock-fallback.sh](#flock-fallbacksh--macos-rev-false-fail-자동-우회-이슈-1192).
+
 환경변수:
 - `REPO=<owner/name>` — default `goohong/mobruji`
 - `GH_BIN=<path>` — default `gh` (테스트에서 mock 주입용)

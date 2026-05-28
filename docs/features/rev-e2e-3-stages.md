@@ -5,8 +5,8 @@ status: implementing
 owner: @mobruji-maestro
 scope: infra
 related_issues: [882, 851]
-related_prs: [889, 932, 953, 958, 1009]
-last_reviewed: 2026-05-27
+related_prs: [889, 932, 953, 958, 1009, 1193]
+last_reviewed: 2026-05-28
 ---
 
 # rev 3단계 e2e 자율 QA
@@ -32,6 +32,10 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 - e2e 가능 판정 (코드 diff 검사):
   - `web/**` 또는 `backend/**` 코드 변경 포함 → **e2e 가능**
   - `docs/**` / `*.md` / `.github/**` / spec / ADR / `tools/` 만 → **e2e 불가능** (no-op pass 후보)
+- **scope:web 추가 trigger** (PR #1193 spec `docs/features/web-e2e-playwright.md` 도입 후):
+  - `web/playwright.config.ts` **존재** + scope:web 코드 변경 → **e2e 의무** (Playwright headless 실행)
+  - `web/playwright.config.ts` **부재** → 단계 1 **no-op pass** (e2e 인프라 미도입 사유 명시). impl PR 1 (`docs/features/web-e2e-playwright.md §10 후속 PR 1`) 머지 시점부터 의무로 전환.
+  - 본 trigger 는 PR #1193 머지 시점 (2026-05-28) 부터 본 spec 안 명문화. impl PR 1 머지 시 본 항목을 "의무" 단일 라인으로 simplify 갱신 (후속 docs PR).
 - **e2e 가능** PR:
   - scope:web → Playwright headless 또는 NCP dev 직접 호출
   - scope:backend → RestAssured E2E 또는 curl + 응답 검증
