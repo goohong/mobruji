@@ -15,7 +15,7 @@
 | **Vol 1 · Governance** | 브랜치/PR/커밋/품질게이트/보안/Spec 프로세스 | `01-harness-spec`, `02-agent-workflow`, `03-quality-gates`, `04-security-policy` |
 | **Vol 2 · Architect** | 도메인 모델/유비쿼터스 랭귀지/ERD/설계 결정 | `06-domain-model`, `docs/decisions/*` (ADR) |
 | **Vol 3 · Standards** | 코드 컨벤션/테스트/관측성/프롬프트 운영 | `08-code-conventions`, `07-testing-guide`, `10-observability`, `05-prompt-ops` |
-| **Vol 4 · Ops Runbook** | 세션/오케스트레이션/메모리/Discord/룰 강제 | `11-multi-session-runbook`, `12-sub-agent-prompt-template`, `13-memory-promote-tracking`, `14-discord-notify-setup`, `15-discord-message-templates`, `16-memory-vs-code-enforcement`, `docs/helper-rules.md` |
+| **Vol 4 · Ops Runbook** | 세션/오케스트레이션/메모리/Discord/룰 강제 | `11-multi-session-runbook`, `12-sub-agent-prompt-template`, `13-memory-and-enforcement`, `14-discord-ops`, `actors/nmae-runbook`, `docs/helper-rules.md` |
 
 ## 2. 에이전트별 주입 맵 (Injection Map)
 

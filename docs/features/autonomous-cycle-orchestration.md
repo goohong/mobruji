@@ -257,7 +257,7 @@ helper 는 다음만 직접 수정:
 - `docs/features/event-action-mapping.md` — 본 spec 의 cycle-status set-active / set-idle / PR 머지 trigger 가 ADR-0019 동반 spec 의 event 3 / 4 / 5 와 1:1 매핑.
 - `docs/features/work-cycle-refactor.md` — 본 spec 의 메모리 룰 reduce 후보 (§5-2 메모리 폐기 후보 10건) 가 ADR-0019 마이그 단계 2 의 대상.
 - `docs/features/nmae-cycle-watchdog.md` — 본 spec §5-5 stale verification 의 코드 강제 구현체.
-- `docs/ai-harness/16-memory-vs-code-enforcement.md` — 본 spec 의 "어떻게" 결정 트리 (메모리 vs 코드) 의 가이드라인.
+- `docs/ai-harness/13-memory-and-enforcement.md` — 본 spec 의 "어떻게" 결정 트리 (메모리 vs 코드) 의 가이드라인.
 
 ## 9) 결정 로그
 - 2026-05-23: 초안 작성 (status=implementing — 관련 PR 11건 이미 머지된 상태). 4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary 4 축 정형화. release cut 자동화는 D12 사용자 결정 대기로 §7 오픈. 1 turn 1 launch + helper boundary 자동 enforce 도 후속 결정.

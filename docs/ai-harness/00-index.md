@@ -21,10 +21,8 @@
 - `docs/ai-harness/10-observability.md`: 관측성 (Actuator + Micrometer) — 현재 backend endpoint만 노출, 시각화는 추후
 - `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev) 셋업·운영 런북
 - `docs/ai-harness/12-sub-agent-prompt-template.md`: maestro이 sub-agent launch 시 참조하는 공통 룰 + 역할별 추가 룰
-- `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스
-- `docs/ai-harness/14-discord-notify-setup.md`: Discord webhook/bot 셋업 및 토큰 관리
-- `docs/ai-harness/15-discord-message-templates.md`: Discord 메시지 템플릿 + 양방향 명령 syntax
-- `docs/ai-harness/16-memory-vs-code-enforcement.md`: 룰 학습 의존 ↓ — "왜" 는 메모리 / "어떻게" 는 코드 (hook / wrapper / workflow / test) 책임 분리 + 결정 트리 + 패턴 카탈로그
+- `docs/ai-harness/13-memory-and-enforcement.md`: 메모리↔코드 책임 분리 ("왜"=메모리 / "어떻게"=코드: hook/wrapper/workflow/test) + 결정 트리 + 패턴 카탈로그 + promote 트래킹 (구 13+16 통합)
+- `docs/ai-harness/14-discord-ops.md`: Discord 셋업(webhook/bot/토큰) + 메시지 템플릿 + 양방향 명령 syntax + Forum (구 14+15 통합)
 
 > `09-notion-api-spec.md`는 추후 Notion API 명세 DB 연동 시 추가.
 

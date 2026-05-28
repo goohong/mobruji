@@ -13,7 +13,7 @@
 | **be / fe / rev / plan** (sub-agent) | `docs/ai-harness/12-sub-agent-prompt-template.md` (§1 공통 + §2 자기 역할) |
 | 라우팅/주입 맵 전반 | `docs/ai-harness/00-MANIFEST.md` |
 
-- 강제는 **prose 가 아니라 코드** — bot.py watchdog loop + `tools/agent-launch-wrapper.sh` / `cycle-status/update.sh` / `discord-daemon/helper-turn-start.sh` wrapper (`docs/ai-harness/16-memory-vs-code-enforcement.md` 철학).
+- 강제는 **prose 가 아니라 코드** — bot.py watchdog loop + `tools/agent-launch-wrapper.sh` / `cycle-status/update.sh` / `discord-daemon/helper-turn-start.sh` wrapper (`docs/ai-harness/13-memory-and-enforcement.md` 철학).
 - 인시던트 "왜"(사고 박제·정정 인용)는 **메모리** (`memory/<actor>/feedback_*.md`) 가 보관. 본 파일은 "무엇을" 만.
 
 ## 1) 프로젝트 한 줄
@@ -39,9 +39,8 @@
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 런북
 - `docs/ai-harness/12-sub-agent-prompt-template.md` — **sub-agent launch single SoT (§13 위임)**
 - `docs/helper-rules.md` — **helper 본체 비협상 룰 single SoT (§12 위임, 2026-05-26 #1085)**
-- `docs/ai-harness/13-memory-promote-tracking.md` — 메모리 promote/tracking
-- `docs/ai-harness/14-discord-notify-setup.md` — Discord notify 셋업
-- `docs/ai-harness/15-discord-message-templates.md` — Discord 메시지 템플릿
+- `docs/ai-harness/13-memory-and-enforcement.md` — 메모리 promote/tracking
+- `docs/ai-harness/14-discord-ops.md` — Discord 셋업 + 메시지/명령/Forum (구 14+15)
 - `docs/decisions/` — ADR
 - `docs/features/` — Feature Spec
 - `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션

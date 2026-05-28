@@ -31,7 +31,7 @@ deciders: [@goohong]
 - 자율 사이클: 사용자 부재 시에도 maestro가 완료 통지 → 다음 사이클 launch 루프를 진행, release 머지만 사용자 확인.
 
 ### 부정적
-- maestro 세션이 닫히면 background sub-agent도 모두 종료 → 사이클 정지. Discord webhook 모니터링이 부분 보완 (`docs/ai-harness/14-discord-notify-setup.md`).
+- maestro 세션이 닫히면 background sub-agent도 모두 종료 → 사이클 정지. Discord webhook 모니터링이 부분 보완 (`docs/ai-harness/14-discord-ops.md`).
 - 4 워크트리 메모리 race 위험 (`MEMORY.md` symlink 공유 시). §11 §1-2 회피책 적용 (1인이 한 번에 1세션과만 대화).
 - maestro 자체가 멀티태스킹 부하 (turn당 1~2 도구 호출 단위로 쪼개야 통지 처리 지연 최소화).
 - sub-agent launch 누락 시 비용이 큼 (사용자 명시 강조: "절대로", `feedback-sub-agent-launch-mandatory`).

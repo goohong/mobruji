@@ -16,7 +16,7 @@ last_reviewed: 2026-05-24
 - helper 또는 nmae 가 `/clear` 또는 세션 종료 시점에 **4 액션을 자동 수행**하는 코드 hook 을 신설한다.
 - 4 액션 = (1) 4-way 문서화 일치 체크 / (2) cycle-status.json sanity / (3) directive forum 상태 갱신 / (4) 핸드오프 메모리 자동 작성.
 - 사용자 2026-05-24 강력 inject: "/clear 직전 컨텍스트 lost 자체가 문제. /clear 직전 메모리 핸드오프 + cycle-status sanity + directive forum 상태 갱신 의무 강제 - 코드 hook 으로".
-- §16-memory-vs-code-enforcement 패턴 적용: 룰의 **"왜"** 는 메모리 ([[feedback-session-close-doc-check]] + [[feedback-keep-promises]]) 가 담고, **"어떻게"** 는 본 spec 이 정의하는 코드 (script + bot.py 함수 + wrapper integration) 가 강제한다.
+- §13-memory-and-enforcement 패턴 적용: 룰의 **"왜"** 는 메모리 ([[feedback-session-close-doc-check]] + [[feedback-keep-promises]]) 가 담고, **"어떻게"** 는 본 spec 이 정의하는 코드 (script + bot.py 함수 + wrapper integration) 가 강제한다.
 
 ### 1-1) 트리거 사고
 
@@ -321,7 +321,7 @@ metadata:
 ## 10) 관련 문서
 
 - `CLAUDE.md §15` — 세션 종료 전 문서화 일치 체크 (룰 본체)
-- `docs/ai-harness/16-memory-vs-code-enforcement.md` — 메모리 vs 코드 분리 원칙
+- `docs/ai-harness/13-memory-and-enforcement.md` — 메모리 vs 코드 분리 원칙
 - `docs/features/context-auto-clear.md` — context 95% 자율 정리 (본 hook 의 트리거)
 - `docs/features/nmae-cycle-watchdog.md` — cycle-status.json sanity 검증 (액션 2 의존)
 - `tools/cycle-status/README.md` — `validate.sh` 헬퍼

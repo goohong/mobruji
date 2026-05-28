@@ -99,7 +99,7 @@ maestro가 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스
 
 ### 0-6-1) maestro 닫혀있을 때 모바일 모니터링
 
-maestro Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
+maestro Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-ops.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
 
 ### 0-6-2) 사이클 트레일 push 룰 (maestro 의무)
 

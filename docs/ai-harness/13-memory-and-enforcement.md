@@ -1,4 +1,4 @@
-# 16. 메모리 vs 코드 책임 분리 (룰 학습 의존 ↓)
+# Memory ↔ Code: 책임 분리 + Promote 트래킹 (구 13+16 통합)
 
 > 룰의 **"왜"** 는 메모리 (`~/.claude/projects/.../memory/`) + CLAUDE.md 가 담고, **"어떻게"** 는 코드 (hook / wrapper script / test) 가 강제한다.
 > 본 문서는 mobruji multi-agent 운영에서 학습 의존 룰이 반복 위반되는 사고 (#1008 / #1014 / #1015 / #1055 등) 후속으로 박제된 분리 원칙을 정의한다.
@@ -255,3 +255,13 @@
 ## 8) 변경 이력
 
 - 2026-05-24 — 최초 작성. #1008 wrapper / #1014 helper-turn-start / #1015 sub-agent no-wait / #1021 thread file passthrough / #1043 nmae manual status push 사고들 후속으로 박제. 결정 트리 + 패턴 카탈로그 6종.
+
+
+## 9) 메모리 → 코드 promote 운영 룰 (구 13 흡수, 2026-05-28)
+
+> 구 `13-memory-promote-tracking.md` 통합. 반복 적용 메모리 룰을 코드(런북/CLAUDE.md/ADR/spec)로 promote 하는 규율. plan-22 시점 promote 매트릭스(구 13 §1)는 stale 이라 git 이력으로만 보존하고, 본 절은 enduring 룰만 남긴다.
+
+- **메모리 수정 채널 단일화**: race 회피 — nmae(사용자 직접 작성 채널 보유)만 메모리 본문 갱신. plan/sub-agent 는 읽기만.
+- **promote 완료 표식**: 메모리에 "코드 promote 완료" 문구가 있으면 코드가 SoT, 메모리는 짧은 포인터만 유지.
+- **새 반복 룰**: §3 패턴 카탈로그 + §4 결정 트리에 따라 코드(hook/wrapper/workflow/test)로 강제하고 "왜"만 메모리에 남긴다.
+- **actor 별 메모리 디렉토리**: `memory/<actor>/` (`common/nmae/helper/subagent/rev/workflow`).

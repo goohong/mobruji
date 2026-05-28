@@ -193,4 +193,4 @@ GHA summary 출력 (metric 표 + level + reasons)
 - `docs/features/adr-0023-suboption-analysis.md` — sub-옵션 A1/A2/A3 비교 (PR #1159)
 - `docs/features/release-cadence-v0.4.0.md` — release cadence 운영 룰
 - `docs/features/nmae-cycle-watchdog.md` — bot.py watchdog 패턴 (graceful skip / Discord push 본문 형식 참고)
-- `docs/ai-harness/14-discord-notify-setup.md` — webhook secret 셋업
+- `docs/ai-harness/14-discord-ops.md` — webhook secret 셋업
