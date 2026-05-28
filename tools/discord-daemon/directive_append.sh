@@ -6,13 +6,17 @@
 # spec: docs/features/directive-board-event-driven-redesign.md §3 (a)
 #
 # 사용:
-#   directive_append.sh <msg_id> "<title>" [pr_url] [body]
+#   directive_append.sh <msg_id> "<title>" [pr_url] [body] [user_id]
 #
 # args:
 #   <msg_id>   — 원본 사용자 메시지 message_id (멱등 key, 필수)
 #   <title>    — directive 본문 요약 (forum thread name, 필수, 90자 cap)
 #   [pr_url]   — 선택. 관련 PR URL (https://github.com/...). 빈 문자열 가능
-#   [body]     — 선택. forum thread 본문 본문 (미명시 시 title 재사용)
+#   [body]     — 선택. forum thread 본문 (미명시 시 build_template_body 자동 호출 —
+#                spec: directive-board-template-and-tags.md). 명시 시 그대로 사용
+#                (helper 정제 / nmae custom 등 override path).
+#   [user_id]  — 선택. 발화자 Discord user_id (template 의 👤 line 표시용).
+#                미명시 시 env `DIRECTIVE_USER_ID` fallback. 둘 다 부재 시 line 생략.
 #
 # 동작:
 #   1. 멱등성 — JSONL 이미 같은 msg_id (또는 source_queue_msg_id) 존재 시 no-op
@@ -41,7 +45,7 @@ JSONL_PATH_DEFAULT="${HOME}/.mobruji/directive-board.jsonl"
 JSONL_PATH="${DIRECTIVE_BOARD_JSONL_PATH:-${JSONL_PATH_DEFAULT}}"
 
 usage() {
-  echo "usage: directive_append.sh <msg_id> \"<title>\" [pr_url] [body]" >&2
+  echo "usage: directive_append.sh <msg_id> \"<title>\" [pr_url] [body] [user_id]" >&2
   exit 64
 }
 
@@ -52,7 +56,8 @@ fi
 MSG_ID="$1"
 TITLE="$2"
 PR_URL="${3:-}"
-BODY="${4:-${TITLE}}"
+BODY="${4:-}"
+USER_ID="${5:-${DIRECTIVE_USER_ID:-}}"
 
 if [[ -z "${MSG_ID}" || -z "${TITLE}" ]]; then
   usage
@@ -62,6 +67,41 @@ fi
 if [[ ${#TITLE} -gt 90 ]]; then
   TITLE="${TITLE:0:87}..."
 fi
+
+# spec: docs/features/directive-board-template-and-tags.md §5-4
+# template body 빌드 — title + msg_id + ts_kst + (선택) user_id 받아 minimal
+# template 본문 생성. 사용자가 forum 한 번 보면 "어떤 상황 / 어디까지 진행" 즉시 파악.
+# helper 가 다음 turn 에 PATCH 로 점진 보강 (컨텍스트 / category tag / 관련 PR).
+build_template_body() {
+  local _title="$1"
+  local _msg_id="$2"
+  local _ts_kst="$3"
+  local _user_id="${4:-}"
+
+  local _user_line=""
+  if [[ -n "${_user_id}" ]]; then
+    _user_line="👤 <@${_user_id}> · "
+  fi
+
+  cat <<EOF
+📌 **${_title}**
+
+💬 원본
+> ${_title}
+
+🆔 \`${_msg_id}\` · ${_user_line}🕐 ${_ts_kst}
+
+📋 진행 (🟡 대기)
+- [ ] 분석 / 위임 결정
+- [ ] 실행
+- [ ] 결과 반영
+
+🔖 관련 *(없음 — 진행되며 helper 가 추가)*
+
+---
+_갱신: ${_ts_kst}_
+EOF
+}
 
 # JSONL 파일 + 부모 디렉토리 보장. mode 0600 유지 (PII 가능성).
 mkdir -p "$(dirname "${JSONL_PATH}")"
@@ -80,6 +120,12 @@ fi
 
 # KST timestamp (jsonl 기존 entry 형식 "YYYY-MM-DD HH:MM KST" 와 호환).
 TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
+
+# BODY 미명시 시 template 본문 자동 빌드 (spec §5-4).
+# 명시 시 그대로 사용 (helper 정제 / nmae custom 등 override path 보존).
+if [[ -z "${BODY}" ]]; then
+  BODY=$(build_template_body "${TITLE}" "${MSG_ID}" "${TS_KST}" "${USER_ID}")
+fi
 
 # atomic append — tmp 파일 mktemp + cat 으로 추가 후 rename.
 ENTRY_TMP="$(mktemp -t "directive_append.XXXXXX")"
