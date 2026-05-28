@@ -5346,7 +5346,11 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info("❓ helper why: msg=%s user=%s thread=%s",
                         raw_payload.message_id, raw_payload.user_id, thread_id)
             append_inbox(payload)
-            write_last_user_msg_id(str(raw_payload.message_id))
+            # 2026-05-29 (PR helper-control-emoji-reply-fix) — write_last_user_msg_id
+            # 호출 제거. ❓ tap message_id 는 helper 자기 답 메시지 (bot self) 라,
+            # last-user-msg-id.txt 에 write 하면 다음 helper turn 의 reply_to 가
+            # 그 bot self 답을 가리켜 "엉뚱한 메시지에 reply" 사고. ❓ 응답은
+            # `[reply_thread=ID]` marker + helper-role.md 룰로 thread 안 push.
             if ensure_tmux_session(session_name, claude_bin):
                 tmux_send_payload(target_pane, synthetic_text)
             return
