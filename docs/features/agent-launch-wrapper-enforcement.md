@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: ["#1008", "#1106", "#1117"]
-related_prs: []
-last_reviewed: 2026-05-26
+related_prs: ["#1181"]
+last_reviewed: 2026-05-28
 ---
 
 # Agent Launch Wrapper Enforcement — 사이클 가시화 + wrapper 호출 강제

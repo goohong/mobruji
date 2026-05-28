@@ -5,8 +5,8 @@ status: approved
 owner: plan
 scope: infra
 related_issues: [1129]
-related_prs: [1140]
-last_reviewed: 2026-05-27
+related_prs: [1140, 1181]
+last_reviewed: 2026-05-28
 ---
 
 # directive board event-driven 재설계
