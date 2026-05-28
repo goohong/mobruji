@@ -5249,6 +5249,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 exc_info=True,
             )
 
+        # ⏹ control emoji 자동 부착 (2026-05-29).
+        # 사용자 정정: "stop button은 내가 보낸 메세지에 붙는게 맞는거같은데".
+        # ⏹ 의 의미 = 이 명령으로 시작된 helper 작업 중단 → 사용자 자기 메시지에 부착.
+        # tap 시 on_raw_reaction_add 의 ⏹ branch 가 helper claude 에 Ctrl-C send.
+        # (❓ 는 helper 답 메시지에 부착 — discord-reply.sh 가 처리.)
+        try:
+            await message.add_reaction(CONTROL_STOP_EMOJI)
+            logger.info(
+                "⏹ control marker OK: message_id=%s emoji=%s",
+                message_id,
+                CONTROL_STOP_EMOJI,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "⏹ control marker 부착 실패: message_id=%s exc=%r",
+                message_id,
+                exc,
+                exc_info=True,
+            )
+
         # helper tmux 세션 routing — 단순화본은 routing 만 수행. 응답은 helper 측
         # `~/.mobruji/discord-reply.sh "<msg>"` 가 직접 bot REST API 로 push.
         # #909 F-3: claim 으로 이미 마킹됐기 때문에 여기서 실패해도 unclaim 하지
@@ -5346,7 +5366,11 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info("❓ helper why: msg=%s user=%s thread=%s",
                         raw_payload.message_id, raw_payload.user_id, thread_id)
             append_inbox(payload)
-            write_last_user_msg_id(str(raw_payload.message_id))
+            # 2026-05-29 (PR helper-control-emoji-reply-fix) — write_last_user_msg_id
+            # 호출 제거. ❓ tap message_id 는 helper 자기 답 메시지 (bot self) 라,
+            # last-user-msg-id.txt 에 write 하면 다음 helper turn 의 reply_to 가
+            # 그 bot self 답을 가리켜 "엉뚱한 메시지에 reply" 사고. ❓ 응답은
+            # `[reply_thread=ID]` marker + helper-role.md 룰로 thread 안 push.
             if ensure_tmux_session(session_name, claude_bin):
                 tmux_send_payload(target_pane, synthetic_text)
             return

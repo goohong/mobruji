@@ -1702,16 +1702,17 @@ case "$MODE" in
     MAIN_PUSH_RESPONSE=$(post_channel_message_chunked "$MSG" "$REPLY_TO_ID")
     printf '%s' "$MAIN_PUSH_RESPONSE"
 
-    # 2026-05-29 (PR helper-control-emoji-auto-attach): 본답 push 직후 ⏹/❓ control
-    # emoji 자동 부착 — 사용자가 emoji picker 없이 즉시 tap 가능. bot.py
-    # on_raw_reaction_add 가 ⏹ → tmux Ctrl-C / ❓ → 사유 설명 요청 처리.
+    # 2026-05-29 (PR helper-control-emoji-auto-attach + reply-target fix): 본답
+    # push 직후 ❓ control emoji 자동 부착. 사용자 정정 (2026-05-29):
+    # "stop button은 내가 보낸 메세지에 붙는게 맞는거같은데" — ⏹ 는 사용자 명령
+    # 메시지 (bot.py on_message 가 부착), ❓ 는 helper 답 메시지 (본 path).
+    # bot.py on_raw_reaction_add 가 ❓ → 사유 설명 요청 처리.
     # 환경 변수 MOBRUJI_CONTROL_EMOJI=0 시 skip (디버깅).
     # graceful: reaction add 실패는 본답 push 자체 결과에 영향 없음.
     if [[ "${MOBRUJI_CONTROL_EMOJI:-1}" == "1" ]]; then
       MAIN_PUSH_MSG_ID=$(printf '%s' "$MAIN_PUSH_RESPONSE" | jq -r '.id // empty' 2>/dev/null || echo "")
       if [[ -n "$MAIN_PUSH_MSG_ID" ]]; then
-        # ⏹ U+23F9 = E2 8F B9 / ❓ U+2753 = E2 9D 93
-        reaction_add "$MAIN_PUSH_MSG_ID" "%E2%8F%B9" || true
+        # ❓ U+2753 = E2 9D 93
         reaction_add "$MAIN_PUSH_MSG_ID" "%E2%9D%93" || true
       fi
     fi
