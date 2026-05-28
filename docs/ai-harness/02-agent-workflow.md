@@ -65,6 +65,8 @@ feat: 제목 (필수)
 ## 8) 릴리즈 (develop → main)
 릴리즈는 `develop`에 누적된 squash 커밋들을 `main`에 한 번에 반영하는 절차다.
 
+> **Cross-ref**: 본 절의 cadence / sync 정책 근거는 [ADR-0023 (workflow / unit file main 미동기화 사고 박제 + sync 전략)](../decisions/0023-workflow-main-sync.md) 와 sub-옵션 비교 spec `docs/features/adr-0023-suboption-analysis.md` (PR #1159 / 머지 후 정식 경로 보존). 옵션 A (정식 release PR cadence) accepted 결정 + #1122 release fork 사고 박제 + retroactive 해소 sub-옵션 A1/A2/A3 가 거기에 박제. 본 §8 은 그 결정의 *operational* 절차.
+
 ### 8-1) 변경 점검
 ```bash
 git fetch origin
@@ -140,6 +142,96 @@ gh release create vX.Y.Z --generate-notes
 ### 8-6) 핫픽스 정책
 - 핫픽스 정책은 첫 사례 발생 시 본 문서에 추가한다 (현재는 미정의).
 
+### 8-7) Release cadence + main↔develop sync 의무 (ADR-0023)
+
+#### 8-7-1) cadence
+- **주 1회 정식 release PR** 이 default cadence. 요일은 합의된 시점 (현재 운영 default: 매주 월요일 09:00 KST — `release-cadence-v0.4.0.md` §5-1 옵션 C 와 정합). 사용자 / nmae / sub-agent 모두 같은 주기 가정.
+- 사이클 트리거 임계치는 §8-1-1 (fix+feat 5건 또는 ahead 20 commits) 와 동치. 임계치 미달 + cadence 시점 도달 시에도 minimal release PR (docs/chore only 라도) 생성 권장 — fork 누적 차단이 cadence 의 본 목적.
+- **긴급 workflow 변경** (예: CI 차단 해제) 는 cadence 와 무관하게 워크플로우-only PR + 옵션 3 (base=main 직접) 으로 처리 가능 — 단 현재는 `pr-target-enforce.yml` 미도입이므로 nmae 가 사용자 사전 통보 후 진행. 별도 PR 신설 시까지 한시적 절차.
+
+#### 8-7-2) release PR 머지 후 24h 안 sync 검증 의무
+release PR 이 `Merge commit` 으로 main 에 머지된 직후, **24시간 안** 에 다음 검증을 수행한다 — 누락 시 다음 cadence 의 release PR 이 fork 사고 (§8-8) 를 재발시킨다.
+
+```bash
+git fetch origin
+
+# (1) develop ahead main — 정상 cadence 중에는 0 또는 새 작업 누적분
+git rev-list --count origin/main..origin/develop
+
+# (2) main ahead develop — release PR 의 머지 commit 외에 0 이어야 정상
+git rev-list --count origin/develop..origin/main
+
+# (3) merge-base sanity — non-empty + 최근 release tag 와 정합
+git merge-base origin/main origin/develop
+```
+
+- (2) 가 **1 보다 크면** main-only commit 발견 — back-merge PR (`sync: main → develop post-release`) 즉시 launch. main 머지 commit 1 개는 정상 (release PR 자체), 그 외는 즉시 sync.
+- (3) 이 빈 응답 / unrelated histories → ADR-0023 §사고 박제 절차 (sub-옵션 A1/A2/A3) 진입. nmae 가 be sub-agent 에 retroactive 해소 위임.
+
+#### 8-7-3) develop-only / main-only commit 누적 monitor (P0 임계 50건)
+fork 누적 시점을 사후 발견하지 않도록 **매 cadence 사이 (= 매주)** 다음 카운트를 watchdog 한다.
+
+```bash
+DEVELOP_ONLY=$(git rev-list --count origin/main..origin/develop)
+MAIN_ONLY=$(git rev-list --count origin/develop..origin/main)
+
+echo "develop-only: $DEVELOP_ONLY (정상 ~ release 주기 동안 누적분)"
+echo "main-only: $MAIN_ONLY (정상 = 0)"
+```
+
+- **임계치 (warning)**: `MAIN_ONLY >= 1` (= 1 commit 이라도 main-only 존재 시 즉시 sync PR).
+- **임계치 (P0 alarm)**: `MAIN_ONLY >= 10` 또는 `DEVELOP_ONLY >= 50` — release loop 정체 + ADR-0023 §사고 박제 재현 risk. nmae 가 즉시 사용자 통보 + sync 전략 결정.
+- **watchdog 자동화 (후속 spec)**: scheduled GHA workflow (`release-fork-watchdog.yml` 가칭) 가 매일 1회 위 카운트 측정 + 임계치 초과 시 Discord push. 본 cadence 보강 후 별도 PR 로 spec + impl 도입.
+
+#### 8-7-4) release PR conflict 시 ADR-0023 sub-옵션 절차
+release PR 생성 시 mergeable=UNKNOWN / conflict marker / merge-base 빈 응답이 관측되면 **ADR-0023 sub-옵션 A1/A2/A3 결정 절차** 로 즉시 진입. 단순 force resolve 금지.
+
+- sub-옵션 정의 + trade-off + 실측 fork 규모 (240/162 commit 박제) 은 `docs/features/adr-0023-suboption-analysis.md` (PR #1159 머지 후 정식 경로) 에서 single source of truth.
+- **권고 default**: **A3 cherry-pick** (자동화 script: `tools/release-sync/cherry-pick-release-commits.sh` — be sub-agent 후속 impl PR). audit trail 가장 명확.
+- **대안**: A1 force reset (release 일관성 + wall-clock 우선 시, irreversible risk 사용자 사전 동의 필수).
+- **A2 -X ours/theirs merge**: silent override risk 로 v1 비권장 — sub-옵션 spec §6 결론 참조.
+- 결정 후 nmae 가 ADR-0023 §변경 이력에 채택 sub-옵션 + 사유 follow-up 기록 의무.
+
+### 8-8) 사고 박제 — release #1122 fork (2026-05-26)
+**박제 사유**: ADR-0023 옵션 A 채택 직후 첫 release PR (#1121 / #1122) 머지 시점에 main↔develop 누적 fork 발견. 본 cadence 룰 (§8-7) 의 *forward* 적용은 본 사고가 trigger.
+
+| 항목 | 측정값 |
+|---|---|
+| 사고 발견 시점 | 2026-05-26 14:51 KST 직후 (사용자 옵션 A 결정 ~30분 내) |
+| develop-only commits | **240 건** (`git rev-list --count origin/main..origin/develop`) |
+| main-only commits | **162 건** (`git rev-list --count origin/develop..origin/main`) |
+| merge-base 응답 | 빈 응답 / mergeable=UNKNOWN (release PR CI) |
+| 누적 기간 | Phase 4 인프라 시점부터 cadence 미설정 상태로 누적 |
+| retroactive 해소 결정 | be sub-agent 자율 판단 — sub-옵션 spec PR #1159 권고 default = A3 cherry-pick |
+
+**Lessons** (본 cadence 룰의 근거):
+1. ADR 결정만으로는 부족 — *operational* 보강 (본 §8-7) 이 동반돼야 학습 의존 ↓.
+2. fork 의 발견 시점이 release PR 머지 직전이면 이미 늦음 — §8-7-3 watchdog 가 fork 1 건부터 catch.
+3. `release: vX.Y.Z` cadence 가 명시되지 않으면 nmae / sub-agent / 사용자 모두 trigger 책임 회피 → 무한 fork 누적.
+
+### 8-9) main 영구 보존 + force push 금지 (비협상)
+- **main 은 영속 브랜치** — 삭제 / rename / squash-only 재작성 금지. release tag 의 ref 기준이므로 history 일관성이 audit trail 의 기반.
+- **`git push --force` 또는 `--force-with-lease` 금지** — main 대상 모든 force push 금지. 사고 발생 시에도 (예: 잘못 머지된 release PR) revert commit 으로 풀고, history rewrite 금지.
+- **예외 절차 없음** — main 에 force push 가 필요한 가설적 상황은 ADR 신설 + 사용자 명시 승인 + 사전 백업 절차로 분리. 본 §8 의 cadence 룰 위반이 발견돼도 force push 로 해소 시도 금지 (ADR-0023 sub-옵션 A1 force reset 도 main 대상이 아님 — develop 대상).
+- 사용자 정정 인용 (2026-05-26): "단순 cherry-pick 으로 안 풀리는 규모. 정식 release PR 로 가자" — main 직접 rewrite 가 아닌 정식 release PR + sub-옵션 절차 채택 박제.
+
+#### 8-9-1) branch protection 권고
+GitHub repo settings 에 다음 protection 도입을 권고 (별도 인프라 PR — 현재 미적용).
+
+- **`main` branch protection rule**:
+  - `Require a pull request before merging` (PR 필수).
+  - `Require approvals` (최소 1 — self-approval 허용 phase 에서는 0 으로 운영 가능하지만 release PR 만큼은 사용자 / rev sub-agent approval 의무).
+  - `Require status checks to pass before merging` — `.github/workflows/*-ci.yml` 의 핵심 job 지정.
+  - `Require linear history` (선택) — Squash merge 의무화 효과. 다만 §8-4 의 Merge commit 룰과 충돌하므로 release PR 만큼은 풀어야 함. → 현실적으로는 main 에 `Restrict who can push to matching branches` + `Do not allow bypassing the above settings` 조합으로 보호하고 linear history 강제는 develop 에만.
+  - `Restrict deletions` — main 삭제 차단.
+  - `Block force pushes` (필수, §8-9 짝).
+- **`develop` branch protection rule**:
+  - `Require a pull request before merging` (PR 필수).
+  - `Block force pushes`.
+  - `Restrict deletions`.
+- **CODEOWNERS 활용**: `.github/CODEOWNERS` 의 `docs/ai-harness/**` / `.github/workflows/**` / `**/db/migration/**` 등 보호 영역에 `@mobruji-maestro` 지정. PR 머지 시 CODEOWNER approval 필요.
+- 본 권고는 인프라 PR 분리 — 보호 영역 (`.github/CODEOWNERS`, GitHub settings) 변경이므로 `needs-human-review` 라벨 동반.
+
 ## 9) Feature Spec 프로세스
 중간 규모 이상 기능은 단발 PR 계획 대신 **living document**로서의 Feature Spec을 먼저 작성·합의한 뒤 구현에 착수한다.
 
@@ -161,6 +253,7 @@ gh release create vX.Y.Z --generate-notes
 
 - frontmatter의 `status` 필드로 추적
 - 상태 전이는 해당 PR에서 같이 수정
+- `blocked` (보조 상태) — 외부 의존성/데이터 부재 등으로 진행 불가. `draft` 와 구분 (의도 자체는 확정, 진행만 막힘). 차단 해제 시 원래 상태로 복귀.
 
 ### 9-4) 프로세스
 1. **Spec 초안 PR** — `docs/features/<slug>.md` 신설. `type:docs` 라벨.
@@ -197,7 +290,7 @@ gh release create vX.Y.Z --generate-notes
 - **PR 본문 "AI 작업 기록"**: 사용 에이전트와 프롬프트 요약을 명시.
 
 ### 10-3) 작업 분담 (현재 형태)
-maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 역할/만질 수 있는 경로는 §11 §2 세션별 역할 표 + [`docs/ai-harness/12-sub-agent-prompt-template.md`](./12-sub-agent-prompt-template.md)(maestro 가 sub-agent launch 시 박는 공통 룰 + 역할별 추가 룰의 single source of truth).
+maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 역할/만질 수 있는 경로는 §11 §2 세션별 역할 표 + [`docs/ai-harness/actors/sub-agent.md`](./actors/sub-agent.md)(maestro 가 sub-agent launch 시 박는 공통 룰 + 역할별 추가 룰의 single source of truth).
 
 - **maestro** (`mobruji`): 기획·이슈 등록·백로그 우선순위·공유 영역(`CLAUDE.md`/`docs/ai-harness/**`) 보수·develop 점유. 코드/테스트 작성은 sub-agent 위임 default.
 - **be** (`mobruji-be`): `backend/**` 구현 전용.
@@ -234,5 +327,5 @@ maestro는 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상
 ### 10-8) 동기화 채널
 - **세션 간 시그널**: PR 라벨(`session:*`, `reviewed:*`, `ai:*`) + draft state + `gh pr list` 조회. 새 메커니즘 없이 GitHub state가 자연스러운 싱크 채널.
 - **사람 대시보드**: GitHub Projects v2(`mobruji` 보드). PR/이슈 자동 등록은 `.github/workflows/auto-add-to-project.yml`. Status/Session 필드로 칸반 + 필터.
-- **모바일/외부 모니터링**: Discord webhook (`docs/ai-harness/14-discord-notify-setup.md` / `docs/features/discord-status-push.md`). maestro 자율 사이클 trail이 GitHub events 경유로 #모부르지 채널에 push.
+- **모바일/외부 모니터링**: Discord webhook (`docs/ai-harness/14-discord-ops.md` / `docs/features/discord-status-push.md`). maestro 자율 사이클 trail이 GitHub events 경유로 #모부르지 채널에 push.
 - `docs/backlog.md`는 폐기되었다(2026-05-21). 대체: Projects v2 보드 + 영속 결정은 `docs/decisions/` ADR로.

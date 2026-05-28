@@ -14,11 +14,11 @@ deciders: [@goohong]
 ## Decision
 다중 AI 운영의 default를 다음으로 고정한다:
 
-1. **5 워크트리 구조**: maestro(`mobruji`) 1개 + sub-agent 워크트리 4개(`mobruji-be`, `mobruji-fe`, `mobruji-rev`, `mobruji-plan`). sub-agent 워크트리는 모두 detached HEAD로 둔다 (develop은 maestro 점유).
+1. **4 sub-agent 워크트리 (be/fe/rev/plan) + maestro 오케스트레이션 1개**: 총 5개 워크트리로 구성된다 — maestro(`mobruji`) 1개 + sub-agent 워크트리 4개(`mobruji-be`, `mobruji-fe`, `mobruji-rev`, `mobruji-plan`). sub-agent 워크트리는 모두 detached HEAD로 둔다 (develop은 maestro 점유). ADR-0021 의 "4 워크트리" 표현은 본 ADR 의 sub-agent 워크트리 4개와 같은 의미이며, maestro 워크트리를 합치면 5개가 된다.
 2. **단일 오케스트레이터**: maestro Claude 세션 하나가 `Agent` 도구로 sub-agent를 background 가동한다(`run_in_background: true`). 사용자는 maestro 한 곳에서 진행 상황을 따라간다.
 3. **항시 가동 룰**: maestro는 be/fe/rev/plan 4 워크트리에 sub-agent 1개씩 가동을 **항상 유지**한다. 1개 완료 통지가 들어오면 같은 워크트리에 즉시 다음 백로그를 launch한다 (워크트리 lock: 동시 2 sub-agent 금지). 백로그 고갈 시에는 즉시 idle로 두지 않고 **발굴 메타 단계**(메모리 §How-to §3 기준 — 직전 사이클 follow-up·rev 코멘트·spec drift·테스트 누락 등 후보 탐색 → 가치 점검 → 새 이슈 등록)를 거쳐 다음 사이클로 연결한다.
 4. **maestro 작업 default = 메타**: maestro는 spec/ADR/메모리/orchestration만 default. 코드/테스트/문서 본문 작성은 sub-agent 위임 (maestro가 직접 하면 4 워크트리 중 하나가 idle).
-5. **공통 prompt 룰**: sub-agent 공통 룰은 `docs/ai-harness/12-sub-agent-prompt-template.md`. 역할별 prompt에 한 줄 reference만.
+5. **공통 prompt 룰**: sub-agent 공통 룰은 `docs/ai-harness/actors/sub-agent.md`. 역할별 prompt에 한 줄 reference만.
 6. **5분 reasoning chunk limit**: 단일 sub-agent turn의 reasoning/도구 호출 묶음이 5분을 넘기지 않도록 작업을 쪼갠다. 2026-05-23 `.claude.json` corruption crash 사후 정착된 안전 룰로, 장시간 reasoning chunk가 세션 상태 파일 손상 위험을 키운다 (`feedback-reasoning-chunk-limit`). LOC 상한·patch 작업 우선 분할이 1차 수단.
 
 ## Consequences
@@ -31,7 +31,7 @@ deciders: [@goohong]
 - 자율 사이클: 사용자 부재 시에도 maestro가 완료 통지 → 다음 사이클 launch 루프를 진행, release 머지만 사용자 확인.
 
 ### 부정적
-- maestro 세션이 닫히면 background sub-agent도 모두 종료 → 사이클 정지. Discord webhook 모니터링이 부분 보완 (`docs/ai-harness/14-discord-notify-setup.md`).
+- maestro 세션이 닫히면 background sub-agent도 모두 종료 → 사이클 정지. Discord webhook 모니터링이 부분 보완 (`docs/ai-harness/14-discord-ops.md`).
 - 4 워크트리 메모리 race 위험 (`MEMORY.md` symlink 공유 시). §11 §1-2 회피책 적용 (1인이 한 번에 1세션과만 대화).
 - maestro 자체가 멀티태스킹 부하 (turn당 1~2 도구 호출 단위로 쪼개야 통지 처리 지연 최소화).
 - sub-agent launch 누락 시 비용이 큼 (사용자 명시 강조: "절대로", `feedback-sub-agent-launch-mandatory`).
@@ -51,7 +51,13 @@ deciders: [@goohong]
   - §0-10 항시 4 워크트리 가동 룰
   - §1-1 워크트리 5개 생성
   - §2 세션별 역할
-- `docs/ai-harness/12-sub-agent-prompt-template.md` — sub-agent 공통 prompt 룰
+- `docs/ai-harness/actors/sub-agent.md` — sub-agent 공통 prompt 룰
 - 메모리: `feedback-orchestration-pattern`, `feedback-keep-4-cycles-active`, `feedback-sub-agent-launch-mandatory`, `feedback-worktree-lock`, `feedback-reasoning-chunk-limit`, `feedback-npm-install-symlink-swap`, `feedback-autonomous-wake-pattern`, `project-plan-session-active`, `project-multi-session-setup`, `project-session-handoff-2026-05-23-v4`
 - PR #397, #398 — §11 5워크트리 + 항시 가동 룰 도입
 - PR (본 ADR 신설 PR) — §10 동기화 + ADR-0014 결번 채움
+- ADR-0021 (재확인, docs/decisions/0021-worktree-count-evaluation.md) — 워크트리 개수 평가 + 옵션 A 채택 박제
+
+## 변경 이력
+
+- 2026-05-23 — 최초 작성 (5 워크트리 + maestro 오케스트레이션 default 고정).
+- 2026-05-26 — ADR-0021 cross-ref 추가 + 워크트리 카운트 어휘 통일 ("4 sub-agent 워크트리 + maestro 1개" 풀어쓰기, 의미 동일).

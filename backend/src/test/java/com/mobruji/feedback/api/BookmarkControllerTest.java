@@ -59,15 +59,19 @@ class BookmarkControllerTest {
     @MockitoBean
     private SessionAuthGuard sessionAuthGuard;
 
+    // UUIDv4 (#948 SessionIdPatterns 강제) — POST body sessionId 는 @Pattern 검증을 통과해야 SessionAuthGuard 로 진입
+    private static final String SESSION_ID = "550e8400-e29b-41d4-a716-11ee5e55c201";
+    private static final String SESSION_ID_OTHER = "550e8400-e29b-41d4-a716-11ee5e55c202";
+
     @Test
     @DisplayName("POST /api/v1/bookmarks: body sessionId == header → 200 + bookmarked/songId 직렬화")
     void toggle_matchingSessionId_returns200() throws Exception {
-        given(bookmarkService.toggle("s-1", 42L)).willReturn(new ToggleResult(true, 42L));
+        given(bookmarkService.toggle(SESSION_ID, 42L)).willReturn(new ToggleResult(true, 42L));
 
         mockMvc.perform(post("/api/v1/bookmarks")
-                .header("X-Session-Id", "s-1")
+                .header("X-Session-Id", SESSION_ID)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
+                .content("{\"sessionId\":\"" + SESSION_ID + "\",\"songId\":42}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bookmarked", is(true)))
                 .andExpect(jsonPath("$.songId", is(42)));
@@ -77,11 +81,11 @@ class BookmarkControllerTest {
     @DisplayName("POST /api/v1/bookmarks: X-Session-Id 헤더 누락 → 401 (service 미호출)")
     void toggle_missingHeader_returns401() throws Exception {
         willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id"))
-                .given(sessionAuthGuard).verify("s-1", null);
+                .given(sessionAuthGuard).verify(SESSION_ID, null);
 
         mockMvc.perform(post("/api/v1/bookmarks")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
+                .content("{\"sessionId\":\"" + SESSION_ID + "\",\"songId\":42}"))
                 .andExpect(status().isUnauthorized());
 
         then(bookmarkService).should(never()).toggle(anyString(), any());
@@ -91,12 +95,12 @@ class BookmarkControllerTest {
     @DisplayName("POST /api/v1/bookmarks: body/header sessionId 불일치 → 401")
     void toggle_mismatchedHeader_returns401() throws Exception {
         willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "session id mismatch"))
-                .given(sessionAuthGuard).verify("s-1", "s-other");
+                .given(sessionAuthGuard).verify(SESSION_ID, SESSION_ID_OTHER);
 
         mockMvc.perform(post("/api/v1/bookmarks")
-                .header("X-Session-Id", "s-other")
+                .header("X-Session-Id", SESSION_ID_OTHER)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sessionId\":\"s-1\",\"songId\":42}"))
+                .content("{\"sessionId\":\"" + SESSION_ID + "\",\"songId\":42}"))
                 .andExpect(status().isUnauthorized());
     }
 

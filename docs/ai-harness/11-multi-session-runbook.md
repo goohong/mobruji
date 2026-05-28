@@ -25,7 +25,7 @@
 - 보호 영역 변경 시 `needs-human-review` 라벨 부여
 
 > 위 5줄 공통 룰은 매번 반복하지 말고 prompt에 다음 한 줄만 박는다:
-> `공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan>.`
+> `공통 룰은 docs/ai-harness/actors/sub-agent.md 따른다. 역할은 <be|fe|rev|plan>.`
 > §12 에는 위 5줄 외에도 다음이 박혀 있다 — 별도 prompt 박지 말 것:
 > - NCP Linux 워크트리 절대경로 (`/home/mobruji/mobruji-{be,fe,rev,plan}`)
 > - maestro 항시 가동 / 워크트리 lock / 5분 reasoning chunk 룰
@@ -99,7 +99,7 @@ maestro가 사용자에게 결정을 묻는 빈도를 조정해 컨텍스트 스
 
 ### 0-6-1) maestro 닫혀있을 때 모바일 모니터링
 
-maestro Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-notify-setup.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
+maestro Claude 세션을 닫으면 background sub-agent도 모두 종료되어 사이클이 멈춘다. 사용자가 외출 중 사이클 상태를 인지하려면 **Discord webhook 모니터링**을 깐다: PR/이슈/릴리즈 이벤트를 GitHub Actions가 Discord 채널에 push → 모바일 알림. 셋업·운영은 `docs/ai-harness/14-discord-ops.md` 참조. workflow 본체는 `.github/workflows/discord-notify.yml`이며 secret 부재 시 graceful skip.
 
 ### 0-6-2) 사이클 트레일 push 룰 (maestro 의무)
 
@@ -301,6 +301,66 @@ maestro turn 자체가 5분 초과(`feedback-reasoning-chunk-limit`)하면 turn�
 #### 위반 시 자기 점검
 
 maestro가 sub-agent launch를 1회라도 까먹은 채 maestro 자체 작업을 진행했다면 즉시 사용자에게 인정 + 사과 + 룰 재확인. 메모리(`feedback-sub-agent-launch-mandatory`)와 본 §0-10이 source of truth — 충돌 시 본 문서 우선.
+
+### 0-11) cycle-status tooling — nmae 의무 (2026-05-24 박제)
+
+§0-10 의 4 워크트리 가동 룰을 실제 enforce 하는 외부 안전망. **메모리/룰 위반 시도 정정**. nmae 가 본 절차 모르면 watchdog inject 무한 loop 발생 (실 사고 #970).
+
+#### bot.py `cycle_idle_watch_loop` (외부 watchdog)
+- **5분 polling** `~/.mobruji/cycle-status.json` → 4 워크트리(be/fe/rev/plan) `in_progress` 검사
+- idle 발견 시 nmae tmux pane (`mobruji:0.0`) 에 `[watchdog ...] cycle-status.json idle 발견 — <ws>. ...` inject + Discord `DIGEST_CHANNEL_ID` push (#1019 rename — 기존 `NOTIFY_CHANNEL_ID` 도 backward-compat 인식)
+- **escalation**: 같은 워크트리 inject 3회 연속 + `in_progress` 여전히 NULL → `MOBRUJI_CHANNEL_ID` (사용자 채널) 에 `🚨 nmae 무응답` 직접 push (debounce 1h)
+- spec: `docs/features/nmae-cycle-watchdog.md`, CLAUDE.md §14
+
+#### nmae inject 대응 의무 (4단계 — 한 단계라도 누락 시 무한 loop)
+nmae 가 watchdog inject 받으면 **다음 turn 시작 즉시**:
+
+1. 백로그 후보 1개 선정 (이슈 / PR follow-up / docs drift)
+2. `bash /home/mobruji/mobruji/tools/cycle-status/update.sh <ws> set-active --title "<후보 한 줄>"`
+3. `Agent` tool 로 sub-agent launch (`/home/mobruji/mobruji-<ws>`)
+4. `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <후보>"`
+
+상세: `docs/ai-harness/actors/nmae.md §11-2` (nmae 본진 룰. sub-agent 입장은 `actors/sub-agent.md §1-14` 보고 양식만).
+
+#### cycle-status.json 갱신 의무 (수동 편집 금지)
+nmae 가 매 sub-agent launch / 완료 / idle 진입 시 **반드시 헬퍼 스크립트 경유**:
+
+```bash
+# active 갱신 (in_progress 채움, idle_since clear)
+bash tools/cycle-status/update.sh <ws> set-active --title "<후보>" [--task "<상세>"]
+
+# idle 갱신 (in_progress null, note 의무)
+bash tools/cycle-status/update.sh <ws> set-idle --note "<사유 또는 다음 launch 후보>"
+
+# 완료 기록
+bash tools/cycle-status/update.sh <ws> set-completed --pr "#NNN" --title "<요약>"
+```
+
+- 수동 JSON 편집 금지 (timezone bug / atomic write race / 스키마 drift 위험)
+- idle 시 `note` 필드 의무 — 빈 string → watchdog STRICT relaunch prompt 즉시 inject
+- 검증: `bash tools/cycle-status/validate.sh` — idle 워크트리 note 누락 detect (nmae self-check 용)
+- 스키마: `tools/cycle-status/README.md`
+
+#### 3중 안전망 (CLAUDE.md §14 와 정합)
+1. **bot.py watchdog** — 외부 데몬, 최후 보루
+2. **nmae 매 turn 종료 직전 자기 점검** — cycle-status.json 4 워크트리 active 검증
+3. **helper 우연 발견 시 직접 inject** — 같은 서버라 `tmux send-keys` 가능 ([[feedback-helper-role-boundary]] 위임 영역)
+
+### 0-12) rev 큐 스크립트 — rev sub-agent 매 사이클 첫 액션 (2026-05-24 박제)
+
+rev sub-agent 가 매 사이클 시작 시 `bash tools/rev-queue/rev-queue.sh all` **첫 액션 의무**. 메모리/룰 학습 의존 X — **GitHub 라벨 + 본 스크립트 = single source of truth**.
+
+| Stage | 의미 | 후보 필터 |
+|---|---|---|
+| stage1 | PR 머지 전 (단계 1 e2e) | `reviewed:claude` 라벨 없는 open PR |
+| stage2 | develop 머지 1h+ 후 (단계 2 사후) | `rev-post-merge-pass` 라벨 없는 merged PR |
+| stage3 | 최근 release tag PR (단계 3 production) | `rev-prod-pass` 라벨 없는 release PR |
+
+처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-3-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
+
+**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `needs-human-review` / `type:release`.
+
+상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-3-stages.md`, CLAUDE.md §4 품질 게이트.
 
 ## 1) 셋업 (최초 1회)
 
@@ -616,3 +676,29 @@ rm -rf ~/.claude/projects/-Users-goohong-workspace-github-mobruji-be
 ```
 
 영구 셋업이라면 그대로 두고 사용.
+
+## 8) 본진 가볍게 유지 (nmae lightweight orchestration)
+
+사용자 2026-05-26 ~16:00 정정: "동시 사이클 4개 유지. 과부하 대응 = 본진 context 가벼이 유지 + 위임."
+
+### 룰
+- 동시 사이클 수는 **4 (be/fe/rev/plan) 고정**. 과부하 시에도 줄이지 않는다.
+- 본진(nmae) 책임 = **오케스트레이션 only**.
+  - launch / 위임 prompt 작성
+  - 완료 통지 수신 + cycle-status.json 갱신 + 다음 백로그 launch
+  - PR 머지 결정 (가능하면 머지 실행 자체도 sub-agent 위임 또는 cron auto-merge)
+  - cron digest 가 cover 안 하는 1회성 사용자 보고
+- 본진 직접 수행 **금지** — 코드 변경, 길어진 git 작업, gradle/npm 실행, 대량 로그 분석. 이 모두는 sub-agent 또는 helper-launched sub-agent 영역.
+- 본진 context% marker (CLAUDE.md §14) 75% 이상 → 본진 추가 작업 자제 + sub-agent 위임 + 다음 turn `/clear` 후보.
+
+### 왜
+- 본진이 직접 구현하면 1 사이클 turn 이 길어진다 → 다른 3 사이클 launch 가 끊긴다.
+- 본진 context 가 폭증하면 `/clear` 빈도가 늘어나며, `/clear` 직전 doc-check (CLAUDE.md §15) 도 누락 위험이 커진다.
+- 위임은 sub-agent 워크트리 격리 + 코드 변경 트래킹 가능 (PR / git log) 이라 감사 trail 도 확보된다.
+
+### 검증
+- nmae turn 종료 시점에 cycle-status.json 4 워크트리 모두 `in_progress` 또는 `last_completed.completed_at` 이 최근 10 분 안인지 확인.
+- nmae context% marker 가 매 turn 마지막 emit 되고 75% 이상 시 자율 정리 트리거됐는지 확인.
+- cron digest 가 본진 활동 vs sub-agent 활동을 분리 표시하는지 확인 (본진 직접 머지 / 본진 직접 코드 변경 = 위반 후보).
+
+관련: CLAUDE.md §11-5 (4 사이클 동시 launch + 본진 오케스트레이션 only), `docs/features/autonomous-cycle-orchestration.md`.

@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: song
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [786, 939]
+last_reviewed: 2026-05-24
 ---
 
 # 외부 API graceful fallback (Spotify / MusicBrainz / YouTube / iTunes 횡단)

@@ -5,8 +5,8 @@ status: implementing
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [316, 336, 349, 376, 377]
+last_reviewed: 2026-05-24
 ---
 
 # rev 세션 QA 실행 검증 프로토콜
@@ -387,7 +387,7 @@ QA pass PR에는 `reviewed:claude` 라벨 부여 (라벨 없으면 release gate�
 ## 6) 작업 분할
 이 spec 자체는 단일 PR. 후속 운영 변경이 필요하면 별 PR로:
 - [x] PR 1: 본 spec + runbook §2 갱신 + 03-quality-gates §8 추가 + local-3tier 가이드 (이 PR)
-- [ ] PR 2 (선택): rev sub-agent prompt 템플릿(`12-sub-agent-prompt-template.md`)에 본 spec 참조 박기
+- [ ] PR 2 (선택): rev sub-agent prompt 템플릿(`actors/sub-agent.md`)에 본 spec 참조 박기
 - [ ] PR 3 (선택): release gate workflow에 `reviewed:claude` 라벨 강제 (현재는 사회적 룰)
 
 ## 7) 테스트 전략

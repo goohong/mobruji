@@ -1,4 +1,29 @@
 @import "tailwindcss";
+/*
+ * ADR-0018 design tokens — color / typography / spacing / radius / shadow / motion.
+ * 본 import 는 변수 정의만 추가하며 기존 페이지 코드의 hardcode 값을 swap 하지
+ * 않는다 (회귀 0). 후속 PR (ui-ux-redesign 단계 4 PR 2-9) 가 페이지 별로 점진
+ * 마이그레이션한다.
+ */
+@import "./tokens.css";
+
+/*
+ * Pretendard Variable — ADR-0018 단계 4 PR 2 자체 호스팅 결정.
+ *
+ *  - 파일: `web/public/fonts/PretendardVariable.woff2` (~2MB, OFL-1.1).
+ *  - `font-display: swap` — 폰트 로드 전에는 system-ui fallback 으로 즉시 paint,
+ *    로드 후 부드럽게 교체. FOIT (Flash of Invisible Text) 회피.
+ *  - `font-weight: 45 920` — variable axis 전체 범위 (Pretendard v1.3 weight 45-920).
+ *    한 파일이 9 weight 를 모두 cover 하므로 후속 weight 별 import 불요.
+ *  - `unicode-range`: Pretendard 는 한글 + 라틴 모두 포함 → 별도 subset 없이 전체.
+ */
+@font-face {
+  font-family: "Pretendard Variable";
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
 
 /*
  * 이슈 #319 — 다크 모드 수동 토글.
@@ -17,8 +42,18 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /*
+   * Tailwind v4 가 인식하는 utility (`font-sans` / `font-mono`) 가
+   * tokens.css 의 Pretendard 우선 stack 을 사용하도록 노출.
+   *
+   * 자기참조 방지: tokens.css 가 별 이름 (`--font-family-sans`) 으로 SoT 보유.
+   * 본 `@theme inline` 의 `--font-sans` 는 그 별칭을 가리킨다.
+   *
+   * 후속 페이지 swap (PR 2-9) 시 `font-sans` Tailwind utility 호출만으로
+   * Pretendard 적용 가능. tokens.css `var(--font-sans)` 직접 호출 경로와 공존.
+   */
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
 }
 
 /*
@@ -31,8 +66,13 @@
   --foreground: #ededed;
 }
 
+/*
+ * body 기본 폰트 — ADR-0018 PR 2 Pretendard 도입.
+ * 기존 `Arial, Helvetica, sans-serif` hardcode 는 무지정 영문 기본으로 한글
+ * 가독성이 약했음. `var(--font-sans)` 는 Pretendard 우선 stack 으로 swap.
+ */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }

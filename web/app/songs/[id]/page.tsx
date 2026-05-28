@@ -86,9 +86,9 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
         <div
           role="alert"
           aria-live="assertive"
-          className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+          className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4"
         >
-          <p className="text-sm text-red-700 dark:text-red-200">
+          <p className="text-sm text-[var(--danger-fg-strong)]">
             곡 정보를 불러오지 못했습니다.{" "}
             {query.error instanceof ApiError
               ? `${query.error.status}: ${query.error.message}`
@@ -96,7 +96,7 @@ function SongDetailContent({ songId }: SongDetailContentProps) {
           </p>
           <Link
             href="/songs"
-            className="self-start rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600"
+            className="self-start rounded-full bg-[var(--danger-cta-bg)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--danger-cta-bg-hover)]"
           >
             검색으로 돌아가기
           </Link>
@@ -129,14 +129,14 @@ function SongDetailView({ song }: SongDetailViewProps) {
       <nav aria-label="이전" className="mb-2">
         <Link
           href="/songs"
-          className="text-sm text-zinc-500 underline-offset-4 hover:underline dark:text-zinc-400"
+          className="text-sm text-[var(--text-caption)] underline-offset-4 hover:underline"
         >
           ← 검색으로 돌아가기
         </Link>
       </nav>
 
       <header className="flex flex-col gap-2">
-        <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
           Song detail
         </p>
         <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -158,7 +158,7 @@ function SongDetailView({ song }: SongDetailViewProps) {
           {difficulty ? (
             <DifficultyBadge difficulty={difficulty} />
           ) : (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="text-xs text-[var(--text-caption)]">
               가창 난이도 정보가 아직 없어요
             </span>
           )}
@@ -187,7 +187,7 @@ function SongDetailView({ song }: SongDetailViewProps) {
             ) : null}
           </dl>
         ) : (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs text-[var(--text-caption)]">
             이 곡의 음역 정보(최고음/최저음)는 아직 등록되지 않았어요.
           </p>
         )}
@@ -270,7 +270,7 @@ type NoteCellProps = {
 function NoteCell({ label, value }: NoteCellProps) {
   return (
     <div className="flex flex-col gap-1">
-      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt className="text-xs text-[var(--text-caption)]">{label}</dt>
       <dd
         aria-label={`${label} ${value}`}
         className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50"
@@ -291,7 +291,7 @@ function MetaCell({ label, value }: MetaCellProps) {
     value === null || value === undefined || value === "" ? "-" : String(value);
   return (
     <div className="flex flex-col gap-1">
-      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt className="text-xs text-[var(--text-caption)]">{label}</dt>
       <dd className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
         {display}
       </dd>

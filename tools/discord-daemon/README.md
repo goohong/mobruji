@@ -44,7 +44,7 @@ helper 응답은 helper 측에서 신규 script `discord-reply.sh "<메시지>"`
 
 | env | 기본값 | 설명 |
 |---|---|---|
-| `NOTIFY_CHANNEL_ID` | (미설정 → `MOBRUJI_CHANNEL_ID` fallback) | cycle digest 송신 대상. 알림 채널 분리 시 설정. |
+| `DIGEST_CHANNEL_ID` | (미설정 → `MOBRUJI_CHANNEL_ID` fallback) | cycle digest 송신 대상. 알림 채널 분리 시 설정. #1019 에서 기존 `NOTIFY_CHANNEL_ID` 를 rename — backward-compat 으로 기존 이름도 fallback 인식 (deprecation warning 1회). |
 | `TMUX_SESSION_NAME` | `helper` | helper tmux 세션 이름. 없으면 bot 이 `CLAUDE_BIN` 으로 재생성. |
 | `TMUX_TARGET_PANE` | `helper:0.0` | `send-keys` 타깃 pane. |
 | `CLAUDE_BIN` | `claude` | tmux 세션 부재 시 띄울 실행 파일. 절대경로 권장. |
@@ -95,8 +95,8 @@ ln -sf "$HOME/mobruji/tools/discord-daemon/discord-reply.sh" ~/.mobruji/discord-
 ```
 
 `.env` 는 `bot.py` 와 동일 파일을 공유합니다 (`DISCORD_BOT_TOKEN`,
-`NOTIFY_CHANNEL_ID` / `MOBRUJI_CHANNEL_ID`). `DISCORD_DAEMON_ENV_PATH` 환경
-변수로 override 가능합니다.
+`DIGEST_CHANNEL_ID` / `MOBRUJI_CHANNEL_ID` — #1019 rename, 기존 `NOTIFY_CHANNEL_ID`
+도 backward-compat). `DISCORD_DAEMON_ENV_PATH` 환경 변수로 override 가능합니다.
 
 종속: `curl`, `jq`, `grep`, `cut` (bot 호스트에 기본 설치).
 

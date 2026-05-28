@@ -6,8 +6,8 @@ pending: user-decision (v0.4.0 release cut 진행 여부 — rev audit D12, 2026
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [774, 856, 871, 875, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Release Cadence v0.4.0 — cutoff 룰 + 범위 결정
@@ -102,7 +102,7 @@ last_reviewed: 2026-05-23
 ## 6) 후속 PR 분할
 1. **PR-1**: 본 spec 머지 (현재 PR)
 2. **PR-2**: `02-agent-workflow.md §8 릴리즈` 에 옵션 C 룰 + 라벨 정책 반영
-3. **PR-3**: maestro prompt template (`12-sub-agent-prompt-template.md`) 에 cutoff 자동 판단 step 추가
+3. **PR-3**: maestro prompt template (`actors/sub-agent.md`) 에 cutoff 자동 판단 step 추가
 4. **PR-4**: `release/v0.4.0` 실 PR 생성 (사용자 승인 후)
 
 ## 7) 오픈 이슈
@@ -113,5 +113,5 @@ last_reviewed: 2026-05-23
 
 ## 8) 영향 파일 (코드 변경 없음, 후속 PR 에서 갱신)
 - `docs/ai-harness/02-agent-workflow.md` §8 (PR-2)
-- `docs/ai-harness/12-sub-agent-prompt-template.md` (PR-3)
+- `docs/ai-harness/actors/sub-agent.md` (PR-3)
 - `CLAUDE.md` §8 (옵션 C 룰 1줄 박제, PR-2 와 동시)

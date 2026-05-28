@@ -301,7 +301,7 @@ export default function AutoVoiceRangePage({
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
       <div className="w-full max-w-md flex flex-col gap-8">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             자동 측정
           </p>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -400,7 +400,7 @@ function PermissionStep({
         <div className="flex flex-col gap-2">
           <p
             role="alert"
-            className="text-sm text-red-600 dark:text-red-400"
+            className="text-sm text-[var(--danger-fg-soft)]"
           >
             {permissionError}
           </p>
@@ -452,7 +452,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
       */}
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
         <div className="flex items-center justify-between">
-          <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <span className="text-xs uppercase tracking-widest text-[var(--text-caption)]">
             현재 음
           </span>
           <span
@@ -472,7 +472,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               ? midiToCombinedNoteName(sample.midi)
               : "—"}
           </span>
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+          <span className="text-sm text-[var(--text-caption)]">
             {sample && sample.frequencyHz > 0
               ? `${sample.frequencyHz.toFixed(1)} Hz`
               : "발성 대기"}
@@ -483,7 +483,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
           aria-label="마이크 입력 레벨"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="text-xs text-[var(--text-caption)]">
               마이크 입력
             </span>
             <span
@@ -491,7 +491,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
               className={
                 hasSignal
                   ? "text-xs text-emerald-700 dark:text-emerald-300"
-                  : "text-xs text-zinc-500 dark:text-zinc-400"
+                  : "text-xs text-[var(--text-caption)]"
               }
             >
               {hasSignal ? "감지 중" : "신호 없음"}
@@ -599,11 +599,11 @@ function ResultStep({
       />
 
       {validationError ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{validationError}</p>
+        <p className="text-sm text-[var(--danger-fg-soft)]">{validationError}</p>
       ) : null}
 
       {submitError ? (
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <p className="text-sm text-[var(--danger-fg-soft)]">
           저장에 실패했습니다. {submitError}
         </p>
       ) : null}
@@ -645,7 +645,7 @@ function ConfidenceBadge({ label, result }: ConfidenceBadgeProps) {
   const text = result?.confirmed ? "안정" : "낮음 — 재측정 권장";
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+      <span className="text-xs uppercase tracking-widest text-[var(--text-caption)]">
         {label}
       </span>
       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>

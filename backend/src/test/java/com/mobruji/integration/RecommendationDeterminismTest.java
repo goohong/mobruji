@@ -75,7 +75,7 @@ class RecommendationDeterminismTest {
         // given
         final String payload = """
                 {
-                  "sessionId": "determinism-stable",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eedee04e01",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT"
@@ -94,7 +94,7 @@ class RecommendationDeterminismTest {
         // given
         final String payload = """
                 {
-                  "sessionId": "determinism-score-stable",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eedee04e02",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT"
@@ -123,7 +123,7 @@ class RecommendationDeterminismTest {
         // given
         final String payload = """
                 {
-                  "sessionId": "v2-bpm-stable",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eedee04e03",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -143,7 +143,7 @@ class RecommendationDeterminismTest {
         // given: 같은 sessionId/voiceRange, preferredBpm 만 다름
         final String payloadFast = """
                 {
-                  "sessionId": "v2-bpm-entropy",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eedee04e04",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",
@@ -152,7 +152,7 @@ class RecommendationDeterminismTest {
                 """;
         final String payloadSlow = """
                 {
-                  "sessionId": "v2-bpm-entropy",
+                  "sessionId": "550e8400-e29b-41d4-a716-11eedee04e04",
                   "voiceRangeLow": 55,
                   "voiceRangeHigh": 75,
                   "mood": "UPBEAT",

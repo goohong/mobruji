@@ -4,9 +4,9 @@ slug: discord-status-push
 status: approved
 owner: @mobruji-maestro
 scope: infra
-related_issues: [#352]
-related_prs: []
-last_reviewed: 2026-05-23
+related_issues: [352]
+related_prs: [352, 353]
+last_reviewed: 2026-05-24
 ---
 
 # Discord 상태 push 룰
@@ -91,7 +91,7 @@ maestro가 매 사이클 launch마다 자기 점검:
 - [ ] 묶음 질문은 maestro task list에 누적 — 다음 사용자 reply 또는 6h 다이제스트에서 일괄 노출.
 
 ## 6) 작업 분할 (PR 리스트)
-- [x] PR: 본 spec 신설 + `11-multi-session-runbook.md` §추가 + `14-discord-notify-setup.md` cross-reference + memory `feedback-discord-status-push`
+- [x] PR: 본 spec 신설 + `11-multi-session-runbook.md` §추가 + `14-discord-ops.md` cross-reference + memory `feedback-discord-status-push`
 - [ ] PR (후속, 옵션): `decision:pending` 라벨 GitHub repo에 신설 (gh label create)
 - [ ] PR (후속, 옵션): `discord-periodic-summary.yml` 에 `decision:pending` 라벨 이슈 별도 섹션 추가
 

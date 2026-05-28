@@ -17,6 +17,7 @@ import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -363,7 +364,7 @@ describe("AutoVoiceRangePage 저장", () => {
     const user = userEvent.setup();
     createVoiceRangeMock.mockResolvedValueOnce({
       id: 91,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "MIC_MEASURE",
@@ -386,7 +387,7 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
     });
     expect(createVoiceRangeMock).toHaveBeenCalledWith({
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "MIC_MEASURE",
@@ -404,7 +405,7 @@ describe("AutoVoiceRangePage 저장", () => {
     const user = userEvent.setup();
     const response = {
       id: 92,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "MIC_MEASURE" as const,
@@ -430,7 +431,7 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(pushMock).toHaveBeenCalledWith("/recommend");
     });
 
-    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+    expect(client.getQueryData(["voice-range", "00000000-0000-4000-8000-000000000001"])).toEqual(
       response,
     );
   });
@@ -456,6 +457,272 @@ describe("AutoVoiceRangePage 저장", () => {
       expect(screen.getByText(/저장에 실패했습니다/)).toBeInTheDocument();
     });
     expect(pushMock).not.toHaveBeenCalled();
+  });
+});
+
+// PR #1029 (`/voice-range/page.test.tsx`) 가 raw `useMutation(createVoiceRange)`
+// 의 race/unmount/Button reflect 가드를 깔았다. `/voice-range/auto` 페이지는
+// 같은 mutation 외에 마이크 + handleRetry + fallbackTimerRef 까지 더 복잡한
+// race state 를 가지므로 동일 패턴을 확장한다 (closes #1029 후속).
+//
+// 검증 범위:
+//   1) 저장 mutation 빠른 연속 클릭 race
+//      - "추천 받기" 버튼은 mutation.isPending 동안 loading=true 로 disabled.
+//      - 같은 turn 안에 두 번째 클릭해도 createVoiceRange 는 1회만 호출.
+//      - 페이지 본체의 `loading={mutation.isPending}` 회귀 가드.
+//
+//   2) 저장 버튼 isPending 동안 UI reflect (aria-busy / disabled / "저장 중..." 라벨)
+//      - 셋 중 하나라도 회귀로 빠지면 더블 submit 가능.
+//      - 동시에 "다시 측정하기" 버튼도 `disabled={saving}` 로 잠겨야 한다.
+//
+//   3) 저장 mutation pending 중 unmount → React state update warning 0건
+//      - mutationFn pending 도중 unmount() → resolve 시 console.error 0건.
+//
+//   4) 401 응답 시 alert 영역에 에러 노출 + /recommend 라우팅 차단
+//      - `ApiError(401, ...)` reject → "저장에 실패했습니다 401: ..." 표시.
+//      - pushMock / setVoiceRangeId 호출 0건.
+//
+//   5) fallback timer race — handleRetry 가 pending fallback timer 를 정리
+//      - 권한 거부 catch 가 setTimeout(1.2s → /voice-range push) 를 띄움.
+//      - timer fire 전 "다시 측정하기" 또는 unmount 가 일어나면 push 가 호출되면 안 됨.
+//      - (#173 시나리오 — 살아있던 timer 가 사용자를 PERMISSION 밖으로 튕기는 회귀 가드)
+//
+// 비범위:
+//   - 페이지 본체 시그니처 / 동작 변경 없음 (테스트만 추가).
+//   - `npm run build` 는 본 워크트리 symlink 이슈로 skip (PR #1029 동일).
+describe("AutoVoiceRangePage mutation 경계 가드 (race/unmount/401/fallback timer)", () => {
+  /**
+   * mutationFn 응답 시점을 테스트가 직접 통제할 수 있게 하는 deferred.
+   * race / unmount 케이스에서 pending 상태를 임의 길이로 유지한다.
+   */
+  function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason: unknown) => void;
+  } {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  type VoiceRangeResponseShape = {
+    id: number;
+    sessionId: string;
+    lowestNoteMidi: number;
+    highestNoteMidi: number;
+    sourceMethod: "MIC_MEASURE";
+    createdAt: string;
+    updatedAt: string;
+  };
+
+  /**
+   * RESULT 단계까지 진입한 페이지를 렌더해서 "추천 받기" 버튼 reference 를 돌려준다.
+   * 본 describe 의 모든 케이스는 RESULT 단계에서 save mutation 을 트리거한다.
+   */
+  async function renderUntilResult(
+    deps = buildDeps(),
+  ): Promise<{ submit: HTMLButtonElement; unmount: () => void }> {
+    const user = userEvent.setup();
+    const { unmount } = renderWithQueryClient(
+      <AutoVoiceRangePage deps={deps} />,
+    );
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+    const submit = screen.getByRole("button", {
+      name: /추천 받기|저장 중/,
+    }) as HTMLButtonElement;
+    return { submit, unmount };
+  }
+
+  it("빠른 연속 클릭 시 createVoiceRange 는 1회만 호출된다 (Button loading 가드)", async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<VoiceRangeResponseShape>();
+    createVoiceRangeMock.mockReturnValueOnce(deferred.promise);
+
+    const { submit } = await renderUntilResult();
+    await user.click(submit);
+
+    // 첫 호출 후 isPending=true → Button disabled.
+    await waitFor(() => {
+      expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(submit).toBeDisabled();
+    });
+
+    // 같은 turn 안에 두 번째 클릭 — Button disabled 로 차단.
+    await user.click(submit);
+    expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+
+    // pending 해제 → router.push 까지 act 안에서 마무리해 act warning 회피.
+    await act(async () => {
+      deferred.resolve({
+        id: 1001,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "MIC_MEASURE",
+        createdAt: "2026-05-24T00:00:00Z",
+        updatedAt: "2026-05-24T00:00:00Z",
+      });
+      await deferred.promise;
+    });
+  });
+
+  it("mutation pending 동안 '추천 받기' 가 aria-busy + disabled + '저장 중...' 라벨로 reflect 되고 '다시 측정하기' 도 잠긴다", async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<VoiceRangeResponseShape>();
+    createVoiceRangeMock.mockReturnValueOnce(deferred.promise);
+
+    const { submit } = await renderUntilResult();
+    const retry = screen.getByRole("button", { name: /다시 측정하기/ });
+
+    // 클릭 전 baseline: 추천 받기 enabled, aria-busy 없음, "추천 받기" 라벨.
+    expect(submit).toBeEnabled();
+    expect(submit).not.toHaveAttribute("aria-busy", "true");
+    expect(submit).toHaveTextContent(/추천 받기/);
+    expect(retry).toBeEnabled();
+
+    await user.click(submit);
+
+    // 추천 받기 — 3 항목 동시 reflect.
+    await waitFor(() => {
+      expect(submit).toBeDisabled();
+    });
+    expect(submit).toHaveAttribute("aria-busy", "true");
+    expect(submit).toHaveTextContent(/저장 중\.\.\./);
+
+    // 다시 측정하기 — 저장 중에는 잠겨야 한다 (race 진입 차단).
+    expect(retry).toBeDisabled();
+
+    // 응답 도착 → cleanup.
+    await act(async () => {
+      deferred.resolve({
+        id: 1002,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "MIC_MEASURE",
+        createdAt: "2026-05-24T00:00:00Z",
+        updatedAt: "2026-05-24T00:00:00Z",
+      });
+      await deferred.promise;
+    });
+  });
+
+  it("저장 mutation pending 중 unmount 해도 React state update warning 이 발생하지 않는다", async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<VoiceRangeResponseShape>();
+    createVoiceRangeMock.mockReturnValueOnce(deferred.promise);
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const { submit, unmount } = await renderUntilResult();
+    await user.click(submit);
+
+    await waitFor(() => {
+      expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+    });
+
+    // mutation pending 중 컴포넌트 unmount.
+    unmount();
+
+    // 응답 도착 — unmounted observer 의 setState 가 무시되어야 한다.
+    await act(async () => {
+      deferred.resolve({
+        id: 1003,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "MIC_MEASURE",
+        createdAt: "2026-05-24T00:00:00Z",
+        updatedAt: "2026-05-24T00:00:00Z",
+      });
+      await deferred.promise;
+    });
+
+    const stateUpdateWarnings = consoleErrorSpy.mock.calls.filter((call) => {
+      const first = call[0];
+      return (
+        typeof first === "string" &&
+        first.includes("unmounted") &&
+        first.includes("state update")
+      );
+    });
+    expect(stateUpdateWarnings).toEqual([]);
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("저장 401 응답 시 에러 메시지를 노출하고 /recommend 라우팅하지 않는다", async () => {
+    const user = userEvent.setup();
+    createVoiceRangeMock.mockRejectedValueOnce(
+      new ApiError(401, "Unauthorized", { error: "auth" }),
+    );
+
+    const { submit } = await renderUntilResult();
+    await user.click(submit);
+
+    // 페이지가 submitError 를 "<status>: <message>" 형식으로 노출한다.
+    await waitFor(() => {
+      expect(screen.getByText(/저장에 실패했습니다/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/401: Unauthorized/)).toBeInTheDocument();
+
+    // 401 은 onSuccess 가 호출되지 않으므로 push / setVoiceRangeId 가 0건.
+    expect(pushMock).not.toHaveBeenCalledWith("/recommend");
+    expect(sessionMock.state().setVoiceRangeId).not.toHaveBeenCalled();
+  });
+
+  // 권한 거부 시 페이지가 setTimeout(1.2s → router.push("/voice-range")) 를 띄운다.
+  // 사용자가 timer fire 전 컴포넌트를 unmount 하면 (예: 다른 페이지로 navigate)
+  // useEffect cleanup 이 timer 를 clear 해 push 가 호출되면 안 된다.
+  //
+  // 회귀 가드: cleanup 에서 fallbackTimerRef clear 가 빠지면 unmount 후에도
+  // 1.2초 뒤 push 가 실행되어 사용자가 의도치 않게 /voice-range 로 끌려간다.
+  it("권한 거부 fallback timer 가 fire 전 unmount 되면 /voice-range push 가 호출되지 않는다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const notAllowed = Object.assign(new Error("denied"), {
+      name: "NotAllowedError",
+    });
+    const deps = buildDeps({
+      requestMic: vi.fn().mockRejectedValue(notAllowed),
+    });
+    const { unmount } = renderWithQueryClient(
+      <AutoVoiceRangePage deps={deps} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // 권한 거부 alert 노출 (= fallback timer 가 등록된 시점).
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /마이크 권한이 거부되었습니다/,
+      );
+    });
+    expect(pushMock).not.toHaveBeenCalledWith("/voice-range");
+
+    // timer fire 전에 unmount.
+    unmount();
+
+    // 1.2초 + α 시간을 흘려도 push 가 호출되지 않아야 한다.
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(pushMock).not.toHaveBeenCalledWith("/voice-range");
+
+    vi.useRealTimers();
   });
 });
 
@@ -568,5 +835,168 @@ describe("AutoVoiceRangePage a11y", () => {
     expect(screen.getByTestId("auto-step-status")).toHaveTextContent(
       "측정이 완료되었습니다. 결과를 확인하세요.",
     );
+  });
+});
+
+// PR #1033 후속 — 마이크 흐름의 더 깊은 race 시나리오 회귀 가드.
+//
+// PR #1033 이 mutation race 5건을 가드했지만, 마이크 흐름 자체의 race 는
+// 아래 3 시나리오가 비어 있다. 이 describe 는 그 빈 공간을 채운다.
+//
+// 검증 범위:
+//   1) 권한 거부 → 재시도 → 다시 거부 — fallback timer 누적 안 됨.
+//      handleRetry / handleStart 가 직전 fallbackTimerRef 를 clear 하지 않으면
+//      두 번째 거부 시점에 timer 2개가 race 해 push 가 2회 호출될 수 있다.
+//
+//   2) 측정 중 unmount — MediaStream tracks stop() 호출.
+//      cleanup 에서 stream.getTracks().forEach(stop) 가 빠지면 마이크 빨간 점이
+//      페이지 떠난 후에도 잔존 (privacy / 배터리 회귀).
+//
+//   3) handleRetry 직후 mutation race — retry 가 pending mutation 결과를
+//      받았을 때 console.error 0건. retry 가 abort signal 만 정리하고 mutation
+//      observer 는 React Query 가 관리하므로 회귀로 setState warning 이 떠선 안 된다.
+//
+// 비범위:
+//   - 페이지 본체 시그니처 / 동작 변경 없음 (테스트만 추가).
+//   - 본 PR 은 PR #1033 과 동일하게 `npm run build` 는 워크트리 symlink 이슈로 skip 가능.
+describe("AutoVoiceRangePage 마이크 흐름 race 가드 (#1033 후속)", () => {
+  it("권한 거부 → 재시도 → 다시 거부 시 fallback timer 가 누적되지 않는다 (push 2회 방지)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const notAllowed = Object.assign(new Error("denied"), {
+      name: "NotAllowedError",
+    });
+    // 1, 2 번째 시도 모두 권한 거부 — 매 시도마다 setTimeout(1.2s → push) 가 등록된다.
+    const requestMic = vi.fn().mockRejectedValue(notAllowed);
+    const deps = buildDeps({ requestMic });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+
+    // 1차 시도 — 거부.
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /마이크 권한이 거부되었습니다/,
+      );
+    });
+
+    // 1.2초 fire 전에 사용자가 PERMISSION 화면에서 재시도 — handleStart 가
+    // 직전 fallbackTimerRef 를 clear 하면 1차 timer 가 무효화된다.
+    // (UI 상에서 PERMISSION 화면의 "측정 시작" 버튼이 여전히 보이므로 다시 클릭 가능)
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // 2차 시도도 거부 → 새 timer 등록.
+    await waitFor(() => {
+      expect(requestMic).toHaveBeenCalledTimes(2);
+    });
+
+    // 시간 충분히 흘리면 2번의 timer 가 누적됐다면 push 가 2회, 정리됐다면 1회.
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    const pushCalls = pushMock.mock.calls.filter(
+      (call) => call[0] === "/voice-range",
+    );
+    expect(pushCalls.length).toBe(1);
+
+    vi.useRealTimers();
+  });
+
+  it("측정 phase 진행 중 unmount 하면 MediaStream tracks stop 이 호출되어 마이크가 해제된다", async () => {
+    const user = userEvent.setup();
+    const trackStop = vi.fn();
+    const stream = {
+      getTracks: () => [
+        { stop: trackStop } as unknown as MediaStreamTrack,
+      ],
+    } as unknown as MediaStream;
+    const deps = buildDeps({
+      requestMic: vi.fn().mockResolvedValue(stream),
+      // low phase 가 진행 중인 상태로 매달려 있게 둔다 — unmount 가 가능해진다.
+      runPhase: vi.fn().mockImplementation((_phase, _stream, onSample, signal) => {
+        return new Promise<MeasurementResult>((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              resolve({
+                midi: null,
+                confirmed: false,
+                stableSampleCount: 0,
+                totalSampleCount: 0,
+              });
+            },
+            { once: true },
+          );
+          onSample({
+            elapsedMs: 100,
+            frequencyHz: 130.81,
+            clarity: 0.5,
+            isStable: false,
+            midi: 48,
+          });
+        });
+      }),
+    });
+
+    const { unmount } = renderWithQueryClient(
+      <AutoVoiceRangePage deps={deps} />,
+    );
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // runPhase 가 진행 중 (low phase) — streamRef 는 살아있다.
+    await waitFor(() => {
+      expect(deps.runPhase).toHaveBeenCalled();
+    });
+
+    unmount();
+
+    // cleanup 에서 streamRef.current?.getTracks().forEach(stop) 호출.
+    // 회귀로 stop 호출이 빠지면 마이크가 페이지 떠난 후에도 활성 (privacy/battery leak).
+    expect(trackStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("'다시 측정하기' 직후 unmount 해도 React state update warning 이 발생하지 않는다", async () => {
+    // handleRetry 가 setState 5건 (lowResult/highResult/currentSample/elapsedMs/
+    // permissionError/step) 을 호출한다. 직후 즉시 unmount 가 일어나도
+    // 살아있던 sampler 등이 setState 를 호출해선 안 된다.
+    const user = userEvent.setup();
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const { unmount } = renderWithQueryClient(
+      <AutoVoiceRangePage deps={buildDeps()} />,
+    );
+
+    // RESULT 까지 진입.
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    // 다시 측정 클릭 → PERMISSION 단계 복귀.
+    await user.click(screen.getByRole("button", { name: /다시 측정하기/ }));
+    expect(
+      screen.getByRole("button", { name: /측정 시작/ }),
+    ).toBeInTheDocument();
+
+    // retry 직후 즉시 unmount — cleanup 이 abortController/fallbackTimer/stream 정리.
+    unmount();
+
+    // unmounted 컴포넌트에 대한 setState warning 이 발생하면 안 된다.
+    const stateUpdateWarnings = consoleErrorSpy.mock.calls.filter((call) => {
+      const first = call[0];
+      return (
+        typeof first === "string" &&
+        first.includes("unmounted") &&
+        first.includes("state update")
+      );
+    });
+    expect(stateUpdateWarnings).toEqual([]);
+
+    consoleErrorSpy.mockRestore();
   });
 });

@@ -44,7 +44,8 @@ class VoiceRangeIntegrationTest {
     @Test
     @DisplayName("E2E: POST → GET → PUT roundtrip 성공 케이스")
     void e2e_createReadUpdate_succeeds() {
-        final String sessionId = "e2e-session-1";
+        // #948: VoiceRangeCreateRequest.sessionId @Pattern(UUIDv4) 적용 — UUIDv4 fixture 필수.
+        final String sessionId = "550e8400-e29b-41d4-a716-446655448001";
         final String createBody = """
                 {
                   "sessionId": "%s",
@@ -112,7 +113,7 @@ class VoiceRangeIntegrationTest {
     @Test
     @DisplayName("E2E: 같은 sessionId로 POST 2번 → 두 번째는 덮어쓰기 (Q4 최신 1건)")
     void e2e_postTwice_replacesExisting() {
-        final String sessionId = "e2e-session-2";
+        final String sessionId = "550e8400-e29b-41d4-a716-446655448002";
 
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
@@ -146,7 +147,7 @@ class VoiceRangeIntegrationTest {
     @Test
     @DisplayName("E2E: POST 시 voice_range upsert 와 동일 트랜잭션에서 snapshot 1행 insert")
     void e2e_post_persistsSnapshotAlongsideVoiceRange() {
-        final String sessionId = "e2e-snapshot-session";
+        final String sessionId = "550e8400-e29b-41d4-a716-446655448003";
 
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
@@ -173,7 +174,7 @@ class VoiceRangeIntegrationTest {
     @Test
     @DisplayName("E2E: PUT update 시에도 snapshot 1행 추가 누적")
     void e2e_putUpdate_appendsSnapshot() {
-        final String sessionId = "e2e-snapshot-put";
+        final String sessionId = "550e8400-e29b-41d4-a716-446655448004";
         given()
                 .contentType(MediaType.APPLICATION_JSON_VALUE)
                 .header("X-Session-Id", sessionId)
@@ -296,7 +297,9 @@ class VoiceRangeIntegrationTest {
         @Test
         @DisplayName("POST: X-Session-Id 헤더 누락 → 401 (upsert 실행 차단)")
         void post_missingHeader_returns401() {
-            final String sessionId = "e2e-auth-post-missing";
+            // body sessionId 는 UUIDv4 (#948) — 헤더 누락이 인증 게이트 차단 사유여야 함.
+            // 비-UUIDv4 라면 @Pattern 가 먼저 400 을 던져 인증 차단 검증이 깨진다.
+            final String sessionId = "550e8400-e29b-41d4-a716-446655448901";
             final String requestBody = """
                     {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                     """.formatted(sessionId);
@@ -315,8 +318,9 @@ class VoiceRangeIntegrationTest {
         @Test
         @DisplayName("POST: body sessionId ≠ X-Session-Id 헤더 → 401 (음역 위조 차단)")
         void post_mismatchedHeader_returns401() {
-            final String bodySessionId = "e2e-auth-post-A";
-            final String headerSessionId = "e2e-auth-post-B";
+            // 둘 다 UUIDv4 (#948) — header/body 불일치가 인증 게이트 차단 사유여야 함.
+            final String bodySessionId = "550e8400-e29b-41d4-a716-446655448902";
+            final String headerSessionId = "550e8400-e29b-41d4-a716-446655448903";
             final String requestBody = """
                     {"sessionId":"%s","lowestNoteMidi":48,"highestNoteMidi":69,"sourceMethod":"OCTAVE_PICK"}
                     """.formatted(bodySessionId);

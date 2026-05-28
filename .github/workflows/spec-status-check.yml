@@ -1,7 +1,16 @@
 name: Feature Spec Status Check
 
-# docs/features/*.md 변경 시 frontmatter status 필드가 valid한지 검증.
-# 유효 값: draft, approved, implementing, shipped, deprecated.
+# docs/features/*.md 변경 시 frontmatter 형식 검증.
+# 검증 항목:
+#   1. status enum (draft|approved|implementing|shipped|deprecated|blocked) — hard fail
+#      - blocked = 외부 의존성/데이터 부재로 진행 불가, draft 와 의미적으로 구분 (#955)
+#   2. related_prs / related_issues 정수 배열 형식 — hard fail
+#      - `#` prefix 금지, 정수만 허용 (예: [123, 456])
+#      - 사례: PR #980 rev 발견 — `ncp-maestro-resilience` 의 `[#385, #391]` 형식 오류
+#   3. PR 본문(non-frontmatter) 가 변경된 spec 의 frontmatter related_prs 갱신 여부 — soft notice
+#      - rev audit 이 단계 1 에서 보고할 수 있도록 가시화만, fail 시키지 않음
+#      - 사례: PR #965 rev 가 `anonymous-session-lifecycle` related_prs 누락 발견
+# 상세: docs/features/README.md §10
 
 on:
   pull_request:
@@ -18,12 +27,16 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const validStatuses = ['draft','approved','implementing','shipped','deprecated'];
+            const { execSync } = require('child_process');
+
+            const validStatuses = ['draft','approved','implementing','shipped','deprecated','blocked'];
             const dir = 'docs/features';
 
             if (!fs.existsSync(dir)) {
@@ -35,31 +48,170 @@ jobs:
               .filter(f => f.endsWith('.md'))
               .filter(f => !['README.md', '_template.md'].includes(f));
 
+            // --- Helper: parse "[123, 456]" 또는 "[#385, #391]" → { values: int[], invalid: string[] }
+            // invalid 가 1개라도 있으면 형식 오류로 분류.
+            function parseIntArrayField(rawArray) {
+              const trimmed = rawArray.trim();
+              if (trimmed === '[]') return { values: [], invalid: [] };
+              const inner = trimmed.replace(/^\[/, '').replace(/\]$/, '');
+              const tokens = inner.split(',').map(s => s.trim()).filter(s => s.length > 0);
+              const values = [];
+              const invalid = [];
+              for (const tok of tokens) {
+                // 정수만 허용. `#` prefix / 문자열 quote / 다른 형식 모두 invalid.
+                if (/^\d+$/.test(tok)) {
+                  values.push(parseInt(tok, 10));
+                } else {
+                  invalid.push(tok);
+                }
+              }
+              return { values, invalid };
+            }
+
+            // 본 PR 에서 변경된 spec 파일만 hard-fail 적용 (기존 spec 잔존 오류는 notice).
+            // 사유: 본 PR 도입 시점에 잔존 형식 오류 (예: ncp-maestro-resilience [#385, #391]) 가 5건 있고,
+            //       향후 첫 spec 변경 PR 이 자기 잘못 아닌 사유로 차단되면 안 됨.
+            //       정정은 별 PR (2차 sweep) 에서 진행 — 변경된 spec 만 strict 가드.
+            const prNumber = context.payload.pull_request && context.payload.pull_request.number;
+            const baseSha = context.payload.pull_request && context.payload.pull_request.base.sha;
+            const headSha = context.payload.pull_request && context.payload.pull_request.head.sha;
+            let changedSpecBasenames = new Set();
+            if (prNumber) {
+              try {
+                const out = execSync(`git diff --name-only ${baseSha}...${headSha} -- 'docs/features/*.md'`, { encoding: 'utf8' });
+                changedSpecBasenames = new Set(
+                  out.split('\n').map(s => s.trim()).filter(s => s.length > 0).map(p => path.basename(p))
+                );
+              } catch (e) {
+                core.notice(`git diff 실패 (changed-file detection skip): ${e.message}`);
+              }
+            }
+
             let failed = false;
             const reports = [];
+            // spec 파일 별 related_prs 값 (soft-notice 단계에서 재사용)
+            const specRelatedPrs = {};
+
             for (const f of files) {
+              const isChanged = changedSpecBasenames.has(f);
+              const reportFail = (msg) => {
+                if (isChanged) {
+                  core.error(msg);
+                  failed = true;
+                } else {
+                  core.notice(`(legacy / 본 PR 미변경) ${msg}`);
+                }
+              };
               const content = fs.readFileSync(path.join(dir, f), 'utf8');
               const m = content.match(/^---\n([\s\S]*?)\n---/);
               if (!m) {
-                core.error(`${f}: missing frontmatter (--- block)`);
-                failed = true;
+                reportFail(`${f}: missing frontmatter (--- block)`);
                 continue;
               }
               const fm = m[1];
+
+              // ---- status enum 검증
               const statusMatch = fm.match(/^status:\s*(\S+)/m);
               if (!statusMatch) {
-                core.error(`${f}: missing 'status' field in frontmatter`);
-                failed = true;
+                reportFail(`${f}: missing 'status' field in frontmatter`);
                 continue;
               }
               const status = statusMatch[1];
               if (!validStatuses.includes(status)) {
-                core.error(`${f}: invalid status '${status}'. Must be one of: ${validStatuses.join(', ')}`);
-                failed = true;
+                reportFail(`${f}: invalid status '${status}'. Must be one of: ${validStatuses.join(', ')}`);
                 continue;
               }
-              reports.push(`✓ ${f}: ${status}`);
+
+              // ---- related_prs 정수 배열 형식 검증
+              // 누락 자체는 fail 안 함 (legacy spec 호환). 있으면 형식만 검증.
+              const relatedPrsMatch = fm.match(/^related_prs:\s*(\[.*?\])\s*$/m);
+              let relatedPrs = null;
+              if (relatedPrsMatch) {
+                const parsed = parseIntArrayField(relatedPrsMatch[1]);
+                if (parsed.invalid.length > 0) {
+                  reportFail(
+                    `${f}: related_prs 형식 오류 — invalid tokens: ${parsed.invalid.join(', ')}. ` +
+                    `정수 배열만 허용 (예: [123, 456]). '#' prefix / 문자열 quote 금지. ` +
+                    `상세: docs/features/README.md §10`
+                  );
+                } else {
+                  relatedPrs = parsed.values;
+                  specRelatedPrs[f] = relatedPrs;
+                }
+              }
+
+              // ---- related_issues 정수 배열 형식 검증
+              const relatedIssuesMatch = fm.match(/^related_issues:\s*(\[.*?\])\s*$/m);
+              if (relatedIssuesMatch) {
+                const parsed = parseIntArrayField(relatedIssuesMatch[1]);
+                if (parsed.invalid.length > 0) {
+                  reportFail(
+                    `${f}: related_issues 형식 오류 — invalid tokens: ${parsed.invalid.join(', ')}. ` +
+                    `정수 배열만 허용 (예: [123, 456]). '#' prefix / 문자열 quote 금지. ` +
+                    `상세: docs/features/README.md §10`
+                  );
+                }
+              }
+
+              reports.push(`✓ ${f}: status=${status}` + (relatedPrs ? `, related_prs=${relatedPrs.length}개` : '') + (isChanged ? ' [본 PR 변경]' : ''));
             }
 
             core.notice(`Validated ${files.length} spec(s):\n${reports.join('\n')}`);
+
+            // ---- 소프트 검증: PR 본문 (frontmatter 밖) 변경된 spec 의 related_prs 에 본 PR 번호 포함됐는지
+            // notice 만 출력, fail 시키지 않음. rev audit 단계 1 에서 보고 가시화 목적.
+            // changedSpecBasenames 는 이미 위에서 계산됨 (변경된 spec basename Set).
+            if (prNumber && changedSpecBasenames.size > 0) {
+              const missingPrRef = [];
+              for (const specBasename of changedSpecBasenames) {
+                if (['README.md', '_template.md'].includes(specBasename)) continue;
+                const specPath = path.join(dir, specBasename);
+                if (!fs.existsSync(specPath)) continue; // 삭제된 spec 은 skip
+
+                // diff 가 frontmatter 밖 (본문) 을 건드렸는지 확인
+                let diffOut = '';
+                try {
+                  diffOut = execSync(`git diff ${baseSha}...${headSha} -- ${specPath}`, { encoding: 'utf8' });
+                } catch (e) {
+                  continue;
+                }
+                if (!diffOut) continue;
+
+                // 본문 변경 휴리스틱: frontmatter 종료 라인 이후 hunk 가 있는지 본다.
+                // frontmatter 만 변경한 경우 hunk endLine 이 fmEndLine 이하에 한정됨.
+                const currentContent = fs.readFileSync(specPath, 'utf8');
+                const fmEndMatch = currentContent.match(/^---\n[\s\S]*?\n---/);
+                const fmEndLine = fmEndMatch ? fmEndMatch[0].split('\n').length : 0;
+
+                // diff hunk 헤더 파싱: `@@ -A,B +C,D @@`
+                const hunkRe = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+                let bodyChanged = false;
+                let hmatch;
+                while ((hmatch = hunkRe.exec(diffOut)) !== null) {
+                  const startLine = parseInt(hmatch[1], 10);
+                  const count = hmatch[2] ? parseInt(hmatch[2], 10) : 1;
+                  const endLine = startLine + count - 1;
+                  if (endLine > fmEndLine) {
+                    bodyChanged = true;
+                    break;
+                  }
+                }
+                if (!bodyChanged) continue;
+
+                // frontmatter 의 related_prs 에 본 PR 번호 포함됐는지
+                const prs = specRelatedPrs[specBasename];
+                if (!prs || !prs.includes(prNumber)) {
+                  missingPrRef.push(specBasename);
+                }
+              }
+
+              if (missingPrRef.length > 0) {
+                core.notice(
+                  `⚠️ Soft warning — 다음 spec 본문이 본 PR 에서 변경됐는데 frontmatter 'related_prs' 에 PR #${prNumber} 가 누락됐습니다:\n` +
+                  missingPrRef.map(f => `  - ${f}`).join('\n') +
+                  `\n\n갱신 의무는 README.md §10-1 참조. 누락 시 rev audit 단계 1 에서 보고됩니다.`
+                );
+              }
+            }
+
             if (failed) core.setFailed('Feature spec frontmatter validation failed');

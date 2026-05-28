@@ -4,9 +4,9 @@ slug: discord-message-style
 status: approved
 owner: @mobruji-maestro
 scope: infra
-related_issues: [#386]
-related_prs: []
-last_reviewed: 2026-05-23
+related_issues: [386]
+related_prs: [386, 387, 827, 830, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Discord 메시지 체계화 + 채널 매핑

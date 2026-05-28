@@ -40,6 +40,7 @@ class SessionAuthGuardTest {
                 AnonymousSessionProperties.DEFAULT_TTL_DAYS,
                 null,
                 null,
+                null,
                 null);
         sessionAuthGuard = new SessionAuthGuard(
                 anonymousSessionRepository, sessionActivityTracker, properties);

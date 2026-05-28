@@ -5,8 +5,8 @@ status: draft
 owner: "@goohong"
 scope: song
 related_issues: [68, 69]
-related_prs: []
-last_reviewed: 2026-05-22
+related_prs: [266]
+last_reviewed: 2026-05-24
 ---
 
 # MusicBrainz 통합 — ISRC/mbid backfill + 메타 보강

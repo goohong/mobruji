@@ -5,8 +5,8 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: [880]
-related_prs: []
-last_reviewed: 2026-05-23
+related_prs: [880, 891, 939]
+last_reviewed: 2026-05-24
 ---
 
 # Helper UX 묶음 — bot 1초 auto-ack + Discord thread stream + reply 컨텍스트 forwarding

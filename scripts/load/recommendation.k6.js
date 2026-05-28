@@ -32,6 +32,22 @@ const VUS = parseInt(__ENV.VUS || '10', 10);
 const DURATION = __ENV.DURATION || '60s';
 const WARMUP = __ENV.WARMUP || '10s';
 
+// UUIDv4 생성 헬퍼 (#948).
+// VoiceRangeCreateRequest.sessionId @Pattern(SessionIdPatterns.UUID_V4) 강제 — 비-UUIDv4 입력은 400.
+// k6 setup() 의 POST /api/v1/voice-ranges 가 본 헬퍼로 sessionId 를 발급해야 시나리오가 통과한다.
+// SessionRotateRequest 와 동일 형식. crypto.randomUUID 미지원 환경(k6) 대응을 위해 Math.random 기반 생성.
+function uuidV4() {
+    const bytes = new Array(16);
+    for (let i = 0; i < 16; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+    }
+    // RFC 4122 §4.4 — version(0100) + variant(10xx) nibble 셋팅
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 const MOODS = ['UPBEAT', 'CALM', 'EMOTIONAL', 'POWERFUL', 'GROOVY', 'NOSTALGIC', null];
 
 // preferredBpm 변주 — v2(#218) tempoMatch 회귀 가드(#274).
@@ -100,7 +116,9 @@ export const options = {
 export function setup() {
     const sessions = [];
     for (let i = 0; i < VUS; i++) {
-        const sessionId = `k6-load-${Date.now()}-${i}`;
+        // #948: VoiceRangeCreateRequest.sessionId @Pattern(UUIDv4) — UUIDv4 생성 필수.
+        // 이전 `k6-load-${Date.now()}-${i}` 패턴은 400 (UUIDv4 format required) 회귀.
+        const sessionId = uuidV4();
         const variant = VOICE_RANGE_VARIANTS[i % VOICE_RANGE_VARIANTS.length];
         const res = http.post(
             `${BASE_URL}/api/v1/voice-ranges`,
@@ -111,7 +129,11 @@ export function setup() {
                 sourceMethod: 'OCTAVE_PICK',
             }),
             {
-                headers: { 'Content-Type': 'application/json' },
+                // SessionAuthGuard(#924, F4) — POST /api/v1/voice-ranges 는 body sessionId
+                // vs X-Session-Id 헤더 상수시간 일치 검증. 헤더 누락 시 401.
+                // bootstrap 옵션 (a): anonymous_session 행 미존재여도 통과 → 별도 세션 생성
+                // endpoint 불필요. SessionActivityTracker 가 lazy 등록 (spec §5-2, §5-5-1).
+                headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
                 tags: { endpoint: 'voice_range_setup' },
             },
         );
@@ -145,7 +167,9 @@ export function recommendationFlow(data) {
     }
 
     const res = http.post(`${BASE_URL}/api/v1/recommendations`, JSON.stringify(payload), {
-        headers: { 'Content-Type': 'application/json' },
+        // POST /api/v1/recommendations 자체는 현재(2026-05-24) SessionAuthGuard 미적용이지만,
+        // session-bound endpoint 동등 처리를 위해 헤더를 함께 전송 (가드 확장 시 회귀 방지).
+        headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
         tags: { endpoint: 'recommendation' },
     });
 

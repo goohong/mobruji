@@ -15,6 +15,7 @@ import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -167,7 +168,7 @@ describe("VoiceRangePage 제출 흐름", () => {
     const user = userEvent.setup();
     createVoiceRangeMock.mockResolvedValueOnce({
       id: 77,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 50,
       highestNoteMidi: 65,
       sourceMethod: "OCTAVE_PICK",
@@ -190,7 +191,7 @@ describe("VoiceRangePage 제출 흐름", () => {
       expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
     });
     expect(createVoiceRangeMock).toHaveBeenCalledWith({
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 50,
       highestNoteMidi: 65,
       sourceMethod: "OCTAVE_PICK",
@@ -229,7 +230,7 @@ describe("VoiceRangePage 제출 흐름", () => {
     const user = userEvent.setup();
     const response = {
       id: 88,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 50,
       highestNoteMidi: 65,
       sourceMethod: "OCTAVE_PICK" as const,
@@ -250,7 +251,7 @@ describe("VoiceRangePage 제출 흐름", () => {
       expect(pushMock).toHaveBeenCalledWith("/recommend");
     });
 
-    expect(client.getQueryData(["voice-range", "test-session-id"])).toEqual(
+    expect(client.getQueryData(["voice-range", "00000000-0000-4000-8000-000000000001"])).toEqual(
       response,
     );
   });
@@ -274,6 +275,200 @@ describe("VoiceRangePage 제출 흐름", () => {
     expect(submit).toBeDisabled();
     await user.click(submit);
     expect(createVoiceRangeMock).not.toHaveBeenCalled();
+  });
+});
+
+// PR #985 (`useFeedbackToggleMutation` race/unmount/401 가드) 패턴을
+// /voice-range 페이지의 raw `useMutation` 블록에도 확장한다.
+//
+// 검증 범위 (closes #1015 후속):
+//   1) 빠른 연속 클릭 race condition
+//      - submit 버튼은 mutation.isPending 동안 `loading=true` 로 disabled.
+//      - 사용자가 0.1초 안에 두 번째 클릭해도 createVoiceRange 는 1회만 호출.
+//      - Button 의 `loading={mutation.isPending}` 회귀 가드.
+//
+//   2) Button isPending 동안 UI reflect (loading / aria-busy / label 변경)
+//      - mutation pending 중: aria-busy="true" + disabled + "저장 중..." 라벨.
+//      - mutation 해결 직전까지 상태가 유지되는지 검증.
+//      - 위 prop 중 하나라도 회귀로 빠지면 사용자가 더블 submit 가능.
+//
+//   3) unmount 직후 응답 도착 — React state update warning 없이 종료
+//      - mutationFn pending 도중 unmount() → resolve 시 console.error 0건.
+//      - React Query 가 unmounted observer 의 setState 를 무시하는지 회귀 확인.
+//
+// 비범위 (의도적으로 검증 안 함):
+//   - voice-range 페이지 본체 / 인터페이스 / 시그니처 변경 없음 (테스트만 추가)
+//   - `/voice-range/auto` 페이지는 별도 테스트 책임 (마이크 의존 흐름)
+//   - createVoiceRange API 자체 동작은 별도 (api/voice-range.test.ts)
+describe("VoiceRangePage mutation 경계 가드 (race/unmount/Button reflect)", () => {
+  /**
+   * mutationFn 이 resolve 되기 전까지 안에 머무를 수 있는 deferred 도우미.
+   * race / unmount 케이스에서 "응답 도착 시점" 을 우리가 직접 통제한다.
+   */
+  function createDeferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason: unknown) => void;
+  } {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it("빠른 연속 클릭 시 createVoiceRange 는 1회만 호출된다 (Button loading 가드)", async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<{
+      id: number;
+      sessionId: string;
+      lowestNoteMidi: number;
+      highestNoteMidi: number;
+      sourceMethod: "OCTAVE_PICK";
+      createdAt: string;
+      updatedAt: string;
+    }>();
+    createVoiceRangeMock.mockReturnValueOnce(deferred.promise);
+
+    renderWithQueryClient(<VoiceRangePage />);
+
+    const submit = screen.getByRole("button", { name: /추천 받기/ });
+    await user.click(submit);
+
+    // 첫 호출 후 isPending=true 가 Button 에 반영되어 disabled.
+    await waitFor(() => {
+      expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(submit).toBeDisabled();
+    });
+
+    // 같은 turn 안에 사용자가 한 번 더 클릭 — Button disabled 로 차단되어야 한다.
+    await user.click(submit);
+    expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+
+    // 응답을 도착시켜 cleanup (router.push 가 await 안에서 호출돼야 act warning 안 뜸).
+    await act(async () => {
+      deferred.resolve({
+        id: 1,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-24T00:00:00Z",
+        updatedAt: "2026-05-24T00:00:00Z",
+      });
+      await deferred.promise;
+    });
+  });
+
+  it("mutation pending 동안 Button 이 aria-busy + disabled + '저장 중...' 라벨로 reflect 된다", async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<{
+      id: number;
+      sessionId: string;
+      lowestNoteMidi: number;
+      highestNoteMidi: number;
+      sourceMethod: "OCTAVE_PICK";
+      createdAt: string;
+      updatedAt: string;
+    }>();
+    createVoiceRangeMock.mockReturnValueOnce(deferred.promise);
+
+    renderWithQueryClient(<VoiceRangePage />);
+
+    const submit = screen.getByRole("button", { name: /추천 받기/ });
+    // 클릭 전: enabled, aria-busy 없음, "추천 받기" 라벨.
+    expect(submit).toBeEnabled();
+    expect(submit).not.toHaveAttribute("aria-busy", "true");
+    expect(submit).toHaveTextContent(/추천 받기/);
+
+    await user.click(submit);
+
+    // 클릭 후 mutation pending — 3 항목 동시 reflect.
+    await waitFor(() => {
+      expect(submit).toBeDisabled();
+    });
+    expect(submit).toHaveAttribute("aria-busy", "true");
+    expect(submit).toHaveTextContent(/저장 중\.\.\./);
+
+    // 응답 도착 → cleanup.
+    await act(async () => {
+      deferred.resolve({
+        id: 2,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-24T00:00:00Z",
+        updatedAt: "2026-05-24T00:00:00Z",
+      });
+      await deferred.promise;
+    });
+  });
+
+  it("unmount 직후 응답이 도착해도 React state update warning 없이 종료된다", async () => {
+    const user = userEvent.setup();
+    const deferred = createDeferred<{
+      id: number;
+      sessionId: string;
+      lowestNoteMidi: number;
+      highestNoteMidi: number;
+      sourceMethod: "OCTAVE_PICK";
+      createdAt: string;
+      updatedAt: string;
+    }>();
+    createVoiceRangeMock.mockReturnValueOnce(deferred.promise);
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const { unmount } = renderWithQueryClient(<VoiceRangePage />);
+
+    const submit = screen.getByRole("button", { name: /추천 받기/ });
+    await user.click(submit);
+
+    await waitFor(() => {
+      expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+    });
+
+    // mutation pending 중 컴포넌트 unmount.
+    unmount();
+
+    // 응답 도착 — unmounted observer 의 setState 가 무시되어야 한다.
+    await act(async () => {
+      deferred.resolve({
+        id: 3,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 69,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-24T00:00:00Z",
+        updatedAt: "2026-05-24T00:00:00Z",
+      });
+      await deferred.promise;
+    });
+
+    // React 가 "Can't perform a React state update on an unmounted component"
+    // warning 을 띄우면 console.error 로 빠진다. 본 가드가 깨지면 unmount race.
+    const stateUpdateWarnings = consoleErrorSpy.mock.calls.filter((call) => {
+      const first = call[0];
+      return (
+        typeof first === "string" &&
+        first.includes("unmounted") &&
+        first.includes("state update")
+      );
+    });
+    expect(stateUpdateWarnings).toEqual([]);
+
+    // pushMock / setVoiceRangeId 가 호출됐는지 자체는 본 케이스 범위 아님 —
+    // React Query 내부 구현에 따라 onSuccess 가 unmount 후에도 호출될 수 있다.
+    // 본 가드 핵심은 "warning 0건" 이다.
+
+    consoleErrorSpy.mockRestore();
   });
 });
 

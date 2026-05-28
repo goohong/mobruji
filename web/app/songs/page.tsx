@@ -59,7 +59,7 @@ function SearchPageFallback() {
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Browse
           </p>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -193,7 +193,7 @@ function SongSearchPageInner() {
     <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Browse
           </p>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -267,7 +267,7 @@ function FilterPanel({
         aria-label="난이도 필터"
         className="flex flex-wrap items-center gap-2"
       >
-        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        <span className="text-xs font-medium text-[var(--text-caption)]">
           난이도
         </span>
         {DIFFICULTY_OPTIONS.map((option) => {
@@ -291,7 +291,7 @@ function FilterPanel({
           // 모바일에서 chip이 많아지면 가로 스크롤. 데스크탑은 wrap.
           className="flex flex-wrap items-center gap-2"
         >
-          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          <span className="text-xs font-medium text-[var(--text-caption)]">
             장르
           </span>
           {availableGenres.map((genre) => {
@@ -354,7 +354,7 @@ function SearchResult({
         </p>
         <Link
           href="/voice-range"
-          className="text-xs text-zinc-500 underline-offset-4 hover:underline dark:text-zinc-400"
+          className="text-xs text-[var(--text-caption)] underline-offset-4 hover:underline"
         >
           또는 음역대 입력으로 추천 받기
         </Link>
@@ -367,7 +367,7 @@ function SearchResult({
       <p
         role="status"
         aria-busy="true"
-        className="text-sm text-zinc-500 dark:text-zinc-400"
+        className="text-sm text-[var(--text-caption)]"
       >
         검색 중...
       </p>
@@ -381,9 +381,9 @@ function SearchResult({
       <div
         role="alert"
         aria-live="assertive"
-        className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+        className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4"
       >
-        <p className="text-sm text-red-700 dark:text-red-200">
+        <p className="text-sm text-[var(--danger-fg-strong)]">
           검색에 실패했습니다.{" "}
           {error instanceof ApiError
             ? `${error.status}: ${error.message}`
@@ -410,7 +410,7 @@ function SearchResult({
       <p
         role="status"
         aria-live="polite"
-        className="text-xs text-zinc-500 dark:text-zinc-400"
+        className="text-xs text-[var(--text-caption)]"
       >
         {filtersActive
           ? `필터 결과 ${songs.length}곡 / 전체 ${rawCount}곡`

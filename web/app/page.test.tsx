@@ -152,7 +152,7 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
 describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
   beforeEach(() => {
     useSessionStore.setState({
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       voiceRangeId: 77,
       excludedSongIds: [],
     });
@@ -161,7 +161,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
   it("primary CTA는 /recommend, 보조 CTA는 /voice-range/auto", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "OCTAVE_PICK",
@@ -187,7 +187,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
   it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (C3 ~ A4)", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48, // C3
       highestNoteMidi: 69, // A4
       sourceMethod: "OCTAVE_PICK",
@@ -203,7 +203,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
         /도3 \(C3\) ~ 라4 \(A4\)/,
       );
     });
-    expect(readVoiceRangeMock).toHaveBeenCalledWith("test-session-id");
+    expect(readVoiceRangeMock).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001");
   });
 
   it("BE 호출이 실패하면 ID fallback을 노출한다", async () => {
@@ -225,7 +225,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
   it("측정 한 상태 a11y 위반 없음", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
-      sessionId: "test-session-id",
+      sessionId: "00000000-0000-4000-8000-000000000001",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "OCTAVE_PICK",

@@ -1,8 +1,12 @@
 ---
-name: rev-e2e-3-stages
-status: draft
-owners: rev
-related-issues: ["#882", "#851"]
+feature: rev 3단계 e2e 자율 QA
+slug: rev-e2e-3-stages
+status: implementing
+owner: @mobruji-maestro
+scope: infra
+related_issues: [882, 851]
+related_prs: [889, 932, 953, 958, 1009]
+last_reviewed: 2026-05-27
 ---
 
 # rev 3단계 e2e 자율 QA
@@ -41,17 +45,18 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 
 ### 3-2. develop 머지 후 사후 검사 (단계 2)
 - **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
+- 후보 발굴: `gh pr list --state merged --base develop --search 'merged:>1h ago -label:rev-post-merge-pass -label:type:release'`
 - develop 머지 직후 NCP dev deploy 사이클 완료까지 대기 (~5분)
 - rev 가 단계 1 시나리오 동일 재실행 — 실제 deploy 환경
-- 통과 → PR 코멘트 `✅ rev e2e post-merge pass`
+- 통과 → PR 코멘트 `✅ rev e2e post-merge pass` + 라벨 `rev-post-merge-pass` (멱등성 표식)
 - 실패 → 즉시 revert 이슈 등록 + `regression:dev` 라벨 + Discord push
 
 ### 3-3. release 후 production 검증 (단계 3)
 - **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
 - release (develop → main) 머지 + production deploy 완료까지 대기
 - rev 가 release 에 포함된 모든 e2e 가능 PR 에 대해 단계 1 시나리오 재실행
-- 통과 → release 노트에 `✅ rev e2e production verified` 추가
-- 실패 → hotfix 이슈 등록 + `regression:prod` 라벨 + 즉시 Discord push
+- 통과 → release 노트에 `✅ rev e2e production verified` 추가 + PR 라벨 `rev-prod-pass`
+- 실패 → hotfix 이슈 등록 + `regression:prod` 라벨 + 즉시 Discord push (사용자 부재여도 자율 hotfix)
 
 ## 4. 비기능 요구사항
 - 단계별 timeout: 단계 1 = 10분, 단계 2 = 5분, 단계 3 = 10분
@@ -59,16 +64,32 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 - 모든 단계 결과는 PR 코멘트 + cycle-status.json `rev.in_progress` 에 기록
 
 ## 5. 구현 계획
-- rev sub-agent prompt template 갱신 (`docs/ai-harness/12-sub-agent-prompt-template.md`) — 별 PR (PR #875 머지 후)
-- CLAUDE.md §4 품질 게이트에 "type:fix/feat PR 머지 전 rev 3단계 e2e" 한 줄 — 별 PR (PR #875 머지 후)
-- rev e2e 시나리오 라이브러리 (`tools/rev-e2e/`) — 별 PR
+- [x] rev sub-agent prompt template §E-2 (3단계 절차) 갱신 (`docs/ai-harness/actors/sub-agent.md`) — **PR #945 (2026-05-24 완료)**
+- [x] GitHub Actions `rev-gate.yml` check 신설 (라벨/코멘트 부재 시 머지 차단) — **PR #945 (2026-05-24 완료)**
+- [x] rev 큐 스크립트 (`tools/rev-queue/`) + sub-agent prompt §E-3 (큐 discovery) — **PR #952 (2026-05-24 완료)**. 매 사이클 첫 액션으로 호출. 라벨 + 스크립트가 single source of truth
+- [ ] CLAUDE.md §4 품질 게이트에 "모든 type:* PR 머지 전 rev 3단계 e2e" 한 줄 — 별 PR
+- [ ] rev e2e 시나리오 라이브러리 (`tools/rev-e2e/`) — 별 PR
+- [ ] `rev-gate.yml` 을 `required_status_checks` 로 GitHub 브랜치 보호 설정 등록 — 별 PR (사용자 admin 작업)
 
 ## 6. 마이그레이션 / rollout
 - phase 1: 단계 1 (PR 머지 전) 만 — 즉시
-- phase 2: 단계 2 (사후) — 1 사이클 후
+- phase 2: 단계 2 (사후) — 1 사이클 후 (#1008 자동 trigger loop 도입 완료)
 - phase 3: 단계 3 (release 후) — release v0.4.0 부터
 
 ## 7. 관련
-- 이슈 #882, #879 (원인 PR #851)
+- 이슈 #882, #879 (원인 PR #851), #1008 (단계 2 자동 trigger)
 - 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]] [[feedback-role-expansion]]
 - 다음 plan 사이클에서 §5 구현 PR 시퀀스 작성
+
+## 8. 단계 2 자동 trigger 구현 (#1008)
+
+`bot.py` 의 `rev_post_merge_audit_loop` (5분 polling) 이 단계 2 후보 PR 을 발굴해
+nmae tmux pane 에 audit launch 알림을 inject 한다.
+
+- 후보 발굴: `gh pr list --state merged --base develop --search 'merged:>1h ago -label:rev-post-merge-pass'`
+- inject: `[rev e2e post-merge] PR #N 단계 2 audit launch — develop deploy 후 시나리오 재실행`
+- debounce: PR 별 15분 (반복 inject 차단)
+- nmae 책임: 단계 2 통과 시 `rev-post-merge-pass` 라벨 부여 (이후 polling 에서 제외)
+- env: `REV_POST_MERGE_AUDIT_LOOP=1` (default), `REV_POST_MERGE_AUDIT_INTERVAL_SECONDS=300`,
+  `REV_POST_MERGE_AUDIT_INJECT_TARGET=mobruji:0.0`
+- 단순화: gh CLI 실패 / 후보 0 / tmux 부재 시 graceful skip — 데몬 영구 dead 방어

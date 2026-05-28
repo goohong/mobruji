@@ -4,9 +4,9 @@ slug: maestro-auto-wake
 status: approved
 owner: @mobruji-maestro
 scope: infra
-related_issues: [#381]
-related_prs: []
-last_reviewed: 2026-05-23
+related_issues: [381]
+related_prs: [382, 383, 939]
+last_reviewed: 2026-05-24
 ---
 
 # maestro 자동 wake 사이클 (idle perpetuating + secondary backup)

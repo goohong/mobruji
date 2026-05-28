@@ -9,6 +9,7 @@
 - 비적용: 타 레포 공통 정책, 조직 전사 정책
 
 ## 3) 문서 목록 (P0)
+- `docs/ai-harness/00-MANIFEST.md`: **라우팅 지도** (주제별 문서 그룹 + 에이전트별 주입 맵 + 작업 트랙 + 통신 계약 + 보고 프로토콜). 문서 대체 아님, 네비게이션/주입 인덱스.
 - `docs/ai-harness/01-harness-spec.md`: 하네스 실행 규격과 결정 규칙
 - `docs/ai-harness/02-agent-workflow.md`: 브랜치/PR/커밋/핸드오프 워크플로우
 - `docs/ai-harness/03-quality-gates.md`: 빌드/테스트 게이트와 실패 처리
@@ -19,15 +20,15 @@
 - `docs/ai-harness/08-code-conventions.md`: 코드 컨벤션 (final/어노테이션/DTO/엔티티/Lombok/null 검증 등)
 - `docs/ai-harness/10-observability.md`: 관측성 (Actuator + Micrometer) — 현재 backend endpoint만 노출, 시각화는 추후
 - `docs/ai-harness/11-multi-session-runbook.md`: 다중 세션(be/fe/rev) 셋업·운영 런북
-- `docs/ai-harness/12-sub-agent-prompt-template.md`: maestro이 sub-agent launch 시 참조하는 공통 룰 + 역할별 추가 룰
-- `docs/ai-harness/13-memory-promote-tracking.md`: Claude 메모리 → 코드 promote 트래킹 매트릭스
-- `docs/ai-harness/14-discord-notify-setup.md`: Discord webhook/bot 셋업 및 토큰 관리
-- `docs/ai-harness/15-discord-message-templates.md`: Discord 메시지 템플릿 + 양방향 명령 syntax
+- `docs/ai-harness/actors/sub-agent.md`: maestro이 sub-agent launch 시 참조하는 공통 룰 + 역할별 추가 룰
+- `docs/ai-harness/13-memory-and-enforcement.md`: 메모리↔코드 책임 분리 ("왜"=메모리 / "어떻게"=코드: hook/wrapper/workflow/test) + 결정 트리 + 패턴 카탈로그 + promote 트래킹 (구 13+16 통합)
+- `docs/ai-harness/14-discord-ops.md`: Discord 셋업(webhook/bot/토큰) + 메시지 템플릿 + 양방향 명령 syntax + Forum (구 14+15 통합)
 
 > `09-notion-api-spec.md`는 추후 Notion API 명세 DB 연동 시 추가.
 
 ## 3-1) 관련 자산
-- `prompts/`: 재사용 프롬프트 저장소 (운영 규칙은 `05-prompt-ops.md`)
+- **에이전트 통신 계약** (command IN / report OUT / 상태 공유): `00-MANIFEST.md §4`. 별도 prompt 템플릿 파일은 두지 않음 — 규격은 launch 시 주입되는 SoT(`actors/sub-agent.md` + `agent-launch-wrapper.sh`)에만 둬야 지켜짐.
+- `docs/ai-harness/actors/`: **actor 전용 런북** (해당 actor 만 로드 — universal 노이즈 제거, 2026-05-28). `nmae.md` (구 CLAUDE.md §11). helper 는 `docs/ai-harness/actors/helper.md`, sub-agent 는 `actors/sub-agent.md` 가 각각 자기 SoT. 라우팅 표는 `CLAUDE.md §0` / `00-MANIFEST.md`.
 - `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE/task.md`: PR/이슈 템플릿
 - `docs/features/`: 기능 단위 living 명세서 (Feature Spec). 프로세스는 `02-agent-workflow.md §9`
 - `docs/decisions/`: Architecture Decision Records (ADR). 횡단 결정의 영속 이력
@@ -48,6 +49,8 @@
   - `0015-hosting-stack.md` — 호스팅 스택
   - `0016-maestro-context-percent-estimation.md` — maestro context 사용률 추정
   - `0017-spring-boot-eol-strategy.md` — Spring Boot 3.5 EOL 대응 (3.6 라인 채택, proposed)
+  - `0018-design-tokens.md` — 디자인 토큰 (color/typography/spacing/radius/shadow/motion) — UI/UX 부활 4단계 (`docs/features/ui-ux-redesign.md`)
+  - `0019-event-driven-architecture-v2.md` — 작업 체계 event-driven 아키텍처 v2 (agent 망각 의존 폐기, 동반 spec: `docs/features/event-action-mapping.md` + `docs/features/work-cycle-refactor.md`, PR #1077)
 - `docs/milestones/`: 마일스톤별 roadmap (v0.2~). 가시화 목적이며 실제 사이클은 별도 launch
 - `docs/runbooks/`: 운영 런북 (로컬 환경 가동 등)
   - `local-3tier-setup.md` — MySQL + Spring Boot + Next.js 로컬 3-tier 가동 가이드 (rev QA 기본 환경)

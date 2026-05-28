@@ -1,6 +1,20 @@
 # CLAUDE.md
 
-> 세션 시작 시 자동 로드. **포인터 + 비협상 룰만** 둔다. 상세는 `docs/ai-harness/` 참조.
+> 세션 시작 시 자동 로드. **모든 actor 공통 비협상 룰 + 포인터만** 둔다. 상세·actor 전용 룰은 아래 라우팅대로 각자 자기 문서만 읽는다.
+
+## 0) Actor 라우팅 — "자기 것만 읽는다"
+
+> 모든 actor 는 **§1~§10 + §14 + §16 + §17 (공통)** 만 필수. 그 외 자기 역할 문서 1개만 추가로 읽으면 됩니다 (노이즈 제거 — 2026-05-28 actor-scoped 분리).
+
+| actor | 추가로 읽을 문서 (이것만) |
+|---|---|
+| **nmae** (NCP `mobruji:0.0`) | `docs/ai-harness/actors/nmae.md` |
+| **helper** (mac `helper:0.0`) | `docs/ai-harness/actors/helper.md` (+ §15 doc-check) |
+| **be / fe / rev / plan** (sub-agent) | `docs/ai-harness/actors/sub-agent.md` (§1 공통 + §2 자기 역할) |
+| 라우팅/주입 맵 전반 | `docs/ai-harness/00-MANIFEST.md` |
+
+- 강제는 **prose 가 아니라 코드** — bot.py watchdog loop + `tools/agent-launch-wrapper.sh` / `cycle-status/update.sh` / `discord-daemon/helper-turn-start.sh` wrapper (`docs/ai-harness/13-memory-and-enforcement.md` 철학).
+- 인시던트 "왜"(사고 박제·정정 인용)는 **메모리** (`memory/<actor>/feedback_*.md`) 가 보관. 본 파일은 "무엇을" 만.
 
 ## 1) 프로젝트 한 줄
 노래방에서 **"뭐 부르지?"** 고민하는 사람에게 음역대·성별·분위기 기반으로 곡을 추천. Spring Boot + Next.js 모노레포.
@@ -23,15 +37,19 @@
 - `docs/ai-harness/08-code-conventions.md` — **코드 컨벤션 전체**
 - `docs/ai-harness/10-observability.md` — 로깅/메트릭/트레이싱
 - `docs/ai-harness/11-multi-session-runbook.md` — 다중 세션 런북
-- `docs/ai-harness/12-sub-agent-prompt-template.md` — **sub-agent launch single SoT (우선순위 최상위)**
-- `docs/ai-harness/13-memory-promote-tracking.md` — 메모리 promote/tracking
-- `docs/ai-harness/14-discord-notify-setup.md` — Discord notify 셋업
-- `docs/ai-harness/15-discord-message-templates.md` — Discord 메시지 템플릿
+- `docs/ai-harness/actors/sub-agent.md` — **sub-agent launch single SoT (§13 위임)**
+- `docs/ai-harness/actors/helper.md` — **helper 본체 비협상 룰 single SoT (§12 위임, 2026-05-26 #1085)**
+- `docs/ai-harness/13-memory-and-enforcement.md` — 메모리 promote/tracking
+- `docs/ai-harness/14-discord-ops.md` — Discord 셋업 + 메시지/명령/Forum (구 14+15)
 - `docs/decisions/` — ADR
 - `docs/features/` — Feature Spec
-- `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션 (4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary)
+- `docs/features/autonomous-cycle-orchestration.md` — 자율 사이클 오케스트레이션
+- `tools/cycle-status/` — nmae 가 cycle-status.json 갱신 시 호출하는 헬퍼 (`update.sh` / `validate.sh`)
+- `tools/agent-launch-wrapper.sh` — sub-agent launch 직전 set-active + launch prompt emit + per-cycle 채널 launch 알림/thread 자동 push (학습 의존 ↓, #1008 + B2 2026-05-24)
+- `tools/discord-daemon/helper-turn-start.sh` — helper 본체 매 turn 첫 명령 (target freeze + cycle-status 요약 + queue 표시, 학습 의존 ↓, #1014)
+- `tools/rev-queue/` — rev sub-agent 매 사이클 첫 액션 `rev-queue.sh all`
 
-## 4) 비협상 룰
+## 4) 비협상 룰 (공통)
 
 ### 브랜치 / PR
 - `main` 직접 push 금지. 모든 변경은 PR.
@@ -54,17 +72,16 @@
 - **Backend**: `cd backend && ./gradlew checkstyleMain spotlessCheck test` (포맷 수정: `./gradlew spotlessApply`)
 - **Frontend**: `cd web && npm run lint && npm run typecheck && npm test`
 - CI 실패 상태로 머지 금지.
-- **rev 3단계 e2e (`reviewed:claude` 라벨 머지 게이트)** — **모든 type:* PR** 은 rev 사이클을 거쳐야 머지 가능 (2026-05-24 확장). e2e 가능 (web/backend) 은 단계 1/2/3 실제 수행, e2e 불가능 (docs/refactor/chore 등) 은 단계 1 에서 **no-op pass 판정** + `reviewed:claude` 라벨 부여. 라벨 없는 PR 자율 머지 금지. 상세: `docs/features/rev-e2e-3-stages.md`. 메모리: [[feedback-rev-e2e-always]]
+- **rev 3단계 e2e (`reviewed:claude` 라벨 머지 게이트)** — **모든 type:* PR** 은 rev 사이클 통과 의무 (e2e 가능 = 단계 1/2/3, e2e 불가능 = 단계 1 no-op pass). 상세: `docs/features/rev-e2e-3-stages.md`. 메모리: [[feedback-rev-e2e-always]]
 
 ### 기능 기획
 - 중간 규모 이상 (신규 도메인/외부 연동/다중 PR) 은 `docs/features/<slug>.md` Feature Spec **먼저 작성·합의** 후 구현.
 - 템플릿: `docs/features/_template.md`. 프로세스: `docs/ai-harness/02-agent-workflow.md §9`.
-- 관련 PR 작업 시 spec 반드시 Read. 충돌 시 spec 먼저 갱신.
 
 ### 코드 컨벤션 (요점만 — 상세 `docs/ai-harness/08-code-conventions.md`)
 - **Java**: 모든 매개변수·지역변수 `final`. 변수명 풀네임. 어노테이션 길이 피라미드. record 필드 2개+면 멀티라인.
 - **Lombok**: `@Data`/`@Setter` 금지. 엔티티는 `@NoArgsConstructor(PROTECTED)` + `@AllArgsConstructor(PACKAGE)`.
-- **null 검증**: DTO + Domain 둘 다 `Objects.requireNonNull`. **Service/Controller 중간 null 가드 금지** (생성자·메서드 파라미터 모두). 예외: `application.yml` 바인딩.
+- **null 검증**: DTO + Domain 둘 다 `Objects.requireNonNull`. **Service/Controller 중간 null 가드 금지**. 예외: `application.yml` 바인딩.
 - **Frontend**: 함수형 + 명시 props 타입. API 호출은 `web/lib/api/` 집중. 환경변수 `NEXT_PUBLIC_*` 구분.
 - **테스트**: BDD `given/when/then`. **신규 엔드포인트는 성공 E2E (RestAssured) 필수**.
 
@@ -72,10 +89,18 @@
 - 새 용어는 `06-domain-model.md §4` 등재 후 코드 사용.
 - 엔티티 변경 시 `§5 엔티티` + `§6 ERD` **같은 PR 갱신**.
 - 계층 침범 금지 (Controller → Repository 직접 호출 등).
-- PR scope ↔ 패키지 경로 일치 (예: `scope:recommendation` ↔ `com.mobruji.recommendation.*`).
+- PR scope ↔ 패키지 경로 일치.
 
 ### 보안
 - 시크릿 하드코딩 금지. 사용자 음역대·기호 데이터 로그/스크린샷 원문 노출 금지. 운영 DB 덤프 공유 금지.
+
+### 공통 행동 룰 (actor 무관)
+- **자율 default** ([[feedback-autonomous-default]]): 사용자에게 묻지 말고 자율 진행. release/secret 등 high-stakes 만 확인.
+- **약속 = binding** ([[feedback-keep-promises]]): "~하겠습니다" 는 다음 turn 부터가 아니라 **이번 turn 부터** 적용.
+- **세션 룰 영속** ([[feedback-session-persist-rules]]): CLAUDE.md + 메모리 두 채널 영속. `/clear` 후에도 동일.
+- **Discord 정중체** ([[feedback-discord-tone-formal]]): "~합니다 / ~할까요?" 통일. 영어 push/post/send 금지 — "메시지/알려 드리겠습니다". **줄임 표현 금지** ("별 sub" → "별도 sub-agent", "별 PR" → "별도 PR"). **비문/미완성 문장 금지** — 주어/술어 완전성 유지 (예: "근본 fix 필요" → "근본 원인 fix 가 필요합니다").
+- **Maestro 약어** ([[feedback-maestro-aliases]]): mmae / nmae. "maestro" 사용 금지.
+- **Verify and iterate** ([[feedback-verify-and-iterate]]): 실행 → 검증 → 실패 시 root cause + alternative. "되었겠지" 가정 금지.
 
 ## 5) 워크플로우 5줄
 1. **이슈** — `.github/ISSUE_TEMPLATE/task.md`, 제목 "동사원형 + 목적어".
@@ -89,17 +114,16 @@
 docker compose up -d                                                    # 로컬 MySQL
 cd backend && ./gradlew bootRun --args='--spring.profiles.active=local' # BE 실행
 cd web && npm run dev                                                   # FE 실행
-# 품질 게이트는 §4 참조
 ```
 
 ## 7) PR 자기 점검
 **PR 생성 전 (Feature Spec 있는 기능)**:
-- §3 기능 + **비기능** 요구사항을 한 줄씩 읽고 구현 코드 존재 확인 (파일/메서드 수준).
-- 의존성 부재로 불가능 → 사용자 보고. 단순 누락 → 구현 완료. **하드코딩/stub "일단 넘어가기" 금지**. 1:1 대응 안 되면 PR 만들지 않음.
+- §3 기능 + **비기능** 요구사항을 한 줄씩 읽고 구현 코드 존재 확인.
+- 의존성 부재로 불가능 → 사용자 보고. 단순 누락 → 구현 완료. **하드코딩/stub "일단 넘어가기" 금지**.
 
-**PR 생성 직후 (떠올리지 않았다면 PR 끝난 것 아님)**:
+**PR 생성 직후**:
 - [ ] `type:*` / `scope:*` 라벨 / (AI) `ai-generated` / (보호 영역) `needs-human-review`
-- [ ] `gh pr create --body` 로 새로 쓴 경우 템플릿 AI 체크리스트 블록 수동 채우기 (`--body` 는 템플릿 덮어씀)
+- [ ] `gh pr create --body` 로 새로 쓴 경우 템플릿 AI 체크리스트 블록 수동 채우기
 
 ## 8) 릴리즈 (develop → main)
 - PR 제목: `release: vX.Y.Z` 또는 `release: YYYY-MM-DD`. 본문 changelog 는 `type` 별 그룹핑.
@@ -119,47 +143,42 @@ cd web && npm run dev                                                   # FE 실
 - 구현 전 **가정값 명시하고** 사용자 확인.
 - 설계 결정은 `06-domain-model.md §7 오픈 이슈` 추가.
 - 문서 ↔ 코드 충돌 시 **문서 먼저 갱신** 후 구현 (01-harness-spec §5).
-- **자율 default** (메모리 `feedback-autonomous-default`): 사용자 부재 (`~/.mobruji/user-presence.json` status:absent) 또는 작은 결정은 묻지 말고 자율 진행. release/secret/보호 영역 등 high-stakes 만 확인. redo 비용 self-check 후 진행.
-- **약속 = binding** (메모리 `feedback-keep-promises`): "~하겠습니다" 발언은 다음 turn 부터가 아니라 **이번 turn 부터** 적용. 미적용 시 약속 위반.
-- **세션 룰 영속** (메모리 `feedback-session-persist-rules`): CLAUDE.md 본문 + 메모리 두 채널로 영속. `/clear` 후에도 동일 적용. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가. 세션 종료 전 §13 doc-check 의무.
+- (공통 행동 룰은 §4 마지막 "공통 행동 룰" 블록 참조 — 자율 default / 약속 binding / 세션 영속 / 정중체 / Maestro 약어 / verify)
+- **워크트리 lock** ([[feedback-worktree-lock]]): 한 워크트리 = 동시 sub-agent 1. 상세 §11-5.
+- **PR base develop 강제** ([[feedback-pr-base-develop]]): `gh pr create --base develop` 항상 명시. 상세 §13-1.
 
-## 11) helper / maestro Discord 양방향 절대 룰
+---
 
-**채널**: `MOBRUJI_CHANNEL_ID` (#모부르지) 전용. `NOTIFY_CHANNEL_ID` 는 digest cron 만.
+## 11) nmae 전용 룰 → `docs/ai-harness/actors/nmae.md`
 
-**매 사용자 메시지마다 순서대로 (한 단계라도 건너뛰면 룰 위반)**:
-1. **ack push** — `bash /home/mobruji/.mobruji/discord-reply.sh "<ack 문구>"`. 다른 어떤 action 보다 먼저. **turn 중간에 system-reminder 로 새 사용자 메시지가 도착해도 진행 중 작업 멈추고 즉시 ack push 먼저**. "작업 끝나고 일괄 처리" 금지 — 사용자 입장에선 깜깜이.
-2. **queue append** — `~/.mobruji/helper-queue.jsonl` 에 `{"ts","message_id","text","status":"pending"}`.
-3. **분류** — (a) helper 자체 수정 / (b) 그 외 작업 / (c) 단순 질문.
-4. **처리** — (a) 직접 / (b) sub-agent·nmae 위임 **직후 즉시** `discord-reply.sh "X 작업 위임함"` / (c) 자체 답 push.
-5. **응답 push** — 본 답변은 `━━━━━━━━━━━━━━━` 구분선으로 시작 (ack 와 시각적 분리).
-6. **queue done + 검증** — message_id 행 `status: done` 갱신 + `grep '"status": "pending"' ~/.mobruji/helper-queue.jsonl` 으로 0건 확인. 1건이라도 남으면 turn 안 끝남.
+> **NCP nmae 세션만 로드.** 3중 watchdog / inject 대응 절차 / cycle-status 보호 / idle note / 4-사이클 / status 채널 라우팅 / directive-board event-driven flow (구 §11-1~11-11). 강제는 bot.py watchdog loop + `tools/agent-launch-wrapper.sh` + `tools/cycle-status/update.sh`.
 
-**ack 문구 3종 (확정 — 부가 설명/사과/계획 금지, 한 줄만)**:
-- 즉답 가능 → "답변 가능합니다. 잠시만 기다려주세요."
-- 대기 필요 → "nmae가 X 작업 중이라 ~분 걸립니다"
-- 재배치 필요 → "nmae가 X 작업 중입니다. 중단시키고 작업 전달할까요?"
+## 12) helper 전용 룰 → `docs/ai-harness/actors/helper.md` (단일 SoT)
 
-**금지**: 분석/조사/tool call 을 먼저 하고 ack 를 뒤로. bot.py auto-ack 는 #807 에서 제거됐기 때문에 helper ack 없으면 사용자 입장에선 깜깜이.
+> **mac helper 세션만 로드.** 채널 경계 / ack(bot.py 처리) / 매 turn 4단계 / thread / 정중체 / 빈 메시지 분류 등. CLAUDE.md 거울 폐지 (#1085) — `docs/ai-harness/actors/helper.md` + `tools/discord-daemon/helper-turn-start.sh` 두 채널로 강제.
 
-**helper launch 표현 룰**: helper 본체는 sub-agent launch 안 함 (Agent 도구는 helper sub-agent 가 nmae 동일 권한으로 launch). helper 가 사용자 응답에서 "launch 하겠습니다" 표현 사용 시 주체 혼동 — 정확히 "nmae 에 위임하겠습니다" / "sub-agent 에 위임하겠습니다" / "nmae 에 알리겠습니다" 로 표현. 메모리 [[feedback-helper-role-boundary]] 참조.
+## 13) sub-agent 룰 → `docs/ai-harness/actors/sub-agent.md` (단일 SoT)
 
-## 12) maestro/helper context% 자기 emit
-mmae(tmux `mobruji:0.0`) + nmae(NCP 호스트 tmux `mobruji:0.0`) + helper(tmux `helper:0.0`) 매 turn **마지막 줄**에 context 사용률 marker 를 emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 pane 별 독립으로 95% 도달 시 자율 정리 트리거 (PR #865 multi-pane 확장).
+> **be/fe/rev/plan sub-agent launch 시 이 한 문서만 로드** (§1 공통 + §2 역할별). 역할↔워크트리↔품질게이트 quick-ref + git 사고 가드 포함. 역할 매핑/주입은 `docs/ai-harness/00-MANIFEST.md`.
+## 14) mmae/nmae/helper context% 자기 emit
+
+> 대상: mmae (mac `tmux mobruji:0.0`) + nmae (NCP `tmux mobruji:0.0`) + helper (`tmux helper:0.0`).
+> **sub-agent (be/fe/rev/plan) 는 marker 안 함**.
+
+매 turn **마지막 줄** 에 context 사용률 marker emit. bot.py `context_auto_clear_loop` (spec: `docs/features/context-auto-clear.md §5-6`) 가 pane 별 독립으로 95% 도달 시 자율 정리 트리거 (PR #865 multi-pane 확장).
 
 - 정상: `===CTX:NN%===` (NN = 0–100 정수)
 - 모를 때: `===CTX:?===` (트리거 안 함)
 - 정리 완료 시: `===CLEAR_READY===` 동반 출력 → bot.py 가 `/clear` 전송
-- **mmae / nmae / helper 만 emit**. sub-agent (be/fe/rev/plan) 는 marker 안 함.
 
 추정 우선순위: ① `/context` slash 결과 → ② input/output 누적 ÷ 모델 window → ③ 모르면 `?`.
 
-## 13) 세션 종료 전 문서화 일치 체크 (helper / nmae /clear 직전 의무)
+## 15) 세션 종료 전 문서화 일치 체크 (helper / nmae /clear 직전 의무)
 
 helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또는 세션 종료 시점 직전 turn 마지막 단계에서 **4-way 문서화 일치 체크**.
 
 ### 4-way
-1. **메모리** (`/home/mobruji/.claude/projects/-home-mobruji-mobruji/memory/feedback_*.md`)
+1. **메모리** (`/home/mobruji/.claude/projects/-home-mobruji-mobruji/memory/<actor>/feedback_*.md` — 2026-05-24 #1004 actor 디렉토리 분리: `common/` `nmae/` `helper/` `subagent/` `rev/` `workflow/`)
 2. **CLAUDE.md** 본문 §1-§N
 3. **docs/ai-harness/** (런북/spec/컨벤션)
 4. **docs/features/** (feature spec)
@@ -170,10 +189,72 @@ helper(`tmux helper:0.0`) 또는 nmae(NCP `tmux mobruji:0.0`) 가 `/clear` 또�
 - 신규 feature 룰 — `docs/features/<slug>.md` 작성됐는지
 
 ### drift 발견 시
-- **즉시 자율 보강 PR launch** (사용자 부재여도 — §11 helper-role + 자율 default 룰)
+- **즉시 자율 보강 PR launch** (사용자 부재여도 — §12 helper-role + 자율 default 룰)
 - push: `[doc-check] 메모리 N건 / CLAUDE.md N건 / docs N건 → drift N건 → 보강 PR #M launch`
 
 ### 위반 정의
 다음 세션 helper 가 룰 학습 못 한 채 시작 = 직전 세션 doc-check 실패. 같은 룰 두 번 사용자 정정 받으면 반복 위반 마커 추가.
 
-관련: 메모리 `feedback-session-close-doc-check` / `feedback-session-persist-rules` / `feedback-autonomous-default`
+관련: 메모리 [[feedback-session-close-doc-check]] [[feedback-session-persist-rules]] [[feedback-autonomous-default]]
+
+## 16) 검증 의무 (모든 actor — common)
+
+**사용자 2026-05-24 명시**: "항상 어떤 작업을 하면 되었겠거니 하지말고 가능한 방법으로 검증하고 안됐을 시 과정을 통해 추론해서 다른 방법으로 해결해".
+
+### 룰
+- 모든 작업 = (1) 실행 → (2) **검증** → (3) 실패 시 root cause 추론 → (4) alternative path
+- "되었겠지" / "머지됐으니 OK" / "deploy 했으니 작동" 가정 금지
+
+### 검증 방법 (작업 종류별)
+| 작업 | 검증 |
+|---|---|
+| daemon 변경 (bot.py) | 재시작 + `sudo journalctl -u <service> -n 30` 으로 새 로그 확인 |
+| file 변경 (cycle-status.json, 메모리 등) | `cat` read back + `grep` 으로 핵심 키 확인 |
+| PR 머지 | CI green + deploy 반영 + 동작 sanity check (예: discord-reply.sh 새 mode 호출) |
+| 룰 변경 (메모리, CLAUDE.md) | 다음 helper turn 또는 다음 sub-agent launch 에서 룰 적용되는지 확인 |
+| Discord push | response payload `type:19` reply 확인 + 사용자 채널 가시 |
+
+### 실패 시 추론 절차
+1. 어느 단계 실패: 생성 / 전달 / read / process / output ?
+2. 가설 1-2개 (most likely first)
+3. alternative path 1개 시도
+4. 검증 → 성공 까지 반복
+
+### 위반 예시 (피해야 함)
+- "PR 머지 + daemon 재시작 했으니 작동" → journal 미확인 → 실제 silent 실패
+- "cycle-counter init 했으니 digest 표시" → daemon read back 미검증 → 표시 안 됨
+
+관련: [[feedback-verify-and-iterate]] [[feedback-autonomous-default]] [[feedback-keep-promises]] [[feedback-session-close-doc-check]]
+
+## 17) Evidence-based root cause (모든 actor — common)
+
+**사용자 2026-05-26 명시**: 사용자가 trigger 한 작업을 시작할 때 **결과 추정 X**. 기록 / 히스토리(git / 메모리 / Discord / journal / PR / queue / tmux pane)를 먼저 분석해 root cause 를 확정한 뒤 작업한다. "메모리 또 박제" 같은 학습 의존 핑계 금지.
+
+### 룰
+- 사용자 trigger → (1) **evidence 수집** → (2) root cause 확정 → (3) 작업.
+- "아마 …일 것" / "보통 …이니" / "지난 번에 …였으니" 같은 추정 첫 답 금지.
+- 같은 사고가 두 번째면 박제 만으로 끝내지 않고 **강제 메커니즘** (hook / wrapper / system prompt) 까지 같이 제안.
+
+### Evidence 수집 채널 (작업 trigger 별)
+
+| trigger | 우선 채널 |
+|---|---|
+| "왜 안 됨" / "방금 …이 망가짐" | journal (`sudo journalctl -u <svc> --since "10 min ago"`) → PR head commit → git log |
+| "사이클이 멈췄음" / "사이클 idle" | `~/.mobruji/cycle-status.json` → `tools/cycle-status/validate.sh` → tmux capture-pane → cron digest |
+| "메시지 못 받음" / "Discord 안 옴" | `~/.mobruji/helper-queue.jsonl` → bot.py journal → discord-reply.sh stdout → `last-user-msg-id.txt` |
+| 룰 변경 요청 | 관련 메모리 file → CLAUDE.md 섹션 → `docs/ai-harness/` / `docs/features/` |
+| 머지 사고 / 회귀 | `git log --oneline -20` + `git show <sha>` + PR rev 코멘트 |
+
+### 위반 예시 (피해야 함)
+- 사용자 "사이클 멈췄음" → "메모리 박제 했으니 다음부터 안 멈출 거예요" (추정 + 학습 의존)
+- 사용자 "PR 못 봤음" → "Discord push 했으니 봤겠죠" (`discord-reply.sh` stdout 미확인)
+- 사용자 "같은 사고 또 발생" → "한 번 더 박제" (강제 메커니즘 제안 누락)
+
+### 메커니즘 단 우선순위 (반복 사고일 때)
+1. system prompt append (sub-agent / helper)
+2. hook (PreToolUse / PostToolUse / Stop)
+3. wrapper script (호출 강제 우회 시 graceful warning)
+4. cron digest 가시화
+5. 메모리 / CLAUDE.md (보조 학습)
+
+관련: [[feedback-evidence-based-root-cause]] [[feedback-verify-and-iterate]] [[feedback-session-persist-rules]]

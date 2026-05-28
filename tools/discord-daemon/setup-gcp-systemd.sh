@@ -54,7 +54,21 @@ echo "로그 owner: ${RUN_USER}:${RUN_GROUP} (systemd unit 의 User= 와 일치�
 sudo touch /var/log/${SERVICE_NAME}.out.log /var/log/${SERVICE_NAME}.err.log
 sudo chown "${RUN_USER}:${RUN_GROUP}" /var/log/${SERVICE_NAME}.out.log /var/log/${SERVICE_NAME}.err.log
 
-# 5) systemd unit 등록 + 기동
+# 5) hook symlink ensure — `~/.mobruji/<hook>` 가 부재/regular file 이면 repo 내 hook
+# source 로 symlink 자동 생성 (PR #1154 helper-direct-work-guard 등). deploy.sh 와
+# 같은 공통 라이브러리 사용 (lib/hook_symlinks.sh, PR #1124).
+if [[ -f "$SCRIPT_DIR/lib/hook_symlinks.sh" ]]; then
+  # setup script 가 실행되는 경로 = repo 내 hook source 의 진실. 사용자가
+  # 별도 HOOK_SOURCE_DIR 을 명시하지 않은 경우 SCRIPT_DIR 을 사용한다.
+  export MOBRUJI_HOOK_SOURCE_DIR="${MOBRUJI_HOOK_SOURCE_DIR:-$SCRIPT_DIR}"
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/lib/hook_symlinks.sh"
+  ensure_hook_symlinks
+else
+  echo "[setup] lib/hook_symlinks.sh 부재 — hook symlink ensure skip (PR #1124 머지 전 호환)."
+fi
+
+# 6) systemd unit 등록 + 기동
 sudo cp "$SERVICE_FILE" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"

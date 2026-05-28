@@ -87,7 +87,7 @@ beforeEach(() => {
   readBookmarksMock.mockReset();
   useBookmarksStore.setState({ bookmarkedSongIds: [] });
   useSessionStore.setState({
-    sessionId: "test-session-id",
+    sessionId: "00000000-0000-4000-8000-000000000001",
     voiceRangeId: null,
     excludedSongIds: [],
   });
@@ -120,7 +120,7 @@ describe("/bookmarks 페이지", () => {
     ).toHaveAttribute("href", "/songs");
     // BE는 sessionId를 받아 호출됐다.
     expect(readBookmarksMock).toHaveBeenCalledWith(
-      "test-session-id",
+      "00000000-0000-4000-8000-000000000001",
       expect.anything(),
     );
   });

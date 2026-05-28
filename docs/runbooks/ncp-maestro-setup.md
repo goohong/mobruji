@@ -215,7 +215,7 @@ chmod 600 .env
 #   # 권장 (helper 분리 운영)
 #   TMUX_SESSION_NAME=helper          # 사용자 메시지 routing 대상 (helper or mobruji)
 #   TMUX_TARGET_PANE=helper:0.0
-#   NOTIFY_CHANNEL_ID=<digest 별 채널 ID — 미지정 시 MOBRUJI_CHANNEL_ID 와 동일>
+#   DIGEST_CHANNEL_ID=<digest 별 채널 ID — 미지정 시 MOBRUJI_CHANNEL_ID 와 동일> (#1019 rename — 기존 NOTIFY_CHANNEL_ID 도 backward-compat)
 #
 #   # 옵션
 #   CLAUDE_BIN=claude
@@ -338,7 +338,7 @@ sudo journalctl -u mobruji-maestro -n 50
 
 ```bash
 cd ~/mobruji/tools/discord-daemon
-grep -E '^(DISCORD_BOT_TOKEN|ALLOWED_USER_IDS|MOBRUJI_CHANNEL_ID|TMUX_SESSION_NAME|TMUX_TARGET_PANE|NOTIFY_CHANNEL_ID)=' .env
+grep -E '^(DISCORD_BOT_TOKEN|ALLOWED_USER_IDS|MOBRUJI_CHANNEL_ID|TMUX_SESSION_NAME|TMUX_TARGET_PANE|DIGEST_CHANNEL_ID|NOTIFY_CHANNEL_ID)=' .env
 # 필수 3개 + 권장 3개가 모두 있어야 한다.
 
 # helper 분리 운영이면 helper session 이 먼저 떠 있어야 send-keys 가 성공한다.

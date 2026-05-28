@@ -39,15 +39,18 @@ public class SessionRotationService {
 
     private final AnonymousSessionRepository anonymousSessionRepository;
     private final SessionDataCascadeDeleter sessionDataCascadeDeleter;
+    private final SessionActivityTracker sessionActivityTracker;
     private final Counter rotatedCounter;
     private final Counter userRotateExpiredCounter;
 
     public SessionRotationService(
             final AnonymousSessionRepository anonymousSessionRepository,
             final SessionDataCascadeDeleter sessionDataCascadeDeleter,
+            final SessionActivityTracker sessionActivityTracker,
             final MeterRegistry meterRegistry) {
         this.anonymousSessionRepository = anonymousSessionRepository;
         this.sessionDataCascadeDeleter = sessionDataCascadeDeleter;
+        this.sessionActivityTracker = sessionActivityTracker;
         this.rotatedCounter = Counter.builder(METRIC_ROTATED)
                 .description("Anonymous session rotation count (user-triggered)")
                 .register(meterRegistry);
@@ -88,6 +91,11 @@ public class SessionRotationService {
         // 새 sessionId 발급 + AnonymousSession 행 생성
         final String newSessionId = UUID.randomUUID().toString();
         anonymousSessionRepository.save(AnonymousSession.create(newSessionId));
+
+        // 옛 sessionId 의 in-memory activity 캐시 즉시 evict (spec §5-2 메모리 누수 방어, PR #937 follow-up).
+        // 트랜잭션 commit 이후가 아닌 메서드 끝 시점 evict — rollback 시에도 캐시만 잠깐 비는 정도라
+        // 다음 호출이 자연스럽게 재마킹. 정합성 영향 없음.
+        sessionActivityTracker.evict(currentSessionId);
 
         rotatedCounter.increment();
         userRotateExpiredCounter.increment();

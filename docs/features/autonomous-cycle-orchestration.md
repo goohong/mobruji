@@ -180,7 +180,7 @@ nmae turn 시작
   1. `~/.mobruji/cycle-status.json` read
   2. 4 워크트리 state + recent_line 한 줄씩 추출
   3. Discord embed 4 field (워크트리별 emoji prefix — be ⚙️ / fe 🎨 / rev 🔍 / plan 📋, PR #850 참조)
-  4. NOTIFY_CHANNEL_ID (디제스트 전용) push. MOBRUJI_CHANNEL_ID (사용자 양방향) 와 분리 ([[project-discord-channel]] + CLAUDE.md §11-pre)
+  4. DIGEST_CHANNEL_ID (디제스트 전용, #1019 rename — 기존 `NOTIFY_CHANNEL_ID` backward-compat) push. MOBRUJI_CHANNEL_ID (사용자 양방향) 와 분리 ([[project-discord-channel]] + CLAUDE.md §11-pre)
 
 - nmae 측 의무: cycle-status.json 은 **반드시 모든 launch/완료/머지 시점 갱신**. 갱신 누락 시 bot.py digest 가 stale data 노출 → 사용자 오해 ([[feedback-cycle-status-json]] 메모리)
 
@@ -227,7 +227,7 @@ helper 는 다음만 직접 수정:
 1. rev sub-agent v0.4.0-rc release audit 완료. 코멘트에 🔴 (P95 regression / 응답시간 SLO 위반) 발견
 2. nmae 다음 turn 깨움 → rev 결과 read
 3. nmae: 같은 turn 내 `gh issue create` 로 follow-up 이슈 등록 (`label: priority:high,scope:web`)
-4. NOTIFY_CHANNEL_ID 에 Discord push (`🔴 rev audit: P95 950ms (SLO 800ms) — fe 우선순위 변경 launch`)
+4. DIGEST_CHANNEL_ID 에 Discord push (#1019 rename — 기존 `NOTIFY_CHANNEL_ID` backward-compat) (`🔴 rev audit: P95 950ms (SLO 800ms) — fe 우선순위 변경 launch`)
 5. fe 다음 picking 은 일반 백로그 대신 새 이슈 우선
 6. cycle-status.json `fe.current_sub_agent` 갱신
 
@@ -251,5 +251,14 @@ helper 는 다음만 직접 수정:
 | Q3 | helper boundary 자동 enforce | (a) tmux pre-exec hook 로 helper 의 PR / gh issue create 차단 / (b) 현 룰 only | @user / boundary 위반 사고 발생 시 | 하 |
 | Q4 | cycle-status.json schema 버저닝 | (a) `schema_version` 필드 추가 / (b) breaking change 없으면 미도입 | @nmae / bot.py reader 변경 시 | 하 |
 
-## 8) 결정 로그
+## 8) 관련 spec / ADR
+
+- `docs/decisions/0019-event-driven-architecture-v2.md` — 본 spec 의 "메모리 학습 의존" 패턴 (4 사이클 launch / cycle-status 갱신 / helper boundary 등) 을 망각 무관 코드 hook 으로 promote 하는 ADR (PR #1077). 본 spec §5-6 helper boundary 자동 enforce (Q3) 의 후속 결정 트리도 ADR-0019 §4.2 enforcement 분류 표 로 정형화됨.
+- `docs/features/event-action-mapping.md` — 본 spec 의 cycle-status set-active / set-idle / PR 머지 trigger 가 ADR-0019 동반 spec 의 event 3 / 4 / 5 와 1:1 매핑.
+- `docs/features/work-cycle-refactor.md` — 본 spec 의 메모리 룰 reduce 후보 (§5-2 메모리 폐기 후보 10건) 가 ADR-0019 마이그 단계 2 의 대상.
+- `docs/features/nmae-cycle-watchdog.md` — 본 spec §5-5 stale verification 의 코드 강제 구현체.
+- `docs/ai-harness/13-memory-and-enforcement.md` — 본 spec 의 "어떻게" 결정 트리 (메모리 vs 코드) 의 가이드라인.
+
+## 9) 결정 로그
 - 2026-05-23: 초안 작성 (status=implementing — 관련 PR 11건 이미 머지된 상태). 4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary 4 축 정형화. release cut 자동화는 D12 사용자 결정 대기로 §7 오픈. 1 turn 1 launch + helper boundary 자동 enforce 도 후속 결정.
+- 2026-05-26: ADR-0019 머지 후 관련 spec 절 (§8) 추가 — 본 spec 의 메모리 학습 의존 패턴이 ADR-0019 event-driven 아키텍처의 promote 대상임을 cross-ref (PR #1077 머지 후속 audit).
