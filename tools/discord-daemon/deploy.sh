@@ -44,6 +44,12 @@ HOOK_NAMES=(
   helper-turn-start.sh
   discord-reply.sh
   nmae-discord-push.sh
+  # 2026-05-28 (#1085 / PR E-2): helper-launch.sh / helper-role.md symlink 강제.
+  helper-launch.sh
+  helper-role.md
+  # 2026-05-29: helper-tool-progress.sh — PreToolUse hook script.
+  # spec: docs/features/helper-tool-visibility.md.
+  helper-tool-progress.sh
 )
 DRY_RUN=0
 
