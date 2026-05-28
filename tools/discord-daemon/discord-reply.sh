@@ -152,6 +152,22 @@
 #
 #       관련 룰: CLAUDE.md §12-3 (helper 본답 push 직전/직후 자동 hook 강제 강화)
 #
+#   4b) choices — 사용자에게 선택지 prompt + reaction tap 응답
+#       (spec: docs/features/discord-reaction-choice-input.md):
+#       discord-reply.sh --choices "<질문>" "<opt1>" "<opt2>" [<opt3> ... <opt10>]
+#         → 동작:
+#             1) 본문 build: 질문 + \n\n + "1️⃣ opt1\n2️⃣ opt2\n..." 형태.
+#             2) post_channel_message (사용자 마지막 메시지 reply 형태로 — 시각적 연결).
+#             3) 응답 message_id 에 1️⃣–🔟 keycap reaction pre-attach.
+#             4) ~/.mobruji/choice-prompts.jsonl 에 register row append (event log).
+#             5) stdout = bot message_id (호출자 trace 가능).
+#         → 사용자가 reaction tap → bot.py on_raw_reaction_add 가 lookup → synthetic
+#           user msg ("[choice N/total] label") 로 helper 에 forwarding. 폴링 X —
+#           Discord Gateway native event push.
+#         → 최대 옵션 = 10 (1️⃣–🔟 keycap 한계). 옵션 < 2 시 dispatch error.
+#         → mode toggle: helper 가 USER_MODE=ASK 인 경우에만 호출 권장 (AUTO 기본).
+#           helper-turn-start.sh 가 ===USER_MODE:AUTO|ASK=== marker emit.
+#
 #   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
 #         → thread_id resolve 우선순위 (높음 → 낮음):
@@ -325,6 +341,29 @@ LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-${HOME:-/tmp}/.mobruji/last-user
 #   5. `~/.mobruji/last-user-msg-id.txt` (기존 fallback — turn-start freeze 안 했을 때)
 HELPER_TARGET_FILE="${HELPER_TARGET_FILE:-${HOME:-/tmp}/.mobruji/helper-current-target.txt}"
 HELPER_QUEUE_FILE="${HELPER_QUEUE_FILE:-${HOME:-/tmp}/.mobruji/helper-queue.jsonl}"
+
+# spec: docs/features/discord-reaction-choice-input.md — `--choices` mode.
+# 사용자가 1️⃣–🔟 keycap reaction 으로 선택지 응답. bot.py on_raw_reaction_add 가
+# choice-prompts.jsonl 의 register entry 를 lookup → synthetic msg 로 helper 전달.
+CHOICE_PROMPTS_FILE="${CHOICE_PROMPTS_FILE:-${HOME:-/tmp}/.mobruji/choice-prompts.jsonl}"
+# Unicode keycap display (사람 가독성, 메시지 본문 build 시 사용).
+CHOICE_KEYCAPS_DISPLAY=(
+  "1️⃣" "2️⃣" "3️⃣" "4️⃣" "5️⃣" "6️⃣" "7️⃣" "8️⃣" "9️⃣" "🔟"
+)
+# URL-encoded UTF-8 byte sequences (Discord REST `PUT /reactions/{emoji}/@me`).
+# 1-9: digit + VS16 (U+FE0F=EF B8 8F) + keycap (U+20E3=E2 83 A3). 🔟 = U+1F51F.
+CHOICE_KEYCAPS_URLENC=(
+  "1%EF%B8%8F%E2%83%A3"
+  "2%EF%B8%8F%E2%83%A3"
+  "3%EF%B8%8F%E2%83%A3"
+  "4%EF%B8%8F%E2%83%A3"
+  "5%EF%B8%8F%E2%83%A3"
+  "6%EF%B8%8F%E2%83%A3"
+  "7%EF%B8%8F%E2%83%A3"
+  "8%EF%B8%8F%E2%83%A3"
+  "9%EF%B8%8F%E2%83%A3"
+  "%F0%9F%94%9F"
+)
 
 # Writing marker / typing indicator 설정 (#1095, 2026-05-26).
 #
@@ -828,6 +867,28 @@ case "$1" in
     MSG="(writing-marker placeholder)"  # MSG 빈값 가드 우회.
     NO_REPLY=1  # reaction/typing 호출은 message_reference 무관.
     ;;
+  --choices)
+    # spec: docs/features/discord-reaction-choice-input.md
+    # --choices "<질문>" "<opt1>" "<opt2>" ... [<opt10>]
+    #   1) 본문 build (질문 + 1️⃣ opt1 + 2️⃣ opt2 + ...) → post_channel_message.
+    #   2) 응답 message_id 에 1️⃣–🔟 keycap reaction pre-attach (사용자 tap 대상).
+    #   3) ~/.mobruji/choice-prompts.jsonl 에 register entry append.
+    #   4) stdout = bot message_id (호출자 trace 가능).
+    # bot.py on_raw_reaction_add 가 lookup → synthetic user msg 로 helper 에 전달.
+    if [[ $# -lt 4 ]]; then
+      echo "discord-reply.sh: --choices <질문> <opt1> <opt2> [<opt3> ... <opt10>] (최소 2 옵션) 형태로 입력해주세요" >&2
+      exit 64
+    fi
+    MODE="choices"
+    CHOICES_QUESTION="$2"
+    shift 2
+    CHOICES_OPTS=("$@")
+    if [[ ${#CHOICES_OPTS[@]} -gt 10 ]]; then
+      echo "discord-reply.sh: --choices — 옵션은 최대 10개 (Discord keycap 0️⃣–🔟)" >&2
+      exit 64
+    fi
+    MSG="(choices placeholder)"  # MSG 빈값 가드 우회 — 실행은 CHOICES_QUESTION 사용.
+    ;;
   --*)
     echo "discord-reply.sh: 알 수 없는 옵션 $1" >&2
     exit 1
@@ -1191,7 +1252,9 @@ atomic_write_thread_file() {
 # emoji 는 이미 URL-encoded 상태로 $BOT_WRITING_REACTION_EMOJI 에 들어있다.
 reaction_add() {
   local message_id="$1"
-  local emoji="$BOT_WRITING_REACTION_EMOJI"
+  # 두 번째 인자 = URL-encoded emoji. 미지정 시 ✍️ default — #1095 writing-marker 호환.
+  # --choices mode 가 1️⃣–🔟 keycap 을 같은 helper 로 부착 (spec #1126 후속).
+  local emoji="${2:-$BOT_WRITING_REACTION_EMOJI}"
   local response status
   response=$(curl -sS -X PUT \
     "https://discord.com/api/v10/channels/${CHANNEL}/messages/${message_id}/reactions/${emoji}/@me" \
@@ -1891,6 +1954,50 @@ case "$MODE" in
     if [[ "$BOT_WRITING_REACTION_ENABLED" == "1" ]]; then
       reaction_remove "$USER_MSG_ID" || true
     fi
+    ;;
+
+  choices)
+    # spec: docs/features/discord-reaction-choice-input.md
+    # helper / nmae 가 사용자에게 선택지 prompt 던질 때 호출. event-driven —
+    # 사용자가 1️⃣–🔟 keycap reaction tap 하면 bot.py on_raw_reaction_add 가
+    # synthetic msg 로 helper 에 전달 (폴링 X, Discord Gateway native push).
+    # 1) 본문 build: 질문 + \n\n + "1️⃣ opt1\n2️⃣ opt2\n...".
+    CHOICES_BODY="$CHOICES_QUESTION"$'\n'
+    for i in "${!CHOICES_OPTS[@]}"; do
+      CHOICES_BODY+=$'\n'"${CHOICE_KEYCAPS_DISPLAY[$i]} ${CHOICES_OPTS[$i]}"
+    done
+
+    # 2) 메시지 post — 사용자 마지막 메시지에 reply 형태 (일관성 + 시각적 연결).
+    CHOICES_REPLY_TO=$(resolve_reply_to_id)
+    CHOICES_PAYLOAD=$(build_reply_payload "$CHOICES_BODY" "$CHOICES_REPLY_TO")
+    CHOICES_RESPONSE=$(post_channel_message "$CHOICES_PAYLOAD")
+    CHOICES_MSG_ID=$(printf '%s' "$CHOICES_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$CHOICES_MSG_ID" ]]; then
+      echo "discord-reply.sh: --choices — message post 실패" >&2
+      echo "$CHOICES_RESPONSE" >&2
+      exit 1
+    fi
+
+    # 3) keycap reaction pre-attach (1 ~ N). 실패 한 건은 graceful (whole bail X).
+    for i in "${!CHOICES_OPTS[@]}"; do
+      reaction_add "$CHOICES_MSG_ID" "${CHOICE_KEYCAPS_URLENC[$i]}" || true
+    done
+
+    # 4) choice-prompts.jsonl register row append (append-only event log).
+    #    bot.py lookup_choice_prompt 가 이 row 를 읽어 사용자 reaction 매칭.
+    mkdir -p "$(dirname "$CHOICE_PROMPTS_FILE")"
+    CHOICES_JSON=$(printf '%s\n' "${CHOICES_OPTS[@]}" | jq -R . | jq -sc .)
+    CHOICES_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    jq -nc \
+      --arg mid "$CHOICES_MSG_ID" \
+      --arg cid "$CHANNEL" \
+      --argjson choices "$CHOICES_JSON" \
+      --arg ts "$CHOICES_TS" \
+      '{event:"register", message_id:$mid, channel_id:$cid, choices:$choices, ts:$ts}' \
+      >> "$CHOICE_PROMPTS_FILE"
+
+    # 5) stdout = bot message_id (호출자 trace 가능).
+    printf '%s\n' "$CHOICES_MSG_ID"
     ;;
 
   update-status)
