@@ -320,7 +320,7 @@ nmae 가 watchdog inject 받으면 **다음 turn 시작 즉시**:
 3. `Agent` tool 로 sub-agent launch (`/home/mobruji/mobruji-<ws>`)
 4. `bash /home/mobruji/.mobruji/discord-reply.sh "<ws> 사이클 재개 — <후보>"`
 
-상세: `docs/ai-harness/actors/sub-agent.md §1 nmae watchdog inject 대응`.
+상세: `docs/ai-harness/actors/nmae.md §11-2` (nmae 본진 룰. sub-agent 입장은 `actors/sub-agent.md §1-14` 보고 양식만).
 
 #### cycle-status.json 갱신 의무 (수동 편집 금지)
 nmae 가 매 sub-agent launch / 완료 / idle 진입 시 **반드시 헬퍼 스크립트 경유**:
@@ -356,7 +356,7 @@ rev sub-agent 가 매 사이클 시작 시 `bash tools/rev-queue/rev-queue.sh al
 | stage2 | develop 머지 1h+ 후 (단계 2 사후) | `rev-post-merge-pass` 라벨 없는 merged PR |
 | stage3 | 최근 release tag PR (단계 3 production) | `rev-prod-pass` 라벨 없는 release PR |
 
-처리 절차 (§E-2 / §E-3): rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2 rev / §E-3` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
+처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-3-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
 
 **GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `needs-human-review` / `type:release`.
 

@@ -41,12 +41,12 @@ bash tools/rev-queue/rev-queue.sh all      # 세 stage 모두
 
 ## rev sub-agent 통합
 
-rev sub-agent prompt (`docs/ai-harness/actors/sub-agent.md §2 rev / §E-3`) 매 사이클 첫 액션:
+rev sub-agent prompt (`docs/ai-harness/actors/sub-agent.md §2-rev`) 매 사이클 첫 액션. 단계별 절차 SoT 는 `docs/features/rev-e2e-3-stages.md`:
 
 ```
-1. bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all   # discovery (§E-3)
-2. stage1 후보 ≥ 1 → 단계 1 e2e 수행 (§E-2.1 절차 — comment + reviewed:claude 라벨)
-3. stage2 후보 ≥ 1 → 단계 2 사후 audit (§E-2.2 절차 — comment + rev-post-merge-pass 라벨)
+1. bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all   # discovery
+2. stage1 후보 ≥ 1 → 단계 1 e2e 수행 (comment + reviewed:claude 라벨)
+3. stage2 후보 ≥ 1 → 단계 2 사후 audit (comment + rev-post-merge-pass 라벨)
 4. stage3 후보 ≥ 1 → 단계 3 production 검증 (§E-2.3 절차 — comment + rev-prod-pass 라벨)
 5. 모두 빈 큐 → ADR audit / 도메인 audit / cross-ref 정리 등 기존 작업 (§E-1)
 ```
