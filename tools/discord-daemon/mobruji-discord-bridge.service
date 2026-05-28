@@ -10,9 +10,9 @@ StartLimitBurst=5
 [Service]
 Type=simple
 User=mobruji
-WorkingDirectory=/home/mobruji/mobruji/tools/discord-daemon
-EnvironmentFile=/home/mobruji/mobruji/tools/discord-daemon/.env
-ExecStart=/home/mobruji/mobruji/tools/discord-daemon/venv/bin/python bot.py
+WorkingDirectory=/home/mobruji/mobruji-bridge/tools/discord-daemon
+EnvironmentFile=/home/mobruji/mobruji-bridge/tools/discord-daemon/.env
+ExecStart=/home/mobruji/mobruji-bridge/tools/discord-daemon/venv/bin/python bot.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
