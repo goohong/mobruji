@@ -188,6 +188,7 @@ frontmatter의 `status` 필드로 추적한다.
 | Slug | Feature | Status | Last reviewed |
 |---|---|---|---|
 | [ui-ux-redesign](ui-ux-redesign.md) | UI/UX 디자인 4단계 부활 (audit → ref → spec → 구현) | approved | 2026-05-24 |
+| [web-e2e-playwright](web-e2e-playwright.md) | web/ Playwright e2e 인프라 도입 (design tokens 시각 회귀 가드) | draft | 2026-05-28 |
 
 ## 10) Frontmatter 필드 의무
 
