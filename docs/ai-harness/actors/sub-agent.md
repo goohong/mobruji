@@ -90,7 +90,38 @@ gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --la
 | plan | `session:plan` |
 | helper sub-agent | `session:helper` |
 
-### 1-11) Discord thread 진행 stream
+### 1-11) Discord thread 진행 stream + cycle forum 본문 정제 (PR D, 2026-05-28)
+
+cycle forum thread 본문은 `agent-launch-wrapper.sh` 가 launch 시점에 template 박음 (📋 진행 6 체크박스). **sub-agent 가 큰 milestone (분석 완료 / PR 생성 / PR 머지) 시 본문의 체크박스 [x] update + 댓글 append**:
+
+```bash
+# milestone 시 (예: PR 생성 후) 본문 PATCH — discord-reply.sh --forum-edit
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-edit "$LAUNCH_THREAD_ID" "$(cat <<'EOF'
+🛠️ **{...기존 title...}**
+...
+📋 진행
+- [x] launch
+- [x] 분석 / 설계 — {짧은 요약}
+- [x] 구현 — branch={...}
+- [x] 검증 — checkstyle+spotless+test green
+- [x] PR 생성 — #1234
+- [ ] PR 머지
+
+🔖 관련
+- PR: #1234
+- directive: {id} (있으면)
+---
+_갱신: {ts}_
+EOF
+)"
+
+# 댓글 append 는 milestone 1 줄 stream (기존 패턴 유지)
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "[milestone] PR #1234 생성"
+```
+
+본문 PATCH = 사용자가 thread 한 번 보면 어디까지 진행됐는지 즉시 파악 (사용자 정정 2026-05-28). 댓글 = milestone 이력 추적.
+
+
 
 nmae/helper 가 `--auto-ack-thread` 로 사전 thread 생성 → `~/.mobruji/last-launch-thread.txt` atomic write. sub-agent 권장 호출 (file 자동 read, hallucination 우회):
 
@@ -179,6 +210,33 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 작업 가능: helper 본체와 동일 — 사용자 응답 / helper 자체 수정 / discord-reply.sh / tools/discord-daemon 등
 - 금지: `backend/**` / `web/**` 도메인 구현 (be/fe 영역, nmae 위임)
 - PR 라벨: `session:helper` 명시 부착 (브랜치 prefix 자유 — 자동 부착 룰이 모호)
+
+#### directive 본문 정제 task (spec [[directive-board-template-and-tags]] §5-6)
+
+**helper 본체가 매 turn-start 시 queue 의 `type=directive_polish` pending task 발견 → helper sub-agent batch launch**. 사용자 응답 우선 → 그 후 polish task 처리.
+
+**launch prompt 패턴** (helper 본체가 Agent 도구 호출):
+```
+공통 룰: docs/ai-harness/actors/sub-agent.md §2-helper. 역할 = helper sub-agent.
+
+Task: directive_polish batch (N건).
+
+pending list (helper-queue.jsonl 의 status=pending + type=directive_polish):
+- directive_id=<X>, thread_id=<A>, raw_body="<...>"
+- directive_id=<Y>, thread_id=<B>, raw_body="<...>"
+
+각 directive 마다:
+1. cycle-status.json 의 최근 사이클 상황 read (컨텍스트 파악)
+2. 한 줄 요약 + 1-2 문장 컨텍스트 + category 분류 (🎯 결정 / 🛠️ 작업 / 🐛 사고 / 💡 spec) 생성
+3. discord-reply.sh --forum-edit <thread_id> "<정제된 본문 (spec §5-3 정제 후 template)>" 호출
+4. discord-reply.sh --forum-retag <thread_id> directive "<category tag>" 호출
+
+완료 후 보고: 처리 N건, OK X건, fail Y건 + fail 사유.
+```
+
+**helper 본체가 sub-agent 보고 받은 후 helper-queue 의 처리 완료 task status: pending → done atomic update**.
+
+batch 효과: 1 launch 가 N task 처리 — launch overhead 분담. N=1 도 정상 동작 (overhead 그대로지만 흐름 일관). 한 turn 처리 한도 = max 5 (5+ 이면 다음 turn 에 남은 것 처리).
 
 ### 2-기획·이슈 등록
 

@@ -1157,6 +1157,33 @@ async def _handle_pin_reaction(
         summary,
     )
 
+    # spec: docs/features/directive-board-template-and-tags.md §5-6
+    # helper sub-agent 정제 위해 helper-queue.jsonl 에 polish task append.
+    # helper 본체가 다음 turn-start 에서 queue scan + sub-agent batch launch.
+    # graceful: append 실패 → warning 만 (📌 등록 자체는 성공).
+    try:
+        helper_queue_path = Path.home() / ".mobruji" / "helper-queue.jsonl"
+        helper_queue_path.parent.mkdir(parents=True, exist_ok=True)
+        polish_task = {
+            "type": "directive_polish",
+            "directive_id": message_id,
+            "raw_body": summary,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "status": "pending",
+        }
+        with helper_queue_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(polish_task, ensure_ascii=False) + "\n")
+        logger.info(
+            "📌 pin: directive_polish task queued (helper sub-agent 처리 대상): msg_id=%s",
+            message_id,
+        )
+    except OSError as exc:
+        logger.warning(
+            "📌 pin: helper-queue polish task append 실패 msg_id=%s exc=%r",
+            message_id,
+            exc,
+        )
+
     try:
         await message.add_reaction(PIN_REGISTERED_EMOJI)
     except Exception as exc:  # noqa: BLE001

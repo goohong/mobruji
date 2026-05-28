@@ -167,15 +167,25 @@ else
   echo "[4/7] user-presence: ?"
 fi
 
-# ─── 5) helper-queue 마지막 pending 표시 ────────────────────────────────────
+# ─── 5) helper-queue 마지막 pending 표시 + directive_polish 종류별 count ─────
+# spec: docs/features/directive-board-template-and-tags.md §5-6
+# bot.py 가 📌 등록 시 queue 에 type=directive_polish task append. helper 본체가
+# 다음 turn 에서 발견 시 helper sub-agent batch launch (정제 + category tag PATCH).
 if [[ -r "$QUEUE_FILE" ]]; then
   if [[ "$HAS_JQ" -eq 1 ]]; then
     pending_count=$(jq -s '[.[] | select(.status == "pending")] | length' "$QUEUE_FILE" 2>/dev/null)
-    last_pending=$(jq -r 'select(.status == "pending") | .message_id // "?"' "$QUEUE_FILE" 2>/dev/null | tail -1)
-    echo "[5/7] queue: pending=${pending_count:-?} last_pending_msg_id=${last_pending:-?} — append 의무 잊지 말기"
+    polish_count=$(jq -s '[.[] | select(.status == "pending" and .type == "directive_polish")] | length' "$QUEUE_FILE" 2>/dev/null)
+    last_pending=$(jq -r 'select(.status == "pending") | .message_id // .directive_id // "?"' "$QUEUE_FILE" 2>/dev/null | tail -1)
+    echo "[5/7] queue: pending=${pending_count:-?} (directive_polish=${polish_count:-0}) last_pending=${last_pending:-?} — append 의무 잊지 말기"
+    if [[ "${polish_count:-0}" -gt 0 ]]; then
+      # polish task 종류별 ids — helper 본체가 sub-agent batch launch 결정에 사용.
+      polish_ids=$(jq -r 'select(.status == "pending" and .type == "directive_polish") | .directive_id' "$QUEUE_FILE" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+      echo "[5b/7] directive_polish pending ids: ${polish_ids} — helper sub-agent batch launch 대상 (spec §5-6)"
+    fi
   else
     pending_count=$(grep -c '"status": "pending"' "$QUEUE_FILE" 2>/dev/null || echo "?")
-    echo "[5/7] queue: pending=${pending_count} (jq 미설치 raw count) — append 의무 잊지 말기"
+    polish_count=$(grep -c '"type": "directive_polish"' "$QUEUE_FILE" 2>/dev/null || echo "?")
+    echo "[5/7] queue: pending=${pending_count} (directive_polish raw=${polish_count}, jq 미설치) — append 의무 잊지 말기"
   fi
 else
   echo "[5/7] queue: ! ${QUEUE_FILE} 부재 (turn 종료 직전 신설 필요)" >&2
