@@ -290,7 +290,7 @@ GitHub repo settings 에 다음 protection 도입을 권고 (별도 인프라 PR
 - **PR 본문 "AI 작업 기록"**: 사용 에이전트와 프롬프트 요약을 명시.
 
 ### 10-3) 작업 분담 (현재 형태)
-maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 역할/만질 수 있는 경로는 §11 §2 세션별 역할 표 + [`docs/ai-harness/12-sub-agent-prompt-template.md`](./12-sub-agent-prompt-template.md)(maestro 가 sub-agent launch 시 박는 공통 룰 + 역할별 추가 룰의 single source of truth).
+maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 역할/만질 수 있는 경로는 §11 §2 세션별 역할 표 + [`docs/ai-harness/actors/sub-agent.md`](./actors/sub-agent.md)(maestro 가 sub-agent launch 시 박는 공통 룰 + 역할별 추가 룰의 single source of truth).
 
 - **maestro** (`mobruji`): 기획·이슈 등록·백로그 우선순위·공유 영역(`CLAUDE.md`/`docs/ai-harness/**`) 보수·develop 점유. 코드/테스트 작성은 sub-agent 위임 default.
 - **be** (`mobruji-be`): `backend/**` 구현 전용.

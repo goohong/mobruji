@@ -27,7 +27,7 @@
 maestro가 sub-agent를 launch할 때 prompt 첫 줄에 다음 한 줄만 박는다:
 
 ```
-공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 <be|fe|rev|plan|helper>.
+공통 룰은 docs/ai-harness/actors/sub-agent.md 따른다. 역할은 <be|fe|rev|plan|helper>.
 ```
 
 그 외 prompt 본문은 **이번 사이클 한정 작업 지시**(이슈 번호/구체 요구사항/완료 조건)만 담는다.
@@ -570,7 +570,7 @@ bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all
 
 좋은 예시:
 ```
-공통 룰은 docs/ai-harness/12-sub-agent-prompt-template.md 따른다. 역할은 be.
+공통 룰은 docs/ai-harness/actors/sub-agent.md 따른다. 역할은 be.
 
 이번 사이클 작업:
 - 이슈: #92 — RecommendationRequest 캐싱 도입

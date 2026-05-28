@@ -1,7 +1,7 @@
 # Discord Ops — Notify 셋업 + 메시지/명령/Forum (구 14+15 통합)
 
 > 2026-05-28 `14-discord-notify-setup` + `15-discord-message-templates` 통합.
-> **채널 라우팅(per-cycle / digest) SoT = `actors/nmae-runbook.md` §11-10 + `docs/helper-rules.md`.** 본 문서의 채널 매핑은 참조용 — 충돌 시 그쪽 우선.
+> **채널 라우팅(per-cycle / digest) SoT = `actors/nmae.md` §11-10 + `docs/ai-harness/actors/helper.md`.** 본 문서의 채널 매핑은 참조용 — 충돌 시 그쪽 우선.
 > **실제 push 동작은 `tools/discord-daemon/bot.py` + `~/.mobruji/discord-reply.sh` 코드가 강제.** 본 문서는 셋업 절차 + 메시지 카테고리/명령 syntax 레퍼런스.
 
 ---

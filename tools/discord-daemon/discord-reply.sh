@@ -345,7 +345,7 @@ BOT_WRITING_REACTION_ENABLED="${BOT_WRITING_REACTION_ENABLED:-1}"
 BOT_TYPING_INDICATOR_ENABLED="${BOT_TYPING_INDICATOR_ENABLED:-1}"
 # bare body 자동 hook — default OFF. 명시 호출 (--writing-marker / --writing-done)
 # 와 두 path 분리. 운영 단계에서 helper 본체가 `--writing-marker` 호출 룰을
-# 안정적으로 학습하면 1 로 전환해 자동화 보강 가능 (helper-rules.md 참고).
+# 안정적으로 학습하면 1 로 전환해 자동화 보강 가능 (docs/ai-harness/actors/helper.md 참고).
 BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-0}"
 
 # Discord API retry 설정 (#911 G-6).

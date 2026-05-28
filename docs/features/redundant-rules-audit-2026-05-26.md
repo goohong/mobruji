@@ -29,7 +29,7 @@ last_reviewed: 2026-05-26
 | ① role definition (NEW) | `.claude/agents/<role>.md` + `tools/discord-daemon/{nmae-role.md, helper-role.md}` | 2026-05-26 | 높음 (system prompt 강제) |
 | ② CLAUDE.md | `/CLAUDE.md` §1-§16 | 기존 | 중간 (학습 의존) |
 | ③ 메모리 | `memory/{common,helper,nmae,subagent,rev,workflow}/feedback_*.md` | 기존 | 낮음 (학습 의존) |
-| ④ docs | `docs/ai-harness/*.md`, `docs/helper-rules.md` | 기존 | 중간 (Read 의무) |
+| ④ docs | `docs/ai-harness/*.md`, `docs/ai-harness/actors/helper.md` | 기존 | 중간 (Read 의무) |
 
 **SoT 원칙**: 같은 룰이 ①②③④ 에 모두 있으면 ① 이 SoT. ② 는 포인터/요약. ③ 은 사고 박제/nuance. ④ 는 상세 SoT.
 
@@ -43,7 +43,7 @@ last_reviewed: 2026-05-26
 - ① role def: `be.md` "작업 중 사용자 입력 대기(AskUserQuestion) 금지", `fe.md` 동일, `rev.md` 동일, `plan.md` 동일
 - ② CLAUDE.md §13-1 "사용자 wait state 금지 ([[feedback-sub-agent-no-user-wait]])"
 - ③ 메모리 `subagent/feedback_sub_agent_no_user_wait.md`
-- ④ docs `docs/ai-harness/12-sub-agent-prompt-template.md §1`
+- ④ docs `docs/ai-harness/actors/sub-agent.md §1`
 
 **판단**: ① 이 강제. ② §13-1 한 줄 / ③ 메모리 / ④ docs 모두 유지 권고 — 한 줄짜리 룰은 redundant 라기보다 SoT 분산. ③ 메모리는 "사고 박제 (wait state 진입한 사례)" 가치 유지.
 
@@ -57,7 +57,7 @@ last_reviewed: 2026-05-26
 - ① role def: `rev.md` "너는 **구현(코드 작성)을 하지 않는다**"
 - ② CLAUDE.md §13-2 표 "rev | 파일 수정 금지 (PR 코멘트만)"
 - ③ 메모리 `rev/feedback_rev_*.md` (3 파일 — e2e, release-gate, develop-grep) — 구현 금지 자체는 핵심이 아니고 e2e 흐름이 핵심
-- ④ docs `docs/ai-harness/12-sub-agent-prompt-template.md §2 Role 별`
+- ④ docs `docs/ai-harness/actors/sub-agent.md §2 Role 별`
 
 **판단**: ① 강제됨. ② 표 한 줄 / ④ docs SoT 유지. ③ 메모리 3 파일은 e2e 절차 박제 — redundant 아님.
 
@@ -70,7 +70,7 @@ last_reviewed: 2026-05-26
 **현재 위치**:
 - ① `plan.md` "프로덕션 코드 구현을 하지 않는다 — 명세/문서/결정만"
 - ② CLAUDE.md §13-2 표 "plan | docs/**, .github/**"
-- ④ docs `docs/ai-harness/12-sub-agent-prompt-template.md §2`
+- ④ docs `docs/ai-harness/actors/sub-agent.md §2`
 
 **판단**: ① 강제. ② 표 한 줄 유지 (역할 매트릭스 가시성). ④ docs 상세 유지.
 
@@ -98,7 +98,7 @@ last_reviewed: 2026-05-26
 - ① helper-role.md (PR #1129 도입) — 핵심 boundary
 - ② CLAUDE.md §12-1 "권한 경계 [[feedback-helper-role-boundary]]"
 - ③ 메모리 `helper/feedback_helper_role_boundary.md`
-- ④ docs `docs/helper-rules.md` (PR #1085 SoT)
+- ④ docs `docs/ai-harness/actors/helper.md` (PR #1085 SoT)
 
 **판단**: ④ 가 SoT 명시. ① 강제. ② 는 ④ 의 mirror. ③ 메모리는 nuance/사고 박제.
 
@@ -112,7 +112,7 @@ last_reviewed: 2026-05-26
 - ① helper-role.md — 가능성 있음 (확인 필요)
 - ② CLAUDE.md §12-1 "보고/relay 범위 [[feedback-helper-relay-scope]]"
 - ③ 메모리 `helper/feedback_helper_relay_scope.md`
-- ④ docs `docs/helper-rules.md`
+- ④ docs `docs/ai-harness/actors/helper.md`
 
 **판단**: ④ SoT. ③ 사고 박제 가치. ② 본문 길 → 포인터 한 줄로 축소 후보.
 
@@ -244,7 +244,7 @@ last_reviewed: 2026-05-26
 - CLAUDE.md 의 매트릭스 표 (§13-2 역할별 워크트리/게이트/경로) — 가시성
 
 ### 3-2) 통합 (SoT 정리 — 별도 PR 후보)
-- §2-5 helper-role-boundary: CLAUDE.md §12-1 본문 → ④ `docs/helper-rules.md` 포인터로 축소
+- §2-5 helper-role-boundary: CLAUDE.md §12-1 본문 → ④ `docs/ai-harness/actors/helper.md` 포인터로 축소
 - §2-6 helper-relay-scope: 동일 패턴
 - §2-1 sub-agent AskUserQuestion 금지: CLAUDE.md §13-1 한 줄 → ① role def 포인터로 슬림화
 
@@ -262,7 +262,7 @@ last_reviewed: 2026-05-26
 1. **본 PR (audit) 머지** → 사용자 review baseline 확보
 2. **사용자 review** → 통합/제거 범위 결정 (§3-2, §3-4 항목별)
 3. **별도 PR (audit 단위)** 로 통합/제거 진행:
-   - 예: `refactor(docs): CLAUDE.md §12-1 helper-role 본문 → docs/helper-rules.md 포인터 슬림화 (#1124-followup)`
+   - 예: `refactor(docs): CLAUDE.md §12-1 helper-role 본문 → docs/ai-harness/actors/helper.md 포인터 슬림화 (#1124-followup)`
    - 예: `fix(docs): autonomous default vs release-gate 모순 해소 (#1124-followup)`
 4. **검증**: 슬림화 후에도 actor 가 룰 위반 안 하는지 다음 사이클 관찰
 
@@ -276,8 +276,8 @@ last_reviewed: 2026-05-26
 - 어느 쪽이 canonical? release 만 wait, develop 머지는 자율? 사용자 결정 필요.
 
 ### Q2) CLAUDE.md 슬림화 범위
-- §12-1 helper-role 본문 (50+ 줄) → `docs/helper-rules.md` 포인터 한 줄로 축소 OK?
-- §13-1 sub-agent 공통 룰 (15+ 줄) → role def + `docs/ai-harness/12-sub-agent-prompt-template.md` 포인터로 축소 OK?
+- §12-1 helper-role 본문 (50+ 줄) → `docs/ai-harness/actors/helper.md` 포인터 한 줄로 축소 OK?
+- §13-1 sub-agent 공통 룰 (15+ 줄) → role def + `docs/ai-harness/actors/sub-agent.md` 포인터로 축소 OK?
 
 ### Q3) `.claude/agents/<role>.md` 강화
 - 현재 role def 본문이 짧음 (5-7 줄). 핵심 룰을 더 흡수해서 system prompt 강제력 ↑ 시킬지?

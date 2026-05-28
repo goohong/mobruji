@@ -216,4 +216,4 @@ $ git log --oneline origin/main..origin/develop | grep -oE '^[a-f0-9]+ [a-z]+\('
 ## 7) 참고 문서
 - `docs/features/release-cadence-v0.4.0.md` — cadence + label 정책 spec (PR #774)
 - `docs/ai-harness/02-agent-workflow.md` §8 — release workflow 박제 (PR #777)
-- `docs/ai-harness/12-sub-agent-prompt-template.md` — maestro prompt template 후속 통합 지점 (PR #774-3 예정)
+- `docs/ai-harness/actors/sub-agent.md` — maestro prompt template 후속 통합 지점 (PR #774-3 예정)

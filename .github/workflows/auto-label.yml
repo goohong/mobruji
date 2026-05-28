@@ -111,7 +111,7 @@ jobs:
             //   2. 파일 경로 기반 추론 fallback (아래)
             //
             // sub-agent 명시 부착이 default — 이 fallback 은 누락 안전망. 상세:
-            //   docs/ai-harness/12-sub-agent-prompt-template.md §1 PR session 라벨 부착 의무.
+            //   docs/ai-harness/actors/sub-agent.md §1 PR session 라벨 부착 의무.
             //
             // 사용자 정정 (2026-05-24, 이슈 #1002):
             //   "각 PR이 무슨 agent가 작업했는지 라벨 제대로 안 붙어있어?"

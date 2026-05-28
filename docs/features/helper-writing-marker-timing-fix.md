@@ -81,7 +81,7 @@ timing 을 정정합니다. 사용자가 helper 가 응답 작성 중임을 한 
 | `~/.mobruji/helper-turn-start.sh` | step 2 (target freeze) 직후 `--writing-marker` ON 호출 추가 |
 | `~/.mobruji/discord-reply.sh` | 변경 없음 (`--writing-marker` / `--writing-done` flag 기존 그대로) |
 | `bot.py` `BOT_WRITING_AUTO_HOOK_ENABLED` hook | 변경 없음 (기존 동작 유지) |
-| `docs/helper-rules.md` | §3 step 6 → step 0 (turn-start wrapper) 안 ON 호출 명시. step 6 의 ON 호출은 wrapper 미사용 fallback 으로만 표기 |
+| `docs/ai-harness/actors/helper.md` | §3 step 6 → step 0 (turn-start wrapper) 안 ON 호출 명시. step 6 의 ON 호출은 wrapper 미사용 fallback 으로만 표기 |
 | `CLAUDE.md` §12-3 | step 0 wrapper 의 5 액션 목록에 "✍️ ON" 추가. step 6 본답 push 직전 ON 부분은 wrapper 미사용 fallback 으로만 표기 |
 | 메모리 `helper/feedback_helper_writing_marker_timing.md` | 신설 (사용자 16:21-24 정정 박제). nmae 가 갱신 |
 
@@ -89,7 +89,7 @@ timing 을 정정합니다. 사용자가 helper 가 응답 작성 중임을 한 
 
 | PR | 작업 | 담당 |
 |---|---|---|
-| 본 SPEC PR | docs/features 신설 + CLAUDE.md §12-3 + docs/helper-rules.md §3 갱신 + 메모리 박제 권고 | plan (본 사이클) |
+| 본 SPEC PR | docs/features 신설 + CLAUDE.md §12-3 + docs/ai-harness/actors/helper.md §3 갱신 + 메모리 박제 권고 | plan (본 사이클) |
 | impl PR | `~/.mobruji/helper-turn-start.sh` 수정 (1 파일) | be 또는 helper-launched (후속 사이클) |
 
 impl 변경 = `helper-turn-start.sh` 단 한 파일. PR base = develop.
@@ -115,5 +115,5 @@ impl 변경 = `helper-turn-start.sh` 단 한 파일. PR base = develop.
 
 - PR #1095 — writing marker 도입 PR (본답 push 직전/직후 ON/OFF)
 - CLAUDE.md §12-3 — helper turn 절차
-- docs/helper-rules.md §3 — helper 강제 룰
+- docs/ai-harness/actors/helper.md §3 — helper 강제 룰
 - 메모리 `helper/feedback_helper_writing_marker_timing.md` (신설 권고)

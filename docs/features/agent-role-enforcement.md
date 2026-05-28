@@ -70,7 +70,7 @@ Claude Code 가 `Agent` tool 호출 시 `subagent_type` 으로 매칭되는 정�
 
 각 파일 frontmatter `name` + `description` 으로 Claude Code 가 매칭. 본문이 system prompt 로 append.
 
-### 2-3) helper — `docs/helper-rules.md` + `tools/discord-daemon/helper-turn-start.sh`
+### 2-3) helper — `docs/ai-harness/actors/helper.md` + `tools/discord-daemon/helper-turn-start.sh`
 
 별도 spec `docs/features/helper-role-enforcement.md` (PR #1129) 참조.
 

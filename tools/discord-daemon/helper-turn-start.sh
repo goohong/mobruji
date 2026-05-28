@@ -13,7 +13,7 @@
 #   2. ✍️ writing marker ON (#1128, PR #1139 spec) — target freeze 직후 즉시
 #      `discord-reply.sh --writing-marker <target_id>` 호출. helper reasoning /
 #      작업 단계 (수 분 ~ 수십 분) 내내 사용자 메시지에 ✍️ reaction 부착되어
-#      "답 작성 중" 가시화. 본답 push 직후 OFF 는 docs/helper-rules.md §3 step 6
+#      "답 작성 중" 가시화. 본답 push 직후 OFF 는 docs/ai-harness/actors/helper.md §3 step 6
 #      (helper 본체) 또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook 가 처리.
 #      target_id 부재/snowflake 미달 시 graceful skip (turn 안 깨짐).
 #   3. cycle-status.json 읽어 4 워크트리 in_progress 한 줄 요약 (사용자가
@@ -54,8 +54,8 @@ echo "=== helper turn-start (#1014) ==="
 
 # ─── 0) 룰 reminder (#1085, 2026-05-26 사용자 정정) ────────────────────────────
 # 메모리 학습 의존 ↓ — wrapper stdout 으로 매 turn 핵심 룰 reminder.
-# 단일 SoT: docs/helper-rules.md. CLAUDE.md §12 는 본 파일 포인터.
-echo "[0/7] rules: (a) 답 first → 그 다음 작업 (b) helper 본체 = pure dispatch (코드 변경 = sub-agent 위임) (c) docs/helper-rules.md = SoT"
+# 단일 SoT: docs/ai-harness/actors/helper.md. CLAUDE.md §12 는 본 파일 포인터.
+echo "[0/7] rules: (a) 답 first → 그 다음 작업 (b) helper 본체 = pure dispatch (코드 변경 = sub-agent 위임) (c) docs/ai-harness/actors/helper.md = SoT"
 
 # ─── 1) target msg freeze (#987) ──────────────────────────────────────────────
 target_id=""
@@ -76,7 +76,7 @@ fi
 # target freeze 직후 즉시 ✍️ reaction + typing indicator ON. helper reasoning
 # 단계 (수 분 ~ 수십 분) 내내 사용자 시점에서 "답 작성 중" 가시화.
 # graceful: target_id 부재 / snowflake 형식 미달 시 skip — turn 안 깨짐.
-# 본답 push 직후 OFF 는 docs/helper-rules.md §3 step 6 (helper 본체 명시 호출)
+# 본답 push 직후 OFF 는 docs/ai-harness/actors/helper.md §3 step 6 (helper 본체 명시 호출)
 # 또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook 가 처리 (본 wrapper 책임 X).
 # discord-reply.sh path 해결: 본 스크립트와 같은 디렉토리. symlink 운영도 대응
 # (readlink -f BASH_SOURCE → 실제 위치 → dirname).
@@ -170,8 +170,8 @@ else
 fi
 
 # ─── 6) 다음 액션 reminder ──────────────────────────────────────────────────
-echo "[6/7] 다음 액션 (docs/helper-rules.md §3): (a) queue append (b) 분류 (c) 답 first → 처리 (d) sub-agent dispatch (e) queue done + grep 0건 검증 (f) directive forum 등록 (지시 채택 시)"
-echo "[7/7] 본답 push 직후 (docs/helper-rules.md §3 step 6): discord-reply.sh --writing-done <target_id> 호출로 ✍️ OFF (또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook)"
+echo "[6/7] 다음 액션 (docs/ai-harness/actors/helper.md §3): (a) queue append (b) 분류 (c) 답 first → 처리 (d) sub-agent dispatch (e) queue done + grep 0건 검증 (f) directive forum 등록 (지시 채택 시)"
+echo "[7/7] 본답 push 직후 (docs/ai-harness/actors/helper.md §3 step 6): discord-reply.sh --writing-done <target_id> 호출로 ✍️ OFF (또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook)"
 echo "=== /helper turn-start ==="
 
 exit 0

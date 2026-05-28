@@ -93,7 +93,7 @@ helper 본체는 별도 allowlist 로 처리되며 본 spec 대상이 아니다.
 - **Claude Code Agent tool `subagent_type` → `MOBRUJI_ROLE` env auto-inject 메커니즘 자체 구현** — Anthropic Agent SDK 가 sub-agent 호출 시 env 를 inherit 하는지는 §8 미해결 Q (자율 결정 표시) 로 두며, 본 spec 은 인프라 측 인식 로직만 정의. 만약 auto-inject 가 불가능하다면 cwd 화이트리스트 (요건 A) 로 fallback
 - helper allowlist 확장 — `helper-direct-work-guard.sh` 의 helper 분기 (line 21-50) 는 별도 spec (`docs/features/helper-direct-work-guard-allowlist.md` — 미작성, 필요 시 후속)
 - bot.py / discord-daemon 변경 — 본 hook 는 Claude Code harness PreToolUse 단일 책임
-- sub-agent prompt template (`docs/ai-harness/12-sub-agent-prompt-template.md`) 변경 — 본 spec 후속 impl PR 에서 "PR 생성 시 sentinel 학습" 항목 제거 가능 (별도 doc PR)
+- sub-agent prompt template (`docs/ai-harness/actors/sub-agent.md`) 변경 — 본 spec 후속 impl PR 에서 "PR 생성 시 sentinel 학습" 항목 제거 가능 (별도 doc PR)
 
 ## 5) 설계
 
@@ -101,7 +101,7 @@ helper 본체는 별도 allowlist 로 처리되며 본 spec 대상이 아니다.
 도메인 엔티티 변경 없음. **infra / harness 레이어**.
 
 관련 컨텍스트:
-- `docs/ai-harness/12-sub-agent-prompt-template.md §1` — sub-agent role ↔ session 라벨 매핑 (envvar 명명도 거울)
+- `docs/ai-harness/actors/sub-agent.md §1` — sub-agent role ↔ session 라벨 매핑 (envvar 명명도 거울)
 - `CLAUDE.md §13-1` — sub-agent 공통 룰 포인터 (`gh pr create --base develop` 강제)
 
 ### 5-2) API 엔드포인트
@@ -152,7 +152,7 @@ Claude Code harness PreToolUse hook
 |---|---|---|
 | `/home/mobruji/.mobruji/helper-direct-work-guard.sh` | edit | sub-agent context 분기 추가 (line 52 nmae 분기 보강) |
 | `~/.mobruji/hook-bypass.log` | 신설 (runtime) | JSON Lines audit log. logrotate 미적용 (수동 점검). impl 단계에서 logrotate spec 추가 검토 |
-| `docs/ai-harness/12-sub-agent-prompt-template.md` | edit (후속) | sub-agent 가 `MOBRUJI_ROLE` env 를 신뢰할 수 있다는 룰 명시 (impl PR 별도) |
+| `docs/ai-harness/actors/sub-agent.md` | edit (후속) | sub-agent 가 `MOBRUJI_ROLE` env 를 신뢰할 수 있다는 룰 명시 (impl PR 별도) |
 
 **경로 검증 절차** (impl 단계 sub-agent 가 자가 탐색):
 ```bash
@@ -169,7 +169,7 @@ grep -n "helper-direct-work-guard" /home/mobruji/.claude/settings.json
 
 - [x] **PR 1 (plan, 본 PR)**: spec 작성 (`docs/features/helper-direct-work-guard-subagent-context.md`)
 - [ ] **PR 2 (be)**: hook script 구현 + audit log + 셸 unit test (가능하면 `bats`)
-- [ ] **PR 3 (plan / 후속)**: `docs/ai-harness/12-sub-agent-prompt-template.md` 갱신 — sub-agent prompt 에 sentinel 학습 항목 제거 / `MOBRUJI_ROLE` env 참조 룰 명시
+- [ ] **PR 3 (plan / 후속)**: `docs/ai-harness/actors/sub-agent.md` 갱신 — sub-agent prompt 에 sentinel 학습 항목 제거 / `MOBRUJI_ROLE` env 참조 룰 명시
 
 ## 7) 테스트 전략
 
@@ -243,4 +243,4 @@ grep -n "helper-direct-work-guard" /home/mobruji/.claude/settings.json
 - `[[feedback-pr-base-develop]]` — sub-agent PR 책무 (`gh pr create --base develop`) 와 직결
 - `[[feedback-autonomous-default]]` — sentinel 학습 의존 = 자율성 저해. hook 가 role context 인식 시 자율 ↑
 - `CLAUDE.md §13-1 / §13-2` — sub-agent 워크트리 + 라벨 룰 매트릭스
-- `docs/ai-harness/12-sub-agent-prompt-template.md §1 PR session 라벨 부착 의무` — role ↔ env 매핑 거울
+- `docs/ai-harness/actors/sub-agent.md §1 PR session 라벨 부착 의무` — role ↔ env 매핑 거울

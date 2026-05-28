@@ -41,7 +41,7 @@ bash tools/rev-queue/rev-queue.sh all      # 세 stage 모두
 
 ## rev sub-agent 통합
 
-rev sub-agent prompt (`docs/ai-harness/12-sub-agent-prompt-template.md §2 rev / §E-3`) 매 사이클 첫 액션:
+rev sub-agent prompt (`docs/ai-harness/actors/sub-agent.md §2 rev / §E-3`) 매 사이클 첫 액션:
 
 ```
 1. bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all   # discovery (§E-3)
