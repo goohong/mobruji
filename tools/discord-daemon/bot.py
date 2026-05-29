@@ -141,6 +141,12 @@ LAST_USER_MSG_ID_PATH: Final[Path] = Path(
 ).expanduser()
 LAST_USER_MSG_ID_FILE_MODE: Final[int] = 0o600
 
+# 2026-05-29 Phase 2.1 — agent dual write. bot.py 가 사용자 메시지 받을 때
+# events 테이블 에 INSERT 추가 (legacy tmux send + inbox 도 유지). new agent
+# (tools/agent/) 가 events 를 consume 해 처리. legacy 영향 0 (dual write).
+# spec: tools/agent/README.md (Phase 2).
+AGENT_EVENTS_DB_PATH: Final[Path] = Path("~/.mobruji/agent.sqlite").expanduser()
+
 # 2026-05-29: helper-current-target.txt — helper-turn-start.sh 가 매 turn 시
 # cp last-user-msg-id 로 freeze 하던 path. helper LLM 의 wrapper 호출 의존 →
 # 호출 누락 시 옛 target 그대로 → helper 답이 옛 메시지에 reply 사고.
@@ -1463,6 +1469,52 @@ async def _handle_pin_reaction(
         logger.warning(
             "📌 pin: ✅ 부착 실패 msg_id=%s exc=%r", message_id, exc
         )
+
+
+def append_agent_event(kind: str, payload: dict) -> int:
+    """Phase 2.1 — new agent (tools/agent/) 의 events 테이블 에 INSERT.
+
+    legacy 영향 0 — dual write. agent SQLite schema 가 없으면 첫 호출 시 생성.
+
+    spec: tools/agent/events.py (같은 schema). bot.py 가 events 를 직접 INSERT 함.
+    agent 가 polling SELECT consumed_by IS NULL → 처리 → mark_consumed.
+
+    graceful — SQLite 실패는 warning 만. legacy path (tmux send / inbox) 가 보장.
+    """
+    _SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS events ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  kind TEXT NOT NULL,"
+        "  payload TEXT NOT NULL,"
+        "  ts_iso TEXT NOT NULL,"
+        "  consumed_by TEXT,"
+        "  consumed_at TEXT"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_events_unconsumed "
+        "  ON events (consumed_by, id) WHERE consumed_by IS NULL;"
+        "CREATE TABLE IF NOT EXISTS agent_state ("
+        "  key TEXT PRIMARY KEY,"
+        "  value TEXT NOT NULL,"
+        "  updated_at TEXT NOT NULL"
+        ");"
+    )
+    try:
+        AGENT_EVENTS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(AGENT_EVENTS_DB_PATH), isolation_level=None, timeout=10.0)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_SCHEMA)
+            ts_iso = datetime.now(timezone.utc).isoformat()
+            cursor = conn.execute(
+                "INSERT INTO events (kind, payload, ts_iso) VALUES (?, ?, ?)",
+                (kind, json.dumps(payload, ensure_ascii=False), ts_iso),
+            )
+            return cursor.lastrowid or 0
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("agent dual write 실패 kind=%s exc=%r", kind, exc)
+        return 0
 
 
 def write_last_user_msg_id(message_id: str) -> None:
@@ -5602,6 +5654,19 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # discord-reply.sh bare body 모드가 이 파일을 읽어
         # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
         write_last_user_msg_id(message_id)
+
+        # 2026-05-29 Phase 2.1 — agent dual write. new agent (tools/agent/) 가
+        # events 테이블 consume. legacy tmux send 와 동시 수행 — 영향 0.
+        # Phase 3 (NCP 배포) 후 운영 검증 → Phase 4 (legacy disable) 시점에 cutover.
+        append_agent_event("user_message", {
+            "message_id": message_id,
+            "channel_id": str(message.channel.id),
+            "user_id": str(message.author.id),
+            "user_name": message.author.name,
+            "body": original_body,
+            "referenced_content": referenced_content,
+            "ts_iso": ts_iso,
+        })
 
         # #1071 / PR #1140: directive classify + jsonl 로그 (자동 등록 path 폐지).
         #
