@@ -1,0 +1,304 @@
+"""SDK @tool wrapper — 12 tool 을 Claude Agent SDK 의 tool primitive 로 노출.
+
+tools_*.py 의 sync function 을 async @tool decorator 로 wrap.
+
+SDK API (2026-05-29 확인):
+- @tool(name, description, input_schema) decorator
+- input_schema = dict[str, type] (예: {"channel_id": str, "body": str})
+- handler async function 가 args dict 받음
+- return = {"content": [{"type": "text", "text": "..."}]}
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+try:
+    from claude_agent_sdk import tool
+except ImportError:  # CI / 개발 환경에서 SDK 미설치 시 graceful
+    def tool(name: str, description: str, input_schema: dict):  # type: ignore[no-redef]
+        def decorator(fn):
+            return fn
+        return decorator
+
+import tools_cycle as tc
+import tools_discord as td
+import tools_pause as tp
+import tools_subagent as ts
+
+
+def _wrap_result(result: dict[str, Any]) -> dict[str, Any]:
+    """tools_*.py 결과 dict → SDK 의 tool result format."""
+    return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
+
+
+def _wrap_error(exc: Exception) -> dict[str, Any]:
+    """예외 → SDK 의 tool error format."""
+    return {
+        "content": [{"type": "text", "text": f"ERROR: {type(exc).__name__}: {exc}"}],
+        "is_error": True,
+    }
+
+
+# ─── 1. post_discord_message ─────────────────────────────────────────────────
+
+
+@tool(
+    name="post_discord_message",
+    description="Discord 채널 또는 thread 에 message push. 사용자 메시지에 답 작성 시 의무.",
+    input_schema={
+        "channel_id": str,
+        "body": str,
+        "reply_to_msg_id": str,
+        "thread_id": str,
+    },
+)
+async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = td.post_discord_message(
+            args["channel_id"],
+            args["body"],
+            reply_to_msg_id=args.get("reply_to_msg_id") or None,
+            thread_id=args.get("thread_id") or None,
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 2. forum_create_thread ──────────────────────────────────────────────────
+
+
+@tool(
+    name="forum_create_thread",
+    description="Forum 채널 에 신규 thread. register_directive_pending 용도만 (자유 생성 금지).",
+    input_schema={"forum_id": str, "title": str, "body": str, "tags": list},
+)
+async def forum_create_thread(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = td.forum_create_thread(
+            args["forum_id"], args["title"], args["body"], tags=args.get("tags"),
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 3. forum_comment ────────────────────────────────────────────────────────
+
+
+@tool(
+    name="forum_comment",
+    description="Forum thread 안 comment. thread_id 필수 (별 thread 생성 X).",
+    input_schema={"thread_id": str, "body": str},
+)
+async def forum_comment(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = td.forum_comment(args["thread_id"], args["body"])
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 4. forum_retag ──────────────────────────────────────────────────────────
+
+
+@tool(
+    name="forum_retag",
+    description="Forum thread tag 변경 (🟡 → ⏳ → ✅ lifecycle).",
+    input_schema={"thread_id": str, "tag_name": str},
+)
+async def forum_retag(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = td.forum_retag(args["thread_id"], args["tag_name"])
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 5. forum_edit_starter ───────────────────────────────────────────────────
+
+
+@tool(
+    name="forum_edit_starter",
+    description="Forum thread starter body PATCH. 진행 / 완료 footer update.",
+    input_schema={"thread_id": str, "body": str},
+)
+async def forum_edit_starter(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = td.forum_edit_starter(args["thread_id"], args["body"])
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 6. launch_subagent ──────────────────────────────────────────────────────
+
+
+@tool(
+    name="launch_subagent",
+    description=(
+        "be/fe/rev/plan 사이클 launch. directive_id 인자 필수. "
+        "paused 모드 또는 in_flight cycle 이면 ERROR. pending_thread_id 자동 조회."
+    ),
+    input_schema={
+        "cycle": str,
+        "directive_id": str,
+        "title": str,
+        "task": str,
+    },
+)
+async def launch_subagent(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = ts.launch_subagent(
+            args["cycle"], args["directive_id"], args["title"], args["task"],
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 7. register_directive_pending ───────────────────────────────────────────
+
+
+@tool(
+    name="register_directive_pending",
+    description="📌 등록 — directive entry + 🟡 forum thread.",
+    input_schema={"directive_id": str, "summary": str, "cycle_hint": str},
+)
+async def register_directive_pending(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tc.register_directive_pending(
+            args["directive_id"], args["summary"],
+            cycle_hint=args.get("cycle_hint") or None,
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 8. update_directive_status ──────────────────────────────────────────────
+
+
+@tool(
+    name="update_directive_status",
+    description=(
+        "directive status transition. closed → closed_reason 필수, "
+        "assigned + plan → delegation_reason 필수."
+    ),
+    input_schema={
+        "directive_id": str,
+        "new_status": str,
+        "pr_url": str,
+        "closed_reason": str,
+        "thread_id": str,
+        "assigned_cycle": str,
+        "delegation_reason": str,
+    },
+)
+async def update_directive_status(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tc.update_directive_status(
+            args["directive_id"], args["new_status"],  # type: ignore[arg-type]
+            pr_url=args.get("pr_url") or None,
+            closed_reason=args.get("closed_reason") or None,
+            thread_id=args.get("thread_id") or None,
+            assigned_cycle=args.get("assigned_cycle") or None,  # type: ignore[arg-type]
+            delegation_reason=args.get("delegation_reason") or None,
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 9. get_cycle_state ──────────────────────────────────────────────────────
+
+
+@tool(
+    name="get_cycle_state",
+    description="be/fe/rev/plan cycle state read.",
+    input_schema={"cycle": str},
+)
+async def get_cycle_state(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tc.get_cycle_state(args["cycle"])  # type: ignore[arg-type]
+        return _wrap_result(result or {"status": "idle"})
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 10. set_cycle_state ─────────────────────────────────────────────────────
+
+
+@tool(
+    name="set_cycle_state",
+    description="cycle state partial update.",
+    input_schema={
+        "cycle": str,
+        "status": str,
+        "current_thread_id": str,
+        "current_pr_url": str,
+        "current_directive_id": str,
+    },
+)
+async def set_cycle_state(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tc.set_cycle_state(
+            args["cycle"],  # type: ignore[arg-type]
+            status=args.get("status") or None,  # type: ignore[arg-type]
+            current_thread_id=args.get("current_thread_id") or None,
+            current_pr_url=args.get("current_pr_url") or None,
+            current_directive_id=args.get("current_directive_id") or None,
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 11. pause_global ────────────────────────────────────────────────────────
+
+
+@tool(
+    name="pause_global",
+    description="사이클 정지. launch_subagent 가 reject. 사용자 명령 시만.",
+    input_schema={"reason": str},
+)
+async def pause_global(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tp.pause_global(reason=args.get("reason") or None)
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 12. resume_global ───────────────────────────────────────────────────────
+
+
+@tool(
+    name="resume_global",
+    description="paused 해제.",
+    input_schema={},
+)
+async def resume_global(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tp.resume_global()
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+ALL_TOOLS = [
+    post_discord_message,
+    forum_create_thread,
+    forum_comment,
+    forum_retag,
+    forum_edit_starter,
+    launch_subagent,
+    register_directive_pending,
+    update_directive_status,
+    get_cycle_state,
+    set_cycle_state,
+    pause_global,
+    resume_global,
+]
