@@ -9,9 +9,6 @@ User=mobruji
 WorkingDirectory=/home/mobruji/mobruji
 Environment=HOME=/home/mobruji
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# 2026-05-29: Claude Code auto-updater 끄기 — TUI 가 "Auto-update failed" prompt 로
-# input mode 차단되는 사고 영구 방지 (helper 와 동일 위험). spec: disable-claude-autoupdater.md.
-Environment=DISABLE_AUTOUPDATER=1
 ExecStart=/usr/bin/tmux new-session -d -s mobruji -c /home/mobruji/mobruji "/home/mobruji/.mobruji/maestro-launch.sh"
 ExecStop=/usr/bin/tmux kill-session -t mobruji
 Restart=on-failure
