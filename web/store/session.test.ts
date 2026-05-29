@@ -259,6 +259,111 @@ describe("useSessionStore.ensureSessionId weak fallback (no crypto)", () => {
   });
 });
 
+/**
+ * persist hydration 시점 legacy sessionId 자동 폐기 회귀 가드 (closes #1255 후속).
+ *
+ * 사고: BE PR #1255 GlobalExceptionHandler 가 표준 4xx body 응답으로 메시지 회복은
+ * 했지만, 사용자 device localStorage 에 legacy `sess_<ts>_<rand>` 형식 sessionId 가
+ * 영속돼 있으면 `ensureSessionId()` 호출 없이 `state.sessionId` 만 직접 read 하는
+ * page (home `ReturningUserPanel`, `/recommend` 진입 query) 가 그대로 BE 400 으로
+ * 떨어지던 hole. hydration 콜백에서 형식 가드.
+ *
+ * 검증: persist `onRehydrateStorage` 는 zustand persist 가 storage 에서 state 를
+ * 복원할 때 호출되는 콜백이다. 같은 효과를 단위 테스트로 보장하기 위해 store 를
+ * 모듈 재import 하여 새 persist 인스턴스를 강제 hydrate 한다.
+ */
+describe("useSessionStore persist hydration 시점 legacy sessionId 자동 폐기 (#1255)", () => {
+  beforeEach(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.clear();
+    }
+    vi.resetModules();
+  });
+
+  it("hydration 시 legacy `sess_<ts>_<rand>` sessionId 를 null 화 + voiceRangeId/excluded 동반 클리어", async () => {
+    // localStorage 에 legacy 형식 payload 박기 (zustand persist v0 schema).
+    const legacyPayload = {
+      state: {
+        sessionId: "sess_lq7k3m_abc12345",
+        voiceRangeId: 42,
+        excludedSongIds: [10, 20, 30],
+      },
+      version: 0,
+    };
+    localStorage.setItem("mobruji-session", JSON.stringify(legacyPayload));
+
+    // 새 모듈 인스턴스 = 새 persist hydration 트리거.
+    const { useSessionStore: freshStore } = await import("./session");
+    // hydration 대기 — happy-dom 환경에서는 synchronous 이지만 안전하게 await.
+    await freshStore.persist.rehydrate();
+
+    const state = freshStore.getState();
+    expect(state.sessionId).toBeNull();
+    expect(state.voiceRangeId).toBeNull();
+    expect(state.excludedSongIds).toEqual([]);
+  });
+
+  it("hydration 시 대문자 hex UUID (BE 소문자 regex 미통과) 도 null 화", async () => {
+    const stalePayload = {
+      state: {
+        sessionId: "ABCDEF12-1234-4ABC-89DE-1234567890AB",
+        voiceRangeId: 7,
+        excludedSongIds: [99],
+      },
+      version: 0,
+    };
+    localStorage.setItem("mobruji-session", JSON.stringify(stalePayload));
+
+    const { useSessionStore: freshStore } = await import("./session");
+    await freshStore.persist.rehydrate();
+
+    expect(freshStore.getState().sessionId).toBeNull();
+    expect(freshStore.getState().voiceRangeId).toBeNull();
+  });
+
+  it("hydration 시 valid UUIDv4 는 그대로 유지 (false-positive 가드)", async () => {
+    const valid = "abcdef12-1234-4abc-89de-1234567890ab";
+    const validPayload = {
+      state: {
+        sessionId: valid,
+        voiceRangeId: 5,
+        excludedSongIds: [1, 2],
+      },
+      version: 0,
+    };
+    localStorage.setItem("mobruji-session", JSON.stringify(validPayload));
+
+    const { useSessionStore: freshStore } = await import("./session");
+    await freshStore.persist.rehydrate();
+
+    const state = freshStore.getState();
+    expect(state.sessionId).toBe(valid);
+    expect(state.voiceRangeId).toBe(5);
+    expect(state.excludedSongIds).toEqual([1, 2]);
+  });
+
+  it("hydration 시 sessionId 가 이미 null 이면 voiceRangeId 등을 건드리지 않는다", async () => {
+    const initialPayload = {
+      state: {
+        sessionId: null,
+        voiceRangeId: 11,
+        excludedSongIds: [4, 5, 6],
+      },
+      version: 0,
+    };
+    localStorage.setItem("mobruji-session", JSON.stringify(initialPayload));
+
+    const { useSessionStore: freshStore } = await import("./session");
+    await freshStore.persist.rehydrate();
+
+    const state = freshStore.getState();
+    expect(state.sessionId).toBeNull();
+    // 첫 사용자 (sessionId 미생성) 일 수 있으므로 voiceRangeId 는 보존.
+    expect(state.voiceRangeId).toBe(11);
+    expect(state.excludedSongIds).toEqual([4, 5, 6]);
+  });
+});
+
 describe("useSessionStore.clearExcluded / reset", () => {
   it("clearExcluded 호출 시 누적 리스트만 비운다 (sessionId 보존)", () => {
     useSessionStore.setState({ sessionId: "abc" });
