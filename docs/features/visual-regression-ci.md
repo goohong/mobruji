@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: [1044, 1283]
-related_prs: [1305, 1309]
+related_prs: [1305, 1309, 1319]
 last_reviewed: 2026-05-29
 ---
 
@@ -170,7 +170,150 @@ baseline 갱신 PR 흐름:
 
 - [ ] **PR 1 (이번 사이클, plan)**: 본 spec 머지 (`docs/features/visual-regression-ci.md` 신설).
 - [ ] **PR 2 (별 PR, plan)**: `.github/PULL_REQUEST_TEMPLATE.md` 본문 끝에 `## visual baseline update` 섹션 추가 (조건부 — `type:feat scope:web` 만 의무). ADR-0026 §Decision 2 후보 (a) 검증.
-- [ ] **PR 3 (PR #1200 머지 후, fe)**: `.github/workflows/visual-regression.yml` 신설 + Playwright spec (`web/tests/visual/`) + 최초 baseline 24 개 commit.
+- [ ] **PR 3 (PR #1200 머지 후, fe)**: `.github/workflows/visual-regression.yml` 신설 + Playwright spec (`web/tests/visual/`) + 최초 baseline 24 개 commit. **상세 설계 = §6-PR3 detailed design** (사전 박제 — plan round 12 / 2026-05-29).
+
+#### §6-PR3 detailed design (사전 박제, plan round 12)
+
+> 본 sub-section 은 PR 3 fe sub-agent 가 launch 시 first-class reference. workflow yml 본문 / Playwright config 실제 코드 작성은 PR 3 본 사이클 — 본 spec 은 골격 / 근거 / 룰만.
+
+**1) Playwright workflow yaml 골격** (`.github/workflows/visual-regression.yml`)
+
+```yaml
+name: visual-regression
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'web/**'
+      - '.github/workflows/visual-regression.yml'
+
+concurrency:
+  group: visual-regression-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual-regression:
+    if: contains(github.event.pull_request.labels.*.name, 'scope:web')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v1.4x-jammy   # PR #1200 머지 시 정확한 tag 확정
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false                                    # baseline LFS 미사용 (§3-2)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+      - name: install (preserve symlinks)
+        working-directory: web
+        run: npm ci --no-audit --no-fund               # symlink 보존 의무 ([[feedback-npm-install-symlink-swap]])
+      - name: build web
+        working-directory: web
+        run: npm run build
+      - name: start web (background)
+        working-directory: web
+        run: npm run start &
+      - name: wait for web ready
+        run: npx wait-on http://localhost:3000 --timeout 60000
+      - name: visual regression test
+        working-directory: web
+        env:
+          CI: 'true'
+        run: npx playwright test --config=tests/visual/playwright.config.ts
+      - name: upload diff artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff-${{ github.run_id }}
+          path: web/tests/visual/__snapshots__/**/*-diff.png
+          retention-days: 30
+```
+
+근거:
+- `if: contains(... 'scope:web')` — §3-5 단계 1 적용 범위 (scope:web 만). auto-label.yml 가 PR 생성 시 자동 부착하므로 trigger 순서 race 시 retry 로 자연 해소. label 미부착 PR 은 skip = green default (false-positive ↓).
+- `concurrency` + `cancel-in-progress: true` — synchronize push 다중 시 이전 run cancel (artifact 비용 ↓).
+- `timeout-minutes: 10` — §비기능 wall-clock < 3 분 + 2x 안전 margin.
+- container Playwright official image — §3-3 OS font 가드 (Docker 통일).
+- `actions/setup-node@v4 cache` — install 시간 단축 (1-2 분 → 20-30 초).
+- `npm ci --no-audit --no-fund` — `npm install` 금지 룰 ([[feedback-npm-install-symlink-swap]]), `ci` 만 허용 + lockfile 의무.
+- `wait-on` — `npm run start` 가 ready 전 Playwright 실행 시 ECONNREFUSED 가드.
+- `retention-days: 30` — §비기능 GitHub Actions free tier 2 GB 한도 안 (90 일 default → 30 일 단축, 1/3 비용).
+
+**2) baseline 디렉토리 구조** (`web/tests/visual/__snapshots__/`)
+
+```
+web/tests/visual/
+├── playwright.config.ts                      # config (Docker container + viewport matrix)
+├── home.spec.ts                              # `/` 캡처
+├── voice.spec.ts                             # `/voice` 캡처
+├── song-detail.spec.ts                       # `/song/seed-1` 캡처
+├── history.spec.ts                           # `/history` 캡처
+├── recommendations.spec.ts                   # `/recommendations` 캡처
+├── likes.spec.ts                             # `/likes` (옵션) 캡처
+└── __snapshots__/
+    ├── home.spec.ts-snapshots/
+    │   ├── home-desktop-light-chromium-linux.png
+    │   ├── home-desktop-dark-chromium-linux.png
+    │   ├── home-mobile-light-chromium-linux.png
+    │   └── home-mobile-dark-chromium-linux.png
+    ├── voice.spec.ts-snapshots/             # 4 baseline
+    ├── song-detail.spec.ts-snapshots/       # 4 baseline
+    ├── history.spec.ts-snapshots/           # 4 baseline
+    ├── recommendations.spec.ts-snapshots/   # 4 baseline
+    └── likes.spec.ts-snapshots/             # 4 baseline (옵션 포함 시)
+```
+
+근거:
+- Playwright snapshot 명명 convention: `<test-name>-<viewport>-<mode>-<browser>-<os>.png` — 명시적 차원이 grep 친화 + 갱신 PR review 시 diff 한눈.
+- `chromium-linux` 만 (Firefox / WebKit / Windows 미포함) — false-positive ↓ + runtime ↓ (1 browser × 1 OS 만 = 24 baseline 이 5-7 분 안).
+- `web/tests/visual/` 격리 — 기존 unit / integration 테스트 (`web/__tests__/` 등) 와 path 충돌 회피, Playwright e2e (PR #1200) 의 `web/tests/e2e/` 와 sibling.
+
+**3) pixelmatch threshold 0.1% 근거** (§3-3 보강)
+
+| threshold | 의미 | trade-off |
+|---|---|---|
+| 0% (strict) | 단일 pixel 차이도 fail | font sub-pixel rendering 차이로 false-positive 50%+ — 즉시 운영 불가 |
+| 0.05% | 24 baseline × 1280×720 ≈ 22M pixel × 0.05% = 11000 pixel 변동 허용 | anti-aliasing edge 변동 catch, 의도된 마이크로 UI 조정도 fail risk |
+| **0.1% (proposed)** | 22M × 0.1% = 22000 pixel 변동 허용 = 1 button 크기 변동 catch | pixelmatch 공식 권장 default + Chromium font rendering 안정 시 false-positive < 5% (사내 경험치, web-e2e-playwright.md §3 확인) |
+| 0.5% | 100K pixel 변동 = 1 section 변동도 통과 | 회귀 catch rate ↓↓ — ADR-0018 swap 시리즈 같은 토큰 변경 detect 불가 |
+| 1%+ | 화면의 1% 변경도 통과 | 사실상 visual regression 의미 상실 |
+
+선정 사유:
+- pixelmatch 공식 README 권장: "good for most uses" = 0.1.
+- Chromium 단일 browser 통일 시 sub-pixel rendering 안정 — 0.1% 가 anti-aliasing margin + 의도된 마이크로 변동 모두 흡수.
+- 운영 후 false-positive > 5% 발견 시 §8 Q2 따라 (b) 0.05% / (c) SSIM 0.99 전환 (별 ADR 트리거).
+- ADR-0026 §Decision 3 와 일치.
+
+**4) artifact 저장 룰** (§3-2 + §비기능 보강)
+
+- 저장 위치: GitHub Actions artifact (`actions/upload-artifact@v4`).
+- 업로드 시점: workflow `failure()` 만 (success 시 zero artifact = 비용 0).
+- 업로드 대상: `web/tests/visual/__snapshots__/**/*-diff.png` (pixelmatch 가 자동 생성하는 diff png 만).
+- retention: 30 일 (default 90 일 단축 → free tier 2 GB 비용 절감).
+- 접근 권한: PR author + repo collaborator (gh-actions default).
+- 사용자 가시화: PR comment 에 artifact URL 자동 (별 PR 후보 — `.github/workflows/visual-regression-comment.yml` 신설, §6 PR 5 의존).
+
+근거: §비기능 "월 100 fail PR 가정 시 100-500 MB / 월" 추정 + 30 일 retention → 누적 200 MB 안. free tier 한도 (2 GB) 의 10% 안.
+
+**5) fail 조건 (workflow fail / PR 머지 차단)**
+
+| 조건 | workflow 결과 | rev 단계 1 판단 (§3-4) |
+|---|---|---|
+| diff = 0 (no change) | ✅ success | 통과 (`rev단계1: 🟢 visual diff 없음`, 코멘트 생략 가능) |
+| 0 < diff ≤ 0.1% | ✅ success (threshold 안) | 통과 (자동) |
+| diff > 0.1% + PR body `## visual baseline update` 명시 | ❌ failure | rev 사유 검토 후 통과 (`rev단계1: 🟢 visual baseline 갱신 의도 확인`) — fe sub-agent 가 `--update-snapshots` 로 baseline 갱신 + 같은 PR push → success 재진입 |
+| diff > 0.1% + PR body 섹션 부재 또는 "baseline 변경 없음" | ❌ failure | 회귀 의심 — `reviewed:claude` 라벨 부착 차단 (`rev단계1: 🔴 시각 회귀 의심`) + fe sub-agent root cause + PR body 보강 위임 |
+| Playwright Docker pull 실패 / dev 서버 down (PR branch deploy 미배포) | ⚠️ skip (graceful) | DIGEST push (`rev-skip-env-down:visual-regression`) + rev 단계 1 skip pass (`rev-qa-protocol §5-9` 룰 reference) |
+| timeout (10 분 초과) | ❌ failure | rev 가 root cause 분석 (network / Docker image cold pull / web build 시간 초과) — workflow tuning 별 PR 트리거 |
+
+차단 메커니즘:
+- `rev-gate.yml` required check 에 `visual-regression` 추가 — workflow fail = `reviewed:claude` 라벨 부착 차단 = squash merge 차단.
+- `auto-label.yml` 보조 — fail 시 `regression:visual` 라벨 자동 부착 (rev triage 가시화).
+- 후속 PR 3 자체에서는 `rev-gate-required-check-enforcement.md` spec 머지 후 추가 — PR 3 첫 머지 시점에는 `continue-on-error: true` 박아 self-bootstrap (baseline 부재 시 모든 PR 차단 risk 회피).
 - [ ] **PR 4 (PR 3 머지 후, plan)**: `docs/ai-harness/actors/sub-agent.md §2-rev` 에 단계 1 visual diff 판단 표 (§3-4) reference 1 줄 추가.
 - [ ] **PR 5 (PR 3 머지 후, fe / 옵션)**: `.github/workflows/visual-regression-nightly.yml` 신설 (단계 2 dev 서버 nightly cron).
 - [ ] **PR 6 (별 spec, 후보 E ADR accepted 격상 트리거)**: ADR-0026 status `proposed` → `accepted` (PR 3 머지 + 첫 baseline 확보 완료 후).
@@ -223,3 +366,4 @@ ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 �
 - **2026-05-29**: §4 제외 — Playwright e2e infra (PR #1200) 머지 의존 명시 + baseline LFS 전환 별 ADR + percy/Chromatic SaaS 보안 정책 위반 risk 채택 X (ADR-0026 Alternatives A).
 - **2026-05-29**: §6 PR 6 (ADR-0026 accepted 격상) 트리거 = PR 3 머지 + 첫 baseline 확보 완료 시점 — ADR 본문 §Decision 의 격상 조건과 일치.
 - **2026-05-29**: **§8 Q5 closure** — (c) 양쪽 동일 갱신 채택. 사유: ADR-0026 §8 (PR #1319, OPEN) 신설 후에는 ADR 본문 §8 Q1~Q4 가 본 spec §8 Q1~Q4 의 super-set 이 아니라 동일 매트릭스의 1:1 mirror — 한쪽 결정 누락 시 sync drift 사고 risk ↑. 결정 로그도 양쪽 같은 일자 / 사유 / PR 번호로 동시 박제. 운영 룰: ADR-0026 §Decision 갱신 PR 은 본 spec §9 같이 갱신 의무 (rev 단계 1 audit grep — `0026-visual-regression-ci.md` 와 `visual-regression-ci.md` 동시 diff 확인). 본 closure 의 머지 가능 시기 = PR #1319 머지 후 (PR body self-link 의무 박제). 본 PR 머지 후 ADR-0026 §8 작성 PR (#1319) 본문에 본 closure 참조 link 의무.
+- **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — fe sub-agent 가 PR 3 launch 시 첫 reference. 5 sub-section: (1) Playwright workflow yaml 골격 (container Docker / scope:web 조건 / concurrency cancel / 30 일 artifact retention), (2) baseline 디렉토리 구조 (`web/tests/visual/__snapshots__/` + `chromium-linux` 단일 browser), (3) pixelmatch 0.1% 근거 5 row 비교표 (pixelmatch 공식 권장 + Chromium 안정 시 false-positive < 5%), (4) artifact 저장 룰 (failure 시만 / 30 일 / free tier 안), (5) fail 조건 + rev 단계 1 판단 매핑 6 row. 트리거 — plan round 12 작업 지시 + PR 3 launch 직전 사전 spec 확정 의무 (망각 가드 — ADR-0019 정신). workflow yml 실제 코드 본문은 PR 3 본 사이클, 본 spec 은 골격 / 근거 / 룰만.
