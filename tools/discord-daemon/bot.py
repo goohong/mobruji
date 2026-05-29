@@ -1864,18 +1864,21 @@ async def _handle_pin_reaction(
 # 새 path: _handle_pin_reaction → 매칭 검색 → confirm view 또는 _do_register_directive.
 
 
-async def agent_outbox_loop() -> None:
+async def agent_outbox_loop(client: discord.Client) -> None:
     """Phase 2.3 — agent events 'agent_reply' / 'agent_forum_action' consume.
 
     1초 polling. tools/agent/ 가 events 에 INSERT 한 메시지를 Discord 로 push.
     graceful — 개별 push 실패 시 mark_consumed 만 (재시도는 agent 책임).
+
+    2026-05-29 fix: client 인자 추가 — module-level 함수가 build_client closure
+    의 client 참조 못 해 NameError 발생 사고 fix.
     """
     while True:
         try:
             rows = _agent_outbox_fetch_batch(limit=20)
             for row in rows:
                 try:
-                    await _agent_outbox_dispatch(row)
+                    await _agent_outbox_dispatch(client, row)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "agent_outbox dispatch 실패 id=%s kind=%s exc=%r",
@@ -1930,21 +1933,17 @@ def _agent_outbox_mark_consumed(event_id: int) -> None:
         logger.warning("agent_outbox mark_consumed 실패 id=%s: %r", event_id, exc)
 
 
-async def _agent_outbox_dispatch(row: dict) -> None:
-    """단일 event → Discord 실제 push (discord.py API 사용).
-
-    agent_reply payload: {channel_id, body, reply_to_msg_id?, thread_id?}
-    agent_forum_action payload: {action: create_thread/comment/retag/edit_starter, ...}
-    """
+async def _agent_outbox_dispatch(client: discord.Client, row: dict) -> None:
+    """단일 event → Discord 실제 push (discord.py API 사용)."""
     kind = row["kind"]
     payload = row["payload"]
     if kind == "agent_reply":
-        await _push_agent_reply(payload)
+        await _push_agent_reply(client, payload)
     elif kind == "agent_forum_action":
-        await _dispatch_agent_forum_action(payload)
+        await _dispatch_agent_forum_action(client, payload)
 
 
-async def _push_agent_reply(payload: dict) -> None:
+async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
     """agent_reply → discord channel.send (또는 thread.send)."""
     channel_id = int(payload.get("channel_id", 0))
     body = payload.get("body", "")
@@ -1972,23 +1971,22 @@ async def _push_agent_reply(payload: dict) -> None:
     logger.info("agent_reply pushed: channel=%s len=%d", target_id, len(body))
 
 
-async def _dispatch_agent_forum_action(payload: dict) -> None:
+async def _dispatch_agent_forum_action(client: discord.Client, payload: dict) -> None:
     """agent_forum_action → action 별 dispatch."""
     action = payload.get("action")
     if action == "create_thread":
-        await _forum_create_thread(payload)
+        await _forum_create_thread(client, payload)
     elif action == "comment":
-        await _forum_comment(payload)
+        await _forum_comment(client, payload)
     elif action == "retag":
-        await _forum_retag(payload)
+        await _forum_retag(client, payload)
     elif action == "edit_starter":
-        await _forum_edit_starter(payload)
+        await _forum_edit_starter(client, payload)
     else:
         logger.warning("agent_forum_action: unknown action=%r", action)
 
 
-async def _forum_create_thread(payload: dict) -> None:
-    """forum 채널 (type=15) 에 신규 thread 생성. discord.py forum API 사용."""
+async def _forum_create_thread(client: discord.Client, payload: dict) -> None:
     forum_id = int(payload.get("forum_id", 0))
     title = payload.get("title", "")[:99]
     body = payload.get("body", "")
@@ -1996,12 +1994,11 @@ async def _forum_create_thread(payload: dict) -> None:
     if forum is None or not hasattr(forum, "create_thread"):
         logger.warning("forum_create_thread: forum %s 미발견 / type 불일치 — drop", forum_id)
         return
-    # tags 는 discord.py 의 ForumTag 객체. 단순 path = applied_tags 없이 생성.
     result = await forum.create_thread(name=title, content=body)
     logger.info("forum_create_thread: forum=%s thread=%s", forum_id, getattr(result.thread, "id", "?"))
 
 
-async def _forum_comment(payload: dict) -> None:
+async def _forum_comment(client: discord.Client, payload: dict) -> None:
     thread_id = int(payload.get("thread_id", 0))
     body = payload.get("body", "")
     thread = client.get_channel(thread_id)
@@ -2012,13 +2009,11 @@ async def _forum_comment(payload: dict) -> None:
     logger.info("forum_comment: thread=%s len=%d", thread_id, len(body))
 
 
-async def _forum_retag(payload: dict) -> None:
-    """forum thread tag 변경 — REST API PATCH /channels/{thread_id} applied_tags."""
+async def _forum_retag(client: discord.Client, payload: dict) -> None:
     thread_id = payload.get("thread_id")
     tag_name = payload.get("tag_name")
     if not thread_id or not tag_name:
         return
-    # discord.py 의 thread.edit(applied_tags=[...]) 사용. tag 객체 lookup 필요.
     thread = client.get_channel(int(thread_id))
     if thread is None or not hasattr(thread, "parent"):
         logger.warning("forum_retag: thread %s 미발견 — drop", thread_id)
@@ -2036,7 +2031,7 @@ async def _forum_retag(payload: dict) -> None:
     logger.info("forum_retag: thread=%s tag=%s", thread_id, tag_name)
 
 
-async def _forum_edit_starter(payload: dict) -> None:
+async def _forum_edit_starter(client: discord.Client, payload: dict) -> None:
     """forum thread starter message body PATCH (starter message_id = thread_id)."""
     thread_id = int(payload.get("thread_id", 0))
     body = payload.get("body", "")
@@ -5869,7 +5864,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # spec: tools/agent/README.md (Phase 2.3).
         if not hasattr(client, "_agent_outbox_task_started"):
             client._agent_outbox_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(agent_outbox_loop())
+            client.loop.create_task(agent_outbox_loop(client))
             logger.info("agent_outbox_loop launched: interval=1s polling")
 
         # PR cf-3 (2026-05-29) — cycle forum thread ✅ 자동 retag.
