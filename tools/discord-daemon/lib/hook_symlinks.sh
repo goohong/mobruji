@@ -55,6 +55,9 @@ if [[ -z "${HOOK_NAMES:-}" ]]; then
       # 반영 — 학습 의존 ↓, 코드 강제. spec: actors/sub-agent.md §2-helper / nmae §11-7.
       helper-launch.sh
       helper-role.md
+      # 2026-05-29 Phase D — nmae-role.md (repo SoT, NCP-only 였던 path 통합).
+      # 자동 위임 폐기 STRICT 룰 — 사용자 명시 적재 (events 'directive_approved') 만 처리.
+      nmae-role.md
       # 2026-05-29: helper-tool-progress.sh — Claude Code PreToolUse hook.
       # .claude/settings.json 의 hook command path 는 $HOME/.mobruji/helper-tool-progress.sh
       # 고정 — repo 변경 즉시 반영을 위해 symlink 강제. spec: docs/features/helper-tool-visibility.md.

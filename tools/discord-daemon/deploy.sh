@@ -53,6 +53,8 @@ HOOK_NAMES=(
   # 2026-05-29: maestro-launch.sh — NCP 본체와 repo SoT 통합 (bootstrap watcher
   # + DISABLE_AUTOUPDATER export). spec: PR fix/maestro-launch-bootstrap-merge.
   maestro-launch.sh
+  # 2026-05-29 Phase D — nmae-role.md repo SoT. 자동 위임 폐기 STRICT 룰.
+  nmae-role.md
 )
 DRY_RUN=0
 
