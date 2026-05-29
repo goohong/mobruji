@@ -162,10 +162,14 @@ DIRECTIVE_APPROVED_PROMPT = """\
 directive_id: {directive_id}
 summary: {summary}
 polished_description: {description}
-suggested_cycle_hint: {cycle_hint}
+user_cycle_hint: {cycle_hint}
 
-위 directive 를 처리하세요:
-1. 적절한 cycle (be / fe / rev / plan) 결정 — summary + description 의 내용 보고 판단.
+cycle 결정 규칙:
+- user_cycle_hint 가 "auto" 가 아니면 (사용자 명시 위임) → **그 cycle 강제 사용, 판단 X**.
+- "auto" 이면 summary + description 보고 적절한 cycle (be / fe / rev / plan) 판단.
+
+처리:
+1. 위 규칙으로 cycle 결정.
 2. plan 위임 시 delegation_reason 명시 (신규 도메인, 다중 PR, 사용자 의도 분석 필요 등).
 3. launch_subagent tool 호출 — directive_id, cycle, title, task 인자.
 4. paused 모드면 launch_subagent 가 PausedError raise — 사용자에게 알림 (post_discord_message).

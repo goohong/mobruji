@@ -1465,10 +1465,16 @@ async def _generate_directive_description(
 
 
 class PinDialogueView(discord.ui.View):
-    """O/X dialogue — 정리된 description 확인 + 수정 loop.
+    """O/X dialogue — 정리된 description 확인 + cycle 명시 + 수정 loop.
 
-    O = `_do_register_directive` 호출 + thread close.
-    X = `_request_revision` (modal 또는 thread 안 메시지 수신) → 재정리 → 다시 O/X.
+    Discord ui.Select (cycle dropdown) + ⭕/❌ button.
+
+    cycle 명시 (사용자 정정 2026-05-29): "내가 명시적으로 plan에게 지시 위임할 수 있지?"
+    → dropdown 의 선택값이 events 'directive_approved' payload 의 cycle_hint 로 전달.
+    agent.py 의 LLM 은 cycle_hint 명시 시 그 cycle 강제 사용 (판단 X).
+
+    O = `_do_register_directive` 호출 + events INSERT + thread close.
+    X = thread 안 메시지 수신 → 재정리 → 다시 O/X.
     max retry = 3, timeout = 15분 (default 취소).
     """
 
@@ -1482,6 +1488,7 @@ class PinDialogueView(discord.ui.View):
         revision_count: int,
         thread,  # noqa: ANN001 — discord thread duck-typed
         register_channel,  # noqa: ANN001
+        initial_cycle_hint: str = "auto",
     ) -> None:
         super().__init__(timeout=PIN_DIALOGUE_TIMEOUT)
         self._target_message_id = target_message_id
@@ -1491,6 +1498,7 @@ class PinDialogueView(discord.ui.View):
         self._revision_count = revision_count
         self._thread = thread
         self._register_channel = register_channel
+        self._cycle_hint = initial_cycle_hint  # default "auto" — nmae LLM 판단
 
     async def _verify_user(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self._target_user_id:
@@ -1499,6 +1507,29 @@ class PinDialogueView(discord.ui.View):
             )
             return False
         return True
+
+    # ─── cycle 선택 dropdown — 사용자가 명시 위임 ────────────────────────────
+    @discord.ui.select(
+        placeholder="cycle 위임 (default: 자동)",
+        min_values=1, max_values=1,
+        options=[
+            discord.SelectOption(label="자동 (nmae 판단)", value="auto", emoji="🤖"),
+            discord.SelectOption(label="be (백엔드)", value="be", emoji="🔧"),
+            discord.SelectOption(label="fe (프론트엔드)", value="fe", emoji="🎨"),
+            discord.SelectOption(label="rev (코드 리뷰 / QA)", value="rev", emoji="🔍"),
+            discord.SelectOption(label="plan (spec / ADR / 큰 분석)", value="plan", emoji="📋"),
+        ],
+    )
+    async def _select_cycle(
+        self, interaction: discord.Interaction, select: discord.ui.Select,
+    ) -> None:
+        if not await self._verify_user(interaction):
+            return
+        self._cycle_hint = select.values[0]
+        await interaction.response.send_message(
+            f"☑️ cycle = **{self._cycle_hint}** 로 설정. ⭕ 누르면 적용.",
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="등록", style=discord.ButtonStyle.success, emoji="⭕")
     async def _approve(
@@ -1527,9 +1558,16 @@ class PinDialogueView(discord.ui.View):
             "channel_id": str(getattr(self._register_channel, "id", "")),
             "thread_id": str(getattr(self._thread, "id", "")),
             "revision_count": self._revision_count,
+            # 사용자 명시 cycle hint (dropdown 선택 — "auto" 면 nmae LLM 자동 판단)
+            "cycle_hint": self._cycle_hint,
         })
+        cycle_label = (
+            f"cycle = **{self._cycle_hint}** (사용자 명시)"
+            if self._cycle_hint != "auto"
+            else "cycle = 자동 판단"
+        )
         await interaction.edit_original_response(
-            content=f"✅ 등록 완료 + nmae 분배 trigger.\n\n{self._polished}",
+            content=f"✅ 등록 완료 + nmae 분배 trigger ({cycle_label}).\n\n{self._polished}",
         )
         # thread 자동 archive
         try:
