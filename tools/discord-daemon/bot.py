@@ -141,6 +141,15 @@ LAST_USER_MSG_ID_PATH: Final[Path] = Path(
 ).expanduser()
 LAST_USER_MSG_ID_FILE_MODE: Final[int] = 0o600
 
+# 2026-05-29: helper-current-target.txt — helper-turn-start.sh 가 매 turn 시
+# cp last-user-msg-id 로 freeze 하던 path. helper LLM 의 wrapper 호출 의존 →
+# 호출 누락 시 옛 target 그대로 → helper 답이 옛 메시지에 reply 사고.
+# bot.py 가 on_message 시 last-user-msg-id 와 동시 갱신해 학습 의존 폐기.
+# spec: docs/features/helper-current-target-bot-side-write.md.
+HELPER_CURRENT_TARGET_PATH: Final[Path] = Path(
+    "~/.mobruji/helper-current-target.txt"
+).expanduser()
+
 # Discord snowflake 길이 가드 (#964, 2026-05-24).
 # Discord snowflake = unix timestamp(42b) + worker(5b) + process(5b) + increment(12b)
 # = 64bit. 2015 epoch 이후 항상 17~19 자리 양의 정수 (보수적으로 20 까지 허용).
@@ -1346,6 +1355,30 @@ def write_last_user_msg_id(message_id: str) -> None:
             raise
     except OSError as exc:
         logger.warning("last-user-msg-id 기록 실패: %s", exc)
+
+    # 2026-05-29: helper-current-target.txt 동시 갱신 — helper-turn-start.sh 호출
+    # 누락 시에도 reply target 이 stale 되지 않도록 코드 강제. helper LLM wrapper
+    # 호출 의존 폐기. spec: helper-current-target-bot-side-write.md.
+    try:
+        HELPER_CURRENT_TARGET_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd2, tmp_path2 = _tempfile.mkstemp(
+            prefix=".helper-current-target-",
+            dir=str(HELPER_CURRENT_TARGET_PATH.parent),
+        )
+        try:
+            with os.fdopen(tmp_fd2, "w", encoding="utf-8") as handle:
+                handle.write(message_id)
+            os.chmod(tmp_path2, LAST_USER_MSG_ID_FILE_MODE)
+            os.replace(tmp_path2, HELPER_CURRENT_TARGET_PATH)
+        except OSError:
+            if tmp_path2 and os.path.exists(tmp_path2):
+                try:
+                    os.unlink(tmp_path2)
+                except OSError:
+                    pass
+            raise
+    except OSError as exc:
+        logger.warning("helper-current-target 기록 실패: %s", exc)
 
 
 def build_reply_context_prefix(
