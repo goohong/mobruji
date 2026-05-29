@@ -1322,11 +1322,30 @@ async def find_mode_toggle_message(
     bot_user_id: int,
     limit: int = MODE_TOGGLE_HISTORY_SCAN_LIMIT,
 ):
-    """채널 history 마지막 ``limit`` 건에서 bot 자신이 post 한 mode toggle marker 검색.
+    """mode toggle 메시지 search — pins 우선 + history fallback.
 
-    매칭 = ``MODE_TOGGLE_MARKER`` 로 시작하는 본문 + author == bot. 없으면 ``None``.
-    history fetch / iter 실패는 graceful — warning + None.
+    매칭 = ``MODE_TOGGLE_MARKER`` 로 시작하는 본문 + author == bot.
+
+    2026-05-29 사용자 정정: history(limit=100) 만으로는 옛 위치 / scan 실패 시
+    못 찾고 신규 post → 핀 2개 사고. 핀된 메시지가 SoT 이므로 pins() 먼저 scan.
+    history fallback 은 사용자가 manual unpin 한 경우 발견 path.
+
+    fetch 실패는 graceful — warning + None (신규 post 진행).
     """
+    # 1) pinned 메시지 우선 scan — pin 된 게 정상 path 의 SoT.
+    try:
+        pinned_list = await channel.pins()
+        for msg in pinned_list:
+            author_id = getattr(getattr(msg, "author", None), "id", None)
+            if author_id != bot_user_id:
+                continue
+            content = getattr(msg, "content", "") or ""
+            if content.startswith(MODE_TOGGLE_MARKER):
+                return msg
+    except Exception as exc:  # noqa: BLE001 — graceful
+        logger.warning("mode toggle pins() scan 실패: %r", exc)
+
+    # 2) history fallback — 사용자가 manual unpin 했거나 pins() 실패 시.
     try:
         async for msg in channel.history(limit=limit):
             author = getattr(msg, "author", None)
@@ -1337,7 +1356,7 @@ async def find_mode_toggle_message(
             if content.startswith(MODE_TOGGLE_MARKER):
                 return msg
     except Exception as exc:  # noqa: BLE001 — graceful fallback
-        logger.warning("mode toggle message scan 실패: %r", exc)
+        logger.warning("mode toggle history scan 실패: %r", exc)
     return None
 
 
