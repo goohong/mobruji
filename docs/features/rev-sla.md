@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: [1329, 1332, 1333, 1334]
+related_prs: [1329, 1332, 1333, 1334, 1340, 1341]
 last_reviewed: 2026-05-29
 ---
 
@@ -570,15 +570,115 @@ PR #1234 (type:emergency-hotfix + body security)
 
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | 정규 단계 1 SLA 30분 — 실제 평균 응답 시간 측정 후 조정 가능. 첫 박제값 (a) 30분 / (b) 15분 / (c) 1시간 | (a) / (b) / (c) | @goohong / spec approved 전 |
-| Q2 | security 🔴 단계 2 SLA 15분 — `watchdog_rev_sla_loop` 1분 polling 으로 충분 vs 30초 polling 필요 | (a) 1분 / (b) 30초 | @goohong / security 사고 발생 후 |
-| Q3 | escalation 시 nmae 별 rev sub-agent 추가 launch — 워크트리 lock 충돌 가능 (`sub-agent.md §1-1`). (a) 같은 워크트리 다른 cycle 재사용 / (b) launch 차단 + DIGEST 만 | (a) / (b) | @goohong / spec approved 전 |
+| ~~Q1~~ ✅ | ~~정규 단계 1 SLA 30분 — 실제 평균 응답 시간 측정 후 조정 가능. 첫 박제값 (a) 30분 / (b) 15분 / (c) 1시간~~ — **(a) 30분 채택 (1차 박제값)** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §A. 운영 1개월 누적 jsonl 결과 P95 < 1200s (20m) 시 (b) 15분 조정 trigger, P95 > 2400s (40m) 시 (c) 1시간 조정 trigger — 본 조정은 §6 PR 7 (월간 회고 spec) SoT. | — | @goohong / **closed 2026-05-29 (1차 박제값, 운영 후 조정 trigger 박제)** |
+| ~~Q2~~ ✅ | ~~security 🔴 단계 2 SLA 15분 — `watchdog_rev_sla_loop` 1분 polling 으로 충분 vs 30초 polling 필요~~ — **(a) 1분 polling 유지 (security 분류에도 동일)** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §B. 1분 polling = 평균 30초 / 최악 60초 lag 보장 — security 15분 SLA 의 1/15 = 회귀 detect 정밀도 충분. 30초 polling 은 bot.py loop overhead 2배 + 사고 사례 누적 0건 (가설 단계) — over-engineering 회피. 실제 사고 사례 발생 시 §8-closure-candidates §B 의 trigger 매트릭스 따라 별 ADR 트리거. | — | @goohong / **closed 2026-05-29 (1분 polling 유지, 사고 사례 trigger 박제)** |
+| ~~Q3~~ ✅ | ~~escalation 시 nmae 별 rev sub-agent 추가 launch — 워크트리 lock 충돌 가능 (`sub-agent.md §1-1`). (a) 같은 워크트리 다른 cycle 재사용 / (b) launch 차단 + DIGEST 만~~ — **(c) 둘 다 채택 — 우선순위 분기 (`docs/features/rev-sla.md §8-closure-candidates §C` 박제)** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §C. (a) 워크트리 idle (rev 사이클 종료 / 매 cycle 끝 status=idle 박제) 시 즉시 재사용 launch / (a) 불가 시 (b) DIGEST + nmae 큐 head retag — 두 분기 모두 sub-agent.md §1-1 워크트리 lock 위반 0. parallel launch 는 별 워크트리 신설 의존 (별 spec — `rev-worktree-pool.md` 후보) 으로 위임, 본 spec 범위 X. | — | @goohong / **closed 2026-05-29 (둘 다 분기 채택, 워크트리 lock 정합)** |
 | Q4 | `rev-sla-metrics.jsonl` 의 retention — 무한 누적 vs 30일 rotate | (a) 무한 / (b) 30일 rotate / (c) 월간 회고 spec 가 흡수 | @goohong / SLA 적용 1개월 후 |
-| Q5 | `type:docs` 단계 1 SLA 5분 — no-op pass (📝) 자동 부착이 가능한 경우 자동화 후보 (`rev-qa-protocol.md` cross-ref 필요) | (a) 자동화 별 spec / (b) 본 spec 5분 SLA 유지 | @goohong / spec approved 전 |
+| ~~Q5~~ ✅ | ~~`type:docs` 단계 1 SLA 5분 — no-op pass (📝) 자동 부착이 가능한 경우 자동화 후보 (`rev-qa-protocol.md` cross-ref 필요)~~ — **(a) 자동화 별 spec 분리 권고 + (b) 본 spec 5분 SLA 유지 병행** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §D. 자동화 별 spec (`rev-docs-noop-auto.md` 후보) trigger 조건 = (1) `type:docs` 라벨 + `scope:infra` only / (2) 코드 변경 0 line (frontmatter / markdown 만) / (3) 보호 영역 파일 변경 0 — 3 조건 AND 매칭 시 bot.py 가 `📝 no-op pass` 코멘트 + `reviewed:claude` 라벨 자동 부착. 본 자동화는 별 spec 신설 후 ADR 트리거 — 본 spec §3-1 매트릭스의 5분 SLA 는 fallback 으로 유지 (자동화 실패 시 manual rev sub-agent 가 5분 안 처리). | — | @goohong / **closed 2026-05-29 (자동화 별 spec trigger 박제 + 5분 SLA fallback 유지)** |
 | Q6 | release PR 단계 1 면제 — `type:release` 라벨 PR 은 사용자 명시 확인 강제로 단계 1 면제. 본 룰 prose 가 아니라 코드 강제 위치 (rev-gate.yml whitelist + watchdog skip) | (a) `nmae-cycle-watchdog.md §5-8` SoT / (b) 본 spec §3-1 매트릭스 SoT | @goohong / spec approved 전 |
+
+### §8-closure-candidates — Q1/Q2/Q3/Q5 closure 후보 평가 매트릭스 (plan round 15)
+
+> 본 sub-section 은 plan round 15 closure 결정의 trade-off / 채택 / 미채택 사유 + 운영 후 재검토 trigger 박제. closure 자체는 §8 표 row 의 ~~closed~~ 표기 + §9 결정 로그가 SoT — 본 sub-section 은 미래 cycle (운영 후 조정 / security 사고 / docs 자동화 별 spec) 의 first-class reference.
+
+#### A) Q1 closure — 정규 단계 1 SLA 30분 적정성
+
+**채택**: (a) 30분 (1차 박제값).
+
+**3 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| **(a) 30분 (proposed, 채택)** | nmae watchdog idle 10분 (`actors/nmae.md §11-2`) 의 3배 — race condition margin 안전 / rev 큐 race 4건 동시 처리 평균 5-15분 + escalation 분기 15-25분 = 30분 안 자연 통과 / 사용자 가시화 적정 (PR push 후 30분 = 한 turn cycle 안) | 첫 박제값 — 실제 운영 evidence 부재. 큐 race 사고 frequency 높을 시 미달성률 ↑ risk | 1차 도입은 sub-agent.md §1-4 reasoning chunk 5분 + nmae cycle 평균 10-15분 (jsonl evidence: plan round 1-15 평균) 의 합리 추정. ADR-0019 정신 — agent 망각 의존 회피, jsonl evidence 누적 후 조정 |
+| (b) 15분 | 사용자 가시화 정밀도 ↑ — race 미발생 시 즉시 통과 → 머지 lag ↓ | rev 큐 race 4건 동시 (head 부터 처리 평균 5-15분 × 4 = 20-60분) 시 미달성률 60%+ → escalation polling 부담 ↑ / nmae 가 큐 race 해소용 별 rev launch 빈도 ↑ → 워크트리 lock 충돌 risk ↑ (§C 분기 의존) | 운영 evidence 부재 단계 — 미달성률 60% 박제 시 jsonl noise ↑, 회고 spec 의미 ↓ |
+| (c) 1시간 | 큐 race 4건 동시 처리도 자연 통과 → escalation 발생률 ≤ 5% | 사용자 가시화 정밀도 ↓ — PR push 후 1시간 = 사용자 turn cycle 2-3회 = "왜 머지 안 됨" 사고 risk ↑ / 단계 1 게이트 의미 약화 (1시간 = rev 사이클 평균 lag 와 동급) | "차단이 아니라 가시화" 정신 위반 — 본 spec §1 핵심 원칙 1 미달 |
+
+**운영 후 조정 trigger** (§6 PR 7 월간 회고 spec SoT):
+
+| trigger | 조정 후보 |
+|---|---|
+| P95 elapsed < 1200s (20m) 가 1개월 누적 | (b) 15분 으로 조정 (별 PR + ADR) |
+| P95 elapsed > 2400s (40m) 가 1개월 누적 | (c) 1시간 으로 조정 또는 큐 race 해소 별 spec trigger |
+| 미달성률 > 20% 가 1개월 누적 | escalation 분기 강화 (nmae 큐 race 해소 별 spec trigger) — SLA 자체 조정 X |
+
+#### B) Q2 closure — security 🔴 단계 2 SLA 15분 polling 주기
+
+**채택**: (a) 1분 polling 유지 (security 분류에도 동일).
+
+**2 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| **(a) 1분 polling (proposed, 채택)** | bot.py loop overhead 적정 (`actors/nmae.md §11-1` 3중 watchdog 동일 패턴) / security 15분 SLA 의 1/15 = lag 평균 30초 / 최악 60초 = SLA 4% 초과 margin / 4중 안전망 (`nmae-cycle-watchdog.md §5-7`) loop 와 동일 주기 = bot.py 부담 균일 | 30초 단위 사고 (예: critical-public 발견 후 1분 안 머지 strictly 필요) 미보호 | security 사고 사례 0건 (가설 단계) — over-engineering 회피. 1분 polling 으로 1차 도입 후 사고 사례 누적 시 별 ADR 트리거 |
+| (b) 30초 polling | security 분류만 30초 = lag 평균 15초 / 최악 30초 = SLA 2% 초과 margin | bot.py loop overhead 2배 (security 분기 별 loop 필요) / security 분류 분기 추가 = 코드 복잡도 ↑ / 본 spec §3-3 watchdog_rev_sla_loop 단일 loop 정신 위반 (4중 안전망 일관성 ↓) | security 사고 사례 0건 단계에서 over-engineering risk — 1분 polling 의 lag 60초가 critical 한 사례 박제 없음 |
+
+**사고 사례 발생 시 trigger 매트릭스** (별 ADR 트리거 조건):
+
+| trigger | 조정 후보 |
+|---|---|
+| security 분류 SLA 미달성 사고 발생 (jsonl `sla_met=false where pr_category="security"`) | 1건 = 회고 / 2건 = (b) 30초 polling 별 ADR 트리거 |
+| security 분류 사고 + 사용자 reply 지연 60초 이상 ↑ noise | (b) 30초 polling 또는 별 web socket 기반 즉시 detect 별 spec |
+
+#### C) Q3 closure — escalation 시 워크트리 lock 충돌 해소
+
+**채택**: (c) 둘 다 채택 — 우선순위 분기.
+
+**3 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| (a) 같은 워크트리 다른 cycle 재사용 만 | rev 워크트리 idle 시 즉시 launch = race 해소 정밀 / sub-agent.md §1-1 워크트리 lock 위반 0 (한 워크트리 = 동시 1 sub-agent) | rev 워크트리 busy 시 (현재 rev 사이클 진행 중) escalation 무동작 = 미달성 PR 머지 lag 지속 / SLA 의미 ↓ | 단독 채택 시 busy 분기 fallback 부재 — 본 spec §1 핵심 원칙 4 (강제 메커니즘) 의미 약화 |
+| (b) launch 차단 + DIGEST 만 | sub-agent.md §1-1 워크트리 lock 100% 보존 / nmae 가 다음 사이클 우선순위 자율 조정 (사용자 가시화 우선) | rev 워크트리 idle 시에도 launch 안 함 = race 해소 실패 / 미달성 PR 머지 lag 지속 | 단독 채택 시 idle 워크트리 활용 0 = §1 핵심 원칙 4 의미 약화 |
+| **(c) 둘 다 채택 (분기, 채택)** | rev 워크트리 status = idle (cycle-status.json 의 `rev.in_progress` null) 시 즉시 (a) launch / busy 시 (b) DIGEST + nmae 큐 head retag — 두 분기 모두 sub-agent.md §1-1 워크트리 lock 위반 0 = 코드 강제 가능 | watchdog_rev_sla_loop 의 분기 로직 추가 (cycle-status.json read 1회 추가) = bot.py 복잡도 ↑ | 단독 (a)/(b) 의 단점 모두 해소 — race 해소 정밀 + 워크트리 lock 보존 = §1 핵심 원칙 4 강제 메커니즘 정신 일치. ADR-0019 정신 (망각 가드, 코드 강제) 일치 |
+
+**분기 로직** (PR 3 `watchdog_rev_sla_loop` 본문 박제 의무):
+
+```text
+function escalation_branch(pr):
+  rev_status = read_cycle_status_json().rev.in_progress
+  if rev_status == null:  # rev 워크트리 idle
+    nmae_launch_rev_subagent(pr)            # (a) 분기
+    log_escalation_channel(pr, "rev_relaunch")
+  else:                    # rev 워크트리 busy
+    discord_reply_digest("⏰ PR #{pr} rev 단계 1 SLA 미달성 ({elapsed}m elapsed) — rev 워크트리 busy, 다음 사이클 head 큐 등록")
+    rev_queue_retag_head(pr)                # (b) 분기
+    log_escalation_channel(pr, "digest_queue_head")
+```
+
+**parallel launch 별 spec 위임**: 별 워크트리 신설 의존 (예: `mobruji-rev-2` 워크트리 추가) 은 본 spec 범위 X — `rev-worktree-pool.md` (후보 신설 spec) 으로 위임. 본 spec 은 단일 rev 워크트리 전제 + busy 분기 가드만 책임.
+
+#### D) Q5 closure — `type:docs` 단계 1 SLA 5분 자동화
+
+**채택**: (a) 자동화 별 spec 분리 + (b) 본 spec 5분 SLA fallback 유지 병행.
+
+**2 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| (a) 자동화 별 spec 만 | rev sub-agent 부담 ↓ / docs only PR 의 머지 lag 0 (자동 통과) / ADR-0019 정신 (코드 강제, 망각 가드) 일치 | 자동화 실패 시 (예: bot.py loop 죽음 / 인증 만료) docs PR 사이런스 risk — fallback 부재 | 단독 채택 시 fallback 부재 risk — 본 spec §1 핵심 원칙 4 강제 메커니즘 정신 일부 위반 |
+| (b) 본 spec 5분 SLA 만 | rev sub-agent 의 manual 처리 보장 = fallback 정밀 | rev sub-agent 부담 ↑ (docs PR 빈도 ↑ 시 큐 race 가중) / 학습 의존 risk (rev 가 docs 라벨 정확히 분류 / 📝 no-op 자동 처리 의존) | 단독 채택 시 rev 큐 race 가중 risk — Q1 정규 SLA 30분 미달성률 ↑ |
+| **(a) + (b) 둘 다 채택 (병행, 채택)** | 자동화 정상 시 docs PR 머지 lag 0 + rev 부담 ↓ / 자동화 실패 시 manual rev 가 5분 안 fallback 처리 = 사이런스 risk 0 | 자동화 별 spec 신설 의무 (`rev-docs-noop-auto.md` 후보) = 별 cycle 부담 / SLA 매트릭스 §3-1 row 의 5분 의미 = fallback 으로 재해석 (docs 매핑 알고리즘 §6-PR3 §3 와 정합 확인 필요) | 단독 후보의 단점 모두 해소 — 자동화 정상 + fallback 정밀 = §1 핵심 원칙 1 (목표값) + 4 (강제 메커니즘) 둘 다 만족 |
+
+**자동화 별 spec trigger 조건** (별 spec `rev-docs-noop-auto.md` 후보 박제 시):
+
+| 조건 (AND) | 검증 방법 |
+|---|---|
+| `type:docs` 라벨 부착 | `gh pr view --json labels` grep |
+| `scope:*` 라벨 = `scope:infra` only (docs + 다른 scope 는 다른 매핑) | `gh pr view --json labels` grep |
+| 코드 변경 0 line (frontmatter / markdown 만) | `gh pr diff --json files` 파일 path = `docs/**` 또는 `.md` 또는 `.yaml` (frontmatter) only |
+| 보호 영역 파일 변경 0 | `.github/workflows/auto-label.yml` 의 정보성 분류 path 매칭 = 0 |
+
+3 조건 AND 매칭 시 bot.py 가 자동 부착:
+- `📝 no-op pass — type:docs scope:infra 자동 통과 (rev-docs-noop-auto §3-1)` 코멘트
+- `reviewed:claude` 라벨
+
+자동화 실패 시 (bot.py loop 죽음 / 인증 만료 / 매칭 분류 fail) → manual rev sub-agent fallback (5분 SLA 안 처리). watchdog_rev_sla_loop 가 5분 SLA 초과 시 escalation 분기 = §A row 4 (`type:docs` 단계 1 DIGEST).
+
+**자동화 별 spec 신설 trigger**: 본 spec status=approved 후 별 cycle (plan / be sub-agent 협업). 본 closure 자체는 자동화 의존 X — 5분 SLA fallback 만으로 본 spec 진행 가능.
 
 ## 9) 결정 로그
 
 - 2026-05-29: 초안 작성 (status=draft). `nmae-cycle-watchdog.md §5-7` 4중 안전망 + `rev-e2e-3-stages.md §3-1` 응답 SLA 부재 사례 박제. plan round 9 trigger.
 - **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — bot.py `watchdog_rev_sla_loop` 구현 launch 시 first-class reference. 5 sub-section: (1) `cycle-status.json` schema 확장 (별 sibling `rev_sla` key 추가, 기존 4 actor 영역 무영향), (2) `rev-sla-metrics.jsonl` schema 확정 (`recorded_iso` + `watchdog_version` 추가, append-only 룰), (3) PR 분류 lookup 알고리즘 (release > hotfix > docs > regular 우선순위, security = type:emergency-hotfix AND body keyword), (4) 30분 SLA timer T0 정의 (3 fallback 우선순위, `t0_source` evidence 박제), (5) 통계 집계 매트릭 6 지표 (단계 1 달성률 / 평균 elapsed / P95 / escalation 발생률 / security 100% / 분류 분포). 트리거 — plan round 12 작업 지시 + watchdog 본문 PR launch 직전 사전 spec 확정 의무. 실제 Python 코드 본문은 PR 3 본 사이클, 본 spec 은 schema / 알고리즘 / 룰만.
 - 2026-05-29 (plan round 13): **§6-PR4 + §6-PR6 사전 spec 박제**. PR 4 (`rev-sla.sh` self-query script) 의 CLI 인터페이스 (4 모드) / 출력 양식 (텍스트 + JSON) / exit code 매트릭스 (9 시나리오) / graceful skip 분기 (4 케이스) / 검증 의무 (6 항목). PR 6 (`rev-e2e-3-stages.md §3` cross-ref) 의 §3-1·§3-2·§3-3·§7 박제 위치별 정확한 텍스트 prototype (5-7 / 3-5 / 2-4 / 2 줄) + 머지 가능 시기 (본 spec status=approved 만으로 가능) + 검증 의무 (4 항목). PR 5 항목 부분 완료 표기 — `RevSlaTarget` / `RevSlaEscalation` / `RevSlaWatchdog` 3건은 PR #1330 머지 완료, `RevSlaMetricEntry` 1건 잔여. 사유: PR 4 / PR 6 가 본 spec 머지 후 옵션 cycle 로 빠지면 학습 의존 risk — 사전 spec 박제로 plan sub-agent 가 본 sub-section 만 읽고 작성 가능. plan round 13 trigger.
+- **2026-05-29 (plan round 15)**: **§8 Q1 / Q2 / Q3 / Q5 closure 후보 평가 사전 박제** — 4 closure 결정의 trade-off 매트릭스 / 채택 / 미채택 사유 / 운영 후 재검토 trigger 를 `§8-closure-candidates §A·B·C·D` 4 sub-section 으로 박제. 채택 요약: **Q1** = (a) 30분 (1차 박제값, P95 jsonl evidence 누적 후 조정 trigger 박제) / **Q2** = (a) 1분 polling 유지 (security 분류 사고 사례 0건 단계 over-engineering 회피, 사고 trigger 매트릭스 박제) / **Q3** = (c) 둘 다 분기 (rev 워크트리 idle → 즉시 재사용 launch / busy → DIGEST + 큐 head retag, sub-agent.md §1-1 워크트리 lock 보존, 분기 로직 prose 박제로 PR 3 watchdog_rev_sla_loop 본문 구현 의무) / **Q5** = (a) 자동화 별 spec 분리 + (b) 5분 SLA fallback 병행 (자동화 trigger 4 조건 AND 매칭 박제, 자동화 실패 시 fallback 정밀). 트리거 — plan round 15 작업 지시 + spec approved 전 4 closure 결정 의무 (§1 핵심 원칙 4 강제 메커니즘 정신). closure 매트릭스는 §8 표 row 의 ~~closed~~ 표기 + 본 항목이 SoT — `§8-closure-candidates` sub-section 은 미래 cycle (운영 후 조정 / security 사고 / docs 자동화 별 spec) 의 first-class reference. 본 closure 의 후속 spec = (Q3 의존) `rev-worktree-pool.md` (parallel launch 별 spec 신설 후보) + (Q5 의존) `rev-docs-noop-auto.md` (docs 자동화 별 spec 신설 후보) — 둘 다 별 cycle 트리거.
