@@ -6313,10 +6313,17 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # 생성. 사용자가 thread 안에서 📌 reaction 누르면 raw_payload.channel_id =
         # thread id ≠ target_channel_id → 옛 코드 가 즉시 return → 사고.
         # thread parent 가 target_channel_id 면 통과.
+        # 2026-05-29 추가 fix — main 채널 thread + 4 cycle forum + directive forum 의
+        # thread 안 reaction 도 처리. 사용자 정정: "directive forum 승인하는 OX 질문도
+        # 누락" → forum thread 안 📌 / 키캡 reaction 처리 필요.
         if raw_payload.channel_id != target_channel_id:
             ch = client.get_channel(raw_payload.channel_id)
             parent_id = getattr(getattr(ch, "parent", None), "id", None)
-            if parent_id != target_channel_id:
+            allowed_parents = {target_channel_id}
+            for _fid in forum_channel_ids.values():
+                if _fid:
+                    allowed_parents.add(_fid)
+            if parent_id not in allowed_parents:
                 return
         if raw_payload.user_id not in allowed_user_ids:
             return
