@@ -6037,12 +6037,25 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # `message_reference` 를 payload 에 포함시켜 자동 reply 형태로 push.
         write_last_user_msg_id(message_id)
 
-        # 2026-05-29 Phase 2.1 — agent dual write. new agent (tools/agent/) 가
-        # events 테이블 consume. legacy tmux send 와 동시 수행 — 영향 0.
-        # Phase 3 (NCP 배포) 후 운영 검증 → Phase 4 (legacy disable) 시점에 cutover.
+        # 2026-05-29 B안 가시화 — 사용자 메시지마다 thread 자동 생성.
+        # agent 의 도구 호출 / 답 모두 그 thread 안 stream. 채널 noise 0.
+        # graceful: thread 생성 실패 시 thread_id="" — agent 가 채널 push fallback.
+        thread_id_str = ""
+        try:
+            thread_name = (original_body[:50] or "대화") + " 진행"
+            agent_thread = await message.create_thread(name=thread_name[:99])
+            thread_id_str = str(agent_thread.id)
+            logger.info(
+                "user_message thread 생성: id=%s name=%r",
+                thread_id_str, thread_name[:30],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("user_message thread 생성 실패 — fallback 채널: %r", exc)
+
         append_agent_event("user_message", {
             "message_id": message_id,
             "channel_id": str(message.channel.id),
+            "thread_id": thread_id_str,  # B안 — agent 가 답/진행 thread 안 push
             "user_id": str(message.author.id),
             "user_name": message.author.name,
             "body": original_body,
