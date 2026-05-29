@@ -49,4 +49,33 @@ Playwright visual regression CI 를 검토 단계 (proposed) 로 도입. 구체 
 - ADR-0019 (event-driven 아키텍처) — agent 망각 의존 폐기 원칙
 - `docs/features/rev-direct-qa-extension.md` §3 후보 E + §8 Q4 (baseline drift 룰 후보)
 - PR #1236 (fe 단계 4 swap in_progress directive 2026-05-29)
-- 후속 spec: `docs/features/visual-regression-ci.md` (PR #1311 draft, 머지 후 §3-4 rev 자율 판단 표 활성화)
+- 후속 spec: `docs/features/visual-regression-ci.md` (PR #1310 머지 후 §3-4 rev 자율 판단 표 활성화 + §8 Q1-Q4 매트릭스)
+
+## 8. 오픈 질문
+
+> 본 ADR 의 status `proposed` → `accepted` 격상 전에 답이 나와야 하는 것들. 본 ADR 의 §8 Q1~Q4 는 후속 spec `docs/features/visual-regression-ci.md` §8 Q1~Q4 와 1:1 매핑 — spec 의 §8 행이 SoT (구체 후보 + 담당 + 기한). 본 ADR §8 은 격상 게이트 요약만 박는다.
+
+### 매핑 표 (ADR §8 ↔ spec §8)
+
+| ADR-0026 §8 | spec `visual-regression-ci.md` §8 | 횡단 결정 (ADR 격상 게이트) | 담당 / 기한 |
+|---|---|---|---|
+| **Q1 — baseline `.png` 저장 매체** (git 직접 commit vs LFS vs GH artifacts) | spec §8 Q1 | (a) git 직접 commit — 1차 도입 proposed (spec §3-2). 누적 100 MB 도달 시 별 마이그레이션 ADR 트리거. | @goohong / PR 3 (workflow + 첫 baseline) 머지 전 |
+| **Q2 — drift threshold 적정값** (pixelmatch 0.1% vs SSIM 0.99 vs 운영 후 조정) | spec §8 Q2 | (a) pixelmatch 0.1% — proposed (spec §3-3). 첫 baseline 1 주 운영 결과 후 조정. SSIM 전환은 false-positive 5% 초과 시 별 ADR. | rev sub-agent / 첫 baseline 확보 1 주 후 |
+| **Q3 — OS font rendering false-positive 가드** (Playwright Docker 통일 vs 시스템 font install vs `fontFamily` CSS 강제) | spec §8 Q3 | (a) Playwright Docker (`mcr.microsoft.com/playwright:v1.4x`) 통일 — proposed (spec §3-3). 로컬 / CI 환경 OS 차이 제거. | fe sub-agent / PR 3 |
+| **Q4 — nightly (단계 2) diff 발견 시 사용자 알림 방식** (rev DIGEST vs Discord 사용자 reply vs GitHub issue 자동 생성) | spec §8 Q4 | (a) rev DIGEST push (`rev-qa-protocol §5-9-3` 단계 2 보고 형식) — proposed (spec §2 시나리오 3). 별 보강 PR 가능. | @goohong / PR 5 (nightly workflow) 머지 전 |
+
+### 격상 트리거 (proposed → accepted)
+
+본 ADR 의 status `proposed` → `accepted` 격상은 다음 두 조건이 모두 만족된 시점:
+
+1. **spec 머지 + 첫 baseline 확보** — `docs/features/visual-regression-ci.md` 머지 (PR #1310) + 후속 PR 3 (`.github/workflows/visual-regression.yml` + 24 baseline `.png` commit) 머지.
+2. **§8 Q1~Q4 결정 로그 박제** — 본 §8 Q1~Q4 의 proposed 답이 실제 운영 후 결정 (accepted) 으로 격상되어 본 ADR `## 9. 결정 로그` (격상 시 추가) 및 spec §9 결정 로그에 박힘.
+
+### spec 우선순위 (충돌 시)
+
+본 §8 매트릭스와 spec §8 의 동일 Q 행이 충돌 시 — **spec §8 우선** (spec 의 SoT 원칙, ADR 은 횡단 결정만 박제). ADR 갱신은 격상 시점에 spec → ADR 동기화 한 번에 처리. spec §8 Q5 (ADR §8 vs spec §8 우선순위) 가 본 §8 신설로 closure.
+
+### 비고
+
+- 본 §8 신설 PR (#1317 후속) = spec §8 Q5 closure 트리거. 본 PR 머지 후 spec §8 Q5 박스를 ✅ 처리 + 결정 로그 1 줄 추가 (별 PR plan).
+- §8 Q1~Q4 의 proposed 답은 본 ADR §Decision 의 1~5 항목과 일관 — Decision 1 (대상 페이지) 은 spec §3-1 에서 확정됨 (본 §8 Q 에 없음, Decision 5 항목으로 closure).
