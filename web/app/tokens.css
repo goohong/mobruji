@@ -207,7 +207,7 @@
   --surface-step-fg: #3f3f46; /* zinc-700 */
 
   /*
-   * Recommend 상세 모달 의미 토큰 (#1044 단계 4 PR 14) — `recommend/components/`
+   * Recommend 상세 모달 의미 토큰 (#1044 단계 4 PR 14, PR #1219) — `recommend/components/`
    * (SongCard.tsx + SongDetailModal.tsx + SongDetailContent.tsx) 잔여 zinc
    * hardcode 일괄 swap.
    *
@@ -247,6 +247,37 @@
   --ring-soft-detail: #e4e4e7; /* zinc-200 */
   --surface-cover-from: #e4e4e7; /* zinc-200 */
   --surface-cover-to: #d4d4d8; /* zinc-300 */
+
+  /*
+   * Chart bar + card surface 의미 토큰 (#1044 단계 4 PR 13) — history
+   * `VoiceRangeProgressCard.tsx` SVG 차트 + section card surface 잔여 zinc 일괄
+   * swap.
+   *
+   * 기존 hardcode 매핑:
+   *   bar (latest, 강조)            : fill-zinc-900  + dark:fill-zinc-100
+   *                                   → --chart-bar-active-bg
+   *   bar (latest, 하단 라벨 강조)  : fill-zinc-700  + dark:fill-zinc-200
+   *                                   = --cta-secondary-fg 와 동일 매핑 (재사용)
+   *   bar (비활성)                  : fill-zinc-300  + dark:fill-zinc-700
+   *                                   → --chart-bar-inactive-bg
+   *   card surface bg               : bg-white       + dark:bg-zinc-900
+   *                                   → --surface-card-bg
+   *   card surface ring             : ring-zinc-200  + dark:ring-zinc-800
+   *                                   → --surface-card-ring
+   *
+   * `--text-primary` (zinc-900/zinc-50) 와 `--chart-bar-active-bg` (zinc-900/
+   * zinc-100) 는 dark 가 한 단계 다름 (chart 강조 막대는 본문 텍스트보다 약간
+   * 부드러운 dark 톤). `--surface-card-bg` (white/zinc-900) 는 `--surface-input`
+   * (PR 10) 과 같은 매핑이지만 의미가 다르므로 (card vs form input) 별도 alias.
+   * `--surface-card-ring` (zinc-200/zinc-800) 도 `--border-input` 과 같은 매핑
+   * 이지만 form 의미와 분리.
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --chart-bar-active-bg: #18181b; /* zinc-900 */
+  --chart-bar-inactive-bg: #d4d4d8; /* zinc-300 */
+  --surface-card-bg: #ffffff; /* white */
+  --surface-card-ring: #e4e4e7; /* zinc-200 */
 }
 
 /* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
@@ -312,6 +343,12 @@
   --ring-soft-detail: #27272a; /* zinc-800 */
   --surface-cover-from: #27272a; /* zinc-800 */
   --surface-cover-to: #3f3f46; /* zinc-700 */
+
+  /* Chart bar + card surface 의미 토큰 dark swap (PR 13) */
+  --chart-bar-active-bg: #f4f4f5; /* zinc-100 */
+  --chart-bar-inactive-bg: #3f3f46; /* zinc-700 */
+  --surface-card-bg: #18181b; /* zinc-900 */
+  --surface-card-ring: #27272a; /* zinc-800 */
 }
 
 /* ───────── 2) Typography token ───────── */
