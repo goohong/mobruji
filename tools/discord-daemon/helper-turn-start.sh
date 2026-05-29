@@ -93,7 +93,13 @@ fi
 # 또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook 가 처리 (본 wrapper 책임 X).
 # discord-reply.sh path 해결: 본 스크립트와 같은 디렉토리. symlink 운영도 대응
 # (readlink -f BASH_SOURCE → 실제 위치 → dirname).
-if [[ -n "$target_id" && "$target_id" =~ ^[0-9]{17,20}$ ]]; then
+#
+# 사용자 directive 2026-05-29 (#1294): 진행단계 자동 이모지 즉시 끄기.
+# BOT_WRITING_AUTO_HOOK_ENABLED=0 (default) 시 본 wrapper 의 `--writing-marker`
+# 호출 자체도 skip — 명시 라인 보존하여 opt-in (env=1) 만 켤 수 있게 가드.
+if [[ "${BOT_WRITING_AUTO_HOOK_ENABLED:-0}" != "1" ]]; then
+  echo "[2/7] writing marker ON: skip (BOT_WRITING_AUTO_HOOK_ENABLED!=1 — 사용자 directive 2026-05-29 #1294)"
+elif [[ -n "$target_id" && "$target_id" =~ ^[0-9]{17,20}$ ]]; then
   SCRIPT_SELF="${BASH_SOURCE[0]}"
   if command -v readlink >/dev/null 2>&1; then
     SCRIPT_RESOLVED=$(readlink -f "$SCRIPT_SELF" 2>/dev/null || echo "$SCRIPT_SELF")

@@ -4,8 +4,8 @@ slug: helper-writing-marker-timing-fix
 status: implementing
 owner: plan
 scope: infra
-related_issues: [1128]
-related_prs: [1139, 1143, 1248]
+related_issues: [1128, 1294]
+related_prs: [1139, 1143, 1248, 1262, 1265, 1282]
 last_reviewed: 2026-05-29
 ---
 
@@ -201,3 +201,47 @@ production 사고 발생 시 즉시 roll-back 2 방법:
 2. **default revert** — `discord-reply.sh:388` 1 줄 revert PR. 모든 사이트 동기.
 
 선택 기준: 사고 원인이 자동 hook 자체면 (1) + 본 spec 보강. 사고 원인이 default ON 가정 자체면 (2) + 본 spec status=blocked 전환.
+
+### §10-2 default OFF 재전환 (2026-05-29, 사용자 directive #1294)
+
+#### trigger
+
+사용자 directive 2026-05-29:
+
+> 진행단계 자동 이모지 (✍️ + ⚡/⏳/🕐 보조 reaction) 즉시 끄기.
+
+§10-1 default ON 전환 결정 **1일 만에 사용자가 노이즈로 판단** → 즉시 OFF 재전환.
+
+#### TO-BE
+
+1. `tools/discord-daemon/discord-reply.sh:389` default 값 `1` → `0` 재전환.
+2. `tools/discord-daemon/helper-turn-start.sh` step 2 의 `--writing-marker` 호출에 `BOT_WRITING_AUTO_HOOK_ENABLED!=1` skip 가드 추가 (호출 라인 보존 — opt-in 시 다시 켤 수 있게).
+3. `tools/discord-daemon/tests/test_helper_ux.py` writing auto hook default 가정 swap (OFF). default ON 가정 6 테스트 → opt-in (`BOT_WRITING_AUTO_HOOK_ENABLED=1`) 명시 부여 + `test_bare_body_auto_hook_off_by_default` 신설 (default OFF 회귀 가드).
+4. **mac helper systemd service 재시작 후속 작업 의무** — be sub-agent 가 NCP 환경이므로 직접 못 함. nmae 또는 사용자가 mac 에서 daemon reload.
+
+#### 학습 정리 (사용자 정정 후속)
+
+- **§3 Edge cases 의 "룰 학습 안정화 후 default ON 전환" 가설 폐기**. 사용자 노이즈 판단 = default 자체가 사고 분류. opt-in 만 유지.
+- §10-1 의 "OFF 누락 사고 박제 가능" 회귀 가드는 **명시 호출 (`--writing-marker` / `--writing-done`) 경로** 로만 처리 (default 자동 hook 의존 X).
+- 다음 default ON 재시도는 사용자 명시 trigger 없이는 금지 (status=blocked-by-user). 이는 §10-2 결정 사유에 박제.
+
+#### 회귀 가드 (default OFF 재전환)
+
+| 항목 | 가드 |
+|---|---|
+| default 값 회귀 (다음 default ON 재시도 PR) | `test_bare_body_auto_hook_off_by_default` 가 fail → 머지 차단 |
+| helper-turn-start.sh 의 `--writing-marker` 호출이 default 환경에서도 발생 (회귀) | wrapper step 2 의 `BOT_WRITING_AUTO_HOOK_ENABLED!=1` 가드로 skip 보장 |
+| opt-in 경로 보존 (env=1 시 동작) | `test_bare_body_auto_hook_calls_reaction_typing_message_remove` 가 opt-in 환경에서 4건 호출 검증 |
+
+#### 검증
+
+```bash
+cd /home/mobruji/mobruji-be
+python3 -m unittest tools.discord-daemon.tests.test_helper_ux -v  # 79 tests OK
+cd backend && ./gradlew checkstyleMain spotlessCheck test         # green
+
+# helper-turn-start.sh 가드 검증 (ad-hoc)
+D=/tmp/mobruji-test-$$; mkdir -p $D; echo "12345678901234567" > $D/last-user-msg-id.txt
+BOT_WRITING_AUTO_HOOK_ENABLED=0 MOBRUJI_DIR=$D bash tools/discord-daemon/helper-turn-start.sh 2>&1 | grep "writing marker"
+# 기대: "[2/7] writing marker ON: skip (BOT_WRITING_AUTO_HOOK_ENABLED!=1 — 사용자 directive 2026-05-29 #1294)"
+```
