@@ -1,12 +1,36 @@
 ---
 id: 0018
 title: Design tokens — color/typography/spacing/radius/shadow/motion
-status: accepted
+status: implementing
 date: 2026-05-24
 deciders: [@goohong]
 ---
 
 # 0018. Design tokens — color/typography/spacing/radius/shadow/motion
+
+## Status timeline
+
+| 일자 | 상태 | 트리거 |
+|---|---|---|
+| 2026-05-24 | `accepted` | 본 ADR 결정 — `docs/features/ui-ux-redesign.md` 단계 2-3 plan 동반 |
+| 2026-05-26 | `implementing` | 단계 4 PR 1 (#1131 — `web/app/tokens.css` + `lib/theme/tokens.ts`) 머지 |
+| **— 현재 (2026-05-29 기준) —** | `implementing` | 단계 4 PR 14+ 머지 (16+ swap PR 누적). 잔존 zinc 41 활성 / 10 파일 / 4 신규 토큰 결정 대기 |
+| (예정) | `implemented` | 단계 4 swap 완결 게이트 4 통과 — `docs/features/design-tokens-residual-swap-matrix.md §5-3` SoT |
+| (예정) | `superseded` | `ui-ux-redesign.md §6` PR 2-9 컴포넌트 redesign 완료 시 ADR 추가 (motion / view-transition-api 등 결정 갱신 시) |
+
+## 단계 4 진행도 (2026-05-29 기준)
+
+| 메트릭 | 값 | 출처 |
+|---|---|---|
+| 누적 swap PR | 16+ (PR #1131 ~ #1259) | `git log --grep='ADR-0018\|design tokens\|#1044'` |
+| tokens.css 정의된 토큰 | 119 (color 30+ / typography 15+ / spacing 8 / radius 5 / shadow 5 / motion 8 / surface+cta+ring 다수) | `git show origin/develop:web/app/tokens.css | grep -oE '^[[:space:]]*--[a-z]'` |
+| 잔존 활성 hardcode | 41 / 10 파일 | `design-tokens-residual-swap-matrix.md §5-1` |
+| 잔존 비활성 (주석 마커) | ~75 | swap cleanup 대기 — sub-PR 동시 정리 |
+| 신규 토큰 결정 대기 | 4 (`--modal-backdrop`, `--surface-modal`, `--ring-soft-hover`, `--ring-soft-focus-within`) | `design-tokens-residual-swap-matrix.md §5-2 sub-PR 0` |
+| 다음 sub-PR | 5 (sub-PR 1 modal / 2 primitive / 3 ThemeToggle+BottomNav / 4 recommend container / 5 history 페이지) | `design-tokens-residual-swap-matrix.md §6` |
+| 진행도 % (활성 swap) | 약 92% — 누적 swap 라인 ~500+ / 잔존 41 = (500-41)/500 = 91.8% | grep delta 추정 |
+
+진행도 추적 SoT: `docs/features/design-tokens-residual-swap-matrix.md` (잔존 매트릭스 + sub-PR 분할 + 완결 게이트). 본 ADR 은 결정값 SoT, swap 추적 spec 은 별도 관리.
 
 ## Context
 
@@ -184,6 +208,43 @@ font-weight:
 --radius-full: 9999px; /* Avatar, FAB */
 ```
 
+### 4-2) 신규 토큰 — modal / soft ring (단계 4 swap 완결용, 2026-05-29 추가)
+
+`docs/features/design-tokens-residual-swap-matrix.md §5-2 sub-PR 0` 결정. 매트릭스 §5-1 의 잔존 카테고리 (modal / SongCard hover+focus-within) 가 기존 토큰만으로 swap 불가능해 추가.
+
+#### Modal 전용
+```css
+/* Light mode */
+--modal-backdrop: rgb(24 24 27 / 0.6);  /* zinc-900/60 — 현 SongDetailModal 값 보존 */
+--surface-modal: #FFFFFF;               /* light: white */
+
+/* Dark mode */
+--modal-backdrop: rgb(24 24 27 / 0.6);  /* 동일 (의도적 — sub-PR 1 launch 시 fe 자율 결정 가능, default=동일) */
+--surface-modal: #18181B;               /* dark: zinc-900 — 현 SongDetailModal 값 보존 */
+```
+
+사유 ([[design-tokens-residual-swap-matrix Q1/Q2]]):
+- `--surface-modal` 을 `--bg-base` (light: white / dark: zinc-950) 재사용 시 dark mode 값이 zinc-950 으로 변경됨 — 현 SongDetailModal dark=zinc-900 회귀 risk. 신규 토큰으로 의도 보존.
+- `--modal-backdrop` 은 현 zinc-900/60 값 보존 (회귀 risk 0). dark 모드 backdrop 강화 (zinc-950/70 등) 는 후속 결정.
+
+#### Soft ring (hover / focus-within)
+`--cta-secondary-ring` (zinc-500 균일) 이 focus-visible 용 — hover / focus-within 의도와 다른 명도 필요.
+
+```css
+/* Light mode */
+--ring-soft-hover: #D4D4D8;          /* zinc-300 — 현 SongCard 의 hover:ring-zinc-300 보존 */
+--ring-soft-focus-within: #A1A1AA;   /* zinc-400 — 현 SongCard 의 focus-within:ring-zinc-400 보존 */
+
+/* Dark mode */
+--ring-soft-hover: #52525B;          /* zinc-600 — 현 dark:hover:ring-zinc-600 보존 */
+--ring-soft-focus-within: #71717A;   /* zinc-500 — 현 dark:focus-within:ring-zinc-500 보존 */
+```
+
+사유 ([[design-tokens-residual-swap-matrix Q3]]):
+- 명도 그라데이션: hover (가장 약함) < focus-within (중간) < `--cta-secondary-ring` focus-visible (가장 강함) = 의도 hierarchy 명확.
+- `--brand-200` 사용 거부 사유: hover ring 이 brand 색이면 "선택됨" 오해 risk + 무채색 hover 가 현 의도.
+- 현 모든 잔존 zinc-300 / zinc-400 / zinc-600 / zinc-500 (hover+focus-within 컨텍스트) 가 본 토큰으로 1:1 swap.
+
 ### 5) Shadow token (elevation)
 
 토스 패턴 — 부드러운 `rgba(0,0,0,0.04~0.08)` low-opacity multi-layer.
@@ -240,6 +301,17 @@ spring + cubic-bezier 기반.
 
 ### 학습 비용
 - fe sub-agent 가 토큰 명명 규칙 (`--brand-*` / `--text-*` / `--space-*`) 학습 필요. 본 ADR + `docs/features/ui-ux-redesign.md` 단계 4 PR 1 prompt 에 cheat sheet 박제.
+
+### 단계 4 swap 완결 게이트 (2026-05-29 추가)
+
+`docs/features/design-tokens-residual-swap-matrix.md §5-3` SoT. 4 조건 동시 충족 시 본 ADR status `implementing` → `implemented` 전이:
+
+1. **활성 hardcode == 0** (매트릭스 §5-1 카운트 합산)
+2. **신규 토큰 4종 결정 + tokens.css 반영** (본 ADR §4-2)
+3. **테스트 assertion 동기 갱신** (`Button.test.tsx` / `Chip.test.tsx`)
+4. **주석 마커 cleanup** (비활성 ~75건 → 0)
+
+게이트 통과 후 `ui-ux-redesign.md §6` 의 단계 4 PR 2-9 (Button press scale / SongCard gradient stripe / Bottom Sheet drag handle 등 컴포넌트 redesign goal) 진입 가능. swap 미완 상태로 redesign 진입 = 어떤 토큰이 swap 인지 / 어떤 토큰이 redesign 인지 혼동 사고 risk.
 
 ## Alternatives (considered)
 
