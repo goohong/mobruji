@@ -428,7 +428,7 @@ function DetailLikeButton({ songId, songTitle }: DetailFeedbackButtonProps) {
         aria-pressed={liked}
         aria-busy={isPending}
         aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           liked
             ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
             : "border border-[var(--cta-secondary-border)] text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
@@ -472,7 +472,7 @@ function DetailBookmarkButton({ songId, songTitle }: DetailFeedbackButtonProps) 
         aria-label={
           bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
         }
-        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           bookmarked
             ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
             : "border border-[var(--cta-secondary-border)] text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
@@ -512,7 +512,7 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
-      className="inline-flex min-h-12 w-fit items-center gap-2 rounded-full bg-[var(--cta-neutral-bg)] px-5 py-2.5 text-sm font-semibold text-[var(--cta-neutral-fg)] transition-colors hover:bg-[var(--cta-neutral-bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+      className="inline-flex min-h-12 w-fit items-center gap-2 rounded-full bg-[var(--cta-neutral-bg)] px-5 py-2.5 text-sm font-semibold text-[var(--cta-neutral-fg)] transition-colors hover:bg-[var(--cta-neutral-bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
     >
       <span aria-hidden="true">▶</span>
       <span>YouTube에서 듣기</span>
