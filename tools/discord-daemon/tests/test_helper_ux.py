@@ -846,6 +846,15 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
             # #987: 신규 우선순위 체인이 운영 ~/.mobruji 파일을 읽지 못하게 격리.
             "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
             "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            # PR #1268: 본 클래스는 본답 main POST payload (message_reference) 만
+            # 검증한다. PR #1233 의 control emoji 자동 부착 + PR #1262 (commit
+            # 6a08c59) writing auto-hook default ON 이 fake curl 의 -d payload
+            # capture 에 reaction PUT / typing POST / DELETE 라인을 끼워넣어
+            # _first_payload 의 json.loads 가 실패 → 두 hook 모두 격리. 동작
+            # 검증은 별도 케이스 (DiscordReplyControlEmojiTests / writing
+            # auto-hook 시나리오) 가 담당하므로 scope 분리.
+            "MOBRUJI_CONTROL_EMOJI": "0",
+            "BOT_WRITING_AUTO_HOOK_ENABLED": "0",
         })
         # HELPER_TURN_TARGET_MSG_ID env 가 부모 프로세스에서 흘러들면 #987
         # 우선순위 2 가 LAST_USER_MSG_ID_FILE 보다 위라 테스트 의도 깨짐 → 명시 제거.
@@ -1478,6 +1487,15 @@ class DiscordReplyResolvePriorityTests(unittest.TestCase):
             "LAST_USER_MSG_ID_FILE": str(last_id_path),
             "HELPER_TARGET_FILE": str(target_path),
             "HELPER_QUEUE_FILE": str(queue_path),
+            # PR #1268: 본 클래스는 resolve 우선순위 체인이 본답 main POST payload
+            # 의 message_reference 에 어떤 msg_id 를 박는지만 검증한다. PR #1233
+            # control emoji 자동 부착 + PR #1262 (commit 6a08c59) writing
+            # auto-hook default ON 이 fake curl -d payload capture 에 reaction
+            # PUT / typing POST / DELETE 라인을 끼워넣어 _first_payload 의
+            # json.loads 가 실패 → 두 hook 모두 격리. 개별 케이스는 extra_env
+            # 로 명시 override 가능.
+            "MOBRUJI_CONTROL_EMOJI": "0",
+            "BOT_WRITING_AUTO_HOOK_ENABLED": "0",
         })
         # HELPER_TURN_TARGET_MSG_ID 는 default 로 비움. 호출자가 extra_env 로 지정.
         run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
