@@ -3451,6 +3451,154 @@ async def directive_complete_on_merge_loop(
         await asyncio.sleep(poll_interval)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# directive_polish_loop — bot.py 가 helper sub-agent (claude -p mode) 직접
+# launch 해 directive forum thread starter body 정제 (2026-05-29 PR).
+# spec: docs/features/helper-subagent-directive-polish.md.
+# ────────────────────────────────────────────────────────────────────────────
+DIRECTIVE_POLISH_POLL_INTERVAL_DEFAULT: Final[int] = 60  # 1분
+DIRECTIVE_POLISH_CLAUDE_TIMEOUT: Final[int] = 180  # 3분
+CLAUDE_CLI_BIN: Final[str] = os.environ.get("CLAUDE_BIN", "/usr/bin/claude")
+
+
+def _polish_prompt(raw_body: str, directive_id: str) -> str:
+    return (
+        "mobruji 프로젝트의 directive forum thread 본문을 정제해 주세요.\n\n"
+        f"원본 사용자 메시지: {raw_body}\n"
+        f"directive_id: {directive_id}\n\n"
+        "다음 4 항목 한국어 markdown 으로 정제 (각 항목 짧게):\n"
+        "- **요약**: 1-2 줄 (사용자가 무엇을 원하는지)\n"
+        "- **유형**: 신규 기능 / 버그 fix / 운영 개선 / 의견 / 질문 중 하나\n"
+        "- **위임 권장**: be / fe / rev / plan / nmae 본진 중 하나 + 한 줄 사유\n"
+        "- **상태**: 대기\n\n"
+        "출력은 위 4 항목 markdown 만. 코드 펜스 / 부가 설명 / 메타코멘트 금지."
+    )
+
+
+def _run_claude_polish(raw_body: str, directive_id: str) -> str:
+    """claude -p subprocess — polish 결과 stdout. 실패 시 빈 문자열."""
+    try:
+        result = subprocess.run(  # noqa: S603 — explicit bin path
+            [CLAUDE_CLI_BIN, "-p", _polish_prompt(raw_body, directive_id)],
+            timeout=DIRECTIVE_POLISH_CLAUDE_TIMEOUT,
+            capture_output=True, text=True, check=False,
+        )
+        return (result.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("directive_polish: claude -p 실패 id=%s exc=%r",
+                       directive_id, exc)
+        return ""
+
+
+def _process_directive_polish_queue(
+    queue_path: Path,
+    mark_polished_sh: Path,
+    discord_reply_sh: Path,
+) -> None:
+    raw_lines = queue_path.read_text(encoding="utf-8").splitlines()
+    items: list[dict] = []
+    for line in raw_lines:
+        if not line.strip():
+            continue
+        try:
+            items.append({"entry": json.loads(line), "raw_line": line})
+        except json.JSONDecodeError:
+            items.append({"entry": None, "raw_line": line})
+
+    changed = False
+    for item in items:
+        entry = item["entry"]
+        if not entry or entry.get("type") != "directive_polish":
+            continue
+        if entry.get("status") != "pending":
+            continue
+        directive_id = str(entry.get("directive_id") or "")
+        raw_body = str(entry.get("raw_body") or "")
+        if not directive_id or not raw_body:
+            continue
+
+        polished_body = _run_claude_polish(raw_body, directive_id)
+        if not polished_body:
+            continue
+
+        if discord_reply_sh.exists():
+            try:
+                subprocess.run(  # noqa: S603 — sibling script
+                    ["bash", str(discord_reply_sh), "--forum-edit",
+                     directive_id, polished_body],
+                    timeout=30.0, check=False, capture_output=True,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                logger.warning("directive_polish: forum-edit 실패 id=%s exc=%r",
+                               directive_id, exc)
+                continue
+
+        if mark_polished_sh.exists():
+            try:
+                subprocess.run(  # noqa: S603 — sibling script
+                    ["bash", str(mark_polished_sh), directive_id],
+                    timeout=10.0, check=False, capture_output=True,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        entry["status"] = "done"
+        entry["polished_at"] = datetime.now(timezone.utc).isoformat()
+        item["raw_line"] = json.dumps(entry, ensure_ascii=False)
+        changed = True
+        logger.info("directive_polish: 완료 id=%s len=%d",
+                    directive_id, len(polished_body))
+
+    if changed:
+        import tempfile
+        with tempfile.NamedTemporaryFile(
+            "w", dir=str(queue_path.parent), delete=False,
+            suffix=".tmp", encoding="utf-8",
+        ) as tmp:
+            for item in items:
+                tmp.write(item["raw_line"] + "\n")
+            tmp_name = tmp.name
+        os.replace(tmp_name, str(queue_path))
+
+
+async def directive_polish_loop(
+    *,
+    poll_interval: int = DIRECTIVE_POLISH_POLL_INTERVAL_DEFAULT,
+    initial_delay: int = 30,
+) -> None:
+    """polling — helper-queue.jsonl 의 directive_polish pending task 처리.
+
+    spec: docs/features/helper-subagent-directive-polish.md.
+    nmae 우회 — bot.py 가 claude CLI subprocess (-p one-shot) 호출. 사이클 정지
+    중에도 directive 본문 lifecycle 만 routine 처리.
+    """
+    if poll_interval <= 0:
+        logger.info("directive_polish_loop disabled (poll_interval<=0)")
+        return
+
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
+
+    queue_path = Path.home() / ".mobruji" / "helper-queue.jsonl"
+    script_dir = Path(__file__).resolve().parent
+    mark_polished_sh = script_dir.parent / "directive-board" / "mark-polished.sh"
+    discord_reply_sh = script_dir / "discord-reply.sh"
+
+    while True:
+        try:
+            record_loop_heartbeat("directive_polish_loop")
+            if queue_path.exists():
+                await asyncio.to_thread(
+                    _process_directive_polish_queue,
+                    queue_path, mark_polished_sh, discord_reply_sh,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("directive_polish_loop iter 실패: %r", exc)
+        await asyncio.sleep(poll_interval)
+
+
 def extract_cycle_forum_refs_from_body(body: str) -> list[tuple[str, str]]:
     """PR body 에서 `cycle-forum: <cycle>:<thread_id>` regex 매칭 list.
 
@@ -4950,6 +5098,18 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info(
                 "directive_complete_on_merge_loop launched: interval=%ds (5min polling)",
                 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
+            )
+
+        # 2026-05-29 (PR feat/directive-polish-bot-loop) — bot.py 가 nmae 우회로
+        # claude -p one-shot 호출해 directive 본문 정제 (helper-queue 의 directive_polish
+        # pending task 처리). 사이클 정지 중에도 routine 처리. spec:
+        # docs/features/helper-subagent-directive-polish.md.
+        if not hasattr(client, "_directive_polish_task_started"):
+            client._directive_polish_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(directive_polish_loop())
+            logger.info(
+                "directive_polish_loop launched: interval=%ds (1min polling)",
+                DIRECTIVE_POLISH_POLL_INTERVAL_DEFAULT,
             )
 
         # PR cf-3 (2026-05-29) — cycle forum thread ✅ 자동 retag.
