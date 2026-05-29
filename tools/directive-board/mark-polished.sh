@@ -110,6 +110,44 @@ if [[ "${NMAE_INJECT_ENABLED}" != "1" ]]; then
   exit 0
 fi
 
+# Issue #1248 — status 필터 (false positive 차단).
+# 매칭 entry status 가 '대기' 또는 '진행 중' 외면 inject 자체 skip. 사고: 2026-05-29
+# 10:39~10:44 KST 사이 status=완료 entry 6건이 mark-polished 호출되어 nmae 본진에
+# 6회 false positive inject. backlog-scan 은 status=대기만 picker 후보로 보내므로
+# 완료/실패 entry inject 는 의미 없음.
+#
+# 검색: jsonl 갱신 후 (mv 직후) 다시 read 해서 최신 entry status 확인. 위 update
+# 단계가 ID_ARG 매칭 entry 의 polished=true 만 박고 status 는 건드리지 않으므로
+# jsonl 의 현재 status 가 곧 inject 결정 기준.
+CURRENT_STATUS=$(jq -r --arg id "${ID_ARG}" '
+  select(
+    (.message_id // "") == $id
+    or (.source_queue_msg_id // "") == $id
+    or (.thread_id // "") == $id
+  )
+  | .status // ""
+' "${JSONL_PATH}" 2>/dev/null | head -1)
+
+# 한국어 정규화 — 일부 entry 가 "✅ 완료" / "🔄 진행 중" 같은 이모지 prefix
+# 사용 (jsonl-forum-diff.sh 와 동일 정규화 패턴).
+NORMALIZED_STATUS="${CURRENT_STATUS#*[[:space:]]}"
+case "${CURRENT_STATUS}" in
+  *완료*) NORMALIZED_STATUS="완료" ;;
+  *실패*) NORMALIZED_STATUS="실패" ;;
+  *"진행 중"*) NORMALIZED_STATUS="진행 중" ;;
+  *대기*) NORMALIZED_STATUS="대기" ;;
+esac
+
+case "${NORMALIZED_STATUS}" in
+  대기|"진행 중")
+    : # inject 진행
+    ;;
+  *)
+    echo "mark-polished: nmae inject skip — id=${ID_ARG} status=${CURRENT_STATUS:-unknown} (#1248 false positive 차단, 대기/진행 중 외 entry inject 무의미)" >&2
+    exit 0
+    ;;
+esac
+
 if ! command -v tmux >/dev/null 2>&1; then
   echo "mark-polished: tmux 부재 — nmae inject skip (graceful)" >&2
   exit 0

@@ -172,11 +172,13 @@ rm -rf "$TMP8"
 # ─────────────────────────────────────────────────────────────────────────────
 # Case 9: mark-polished — tmux 부재 / session 부재 graceful skip.
 # (mac local 환경 default = tmux 있지만 session mobruji 부재 → skip)
+# entry status="대기" 명시 — #1248 status 필터 추가로 status 부재 시 inject skip
+# 분기로 빠지지 않게 정상 케이스로 테스트.
 # ─────────────────────────────────────────────────────────────────────────────
 echo "Case 9: nmae inject 부재 session graceful skip"
 TMP9="$(mktemp -d)"
 JSONL9="$TMP9/board.jsonl"
-echo '{"message_id":"M_DDD","polished":false}' > "$JSONL9"
+echo '{"message_id":"M_DDD","status":"대기","polished":false}' > "$JSONL9"
 
 # 부재 session 지정 → graceful skip.
 OUT9=$(DIRECTIVE_BOARD_JSONL_PATH="$JSONL9" \
@@ -191,6 +193,65 @@ esac
 POLISHED9=$(jq -r '.polished' "$JSONL9")
 _assert_eq "Case 9 polished=true (jsonl update 정상)" "true" "$POLISHED9"
 rm -rf "$TMP9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 10: #1248 false positive 가드 — status=완료 entry inject skip.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Case 10: #1248 status=완료 entry inject skip"
+TMP10="$(mktemp -d)"
+JSONL10="$TMP10/board.jsonl"
+echo '{"message_id":"M_DONE","status":"완료","polished":false}' > "$JSONL10"
+
+# tmux session 자체는 valid 한 척 — 환경에 따라 실제 inject 시도하면 안 됨.
+# status 필터가 먼저 동작해 graceful skip 으로 inject 자체 차단.
+OUT10=$(DIRECTIVE_BOARD_JSONL_PATH="$JSONL10" \
+  MOBRUJI_NMAE_PANE="non-existent-session-xyz:0.0" \
+  bash "$MARK_SCRIPT" "M_DONE" 2>&1)
+_assert_eq "Case 10 status=완료 exit 0 (graceful)" "0" "$?"
+_assert_contains "Case 10 status=완료 inject skip 사유" "#1248" "$OUT10"
+# polished=true 박혔는지 — jsonl update 자체는 정상 (race 가드 해제 OK).
+POLISHED10=$(jq -r '.polished' "$JSONL10")
+_assert_eq "Case 10 polished=true (jsonl update 정상)" "true" "$POLISHED10"
+rm -rf "$TMP10"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 11: #1248 — status="✅ 완료" (이모지 prefix) 도 정규화로 skip.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Case 11: #1248 status='✅ 완료' (이모지 prefix) inject skip"
+TMP11="$(mktemp -d)"
+JSONL11="$TMP11/board.jsonl"
+echo '{"message_id":"M_EMOJI","status":"✅ 완료","polished":false}' > "$JSONL11"
+
+OUT11=$(DIRECTIVE_BOARD_JSONL_PATH="$JSONL11" \
+  MOBRUJI_NMAE_PANE="non-existent-session-xyz:0.0" \
+  bash "$MARK_SCRIPT" "M_EMOJI" 2>&1)
+_assert_eq "Case 11 이모지 prefix 완료 exit 0" "0" "$?"
+_assert_contains "Case 11 이모지 prefix 완료 inject skip 사유" "#1248" "$OUT11"
+rm -rf "$TMP11"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 12: #1248 — status="진행 중" → inject 진행 (skip 분기 X).
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Case 12: #1248 status='진행 중' inject 진행"
+TMP12="$(mktemp -d)"
+JSONL12="$TMP12/board.jsonl"
+echo '{"message_id":"M_PROG","status":"진행 중","polished":false}' > "$JSONL12"
+
+OUT12=$(DIRECTIVE_BOARD_JSONL_PATH="$JSONL12" \
+  MOBRUJI_NMAE_PANE="non-existent-session-xyz:0.0" \
+  bash "$MARK_SCRIPT" "M_PROG" 2>&1)
+_assert_eq "Case 12 진행 중 exit 0" "0" "$?"
+# #1248 skip 사유는 출력되면 안 됨 — inject 단계까지 흐름이 이어져야 함.
+case "$OUT12" in
+  *"#1248"*) _assert_eq "Case 12 진행 중 inject skip 분기 X" "no_1248_skip" "1248_skipped" ;;
+  *) _assert_eq "Case 12 진행 중 inject skip 분기 X" "no_1248_skip" "no_1248_skip" ;;
+esac
+# graceful tmux skip (또는 session 부재 skip) 도달.
+case "$OUT12" in
+  *"session"*"부재"*|*"tmux"*"부재"*) _assert_eq "Case 12 inject 시도 graceful skip" "graceful" "graceful" ;;
+  *) _assert_eq "Case 12 inject 시도 graceful skip" "graceful" "$(echo "$OUT12" | tail -c 200)" ;;
+esac
+rm -rf "$TMP12"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 결과

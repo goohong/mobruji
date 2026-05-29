@@ -3529,10 +3529,56 @@ def _run_claude_polish(raw_body: str, directive_id: str) -> str:
         return ""
 
 
+def _directive_board_status_for(
+    directive_board_path: Path, directive_id: str,
+) -> str | None:
+    """directive-board.jsonl 에서 매칭 entry status 한국어 정규화 후 반환.
+
+    Issue #1248 — polish queue 처리 시 매칭 entry status='완료/실패' 면 polish
+    자체 skip (false positive nmae inject 차단의 1차 가드, 2차 가드는
+    mark-polished.sh 자체에 동일 status 필터).
+
+    매칭 키: message_id / source_queue_msg_id / thread_id 셋 중 1매칭. 못 찾으면
+    None — 호출자가 'unknown' 로 분기해 polish 진행 (jsonl 미반영 race 보호).
+    """
+    if not directive_board_path.exists():
+        return None
+    try:
+        with directive_board_path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ids = {
+                    str(entry.get("message_id") or ""),
+                    str(entry.get("source_queue_msg_id") or ""),
+                    str(entry.get("thread_id") or ""),
+                }
+                if directive_id in ids and directive_id:
+                    raw_status = str(entry.get("status") or "")
+                    if "완료" in raw_status:
+                        return "완료"
+                    if "실패" in raw_status:
+                        return "실패"
+                    if "진행 중" in raw_status:
+                        return "진행 중"
+                    if "대기" in raw_status:
+                        return "대기"
+                    return raw_status or None
+    except OSError:
+        return None
+    return None
+
+
 def _process_directive_polish_queue(
     queue_path: Path,
     mark_polished_sh: Path,
     discord_reply_sh: Path,
+    directive_board_path: Path | None = None,
 ) -> None:
     raw_lines = queue_path.read_text(encoding="utf-8").splitlines()
     items: list[dict] = []
@@ -3555,6 +3601,28 @@ def _process_directive_polish_queue(
         raw_body = str(entry.get("raw_body") or "")
         if not directive_id or not raw_body:
             continue
+
+        # Issue #1248 — directive-board entry status='완료/실패' 면 polish skip.
+        # forum-edit + nmae inject 모두 무의미 (이미 종결된 entry). queue entry 는
+        # done + skipped_reason 박아 다음 loop 가 재처리하지 않도록 멱등.
+        if directive_board_path is not None:
+            board_status = _directive_board_status_for(
+                directive_board_path, directive_id,
+            )
+            if board_status in {"완료", "실패"}:
+                entry["status"] = "done"
+                entry["skipped_reason"] = (
+                    f"directive_board_status={board_status}"
+                )
+                entry["polished_at"] = datetime.now(timezone.utc).isoformat()
+                item["raw_line"] = json.dumps(entry, ensure_ascii=False)
+                changed = True
+                logger.info(
+                    "directive_polish: skip (#1248 false positive 가드) "
+                    "id=%s board_status=%s",
+                    directive_id, board_status,
+                )
+                continue
 
         polished_body = _run_claude_polish(raw_body, directive_id)
         if not polished_body:
@@ -3622,6 +3690,9 @@ async def directive_polish_loop(
     script_dir = Path(__file__).resolve().parent
     mark_polished_sh = script_dir.parent / "directive-board" / "mark-polished.sh"
     discord_reply_sh = script_dir / "discord-reply.sh"
+    # Issue #1248 — directive-board.jsonl 의 매칭 entry status 가 완료/실패면
+    # polish 자체 skip (false positive nmae inject 1차 가드).
+    directive_board_path = Path.home() / ".mobruji" / "directive-board.jsonl"
 
     while True:
         try:
@@ -3630,6 +3701,7 @@ async def directive_polish_loop(
                 await asyncio.to_thread(
                     _process_directive_polish_queue,
                     queue_path, mark_polished_sh, discord_reply_sh,
+                    directive_board_path,
                 )
         except asyncio.CancelledError:
             raise
