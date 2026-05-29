@@ -315,8 +315,113 @@ web/tests/visual/
 - `auto-label.yml` 보조 — fail 시 `regression:visual` 라벨 자동 부착 (rev triage 가시화).
 - 후속 PR 3 자체에서는 `rev-gate-required-check-enforcement.md` spec 머지 후 추가 — PR 3 첫 머지 시점에는 `continue-on-error: true` 박아 self-bootstrap (baseline 부재 시 모든 PR 차단 risk 회피).
 - [ ] **PR 4 (PR 3 머지 후, plan)**: `docs/ai-harness/actors/sub-agent.md §2-rev` 에 단계 1 visual diff 판단 표 (§3-4) reference 1 줄 추가.
-- [ ] **PR 5 (PR 3 머지 후, fe / 옵션)**: `.github/workflows/visual-regression-nightly.yml` 신설 (단계 2 dev 서버 nightly cron).
+- [ ] **PR 5 (PR 3 머지 후, fe / 옵션)**: `.github/workflows/visual-regression-nightly.yml` 신설 (단계 2 dev 서버 nightly cron). 상세 spec **§6-PR5** 박제.
 - [ ] **PR 6 (별 spec, 후보 E ADR accepted 격상 트리거)**: ADR-0026 status `proposed` → `accepted` (PR 3 머지 + 첫 baseline 확보 완료 후).
+
+### §6-PR5) `visual-regression-nightly.yml` 상세 spec (사전 박제)
+
+> **목표**: PR 5 구현 시점에 fe sub-agent 가 학습 의존 없이 본 sub-section 만 보고 workflow 작성 가능. cron 시각 / dev 서버 호출 / DIGEST push 분기 / graceful skip 4 항목을 prose 가 아니라 검증 가능 매트릭스로 박제.
+
+#### A) cron 시각 — KST 03:00 = UTC 18:00
+
+- cron 표기: `0 18 * * *` (GitHub Actions UTC 기준 = KST 03:00).
+- 사유: (1) 사용자 비활동 시간대 — fail 시 DIGEST push 가 알림 우선순위 충돌 X. (2) develop tip 자동 deploy (`cd-dev.yml`) 가 KST 평일 18-24 시 집중 — 새벽 03:00 은 dev 서버 quiet state 보장.
+- 후보 alternative: (b) `0 17 * * *` (KST 02:00) — 사용자 수면 깊이 max. 채택 X 사유: 03:00 = 사용자 사용 시간대 시작 직전 — fail 발견 시 사용자가 turn 시작과 함께 곧 가시화 (lag ↓). 본 사유는 §8 Q4-A 결정 로그.
+- 단계 2 SLA 매트릭스 (`rev-sla.md §3-1`) 와 정합: 정규 단계 2 SLA = 24 시간 — nightly 1회/일 = SLA 안 1 회 사이클로 안전.
+- 수동 trigger 허용: `workflow_dispatch:` 명시 — fe sub-agent 가 PR 3 머지 직후 첫 baseline 검증용으로 즉시 실행 가능.
+
+#### B) dev 서버 호출 — `MOBRUJI_DEV_BASE_URL` 단일 SoT
+
+- workflow env: `MOBRUJI_DEV_BASE_URL: http://101.79.20.94` (`deployment-infrastructure.md §3-1` Phase 4 dev 서버 IP SoT — 변경 시 양쪽 동시 갱신 의무).
+- Playwright config 의 `baseURL` 도 본 env 우선 참조 (`process.env.MOBRUJI_DEV_BASE_URL ?? 'http://localhost:3000'`).
+- 대상 페이지: §3-1 매트릭스 24 baseline 동일 — 단계 1 (PR push) 과 단계 2 (nightly) 가 같은 시나리오를 다른 환경 (PR branch vs dev tip) 에 적용.
+- dev 서버 health check 사전 단계: `curl -sf $MOBRUJI_DEV_BASE_URL/api/v1/health -o /dev/null` (timeout 30s) — fail 시 §D graceful skip 분기. PR #1247 의 dev 서버 ngrok 사고 (서버 down 30분) 재발 방지.
+
+#### C) DIGEST push 분기 매트릭스
+
+| nightly 결과 | DIGEST push | Discord 본 채널 | 사용자 reply | GitHub issue | rev 큐 등록 |
+|---|---|---|---|---|---|
+| 전체 통과 (diff 0%) | X (정상) | X | X | X | X |
+| diff > 0.1% (회귀 의심) | 🟢 `discord-reply.sh --digest "⏰ nightly visual diff: N 페이지 회귀 의심"` | X | X | X | 🟢 (rev 단계 2 audit launch) |
+| dev 서버 down (graceful skip) | 🟢 `discord-reply.sh --digest "⏭️ nightly skip — dev 서버 down"` | X | X | X | X |
+| Playwright Docker pull 실패 | 🟢 `discord-reply.sh --digest "⚠️ nightly skip — Playwright Docker pull fail"` | X | X | X | X |
+| diff > 0.1% + 3 일 연속 | 🟢 (1일차와 동일) | 🟢 `discord-reply.sh --reply ... "🔴 nightly visual diff 3일 연속 — 사용자 결정 필요"` | 🟢 (사용자 reply) | 🟢 `audit:nightly-visual-regression-persistent` 라벨 | 🟢 (최우선 큐 head) |
+
+본 매트릭스 출처: §3-3 rev 자율 판단 표 (단계 1) + `rev-qa-protocol.md §5-9-3` (단계 2 DIGEST push) + 본 sub-section §C 신설 (3 일 연속 escalation).
+
+3 일 연속 detect 방법: `~/.mobruji/nightly-visual-regression.jsonl` 에 entry append (date / diff_pages / dev_url_health) — workflow 직전 단계가 jsonl 의 최근 3 entry 를 grep 해 `diff > 0.1%` 가 3 연속이면 사용자 reply 분기.
+
+#### D) graceful skip 분기 — 4 가지 fail 시나리오
+
+| 시나리오 | detect 방법 | workflow 동작 | exit code | DIGEST |
+|---|---|---|---|---|
+| dev 서버 down | `curl -sf` non-zero | skip + DIGEST | 0 (workflow success — fail 알림 false-positive 회피) | 🟢 |
+| Playwright Docker pull 실패 | `docker pull` non-zero | skip + DIGEST | 0 | 🟢 |
+| baseline `.png` 부재 (PR 3 미머지) | `ls web/tests/visual/__snapshots__/` empty | skip + DIGEST | 0 | 🟢 (`⏭️ nightly skip — baseline 부재, PR 3 머지 대기`) |
+| jsonl 손상 | jq parse fail | skip jsonl append (workflow 본체는 진행) | workflow 결과 따라 | X (별 사고 분류 — 다음 nightly 재계산) |
+
+원칙: workflow 가 fail (exit non-zero) 로 끝나면 GitHub Actions 가 알림 자동 발사 → DIGEST 와 중복 + 매트릭스 control 권한 X. exit 0 + DIGEST 통제 모델로 통일 — `rev-qa-protocol.md §5-9` graceful skip 룰 정합.
+
+#### E) workflow 본문 skeleton (구현 PR 5 의 참고 prototype)
+
+```yaml
+name: visual-regression-nightly
+on:
+  schedule:
+    - cron: '0 18 * * *'  # KST 03:00 — §A 사유
+  workflow_dispatch: {}
+
+env:
+  MOBRUJI_DEV_BASE_URL: http://101.79.20.94  # §B 단일 SoT
+
+jobs:
+  nightly-visual:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.4x  # PR #1200 정확한 버전 인용
+    steps:
+      - uses: actions/checkout@v4
+      - name: dev 서버 health check (graceful skip §D)
+        id: health
+        run: |
+          if ! curl -sf --max-time 30 "$MOBRUJI_DEV_BASE_URL/api/v1/health" -o /dev/null; then
+            echo "skip_reason=dev-down" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+      - name: baseline 부재 가드 (graceful skip §D)
+        if: steps.health.outputs.skip_reason == ''
+        id: baseline
+        run: |
+          if [ -z "$(ls web/tests/visual/__snapshots__/ 2>/dev/null)" ]; then
+            echo "skip_reason=baseline-empty" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+      - name: Playwright nightly
+        if: steps.health.outputs.skip_reason == '' && steps.baseline.outputs.skip_reason == ''
+        id: pw
+        working-directory: web
+        run: npx playwright test tests/visual/ --reporter=json --output=playwright-nightly.json
+        continue-on-error: true
+      - name: jsonl append + DIGEST 분기 (§C 매트릭스)
+        if: always()
+        run: |
+          bash tools/visual-regression/nightly-report.sh \
+            "${{ steps.health.outputs.skip_reason }}" \
+            "${{ steps.baseline.outputs.skip_reason }}" \
+            "${{ steps.pw.outcome }}" \
+            "web/playwright-nightly.json"
+```
+
+`tools/visual-regression/nightly-report.sh` 별 PR 5-b 신설 후보 (helper script — jsonl append + §C 매트릭스 분기 + `discord-reply.sh` 호출). PR 5 본 body 안에 포함하거나 PR 5 직후 별 PR 분할 — fe sub-agent 자율 결정.
+
+#### F) 검증 절차 (PR 5 머지 후 fe sub-agent 의무)
+
+- [ ] workflow_dispatch 수동 trigger 1회 → 정상 통과 시나리오 검증 (diff 0%, DIGEST 미push, jsonl entry 1개 append)
+- [ ] dev 서버 일시 down 시뮬레이션 (예: `MOBRUJI_DEV_BASE_URL` 임시 변경) → DIGEST `⏭️ nightly skip — dev 서버 down` push 확인
+- [ ] 의도된 diff (baseline 1개 강제 변형 commit) → DIGEST `⏰ nightly visual diff: 1 페이지 회귀 의심` push 확인 + rev 큐 등록 확인
+- [ ] jsonl 손상 시뮬레이션 (`echo 'broken' > nightly.jsonl`) → 다음 nightly 가 graceful skip jsonl append (workflow 본체 진행) 확인
+
+검증 evidence 는 PR 5 본문 `## 검증` 섹션에 4 항목 체크박스 박제 의무 (rev 단계 1 통과 조건).
 
 ### 보호 영역 변경 여부 (필수 명시)
 
@@ -342,7 +447,7 @@ web/tests/visual/
 | Q1 | baseline `.png` 저장 — git 직접 commit vs LFS | (a) git 직접 commit (1차 도입) / (b) 처음부터 LFS / (c) GH artifacts | @goohong / PR 3 머지 전 |
 | Q2 | drift threshold — pixelmatch 0.1% 가 적정한가 | (a) 0.1% (proposed) / (b) 0.05% / (c) SSIM 0.99 / (d) baseline 1 주 운영 후 조정 | rev sub-agent / 첫 baseline 1 주 후 |
 | Q3 | OS font rendering false-positive 가드 | (a) Playwright Docker 통일 (proposed) / (b) 시스템 font install / (c) `fontFamily` CSS 강제 | fe sub-agent / PR 3 |
-| Q4 | nightly workflow (단계 2) 운영 — diff 발견 시 사용자 알림 방식 | (a) rev DIGEST push (rev-qa-protocol §5-9) / (b) Discord 사용자 reply / (c) GitHub issue 자동 생성 | @goohong / PR 5 머지 전 |
+| ~~Q4~~ ✅ | ~~nightly workflow (단계 2) 운영 — diff 발견 시 사용자 알림 방식~~ — **§6-PR5 §C 매트릭스 채택** (default = DIGEST / 3 일 연속 = Discord 본 채널 + 사용자 reply + GitHub issue 자동). 결정 로그 §9 참조. | — | @goohong / **closed 2026-05-29 (round 13)** |
 | ~~Q5~~ ✅ | ~~ADR-0026 §8 Q1~Q4 와 본 spec §8 Q1~Q4 의 매핑 — accepted 격상 시 ADR 결정 로그 vs 본 spec 결정 로그 우선순위~~ — **(c) 양쪽 동일 갱신** 채택. ADR-0026 §8 신설 (PR #1319 머지 후) 이후 본 spec §8 Q1~Q4 와 ADR 의 Q1~Q4 는 결정 로그 양쪽 같은 일자 / 같은 내용으로 갱신. PR #1319 본문 self-link 형태. 결정 로그 §9 참조. | — | @goohong / **closed 2026-05-29** |
 | Q6 (본 spec 신규) | `## visual baseline update` 섹션 의무 부착 — 자동 검증 workflow 신설 vs rev 자율 판단 | (a) `visual-baseline-pr-body-check.yml` workflow 신설 / (b) rev §3-4 판단 표만 / (c) 둘 다 | rev sub-agent / PR 3 머지 후 |
 
@@ -367,3 +472,4 @@ ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 �
 - **2026-05-29**: §6 PR 6 (ADR-0026 accepted 격상) 트리거 = PR 3 머지 + 첫 baseline 확보 완료 시점 — ADR 본문 §Decision 의 격상 조건과 일치.
 - **2026-05-29**: **§8 Q5 closure** — (c) 양쪽 동일 갱신 채택. 사유: ADR-0026 §8 (PR #1319, OPEN) 신설 후에는 ADR 본문 §8 Q1~Q4 가 본 spec §8 Q1~Q4 의 super-set 이 아니라 동일 매트릭스의 1:1 mirror — 한쪽 결정 누락 시 sync drift 사고 risk ↑. 결정 로그도 양쪽 같은 일자 / 사유 / PR 번호로 동시 박제. 운영 룰: ADR-0026 §Decision 갱신 PR 은 본 spec §9 같이 갱신 의무 (rev 단계 1 audit grep — `0026-visual-regression-ci.md` 와 `visual-regression-ci.md` 동시 diff 확인). 본 closure 의 머지 가능 시기 = PR #1319 머지 후 (PR body self-link 의무 박제). 본 PR 머지 후 ADR-0026 §8 작성 PR (#1319) 본문에 본 closure 참조 link 의무.
 - **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — fe sub-agent 가 PR 3 launch 시 첫 reference. 5 sub-section: (1) Playwright workflow yaml 골격 (container Docker / scope:web 조건 / concurrency cancel / 30 일 artifact retention), (2) baseline 디렉토리 구조 (`web/tests/visual/__snapshots__/` + `chromium-linux` 단일 browser), (3) pixelmatch 0.1% 근거 5 row 비교표 (pixelmatch 공식 권장 + Chromium 안정 시 false-positive < 5%), (4) artifact 저장 룰 (failure 시만 / 30 일 / free tier 안), (5) fail 조건 + rev 단계 1 판단 매핑 6 row. 트리거 — plan round 12 작업 지시 + PR 3 launch 직전 사전 spec 확정 의무 (망각 가드 — ADR-0019 정신). workflow yml 실제 코드 본문은 PR 3 본 사이클, 본 spec 은 골격 / 근거 / 룰만.
+- **2026-05-29 (plan round 13)**: **§6-PR5 사전 spec 박제** — `visual-regression-nightly.yml` 의 cron 시각 (KST 03:00 = UTC 18:00), dev 서버 호출 (`MOBRUJI_DEV_BASE_URL` 단일 SoT), DIGEST push 분기 매트릭스 (5 행 — 통과 / diff / dev down / Docker pull fail / 3 일 연속), graceful skip 분기 (4 시나리오), workflow yaml skeleton, fe sub-agent 검증 의무 4 항목. 사유: PR 5 가 옵션 단계 (§6 "옵션") 라 학습 의존 risk 높음 — 사전 spec 박제로 PR 3 머지 직후 fe sub-agent 가 본 sub-section 만 읽고 작성 가능. §8 Q4 (nightly diff 발견 시 사용자 알림 방식) closure 매트릭스 일부 포함 — (a) DIGEST push default 채택 + (b) 사용자 reply 는 3 일 연속에만 추가 + (c) issue 자동 생성은 3 일 연속에만 trigger. plan round 13 trigger.
