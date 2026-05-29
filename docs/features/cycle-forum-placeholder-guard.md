@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: [1247, 1248]
+related_prs: [1247, 1248, 1336]
 last_reviewed: 2026-05-29
 ---
 
@@ -114,6 +114,8 @@ discord-reply.sh --auto-thread "<milestone>"
 
 - [ ] **PR A**: `discord-reply.sh` 의 `atomic_write_thread_file` 에 F-1 검증 추가 + `--auto-ack-thread` 의 F-2 추출 후 재검증. fake curl mock 테스트 추가.
 - [ ] **PR B**: `discord-reply.sh` 의 `--auto-thread` reader (line 1800 부근) F-3 quarantine rename 로직. quarantine 시 stderr `[CYCLE-FORUM-GUARD] placeholder thread_id quarantined: <path>` 표준 format.
+  - F-3 quarantine 후 fallback chain 종착점 = **`--digest` 단발 모드 1회 push + nmae 보고** (sub-agent.md §1-11 별 forum thread 신설 금지 룰 준수). `docs/ai-harness/14-discord-ops.md §8-7` cross-ref 박제 완료 (plan round 16, 2026-05-29).
+  - cron digest signature 추가 의무: `🛡️ cycle-forum guard quarantine: N건 (last-launch-thread placeholder) — 직전 24h` (관측성 비기능 요구사항 §3 참조).
 - [ ] **PR C**: `agent-launch-wrapper.sh` F-4 — pending-thread-id 부재 진입 시 `last-launch-thread.txt` stale invalidate.
 - [ ] **PR D**: test fixture / conftest 작성 (F-5) + 기존 `test_helper_ux.py` 류 setUp 에 env override 추가 일괄 리팩터.
 - [ ] **PR E**: pre-push hook (F-6) — `printf '{"id":` mock 사용 테스트 grep + `LAUNCH_THREAD_FILE` env override 부재 시 차단. `06-domain-model.md §4` 용어 등재 함께.
@@ -141,3 +143,4 @@ discord-reply.sh --auto-thread "<milestone>"
 ## 9) 결정 로그
 
 - 2026-05-29: 초안 작성 (status=draft). 직전 plan 사이클 §5-1 evidence (`~/.mobruji/last-launch-thread.txt` = "99999") + root cause 추적 (`test_helper_ux.py` fake curl mock `{"id": "99999"}` 가 isolation 부재로 production file 오염) + discord-reply.sh atomic_write_thread_file 검증 없음 + `validate_snowflake` 이미 17-20자 강제이긴 하나 read 시점만 catch (write 시점은 무방어).
+- **2026-05-29 (plan round 16)**: §6 PR B (F-3 quarantine) 의 fallback chain 종착점 박제 — `--digest` 단발 모드 1회 push + nmae 보고. `sub-agent.md §1-11` STRICT 룰 (별 forum thread 신설 금지) 의 fallback 종착이 사일런스가 아니라 "DIGEST 단발 + nmae 알림" 임을 명시. `docs/ai-harness/14-discord-ops.md §8-7` 신설 sub-section 에 F-1~F-4 매트릭스 + `--digest` 종착점 + cron digest signature (`🛡️ cycle-forum guard quarantine: N건`) cross-ref 박제 완료. 본 spec §6 PR B 항목에 14-discord-ops cross-ref 마커 추가 + frontmatter `related_prs` 에 #1336 추가. plan round 16 trigger.
