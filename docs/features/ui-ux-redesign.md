@@ -61,7 +61,8 @@ last_reviewed: 2026-05-24
 - [x] visual ref 인용표 (§5-3)
 
 #### 단계 4 — 컴포넌트별 PR 분할 구현 (fe sub-agent, 9 PR 순차 — §6)
-- [ ] PR 1: design tokens 도입 (`app/globals.css` + `lib/theme/tokens.ts`)
+- [x] PR 1: design tokens 도입 (`app/globals.css` + `lib/theme/tokens.ts`) — **shipped (PR #1131 2026-05-26)**
+- **잔존 zinc swap 추적**: `docs/features/design-tokens-residual-swap-matrix.md` SoT — 현 활성 41 / 10 파일 / 4 신규 토큰 결정 대기 (2026-05-29). 단계 4 PR 2-9 (Button/SongCard redesign goal) 진입 전 swap 완결 게이트 통과 의무.
 - [ ] PR 2: Button — press scale + brand color + spring transition
 - [ ] PR 3: SongCard — gradient stripe + stagger fade-in + active scale
 - [ ] PR 4: SongDetailModal → bottom sheet (drag handle + slide-from-bottom)
