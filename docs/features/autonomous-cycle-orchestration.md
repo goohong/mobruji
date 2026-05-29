@@ -6,7 +6,7 @@ owner: @mobruji-maestro
 scope: infra
 related_issues: []
 related_prs: [811, 822, 826, 830, 832, 839, 842, 843, 844, 852, 856]
-last_reviewed: 2026-05-23
+last_reviewed: 2026-05-29
 ---
 
 # 자율 사이클 오케스트레이션 — 4 워크트리 동시 가동 + cycle-status digest
@@ -202,6 +202,20 @@ stale 결정 룰:
 - 7일 이상 update 없고 라벨/제목 명확하지 않음 → close (`stale, no clear scope`)
 - 위 둘 다 아님 → fresh, launch 진행
 
+#### 5-5-1) 5중 안전망 cross-ref (rev-sla 확장 후)
+
+본 §5-5 stale verification 은 `nmae-cycle-watchdog.md §5-7` **5중 안전망 (rev-sla.md PR 2 박제 후 4중 → 5중 확장)** 의 한 layer 와 짝을 이룬다 — sub-agent launch 직전 결정성 보강 측면. 5중 매트릭스:
+
+| layer | 위치 | trigger |
+|---|---|---|
+| 1 | `nmae-cycle-watchdog.md §5-7` (1) `cycle_idle_watch_loop` | 5분 polling — cycle-status.json idle detect |
+| 2 | `nmae-cycle-watchdog.md §5-7` (2) nmae 매 turn 종료 직전 자기 점검 | 매 turn 종료 직전 — 메모리 [[feedback-keep-4-cycles-active]] 룰 |
+| 3 | `nmae-cycle-watchdog.md §5-7` (3) helper 우연 발견 시 직접 inject | helper 가 사용자 메시지 처리 중 cycle-status 발견 시 |
+| 4 | `nmae-cycle-watchdog.md §5-7` (4) escalation 사용자 직접 push | layer 1 inject 3회 후에도 in_progress NULL → MOBRUJI_CHANNEL_ID push |
+| **5** | **`rev-sla.md §3-3` `watchdog_rev_sla_loop` (신규)** | **1분 polling — rev-sla-metrics.jsonl 미달성 detect → DIGEST/security 3채널 escalation** |
+
+본 §5-5 은 위 layer 매트릭스의 **사용자 절차 측 표면** — nmae 가 launch 결정 직전 stale 분류 → idle 진입 방지. layer 1 (외부 데몬) 이 nmae 룰 위반 시 백업, layer 5 (rev SLA) 가 PR 머지 timing 측 가시화 → 본 §5-5 의 stale verification 과 직교 가드.
+
 ### 5-6) helper boundary 강제 (CLAUDE.md §11-pre-pre 재기재)
 helper 는 다음만 직접 수정:
 1. helper 자체 ack 룰 (`/home/mobruji/.mobruji/discord-reply.sh`)
@@ -256,7 +270,8 @@ helper 는 다음만 직접 수정:
 - `docs/decisions/0019-event-driven-architecture-v2.md` — 본 spec 의 "메모리 학습 의존" 패턴 (4 사이클 launch / cycle-status 갱신 / helper boundary 등) 을 망각 무관 코드 hook 으로 promote 하는 ADR (PR #1077). 본 spec §5-6 helper boundary 자동 enforce (Q3) 의 후속 결정 트리도 ADR-0019 §4.2 enforcement 분류 표 로 정형화됨.
 - `docs/features/event-action-mapping.md` — 본 spec 의 cycle-status set-active / set-idle / PR 머지 trigger 가 ADR-0019 동반 spec 의 event 3 / 4 / 5 와 1:1 매핑.
 - `docs/features/work-cycle-refactor.md` — 본 spec 의 메모리 룰 reduce 후보 (§5-2 메모리 폐기 후보 10건) 가 ADR-0019 마이그 단계 2 의 대상.
-- `docs/features/nmae-cycle-watchdog.md` — 본 spec §5-5 stale verification 의 코드 강제 구현체.
+- `docs/features/nmae-cycle-watchdog.md` — 본 spec §5-5 stale verification 의 코드 강제 구현체. §5-7 5중 안전망 (rev-sla.md PR 2 박제 후 4중 → 5중 확장) — layer 5 = `watchdog_rev_sla_loop` (PR rev 단계 1 응답 SLA 미달성 detect). 본 spec §5-5-1 cross-ref 매트릭스 참조.
+- `docs/features/rev-sla.md` — 본 spec §5-5-1 layer 5 (`watchdog_rev_sla_loop`) SoT. rev 단계 1 응답 SLA 매트릭스 + escalation 채널 분기 박제.
 - `docs/ai-harness/13-memory-and-enforcement.md` — 본 spec 의 "어떻게" 결정 트리 (메모리 vs 코드) 의 가이드라인.
 
 ## 9) 결정 로그
