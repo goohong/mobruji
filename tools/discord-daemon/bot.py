@@ -1215,18 +1215,332 @@ async def _post_control_ack(
 # (코드에서 자동 unpin / delete 안 함 — Discord 의 user content 정리 보수적 정책.)
 
 
+# ─── 📌 pin match search (2026-05-29 사용자 정정) ─────────────────────────────
+# 사용자 정정: "이미 작업 중인 것에 핀꼽기 좀 그렇다 + following 목적 핀 = task 됨"
+# 해결: 📌 시 active directive + cycle forum thread 매칭 검색 → 발견 시 사용자
+# 명시 선택 (등록 / 매칭 thread 로 / 취소). 매칭 없으면 즉시 등록 (현재 path).
+# 사용자 룰: "그냥 궁금한 것들은 질문, 작업에 적재하고 싶은 경우에만 이모지".
+
+PIN_MATCH_LIMIT: Final[int] = 5
+PIN_MATCH_KEYWORD_MAX: Final[int] = 10
+PIN_MATCH_KEYWORD_MIN_LEN: Final[int] = 2
+PIN_MATCH_STOPWORDS: Final[frozenset[str]] = frozenset({
+    "그", "이", "그것", "그건", "이거", "저거", "이건", "저건",
+    "있어", "있는", "하는", "되는", "관련", "관해", "대해",
+    "그리고", "그러나", "그래서", "그런데", "근데", "하지만",
+    "그래도", "그냥", "혹시", "어떻게", "뭐", "왜", "어디",
+})
+
+
+def _extract_pin_keywords(text: str) -> list[str]:
+    """간단한 한국어 토큰화 — split + stopword 제거 + min length filter."""
+    cleaned = re.sub(r"[^\w가-힣\s]", " ", text)
+    tokens = cleaned.split()
+    keywords: list[str] = []
+    for tok in tokens:
+        if len(tok) < PIN_MATCH_KEYWORD_MIN_LEN:
+            continue
+        if tok in PIN_MATCH_STOPWORDS:
+            continue
+        keywords.append(tok)
+        if len(keywords) >= PIN_MATCH_KEYWORD_MAX:
+            break
+    return keywords
+
+
+def _substring_match(keywords: list[str], target: str) -> bool:
+    """의미 있는 단어 1개 이상 매칭."""
+    if not keywords or not target:
+        return False
+    return any(kw in target for kw in keywords)
+
+
+def _find_matching_directives(summary: str) -> list[dict]:
+    """directive board jsonl 에서 active entries 와 매칭 검색."""
+    board_path = Path.home() / ".mobruji" / "directive-board.jsonl"
+    if not board_path.exists():
+        return []
+    keywords = _extract_pin_keywords(summary)
+    if not keywords:
+        return []
+    matches: list[dict] = []
+    try:
+        for line in board_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            entry_status = entry.get("status", "")
+            if entry_status in ("완료", "✅ 완료", "closed", "취소"):
+                continue
+            entry_summary = entry.get("summary") or ""
+            if _substring_match(keywords, entry_summary):
+                matches.append({
+                    "kind": "directive",
+                    "summary": entry_summary[:80],
+                    "thread_id": entry.get("thread_id"),
+                    "status": entry_status,
+                })
+                if len(matches) >= PIN_MATCH_LIMIT:
+                    break
+    except OSError as exc:
+        logger.warning("📌 pin match: directive board read 실패: %r", exc)
+    return matches
+
+
+async def _find_matching_cycle_threads(
+    client: discord.Client,
+    summary: str,
+    forum_ids: list[int],
+) -> list[dict]:
+    """4 cycle forum (be/fe/rev/plan) active threads 매칭 검색.
+
+    discord.py 의 Forum channel.threads 속성 사용 (활성 thread list).
+    """
+    keywords = _extract_pin_keywords(summary)
+    if not keywords:
+        return []
+    matches: list[dict] = []
+    for forum_id in forum_ids:
+        if not forum_id:
+            continue
+        forum = client.get_channel(forum_id)
+        if forum is None or not hasattr(forum, "threads"):
+            continue
+        for thread in getattr(forum, "threads", []):
+            if thread.archived:
+                continue
+            name = getattr(thread, "name", "") or ""
+            if _substring_match(keywords, name):
+                matches.append({
+                    "kind": "cycle_thread",
+                    "summary": name[:80],
+                    "thread_id": str(thread.id),
+                    "forum_name": getattr(forum, "name", ""),
+                })
+                if len(matches) >= PIN_MATCH_LIMIT:
+                    return matches
+    return matches
+
+
+def _build_pin_match_followup(
+    matches: list[dict], original_summary: str,
+) -> str:
+    """ephemeral followup 본문 build — 매칭 list + 사용자 선택 안내."""
+    lines = [
+        f"📌 매칭되는 기존 작업이 있습니다 (원본: `{original_summary[:60]}`):\n",
+    ]
+    for m in matches[:PIN_MATCH_LIMIT]:
+        if m["kind"] == "directive":
+            status = m.get("status", "")
+            lines.append(f"• directive ({status}): `{m['summary']}`")
+        else:
+            forum_name = m.get("forum_name", "")
+            lines.append(f"• {forum_name} forum: `{m['summary']}`")
+    lines.append("\n그래도 새로 등록할까요?")
+    return "\n".join(lines)
+
+
+class PinConfirmView(discord.ui.View):
+    """매칭 발견 시 사용자 선택 button. 3 button (등록 / redirect / 취소).
+
+    timeout 시 default = 취소 (사고 path 차단 우선).
+    """
+
+    def __init__(
+        self,
+        *,
+        target_message_id: str,
+        target_user_id: int,
+        original_summary: str,
+        first_match_thread_id: str | None,
+        guild_id: int,
+    ) -> None:
+        super().__init__(timeout=900.0)  # 15분
+        self._target_message_id = target_message_id
+        self._target_user_id = target_user_id
+        self._original_summary = original_summary
+        self._first_match_thread_id = first_match_thread_id
+        self._guild_id = guild_id
+
+    async def _verify_user(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self._target_user_id:
+            await interaction.response.send_message(
+                "버튼은 원래 사용자만 사용할 수 있습니다.", ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="새로 등록", style=discord.ButtonStyle.success, emoji="✅")
+    async def _register(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        if not await self._verify_user(interaction):
+            return
+        await interaction.response.edit_message(
+            content="📌 새 directive 로 등록합니다…", view=None,
+        )
+        await _do_register_directive(
+            interaction.client, self._target_message_id, self._target_user_id,
+        )
+        await interaction.edit_original_response(
+            content="✅ 새 directive 등록 완료.",
+        )
+        self.stop()
+
+    @discord.ui.button(label="기존으로 이동", style=discord.ButtonStyle.primary, emoji="🔗")
+    async def _redirect(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        if not await self._verify_user(interaction):
+            return
+        if not self._first_match_thread_id:
+            await interaction.response.edit_message(
+                content="🔗 매칭 thread URL 없음 — 취소.", view=None,
+            )
+            self.stop()
+            return
+        thread_url = (
+            f"https://discord.com/channels/{self._guild_id}/"
+            f"{self._first_match_thread_id}"
+        )
+        await interaction.response.edit_message(
+            content=f"🔗 기존 작업으로: {thread_url}", view=None,
+        )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary, emoji="🚫")
+    async def _cancel(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        if not await self._verify_user(interaction):
+            return
+        await interaction.response.edit_message(
+            content="🚫 등록 취소.", view=None,
+        )
+        # 📌 reaction remove
+        try:
+            channel = interaction.client.get_channel(interaction.channel_id)
+            if channel is not None:
+                msg = await channel.fetch_message(int(self._target_message_id))
+                bot_user = interaction.client.user
+                if bot_user is not None:
+                    await msg.remove_reaction(PIN_REACTION_EMOJI, bot_user)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin cancel: reaction remove 실패: %r", exc)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        # timeout default = 취소 (사고 path 차단 우선). 사용자가 인지 못 한 상태에서
+        # 자동 등록되면 의도 불일치 risk.
+        logger.info(
+            "📌 pin confirm timeout: msg_id=%s — default 취소",
+            self._target_message_id,
+        )
+
+
+async def _do_register_directive(
+    client: discord.Client,
+    message_id: str,
+    user_id: int,
+    *,
+    channel=None,  # noqa: ANN001 — discord channel duck-typed
+    summary: str | None = None,
+) -> None:
+    """실제 directive 등록 — directive_append.sh + helper-queue + ✅ reaction.
+
+    caller 가 channel + summary 알면 인자로 전달 (cost 0). 미전달 시 client.guilds
+    scan fallback (cold start 등 edge case).
+    """
+    append_script = Path(__file__).resolve().parent / "directive_append.sh"
+    if not append_script.exists():
+        logger.warning("📌 pin: directive_append.sh 부재 — skip: %s", append_script)
+        return
+
+    # 인자 미전달 시 client.guilds fallback fetch.
+    if channel is None or summary is None:
+        try:
+            msg = None
+            for guild in getattr(client, "guilds", []):
+                for ch in getattr(guild, "text_channels", []):
+                    try:
+                        msg = await ch.fetch_message(int(message_id))
+                        if msg is not None:
+                            channel = ch
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                if msg is not None:
+                    break
+            if msg is not None and summary is None:
+                summary = (getattr(msg, "content", "") or "").strip()[:80] or "(빈 본문)"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin register fallback fetch 실패 msg_id=%s exc=%r",
+                           message_id, exc)
+    if summary is None or not summary:
+        summary = "(빈 본문)"
+
+    try:
+        result = subprocess.run(  # noqa: S603 — script path hardcoded sibling
+            ["bash", str(append_script), message_id, summary],
+            check=False, timeout=10.0, capture_output=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "📌 pin: directive_append.sh rc=%d stderr=%r",
+                result.returncode, result.stderr[:200] if result.stderr else b"",
+            )
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("📌 pin: directive_append 호출 실패: %r", exc)
+        return
+
+    logger.info(
+        "📌 pin registered: msg_id=%s user=%s summary=%r",
+        message_id, user_id, summary,
+    )
+
+    # helper-queue polish task
+    try:
+        helper_queue_path = Path.home() / ".mobruji" / "helper-queue.jsonl"
+        helper_queue_path.parent.mkdir(parents=True, exist_ok=True)
+        polish_task = {
+            "type": "directive_polish",
+            "directive_id": message_id,
+            "raw_body": summary,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "status": "pending",
+        }
+        with helper_queue_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(polish_task, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning("📌 pin: helper-queue append 실패: %r", exc)
+
+    # ✅ reaction 부착
+    if channel is not None:
+        try:
+            msg = await channel.fetch_message(int(message_id))
+            await msg.add_reaction(PIN_REGISTERED_EMOJI)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin: ✅ 부착 실패: %r", exc)
+
+
 async def _handle_pin_reaction(
     client: discord.Client,
     channel_id: int,
     message_id: str,
     user_id: int,
+    *,
+    forum_ids: list[int] | None = None,
+    guild_id: int | None = None,
 ) -> None:
-    """📌 reaction tap → directive_append.sh 호출 → 성공 시 ✅ 부착.
+    """📌 reaction tap → 매칭 검색 → 매칭 발견 시 사용자 confirm, 없으면 즉시 등록.
 
-    spec: docs/features/directive-pushpin-registration.md
+    2026-05-29 변경: 사용자 정정 path — 사전 매칭 검색 + ephemeral followup question.
 
-    fail-soft (graceful): fetch / subprocess / add_reaction 각 단계 모두 예외 격리 —
-    on_raw_reaction_add 흐름 차단 금지. 실패 시 warning 만 emit.
+    spec: docs/features/directive-pushpin-registration.md (2026-05-29 보강).
     """
     channel = client.get_channel(channel_id)
     if channel is None:
@@ -1242,54 +1556,45 @@ async def _handle_pin_reaction(
 
     summary = (getattr(message, "content", "") or "").strip()[:80] or "(빈 본문)"
 
-    append_script = Path(__file__).resolve().parent / "directive_append.sh"
-    if not append_script.exists():
-        logger.warning(
-            "📌 pin: directive_append.sh 부재 — skip: %s", append_script
-        )
-        return
-    try:
-        result = subprocess.run(  # noqa: S603 — script path hardcoded sibling
-            ["bash", str(append_script), message_id, summary],
-            check=False,
-            timeout=10.0,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "📌 pin: directive_append.sh rc=%d stderr=%r",
-                result.returncode,
-                result.stderr[:200] if result.stderr else b"",
+    # ─── 매칭 검색 ──────────────────────────────────────────────────────────
+    directive_matches = _find_matching_directives(summary)
+    thread_matches = await _find_matching_cycle_threads(
+        client, summary, forum_ids or [],
+    )
+    all_matches = directive_matches + thread_matches
+    if all_matches:
+        # 매칭 발견 — 사용자 confirm 요청 (채널 안 reply 메시지 + button)
+        try:
+            first_thread_id = next(
+                (m["thread_id"] for m in all_matches if m.get("thread_id")), None,
+            )
+            view = PinConfirmView(
+                target_message_id=message_id,
+                target_user_id=user_id,
+                original_summary=summary,
+                first_match_thread_id=first_thread_id,
+                guild_id=guild_id or 0,
+            )
+            content = _build_pin_match_followup(all_matches, summary)
+            await channel.send(content=content, view=view, reference=message)
+            logger.info(
+                "📌 pin match: msg_id=%s matches=%d — confirm 요청",
+                message_id, len(all_matches),
             )
             return
-    except subprocess.TimeoutExpired:
-        logger.warning("📌 pin: directive_append timeout (10s) msg_id=%s", message_id)
-        return
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "📌 pin: directive_append 호출 실패 msg_id=%s exc=%r",
-            message_id,
-            exc,
-        )
-        return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "📌 pin match: confirm view 전송 실패 — 즉시 등록 fallback: %r", exc,
+            )
 
-    logger.info(
-        "📌 pin registered: msg_id=%s user=%s summary=%r",
-        message_id,
-        user_id,
-        summary,
+    # 매칭 없거나 confirm 전송 실패 — 즉시 등록 (caller 가 알고 있는 channel + summary 전달).
+    await _do_register_directive(
+        client, message_id, user_id, channel=channel, summary=summary,
     )
 
-    # 2026-05-29 폐기: 사후 polish task append. 새 design 의 등록 직전 dialogue
-    # (Phase A-C) 가 polish 역할 흡수 — claude -p 호출 시점이 등록 직전 + 사용자
-    # 확인 (O/X) 받는 path 로 이동.
 
-    try:
-        await message.add_reaction(PIN_REGISTERED_EMOJI)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "📌 pin: ✅ 부착 실패 msg_id=%s exc=%r", message_id, exc
-        )
+# 2026-05-29 — legacy _legacy_handle_pin_reaction 폐기 (dead code 정리).
+# 새 path: _handle_pin_reaction → 매칭 검색 → confirm view 또는 _do_register_directive.
 
 
 async def agent_outbox_loop() -> None:
@@ -5851,11 +6156,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             if ledger is not None and not ledger.claim(pin_dedup_key):
                 logger.info("📌 pin dedup hit: msg_id=%s", target_msg_id)
                 return
+            # 2026-05-29 사용자 정정 — cycle forum 매칭 검색 추가.
+            # forum_ids = 4 cycle (be/fe/rev/plan) forum ID list (.env 에서 load).
+            cycle_forum_id_list = [
+                forum_channel_ids.get("be", 0),
+                forum_channel_ids.get("fe", 0),
+                forum_channel_ids.get("rev", 0),
+                forum_channel_ids.get("plan", 0),
+            ]
             await _handle_pin_reaction(
                 client=client,
                 channel_id=raw_payload.channel_id,
                 message_id=target_msg_id,
                 user_id=raw_payload.user_id,
+                forum_ids=cycle_forum_id_list,
+                guild_id=raw_payload.guild_id or 0,
             )
             return
 
