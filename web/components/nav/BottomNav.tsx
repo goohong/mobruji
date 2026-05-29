@@ -70,11 +70,14 @@ export function BottomNav() {
    *  4) inactive 탭 hover text : hover:text-zinc-700 dark:hover:text-zinc-200
    *     → hover:text-[var(--text-secondary)]
    *
+   * 후속 PR (#1259 / 본 PR) 추가 swap:
+   *  5) focus ring : focus-visible:ring-zinc-500 → --cta-secondary-ring
+   *     (PR #1256 / #1259 동일 패턴 — 균일 outline 토큰)
+   *
    * 미swap (후속 PR 양보):
    *  - bg-white/95 + supports-[backdrop-filter]:bg-white/80 (다크 동일) —
    *    opacity suffix 가 var() 와 호환 안 됨. backdrop-blur 결합 패턴 토큰화
    *    별도 결정 필요 (PR 6+).
-   *  - focus-visible:ring-zinc-500 — semantic focus ring 토큰 매핑 미정.
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
    * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
@@ -97,7 +100,7 @@ export function BottomNav() {
                 aria-label={item.label}
                 className={[
                   "flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium transition-colors",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]",
                   active
                     ? "text-[var(--text-primary)]"
                     : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
