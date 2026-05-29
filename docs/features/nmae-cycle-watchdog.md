@@ -1,20 +1,21 @@
 ---
-feature: nmae 사이클 watchdog (4중 안전망 + STRICT mode + escalation)
+feature: nmae 사이클 watchdog (5중 안전망 + STRICT mode + escalation + rev SLA)
 slug: nmae-cycle-watchdog
 status: draft
 owner: @mobruji-maestro
 scope: infra
 related_issues: [941, 956, 972]
 related_prs: []
-last_reviewed: 2026-05-24
+last_reviewed: 2026-05-29
 ---
 
-# nmae 사이클 watchdog (3중 안전망)
+# nmae 사이클 watchdog (5중 안전망)
 
 ## 1) 개요 (What / Why)
 - bot.py 데몬에 `cycle_idle_watch_loop` 추가. 5분 polling 으로 `~/.mobruji/cycle-status.json` 4 워크트리(be/fe/rev/plan) 상태를 감시. idle 발견 시 자동으로 nmae tmux pane 에 알림 inject + Discord `#모부르지-알림` 채널 push.
 - 사용자 2026-05-24 강조: "절대로 nmae 사이클이 멈춰서는 안돼 이게 왜 계속 누락되지? 대책을 세워줘". 메모리 [[feedback-keep-4-cycles-active]] 가 nmae 자기 점검 룰에 의존했는데 반복 누락 → 외부 데몬 안전망 도입.
 - 대상 액터: nmae(NCP maestro), helper(맥 helper) — 둘 다 4 워크트리 가동 유지 책임이 있으나 본 watchdog 은 nmae 누락만 정정 (helper 는 `tmux send-keys` 같은 서버에서 직접 inject 가능).
+- 2026-05-29 round 10 확장: §5-7 안전망이 4중 → **5중** 으로 확장. 5번째 layer = bot.py `watchdog_rev_sla_loop` (`rev-sla.md §3-3` SoT) — rev 단계 1/2/3 응답 시간 SLA 미달성 자동 detect + nmae escalation. 1~4번 layer 가 "nmae 사이클 멈춤" 차원 안전망인 반면 5번은 "rev 큐 race / SLA 미달성" 차원 분리 — 다른 idle 종류 박제.
 
 ## 2) 사용자 시나리오
 - nmae 가 sub-agent 완료 통지를 처리하다 cycle-status.json 만 갱신하고 다음 launch 를 까먹는 상황 → bot.py watchdog 5분 내 발견 → tmux inject 로 "[watchdog] cycle-status.json idle 발견 — be. last_completed: ... — keep-4-cycles 룰 위반" 자동 알림 → nmae 다음 turn 에서 즉시 다음 백로그 launch.
@@ -85,13 +86,14 @@ N/A (Discord webhook + tmux 만 사용).
 ### 5-6) 프론트엔드 화면
 없음 (백그라운드 데몬).
 
-### 5-7) 4중 안전망 (핵심)
+### 5-7) 5중 안전망 (핵심)
 1. **bot.py `cycle_idle_watch_loop`** (외부 데몬 watchdog) — 본 spec. **최후 보루**. 메모리/룰 위반 시도 자동 정정.
 2. **nmae 매 turn 종료 직전 자기 점검** — 기존 메모리 [[feedback-keep-4-cycles-active]] 룰. cycle-status.json 4 워크트리 active 검증, idle 시 즉시 launch.
 3. **helper 우연 발견 시 직접 inject** — helper 가 사용자 메시지 처리 중 cycle-status.json 발견 시 같은 서버라 직접 `tmux send-keys -t mobruji:0.0` 가능. [[feedback-helper-role-boundary]] 위임 영역 (helper 가 nmae 권한 침범 X — 알림만).
 4. **escalation 사용자 직접 push (#972)** — 1번 watchdog 가 같은 워크트리 inject **3회 연속** 후에도 in_progress 가 여전히 NULL 이면 MOBRUJI_CHANNEL_ID (사용자 채널) 에 `🚨 nmae 무응답` 직접 push. nmae 자체가 룰 위반 중이라는 신호 — 사용자 개입 트리거.
+5. **bot.py `watchdog_rev_sla_loop`** (rev SLA 미달성 자동 escalation) — `rev-sla.md §3-3` SoT. 1분 polling 으로 모든 OPEN type:* PR 의 rev 단계 1/2/3 응답 시간을 `RevSlaTarget` (정규 30분 / hotfix 30분 / security 15분 등) 매트릭스에 적용 → 미달성 PR 발견 시 `RevSlaEscalation` 분기 (DIGEST + nmae 별 rev sub-agent parallel launch + security 🔴 분류 시 Discord 본 채널 + 사용자 reply). 1~4 layer 가 "nmae 사이클 멈춤" 가시화 + 정정인 반면 5 layer 는 **"rev 큐 race / 큐 head 지연" 가시화 + 정정** — 다른 차원의 idle (rev 사이클은 정상 가동 중이나 SLA 미달성) 안전망. 본 SoT 는 `rev-sla.md` (`docs/features/rev-sla.md §3-3`).
 
-네 layer 각각이 단독으로도 동작. 1번이 안전망의 핵심 — nmae 룰에 의존하지 않음. 4번은 1번이 효과 없을 때의 최종 escalation — 사용자 가시성 확보.
+다섯 layer 각각이 단독으로도 동작. 1번이 안전망의 핵심 — nmae 룰에 의존하지 않음. 4번은 1번이 효과 없을 때의 최종 escalation — 사용자 가시성 확보. 5번은 1~4번이 다루지 않는 차원 (rev SLA) 의 idle 분리 안전망 — 본 spec 본문은 cross-ref 만, 본문 SoT 는 `rev-sla.md`.
 
 ### 5-8) STRICT mode + reason 의무 (#956)
 
@@ -185,6 +187,8 @@ STRICT relaunch (1): fe
 - [x] PR 1 (#941, #950): bot.py `cycle_idle_watch_loop` + pytest 17건 + 메모리 + CLAUDE.md §14.
 - [x] PR 2 (#956): STRICT mode + reason 의무 + `tools/cycle-status/` (update.sh / validate.sh / README) + pytest +7 (총 24) + CLAUDE.md §14 보강.
 - [x] PR 3 (#972): escalation 카운터 + MOBRUJI_CHANNEL_ID 직접 push + sub-agent prompt §1 nmae watchdog inject 대응 4단계 절차 명문화 + pytest +4.
+- [ ] PR 4 (round 10): §5-7 4중 → 5중 확장 cross-ref 보강 — 본 PR (docs only). `rev-sla.md §3-3` 의 `watchdog_rev_sla_loop` 가 본 spec 의 5번째 layer 임을 박제 + §1 개요 / §5-7 본문 / §9 관련 spec / §10 결정 로그 동시 갱신. 본문 SoT 는 `rev-sla.md` — 본 spec 은 안전망 카운트 변경만.
+- [ ] PR 5 (round 10 / `rev-sla.md` 후속): bot.py `watchdog_rev_sla_loop` 본문 신설 — `rev-sla.md §3-3` SoT. 보호 영역 변경 X but daemon 변경 가중도.
 
 ## 7) 테스트 전략
 - 단위 테스트 (pytest, asyncio mock):
@@ -206,6 +210,7 @@ STRICT relaunch (1): fe
 - `docs/features/event-action-mapping.md` — 본 spec 의 watchdog inject 가 event 10 (`watchdog_detect_idle`) 의 trigger 지점으로 1:1 매핑. STRICT mode note 강제는 event 7 (`cycle_status_set_idle`) action (a) note 필수 와 짝.
 - `docs/features/work-cycle-refactor.md` — 본 spec 의 5분 polling → realtime hook (GitHub webhook) 마이그가 단계 1.4 의 대상.
 - `docs/features/autonomous-cycle-orchestration.md` — 본 spec 이 §5-5 stale verification 표준 명령의 코드 강제 구현체.
+- `docs/features/rev-sla.md` — §5-7 5번째 layer (`watchdog_rev_sla_loop`) SoT. rev 단계 1/2/3 응답 시간 SLA 미달성 자동 detect + nmae escalation. 본 spec 은 안전망 카운트 / cross-ref 만 박제, 본문 (T0 정의 / `RevSlaTarget` 매트릭스 / `RevSlaEscalation` 분기 / `rev-sla-metrics.jsonl` schema) 은 `rev-sla.md` SoT.
 
 ## 10) 결정 로그
 - 2026-05-24: 초안 작성 (status=draft). #941 머지 후 status=shipped 로 갱신.
@@ -214,3 +219,4 @@ STRICT relaunch (1): fe
 - 2026-05-24 (#956): STRICT mode 도입 — note 미명시 idle 은 즉시 relaunch + 의무 강제 prompt. 사용자 정정: "idle 시 digest 에 사유 명시 / 타당한 사유 없으면 relaunch 강제". rev/plan 은 note 명시 패턴 정착, fe 는 누락 → 강제화 필요.
 - 2026-05-24 (#956): `CYCLE_REASON_REQUIRED=1` default — 후방호환 off 가능. `tools/cycle-status/update.sh` 도입 — nmae 수동 JSON 편집 부담 해소.
 - 2026-05-26: ADR-0019 머지 후 관련 spec 절 (§9) 추가 — 본 spec 의 polling 기반 watchdog 가 event-action-mapping event 10 의 trigger 지점으로 정형화 (PR #1077 머지 후속 audit).
+- 2026-05-29 (plan round 10): §5-7 4중 → 5중 확장 — `rev-sla.md §3-3` 의 `watchdog_rev_sla_loop` 추가. 1~4번 layer (nmae 사이클 멈춤 차원) 와 5번 layer (rev SLA 미달성 차원) 의 idle 종류 분리 박제. 본문 SoT 는 `rev-sla.md` — 본 spec 은 cross-ref / 카운트 변경만 (drift 방지). 동시 갱신: frontmatter 제목 / §1 개요 / §5-7 본문 / §6 작업 분할 / §9 관련 spec.
