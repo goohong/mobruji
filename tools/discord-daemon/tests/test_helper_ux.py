@@ -1798,22 +1798,30 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
             urls = Path(url_capture).read_text().splitlines()
             self.assertEqual(len(urls), 0)
 
-    # ── bare body 자동 hook (default ON — 2026-05-29 PR #1252 §10-1) ──────────
+    # ── bare body 자동 hook (default OFF — 사용자 directive 2026-05-29 #1294) ──
+    #
+    # PR #1252 (#1262) 가 default OFF → ON 전환했으나, 사용자가 노이즈로 판단해
+    # 1일 만에 OFF 재전환 (#1294). 명시 opt-in (BOT_WRITING_AUTO_HOOK_ENABLED=1)
+    # 시에만 자동 hook 동작.
     #
     # NOTE: 본 영역 테스트는 ❓ control emoji 자동 부착(PR #1233/#1234) 과 독립
     # 검증 목표 — 모든 _run 호출에 `MOBRUJI_CONTROL_EMOJI=0` 명시 부여로 control
     # emoji path 격리. writing auto hook default 값 자체만 회귀 검증.
 
     def test_bare_body_auto_hook_calls_reaction_typing_message_remove(self) -> None:
-        """본답 (bare body) push 시 자동 hook: PUT reaction + POST typing + POST message + DELETE reaction.
+        """opt-in (BOT_WRITING_AUTO_HOOK_ENABLED=1) 본답 push 자동 hook 회귀 가드:
+        PUT reaction + POST typing + POST message + DELETE reaction.
 
         target msg id 는 last-user-msg-id.txt (valid snowflake) 에서 resolve.
-        자동 hook 은 default ON (BOT_WRITING_AUTO_HOOK_ENABLED 미설정 시 활성).
+        자동 hook 은 default OFF (#1294) — env=1 명시 부여 시에만 동작.
         """
         result, url_capture, method_capture = self._run(
             "본답",
             last_id_content="12345678901234567",
-            extra_env={"MOBRUJI_CONTROL_EMOJI": "0"},
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
@@ -1833,11 +1841,14 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("/reactions/", urls[3])
 
     def test_bare_body_auto_hook_skipped_when_no_reply(self) -> None:
-        """--no-reply → REPLY_TO_ID 빈 문자열 → writing hook 자동 skip (default ON 환경)."""
+        """--no-reply → REPLY_TO_ID 빈 문자열 → writing hook 자동 skip (opt-in 환경에서도)."""
         result, url_capture, _ = self._run(
             "--no-reply", "본답",
             last_id_content="12345678901234567",
-            extra_env={"MOBRUJI_CONTROL_EMOJI": "0"},
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
@@ -1846,45 +1857,43 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("/channels/42/messages", urls[0])
 
     def test_bare_body_auto_hook_skipped_when_target_absent(self) -> None:
-        """last-user-msg-id 없음 → REPLY_TO_ID 빈 → hook skip (default ON 환경)."""
+        """last-user-msg-id 없음 → REPLY_TO_ID 빈 → hook skip (opt-in 환경에서도)."""
         result, url_capture, _ = self._run(
             "본답",
             last_id_content=None,
-            extra_env={"MOBRUJI_CONTROL_EMOJI": "0"},
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
         self.assertEqual(len(urls), 1)
         self.assertIn("/messages", urls[0])
 
-    def test_bare_body_auto_hook_on_by_default(self) -> None:
-        """BOT_WRITING_AUTO_HOOK_ENABLED default ON — env 미설정 시 자동 hook 동작.
+    def test_bare_body_auto_hook_off_by_default(self) -> None:
+        """BOT_WRITING_AUTO_HOOK_ENABLED default OFF — env 미설정 시 자동 hook no-op.
 
-        2026-05-29 PR #1252 §10-1 default OFF → ON 전환. helper 본체가 명시 호출
-        `--writing-marker` / `--writing-done` 룰 누락 시에도 fallback OFF 보장 →
-        ✍️ 잔존 0건. 본 테스트 = default 값이 ON 인지 회귀 가드.
+        사용자 directive 2026-05-29 (#1294): 진행단계 자동 이모지 즉시 끄기.
+        PR #1252 default ON 결정 1일 만에 OFF 재전환. 본 테스트 = default 값이
+        OFF 인지 회귀 가드 (다음 default ON 재시도 PR 방지).
         """
-        result, url_capture, methods_capture = self._run(
+        result, url_capture, _ = self._run(
             "본답",
             last_id_content="12345678901234567",
             extra_env={"MOBRUJI_CONTROL_EMOJI": "0"},
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
-        methods = Path(methods_capture).read_text().splitlines()
-        # default ON 이므로 4 건 호출 (reaction PUT + typing POST + message POST + reaction DELETE).
-        self.assertEqual(len(urls), 4, f"호출 카운트: {urls}")
-        self.assertIn("PUT", methods[0])
-        self.assertIn("/reactions/", urls[0])
-        self.assertIn("DELETE", methods[3])
-        self.assertIn("/reactions/", urls[3])
+        # default OFF 이므로 message push 1건만 (reaction/typing 없음).
+        self.assertEqual(len(urls), 1, f"호출 카운트: {urls}")
+        self.assertIn("/messages", urls[0])
 
     def test_bare_body_auto_hook_opt_out_when_env_zero(self) -> None:
-        """BOT_WRITING_AUTO_HOOK_ENABLED=0 명시 → 자동 hook no-op (roll-back 경로).
+        """BOT_WRITING_AUTO_HOOK_ENABLED=0 명시 → 자동 hook no-op (default 와 동일 동작 확인).
 
-        production 사고 시 즉시 안정화 escape hatch — systemd / launchd unit 에
-        `BOT_WRITING_AUTO_HOOK_ENABLED=0` 명시 부여로 자동 hook 자체 disable.
-        본 테스트 = opt-out 회귀 가드.
+        default OFF 와 동일하지만 env 명시 부여 path 회귀 가드 (#1294 default OFF
+        후에도 systemd / launchd unit env 의 명시 0 부여가 동작하는지 검증).
         """
         result, url_capture, _ = self._run(
             "본답",
@@ -1901,11 +1910,12 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("/messages", urls[0])
 
     def test_bare_body_auto_hook_partial_reaction_only(self) -> None:
-        """TYPING_INDICATOR_ENABLED=0 + AUTO_HOOK default ON → PUT + POST message + DELETE 3건."""
+        """opt-in (AUTO_HOOK=1) + TYPING_INDICATOR_ENABLED=0 → PUT + POST message + DELETE 3건."""
         result, url_capture, methods_capture = self._run(
             "본답",
             last_id_content="12345678901234567",
             extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
                 "BOT_TYPING_INDICATOR_ENABLED": "0",
                 "MOBRUJI_CONTROL_EMOJI": "0",
             },
