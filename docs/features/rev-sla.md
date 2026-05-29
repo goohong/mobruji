@@ -364,10 +364,180 @@ jq -s --arg month "2026-05" \
 - 회고 spec (§6 PR 7) 이 본 매트릭 6 지표를 cron 월 1회 자동 집계 → DIGEST 보고.
 - 목표값 / 알람 = 초기 박제값 (운영 1개월 후 §8 Q1 따라 조정).
 - 본 매트릭은 SLA 자체 박제 후 첫 회고 사이클에서 활용 — PR 3 자체는 jsonl write 만 책임.
-- [ ] PR 4 (`tools/rev-queue/rev-sla.sh` self-query script): 본 spec status=approved 후
-- [ ] PR 5 (`06-domain-model.md §4` 보강 — `RevSlaTarget` / `RevSlaMetricEntry` / `RevSlaEscalation` / `WatchdogRevSlaLoop` 4건 등재): 본 spec status=approved 후
-- [ ] PR 6 (`rev-e2e-3-stages.md §3` SLA cross-ref 보강): 본 spec status=shipped 후
+
+- [ ] PR 4 (`tools/rev-queue/rev-sla.sh` self-query script): 본 spec status=approved 후. 상세 spec **§6-PR4** 박제.
+- [ ] PR 5 (`06-domain-model.md §4` 보강 — `RevSlaTarget` / `RevSlaMetricEntry` / `RevSlaEscalation` / `WatchdogRevSlaLoop` 4건 등재): 본 spec status=approved 후. **부분 완료** — `RevSlaTarget` / `RevSlaEscalation` / `RevSlaWatchdog` 3건은 PR #1330 (2026-05-29 develop 머지) 으로 박제 완료. `RevSlaMetricEntry` 1건은 잔여 — `rev-sla-metrics.jsonl` schema 등재 시점 박제 (PR 3 머지 시 동시 박제 권고).
+- [ ] PR 6 (`rev-e2e-3-stages.md §3` SLA cross-ref 보강): 본 spec status=shipped 후. 상세 spec **§6-PR6** 박제.
 - [ ] PR 7 (월간 SLA 회고 spec 신설): SLA 적용 1개월 후
+
+### §6-PR4) `tools/rev-queue/rev-sla.sh` self-query script 상세 spec (사전 박제)
+
+> **목표**: PR 4 구현 시점에 plan / helper sub-agent 가 학습 의존 없이 본 sub-section 만 보고 helper script 작성 가능. CLI 인터페이스 / 출력 양식 / exit code / graceful 분기 4 항목 박제.
+
+#### A) CLI 인터페이스
+
+```bash
+bash tools/rev-queue/rev-sla.sh <PR_number>
+bash tools/rev-queue/rev-sla.sh --json <PR_number>
+bash tools/rev-queue/rev-sla.sh --list-pending     # 모든 미달성 PR list
+bash tools/rev-queue/rev-sla.sh --validate          # jsonl schema 검증
+```
+
+- 기본 mode: 사람-가독 텍스트 출력 (helper / fe / be sub-agent 가 자기 PR 진행 상황 확인용).
+- `--json` mode: jq pipe 가능한 single-line JSON — bot.py watchdog / 후속 metrics 도구가 호출.
+- `--list-pending`: SLA 미달성 PR 만 list — nmae 가 다음 사이클 우선순위 결정 시 호출.
+- `--validate`: `~/.mobruji/rev-sla-metrics.jsonl` 의 schema 손상 검증 — `RevSlaWatchdog` 가 polling 직전 호출 권고.
+
+#### B) 기본 mode 출력 양식
+
+```text
+PR #1234 (type:feat scope:web)
+- 분류: 정규 type:* (단계 1 SLA = 30분)
+- 큐 위치: 3 / 5
+- T0 (rev-queue.sh register 시각): 2026-05-29T10:00:00Z (12 분 전)
+- SLA 목표: 2026-05-29T10:30:00Z (18 분 후)
+- 현재 elapsed: 12 분
+- 단계 1 통과 여부: 미달 (reviewed:claude 라벨 부재)
+- escalated: false
+- 다음 polling 결과 (예상): SLA 안 진행 — 18 분 안 코멘트 부착 시 통과
+```
+
+미달성 PR 예시:
+```text
+PR #1234 (type:emergency-hotfix + body security)
+- 분류: security 🔴 critical-public (단계 2 SLA = 15분)
+- T0 (mergedAt): 2026-05-29T10:00:00Z (22 분 전)
+- SLA 목표: 2026-05-29T10:15:00Z (7 분 초과)
+- 현재 elapsed: 22 분
+- 단계 2 통과 여부: 미달 (rev-post-merge-pass 라벨 부재)
+- escalated: true (2026-05-29T10:16:00Z)
+- escalation 채널: DIGEST + Discord 본 채널 + 사용자 reply
+- 다음 polling 결과 (예상): 이미 escalated — 멱등 가드 작동
+```
+
+#### C) `--json` mode 출력 양식
+
+```json
+{
+  "pr_number": 1234,
+  "pr_category": "regular|release|hotfix|security|docs",
+  "stage": "1|2|3",
+  "sla_target_seconds": 1800,
+  "t0_iso": "2026-05-29T10:00:00Z",
+  "elapsed_seconds": 720,
+  "remaining_seconds": 1080,
+  "sla_met": null,
+  "comment_attached": false,
+  "label_reviewed_claude": false,
+  "escalated": false,
+  "escalated_at_iso": null,
+  "escalation_channels": [],
+  "next_polling_prediction": "in-sla-window"
+}
+```
+
+- schema 는 `§3-5 RevSlaMetricEntry` 의 super-set — 추가 필드 (`remaining_seconds`, `next_polling_prediction`) 는 sub-agent self-query 용 컨텍스트.
+- `next_polling_prediction` enum: `in-sla-window` / `breach-imminent` (남은 5분 미만) / `breached-pending-escalation` / `breached-escalated` / `pass`.
+
+#### D) exit code 매트릭스
+
+| 시나리오 | exit code | stderr |
+|---|---|---|
+| 정상 출력 (SLA 안 / 통과 / 미달성 + escalated) | 0 | 빈 |
+| SLA 미달성 + escalation 미발사 (race condition — 다음 polling 대기) | 0 | `[warn] PR #N: SLA breached but escalation pending — watchdog next polling` |
+| PR 번호 부재 (`gh pr view` 404) | 2 | `[error] PR #N not found` |
+| 큐 미등록 PR (rev-queue.sh register 호출 안 된 PR) | 3 | `[error] PR #N not in rev queue — register first via rev-queue.sh register <PR>` |
+| `gh` CLI 부재 / 인증 만료 | 4 | `[error] gh CLI not available — re-auth via gh auth login` |
+| `rev-sla-metrics.jsonl` 부재 | 0 | `[info] jsonl not yet created — first SLA measurement` |
+| `rev-sla-metrics.jsonl` 손상 (jq parse fail) | 5 | `[error] jsonl corrupted — backup + rebuild required` |
+| `--validate` 통과 | 0 | `[ok] jsonl schema valid (N entries)` |
+| `--validate` 실패 | 5 | `[error] jsonl schema invalid at entry M: <원인>` |
+
+#### E) graceful skip 분기
+
+| 분기 | 동작 |
+|---|---|
+| `gh pr view` rate-limited (HTTP 429) | exponential backoff (30s → 60s → 120s, max 3 retry) → 최종 실패 시 exit 4 |
+| `~/.mobruji/rev-sla-metrics.jsonl` 부재 | 빈 jsonl 가정 + entry 0건으로 처리 (exit 0) — first run scenario |
+| `~/.mobruji/` 디렉토리 부재 | 자동 생성 (`mkdir -p`) — daemon 부재 환경 (로컬 helper) 대응 |
+| PR 라벨 / body 가 분류 매트릭스 미매칭 (예: `type:*` 부재) | "기타" 분류 — SLA = 정규 type:* 동일 적용 + stderr warning (`[warn] PR #N: type:* 라벨 부재 — 정규 SLA 기본 적용`) |
+
+#### F) helper script 검증 절차 (PR 4 머지 후 plan / helper sub-agent 의무)
+
+- [ ] 정상 PR 1건 (큐 등록 + SLA 안) → 기본 mode 출력 양식 §B 일치 확인
+- [ ] SLA 미달성 PR 1건 + escalated=true → 기본 mode 출력에 `escalation 채널` 표기 확인
+- [ ] `--json` mode 1건 → jq pipe (`bash ... --json <PR> | jq .pr_category`) 정상 동작 확인
+- [ ] `--list-pending` 호출 → 미달성 PR 0건 / 1건 / N건 시나리오 각각 확인
+- [ ] `--validate` 호출 → 정상 jsonl 통과 + 손상 jsonl 시뮬레이션 exit 5 확인
+- [ ] PR 부재 / 큐 미등록 / `gh` CLI 부재 3 시나리오 각각 exit code + stderr 확인
+
+검증 evidence 는 PR 4 본문 `## 검증` 섹션에 6 항목 체크박스 박제 의무 (rev 단계 1 통과 조건).
+
+### §6-PR6) `rev-e2e-3-stages.md §3` SLA cross-ref 보강 상세 spec (사전 박제)
+
+> **목표**: PR 6 구현 시점에 plan sub-agent 가 학습 의존 없이 본 sub-section 만 보고 docs 갱신 가능. `rev-e2e-3-stages.md` 의 어느 §3 sub-section 에 어떤 SLA cross-ref 를 박제할지 미리 결정.
+
+#### A) `rev-e2e-3-stages.md §3-1` (PR 머지 전, 단계 1) 추가 박제
+
+본 spec `§3-1 SLA 매트릭스` cross-ref 박제 위치 = `rev-e2e-3-stages.md §3-1` 끝 줄 (현재 `머지 게이트: 모든 PR reviewed:claude 라벨 없으면 nmae 자율 머지 안 함`) 직전.
+
+추가할 내용 (예상 5-7 줄):
+```markdown
+- **응답 시간 SLA** (`docs/features/rev-sla.md §3-1` SoT — 본 spec 머지 후 PR 6 박제):
+  - 정규 type:* = 30분 / `type:docs` (no-op pass) = 5분 / `type:release` = 면제 (사용자 명시 확인) / `type:emergency-hotfix` = 면제 (whitelist 머지)
+  - 측정 시작 (T0) = nmae 가 rev sub-agent launch 큐 등록 시점 (`rev-queue.sh register <PR>` 호출 또는 wrapper launch 시점)
+  - 측정 종료 = `reviewed:claude` 라벨 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽 (둘 다 만족해야 통과)
+  - **차단이 아니라 가시화** — 미달성 시 `RevSlaEscalation` (`docs/features/rev-sla.md §3-4`) DIGEST push + nmae 별 rev sub-agent parallel launch trigger. 강제 머지 / 강제 회수 X.
+  - 강제 메커니즘: bot.py `watchdog_rev_sla_loop` (1분 polling, `docs/features/rev-sla.md §3-3`, `nmae-cycle-watchdog.md §5-7` 5중 안전망의 5번째 layer)
+```
+
+#### B) `rev-e2e-3-stages.md §3-2` (develop 머지 후, 단계 2) 추가 박제
+
+본 spec `§3-1 SLA 매트릭스` 단계 2 row cross-ref 박제 위치 = `rev-e2e-3-stages.md §3-2` 끝 줄 (현재 `실패 → 즉시 revert 이슈 등록 + regression:dev 라벨 + Discord push`) 직후.
+
+추가할 내용 (예상 3-5 줄):
+```markdown
+- **응답 시간 SLA** (`docs/features/rev-sla.md §3-1` SoT):
+  - 정규 type:* = 24시간 / `type:emergency-hotfix` (정규) = 30분 / security 🔴 critical-public (`SecurityUserNotification` 발동 PR) = 15분
+  - 측정 시작 (T0) = PR 머지 완료 시점 (mergedAt, GitHub API)
+  - 측정 종료 = `rev-post-merge-pass` 또는 `regression:dev` 라벨 부착 시각
+  - security 🔴 미달성 분기 = DIGEST + Discord 본 채널 + 사용자 reply 3 채널 동시 push (정규 PR 은 DIGEST 1 채널만)
+```
+
+#### C) `rev-e2e-3-stages.md §3-3` (release 후, 단계 3) 추가 박제
+
+본 spec `§3-1 SLA 매트릭스` 단계 3 row cross-ref 박제 위치 = `rev-e2e-3-stages.md §3-3` 끝 줄 (현재 `실패 → hotfix 이슈 등록 + regression:prod 라벨 + 즉시 Discord push`) 직후.
+
+추가할 내용 (예상 2-4 줄):
+```markdown
+- **응답 시간 SLA** (`docs/features/rev-sla.md §3-1` SoT):
+  - 정규 type:* = 7일 (단계 1 / 단계 2 보다 길게 — production 검증은 사용자 실제 사용 패턴 누적 후 의미)
+  - 측정 시작 (T0) = release PR (`type:release` 라벨) 머지 시점 (mergedAt)
+  - 측정 종료 = `rev-prod-pass` 또는 `regression:prod` 라벨 부착 시각
+```
+
+#### D) `rev-e2e-3-stages.md §7 관련` cross-ref 추가
+
+본 spec link 박제 위치 = `rev-e2e-3-stages.md §7 관련` 의 이슈 list 끝.
+
+추가할 내용:
+```markdown
+- spec: `docs/features/rev-sla.md` (단계별 응답 SLA + escalation, PR #1329 박제 + 본 sub-section PR 박제)
+- 메모리 후보: `[[feedback-rev-sla-watchdog]]` (rev SLA 자동 escalation 사고 사례 누적 시 등재)
+```
+
+#### E) 머지 가능 시기 (PR 6 trigger)
+
+본 spec status=shipped 시점 = PR 5 머지 (06-domain-model §4 `RevSlaMetricEntry` 마지막 1건 박제) + PR 3 머지 (`watchdog_rev_sla_loop` 본문 배포) 둘 다 완료 시점. PR 6 가 docs only 이므로 본 spec status=approved 만 만족해도 머지 가능 — 단, `docs/features/rev-sla.md` 의 §3-1·§3-3·§3-4 가 PR 1 박제로 이미 존재하므로 PR 6 는 `rev-e2e-3-stages.md` 단 1 파일 변경.
+
+#### F) plan sub-agent 검증 절차 (PR 6 머지 후 의무)
+
+- [ ] `rev-e2e-3-stages.md §3-1·§3-2·§3-3` 끝 줄에 SLA cross-ref 5-7 줄 / 3-5 줄 / 2-4 줄 박제 확인
+- [ ] `rev-e2e-3-stages.md §7 관련` 의 spec / 메모리 후보 cross-ref 박제 확인
+- [ ] `rev-e2e-3-stages.md` frontmatter `last_reviewed` 갱신 + `related_prs` 에 PR 6 번호 추가
+- [ ] grep 검증: `grep -nE "docs/features/rev-sla.md" docs/features/rev-e2e-3-stages.md` 출력 ≥ 4 건 (§3-1·§3-2·§3-3·§7)
+
+검증 evidence 는 PR 6 본문 `## 검증` 섹션에 4 항목 체크박스 박제 의무 (rev 단계 1 통과 조건).
 
 ### 보호 영역 변경 여부 (필수 명시)
 
@@ -411,3 +581,4 @@ jq -s --arg month "2026-05" \
 
 - 2026-05-29: 초안 작성 (status=draft). `nmae-cycle-watchdog.md §5-7` 4중 안전망 + `rev-e2e-3-stages.md §3-1` 응답 SLA 부재 사례 박제. plan round 9 trigger.
 - **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — bot.py `watchdog_rev_sla_loop` 구현 launch 시 first-class reference. 5 sub-section: (1) `cycle-status.json` schema 확장 (별 sibling `rev_sla` key 추가, 기존 4 actor 영역 무영향), (2) `rev-sla-metrics.jsonl` schema 확정 (`recorded_iso` + `watchdog_version` 추가, append-only 룰), (3) PR 분류 lookup 알고리즘 (release > hotfix > docs > regular 우선순위, security = type:emergency-hotfix AND body keyword), (4) 30분 SLA timer T0 정의 (3 fallback 우선순위, `t0_source` evidence 박제), (5) 통계 집계 매트릭 6 지표 (단계 1 달성률 / 평균 elapsed / P95 / escalation 발생률 / security 100% / 분류 분포). 트리거 — plan round 12 작업 지시 + watchdog 본문 PR launch 직전 사전 spec 확정 의무. 실제 Python 코드 본문은 PR 3 본 사이클, 본 spec 은 schema / 알고리즘 / 룰만.
+- 2026-05-29 (plan round 13): **§6-PR4 + §6-PR6 사전 spec 박제**. PR 4 (`rev-sla.sh` self-query script) 의 CLI 인터페이스 (4 모드) / 출력 양식 (텍스트 + JSON) / exit code 매트릭스 (9 시나리오) / graceful skip 분기 (4 케이스) / 검증 의무 (6 항목). PR 6 (`rev-e2e-3-stages.md §3` cross-ref) 의 §3-1·§3-2·§3-3·§7 박제 위치별 정확한 텍스트 prototype (5-7 / 3-5 / 2-4 / 2 줄) + 머지 가능 시기 (본 spec status=approved 만으로 가능) + 검증 의무 (4 항목). PR 5 항목 부분 완료 표기 — `RevSlaTarget` / `RevSlaEscalation` / `RevSlaWatchdog` 3건은 PR #1330 머지 완료, `RevSlaMetricEntry` 1건 잔여. 사유: PR 4 / PR 6 가 본 spec 머지 후 옵션 cycle 로 빠지면 학습 의존 risk — 사전 spec 박제로 plan sub-agent 가 본 sub-section 만 읽고 작성 가능. plan round 13 trigger.
