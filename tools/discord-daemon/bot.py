@@ -5710,6 +5710,21 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         DIRECTIVE_DETECT_WATCH_DEFAULT_GRACE_COUNT,
         allow_zero=True,
     )
+    # 2026-05-29 사용자 directive: directive forum 등록 누락 의심 알림이 사용자 채널
+    # (MOBRUJI_CHANNEL_ID) 에 떨어져 noise. ops 헬스 모니터링 가치는 유지하되 사용자
+    # 가시 채널에서 분리. fallback 순서: 명시 env → DIGEST_CHANNEL_ID → MOBRUJI_CHANNEL_ID.
+    # 0 또는 미설정 시 DIGEST 로 라우팅 (사용자 채널 push 금지).
+    directive_detect_watch_notify_channel_raw = env.get(
+        "DIRECTIVE_DETECT_WATCH_NOTIFY_CHANNEL_ID", ""
+    )
+    try:
+        directive_detect_watch_notify_channel_id = int(
+            directive_detect_watch_notify_channel_raw
+        )
+    except (TypeError, ValueError):
+        directive_detect_watch_notify_channel_id = 0
+    if directive_detect_watch_notify_channel_id <= 0:
+        directive_detect_watch_notify_channel_id = digest_channel_id
 
     # Loop heartbeat watchdog (#1087) — env 해석.
     heartbeat_watch_enabled = (
@@ -6010,8 +6025,11 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info("thread_cleanup_loop disabled (THREAD_CLEANUP_ENABLED=0)")
 
         # directive-detect register watchdog loop (#1071).
-        # 10분 polling — detect (queue) vs board (forum) mismatch 감지 + MOBRUJI push.
+        # 10분 polling — detect (queue) vs board (forum) mismatch 감지.
         # 사용자 P0 frustration "내가 지시한 거 왜 지시 forum에 추가 안해" 직접 fix.
+        # 2026-05-29 사용자 directive: 알림 자체는 헬스 모니터링 가치 있으나 사용자
+        # 채널 (MOBRUJI_CHANNEL_ID) noise 차단을 위해 DIGEST_CHANNEL_ID (또는 명시 env
+        # DIRECTIVE_DETECT_WATCH_NOTIFY_CHANNEL_ID) 로 라우팅. 로깅은 유지.
         if directive_detect_watch_enabled and not hasattr(
             client, "_directive_detect_watch_task_started"
         ):
@@ -6019,7 +6037,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(
                 directive_register_watch_loop(
                     client,
-                    target_channel_id,
+                    directive_detect_watch_notify_channel_id,
                     detect_path=DIRECTIVE_DETECT_PATH_DEFAULT,
                     board_path=directive_board_jsonl_path,
                     poll_interval=directive_detect_watch_interval,
@@ -6030,7 +6048,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info(
                 "directive_register_watch_loop launched: channel=%d interval=%ds "
                 "window=%dmin grace=%d detect_path=%s board_path=%s",
-                target_channel_id,
+                directive_detect_watch_notify_channel_id,
                 directive_detect_watch_interval,
                 directive_detect_watch_window_minutes,
                 directive_detect_watch_grace,

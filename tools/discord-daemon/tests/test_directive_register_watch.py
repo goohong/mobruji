@@ -186,6 +186,62 @@ class TestDirectiveRegisterWatchLoop(unittest.IsolatedAsyncioTestCase):
             initial_delay=0,
         )
 
+    async def test_notify_channel_routed_not_user_channel(self) -> None:
+        """2026-05-29 사용자 directive 회귀 가드: 알림이 user 채널 (MOBRUJI) 이 아닌
+        명시 notify_channel_id 로만 발송되는지 확인.
+
+        notify_channel_id 인자 = router 의 단일 source of truth. bot.py 가
+        DIGEST_CHANNEL_ID 또는 DIRECTIVE_DETECT_WATCH_NOTIFY_CHANNEL_ID 로
+        라우팅하므로 본 loop 가 받는 channel id 는 사용자 채널이 아니다.
+        get_channel 호출 시 정확히 인자로 받은 id 만 lookup 하는지 검증.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            detect = tmp_path / "directive-detect.jsonl"
+            board = tmp_path / "directive-board.jsonl"
+            now = datetime.now(timezone.utc)
+            _make_detect_jsonl(detect, now, count=10)
+            _make_empty_board(board)
+
+            channel = MagicMock()
+            channel.send = AsyncMock()
+            client = MagicMock()
+            requested_ids: list[int] = []
+
+            def capture_get_channel(channel_id: int):
+                requested_ids.append(channel_id)
+                return channel
+
+            client.get_channel = MagicMock(side_effect=capture_get_channel)
+
+            iter_count = {"n": 0}
+            user_channel_id = 1506925497651560458  # MOBRUJI_CHANNEL_ID (실제 운영 값)
+            digest_channel_id = 1507617571384328312  # DIGEST_CHANNEL_ID 라우팅 타깃
+
+            async def fake_sleep(_s: float) -> None:
+                iter_count["n"] += 1
+                if iter_count["n"] >= 2:
+                    raise asyncio.CancelledError()
+
+            with patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
+                with self.assertRaises(asyncio.CancelledError):
+                    await bot.directive_register_watch_loop(
+                        client,
+                        notify_channel_id=digest_channel_id,
+                        detect_path=detect,
+                        board_path=board,
+                        poll_interval=1,
+                        window_minutes=60,
+                        grace_count=5,
+                        initial_delay=0,
+                    )
+
+            # DIGEST 채널로 lookup. user 채널 lookup 절대 없음.
+            self.assertIn(digest_channel_id, requested_ids)
+            self.assertNotIn(user_channel_id, requested_ids)
+            channel.send.assert_called_once()
+
     async def test_missing_files_graceful(self) -> None:
         """파일 부재 → detect=0 / board=0 → mismatch=False → push 없음."""
         import tempfile
