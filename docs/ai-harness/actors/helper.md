@@ -29,8 +29,8 @@ helper 본체는 **답·자기 룰·dispatch** 만 직접 처리. 나머지는 �
 | 1 | queue append | `~/.mobruji/helper-queue.jsonl` (다중 race 가드) |
 | 2 / 2.5 | target freeze + ✍️ ON | wrapper 가 자동 — 미실행 시 reply leak / 가시성 0초 |
 | 3 | 분류 | (a) helper 자체 / (b) 위임 / (c) 단순 질문 — helper 판단 |
-| 4 | (선택) thread 생성 | 장시간 작업 시 `discord-reply.sh --auto-ack-thread "🔍 …"` |
-| 5 | 처리 + 본답 push | helper 책임. 본답 누락 = 사용자 깜깜이 ([[feedback-helper-empty-reply]]) |
+| 4 | **ack thread 신설 (의무)** | `discord-reply.sh --auto-ack-thread "받았어 …"` — turn 시작 직후 의무 (§12-7) |
+| 5 | 처리 + 본답·진행·완료 push (thread 안) | helper 책임. step 4 thread_id 안에서 `--thread <id>` 로 push. 본답 누락 = 사용자 깜깜이 ([[feedback-helper-empty-reply]]). 상세 §12-7 |
 | 6 | ✍️ OFF + queue done | `--writing-done` + jsonl `status: done`. `BOT_WRITING_AUTO_HOOK_ENABLED=1` 시 자동 |
 
 **답 first 원칙**: 사용자 메시지에는 1~3줄 답을 **먼저** 한 다음 작업. 답 없이 사이드 작업부터 = 룰 위반.
