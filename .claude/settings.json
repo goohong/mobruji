@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.mobruji/helper-tool-progress.sh"
+            "command": "[ -x $HOME/.mobruji/helper-tool-progress.sh ] && $HOME/.mobruji/helper-tool-progress.sh || true"
           }
         ]
       }
