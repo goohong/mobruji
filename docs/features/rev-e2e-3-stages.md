@@ -5,8 +5,8 @@ status: implementing
 owner: @mobruji-maestro
 scope: infra
 related_issues: [882, 851]
-related_prs: [889, 932, 953, 958, 1009, 1193]
-last_reviewed: 2026-05-28
+related_prs: [889, 932, 953, 958, 1009, 1193, 1340]
+last_reviewed: 2026-05-29
 ---
 
 # rev 3단계 e2e 자율 QA
@@ -46,6 +46,7 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
   - 통과 → `reviewed:claude` 라벨 + PR 코멘트 `📝 rev no-op pass — 변경 사소함, e2e 불요`
   - 결함 발견 → 후속 이슈 등록 + PR 코멘트 `❌ rev no-op audit fail: <원인>`
 - 머지 게이트: **모든 PR** `reviewed:claude` 라벨 없으면 nmae 자율 머지 안 함
+- **SLA**: 정규 type:* = **30분** / `type:docs` (no-op pass) = **5분** / `type:release` = **면제** (사용자 명시 확인) / `type:emergency-hotfix` = **면제** (whitelist 머지). 측정 시작 (T0) = `rev-queue.sh register <PR>` 호출 시각 (또는 `cycle-status.json` `rev.in_progress.started_at` / PR `createdAt` fallback). 측정 종료 = `reviewed:claude` 라벨 부착 시각 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽. SLA 미달성 시 `watchdog_rev_sla_loop` 1분 polling 이 DIGEST push + nmae 별 rev sub-agent 추가 launch — **차단이 아니라 가시화 + 큐 race 해소**. 상세 SoT: `docs/features/rev-sla.md §3-1`(SLA 매트릭스) + §3-2(T0/완료 시점 정의) + §3-3(`watchdog_rev_sla_loop`).
 
 ### 3-2. develop 머지 후 사후 검사 (단계 2)
 - **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
@@ -54,6 +55,7 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 - rev 가 단계 1 시나리오 동일 재실행 — 실제 deploy 환경
 - 통과 → PR 코멘트 `✅ rev e2e post-merge pass` + 라벨 `rev-post-merge-pass` (멱등성 표식)
 - 실패 → 즉시 revert 이슈 등록 + `regression:dev` 라벨 + Discord push
+- **SLA**: 정규 type:* = **24시간** / `type:release` = **24시간** / `type:emergency-hotfix` (정규) = **30분** (정규 단계 1 등급) / `type:emergency-hotfix` + body `security` (🔴 critical-public) = **15분**. T0 = PR `mergedAt` (GitHub API). 측정 종료 = `rev-post-merge-pass` 또는 `regression:dev` 라벨 부착 시각. security 분류 미달성 시 DIGEST + Discord 본 채널 + 사용자 reply 3 채널 동시 push — 정규 분류는 DIGEST 1 채널만. SoT: `docs/features/rev-sla.md §3-1` + §3-2 + §3-4(escalation 매트릭스).
 
 ### 3-3. release 후 production 검증 (단계 3)
 - **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
@@ -61,11 +63,14 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 - rev 가 release 에 포함된 모든 e2e 가능 PR 에 대해 단계 1 시나리오 재실행
 - 통과 → release 노트에 `✅ rev e2e production verified` 추가 + PR 라벨 `rev-prod-pass`
 - 실패 → hotfix 이슈 등록 + `regression:prod` 라벨 + 즉시 Discord push (사용자 부재여도 자율 hotfix)
+- **SLA**: 정규 type:* = **7일** / `type:release` = **7일** / `type:emergency-hotfix` (정규 + security) = **24시간**. T0 = release PR (`type:release` 라벨) `mergedAt`. 측정 종료 = `rev-prod-pass` 또는 `regression:prod` 라벨 부착 시각. SoT: `docs/features/rev-sla.md §3-1` + §3-2 + §3-4.
 
 ## 4. 비기능 요구사항
 - 단계별 timeout: 단계 1 = 10분, 단계 2 = 5분, 단계 3 = 10분
 - 실패 시 재시도 1회 (transient 회피)
 - 모든 단계 결과는 PR 코멘트 + cycle-status.json `rev.in_progress` 에 기록
+- **SLA 관측성**: 모든 단계의 응답 evidence (T0 / 완료 / SLA 결과 / escalation) 는 `~/.mobruji/rev-sla-metrics.jsonl` append-only 박제. schema / 적재 룰 SoT: `docs/features/rev-sla.md §3-5`. 후속 회고 spec 가 본 jsonl 로 단계 1 SLA 달성률 / 평균 elapsed / P95 / escalation 발생률 / security 100% / 분류 분포 6 지표 집계 (`rev-sla.md §6-PR3 detailed design (5)`).
+- **테스트 전략 cross-ref**: 본 spec 의 단계별 SLA 검증 시나리오는 `docs/features/rev-sla.md §7` (5 분류 매트릭스 검증 / `watchdog_rev_sla_loop` polling 멱등성 / Escalation 분기 / sub-agent self-query) 와 단일 SoT. 본 spec 의 §3-1/§3-2/§3-3 SLA 행 갱신 시 `rev-sla.md §7` 동시 갱신 의무 (drift 방지).
 
 ## 5. 구현 계획
 - [x] rev sub-agent prompt template §E-2 (3단계 절차) 갱신 (`docs/ai-harness/actors/sub-agent.md`) — **PR #945 (2026-05-24 완료)**
@@ -82,7 +87,8 @@ PR #851 (voice-range 404 fix) 가 CI green 인 채 30분+ 머지 안 되고 방�
 
 ## 7. 관련
 - 이슈 #882, #879 (원인 PR #851), #1008 (단계 2 자동 trigger)
-- 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]] [[feedback-role-expansion]]
+- 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]] [[feedback-role-expansion]] [[feedback-evidence-based-root-cause]]
+- **SLA spec cross-ref**: `docs/features/rev-sla.md` (PR #1340) — §3-1 SLA 목표값 매트릭스 / §3-2 측정 시작·종료 시점 / §3-3 `watchdog_rev_sla_loop` (`nmae-cycle-watchdog.md` 4중 → 5중 안전망 확장) / §3-4 escalation 채널 매트릭스 / §3-5 `rev-sla-metrics.jsonl` schema / §3-6 sub-agent self-query 도구 / §6-PR3 detailed design (5 sub-section). 본 spec 의 §3 SLA 행 = `rev-sla.md` mirror — 동시 갱신 의무 (`rev-sla.md §9` 2026-05-29 plan round 14 PR 6 prototype 동기).
 - 다음 plan 사이클에서 §5 구현 PR 시퀀스 작성
 
 ## 8. 단계 2 자동 trigger 구현 (#1008)
