@@ -460,19 +460,30 @@ if [[ -n "$PENDING_THREAD_ID" && "$PENDING_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
   exit 0
 fi
 
-FORUM_OUT=$("$DISCORD_REPLY_SH" \
-  --forum-post-auto-tag "$WORKTREE" "$FORUM_TITLE" "$FORUM_BODY" 2>/dev/null) \
-  || FORUM_RC=$?
+# 2026-05-29 (PR fix/cycle-forum-noise-prune): pending-thread-id 부재 시 신규
+# forum thread 생성 skip. cycle forum 의 "sub-agent launch (...)" noise thread
+# 누적 차단. spec: cycle-forum-operation.md §5-6 (1 task = 1 thread 원칙).
+# 자율 사이클 (사용자 directive 박지 않은 launch) 은 DIGEST 채널 fallback 만.
+#
+# 단 명시적 opt-in (AGENT_LAUNCH_CREATE_FORUM_THREAD=1) 시 기존 path 유지 —
+# 운영 전환기 / 디버그 친화.
+if [[ "${AGENT_LAUNCH_CREATE_FORUM_THREAD:-0}" == "1" ]]; then
+  FORUM_OUT=$("$DISCORD_REPLY_SH" \
+    --forum-post-auto-tag "$WORKTREE" "$FORUM_TITLE" "$FORUM_BODY" 2>/dev/null) \
+    || FORUM_RC=$?
 
-if [[ "$FORUM_RC" -eq 0 ]]; then
-  LAUNCH_THREAD_ID=$(printf '%s' "$FORUM_OUT" | tr -d '\r' | awk 'NF{line=$0} END{print line}')
-  if [[ "$LAUNCH_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
-    printf 'LAUNCH_THREAD_ID=%s\n' "$LAUNCH_THREAD_ID"
-    exit 0
+  if [[ "$FORUM_RC" -eq 0 ]]; then
+    LAUNCH_THREAD_ID=$(printf '%s' "$FORUM_OUT" | tr -d '\r' | awk 'NF{line=$0} END{print line}')
+    if [[ "$LAUNCH_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
+      printf 'LAUNCH_THREAD_ID=%s\n' "$LAUNCH_THREAD_ID"
+      exit 0
+    fi
+    echo "agent-launch-wrapper.sh: forum-post 응답에 valid thread_id 가 없음 (raw=$FORUM_OUT) — DIGEST fallback 시도" >&2
+  else
+    echo "agent-launch-wrapper.sh: forum-post 실패 (rc=$FORUM_RC) — DIGEST status channel fallback 시도" >&2
   fi
-  echo "agent-launch-wrapper.sh: forum-post 응답에 valid thread_id 가 없음 (raw=$FORUM_OUT) — DIGEST fallback 시도" >&2
 else
-  echo "agent-launch-wrapper.sh: forum-post 실패 (rc=$FORUM_RC) — DIGEST status channel fallback 시도" >&2
+  echo "agent-launch-wrapper.sh: pending-thread-id 부재 + AGENT_LAUNCH_CREATE_FORUM_THREAD!=1 → forum 신규 thread skip. DIGEST fallback 사용." >&2
 fi
 
 # 2차 graceful fallback: --status-channel (DIGEST text channel) — 사용자 가시성

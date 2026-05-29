@@ -94,6 +94,8 @@ gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --la
 
 **spec**: `docs/features/cycle-forum-operation.md` SoT.
 
+**[STRICT — 2026-05-29 PR #1247]** sub-agent 의 모든 진행 / 결과 push 는 `$LAUNCH_THREAD_ID` (또는 `$PENDING_THREAD_ID`) thread **안** 에만 한다. **별 thread 생성 절대 금지** — `--forum-post`, `--forum-post-auto-tag`, `forum_create_thread` 호출 금지. 결과 보고 / 분석 완료 / 의견 / 진행 메모 모두 `--forum-edit` (본문 PATCH) 또는 `--forum-comment` / `--auto-thread` (thread 안 stream) 로만. 사용자 정정 (2026-05-29): "양식 안 맞는 게시물" = sub-agent 가 별 thread 생성한 noise. 1 task = 1 thread 원칙 강제.
+
 **4 tag 라이프사이클** (모든 cycle 작업 = individual thread, backlog single thread 폐기):
 - 🟡 대기: nmae 가 `wrapper --register-pending` 호출 시 신설
 - ⏳ 진행: wrapper launch 시 기존 🟡 thread 재사용 + retag (코드 강제)
