@@ -275,6 +275,21 @@ EOF
     exit 7
   fi
 
+  # 2026-05-29 (PR fix/wrapper-pending-thread-id-auto-chain): PENDING_THREAD_ID
+  # 를 file 에 atomic write. 다음 launch mode 호출 시 --pending-thread-id 인자
+  # 부재해도 wrapper 가 자동 load — nmae LLM 학습 의존 폐기. code 강제.
+  PENDING_CACHE_DIR="${HOME:-/tmp}/.mobruji/cycle-pending-thread"
+  mkdir -p "$PENDING_CACHE_DIR" 2>/dev/null || true
+  PENDING_CACHE_FILE="$PENDING_CACHE_DIR/${WORKTREE}.txt"
+  PENDING_CACHE_TMP="${PENDING_CACHE_FILE}.tmp.$$"
+  if printf '%s\n' "$PENDING_THREAD_ID_RESULT" > "$PENDING_CACHE_TMP" 2>/dev/null \
+      && mv "$PENDING_CACHE_TMP" "$PENDING_CACHE_FILE" 2>/dev/null; then
+    echo "agent-launch-wrapper.sh: PENDING_THREAD_ID cache 작성 ($PENDING_CACHE_FILE)" >&2
+  else
+    echo "agent-launch-wrapper.sh: PENDING_THREAD_ID cache 작성 실패 — graceful (다음 launch 시 직접 인자 명시 필요)" >&2
+    rm -f "$PENDING_CACHE_TMP" 2>/dev/null || true
+  fi
+
   printf 'PENDING_THREAD_ID=%s\n' "$PENDING_THREAD_ID_RESULT"
   echo "agent-launch-wrapper.sh: --register-pending OK (cycle=$WORKTREE, thread=$PENDING_THREAD_ID_RESULT)" >&2
   exit 0
@@ -440,6 +455,23 @@ FORUM_BODY="$(_build_cycle_template_body "$WORKTREE" "$ANNOUNCE_BODY" "$ANNOUNCE
 # 보존해 fallback 결정에 사용. stdout 마지막 줄 = thread_id.
 FORUM_OUT=""
 FORUM_RC=0
+
+# 2026-05-29 (PR fix/wrapper-pending-thread-id-auto-chain): pending-thread-id
+# 인자 부재 시 register-pending 의 cache file 에서 자동 load. nmae LLM 학습 의존
+# 폐기 — code 가 chain 강제. 사용 후 file 삭제 (다음 launch 위해 reset).
+if [[ -z "$PENDING_THREAD_ID" ]]; then
+  PENDING_CACHE_FILE="${HOME:-/tmp}/.mobruji/cycle-pending-thread/${WORKTREE}.txt"
+  if [[ -r "$PENDING_CACHE_FILE" ]]; then
+    PENDING_THREAD_ID=$(head -1 "$PENDING_CACHE_FILE" 2>/dev/null | tr -d '[:space:]')
+    if [[ -n "$PENDING_THREAD_ID" && "$PENDING_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
+      echo "agent-launch-wrapper.sh: PENDING_THREAD_ID cache 에서 load (cycle=$WORKTREE, thread=$PENDING_THREAD_ID)" >&2
+      # 사용 후 cache 삭제 — 다음 launch 시 reset 위해.
+      rm -f "$PENDING_CACHE_FILE" 2>/dev/null || true
+    else
+      PENDING_THREAD_ID=""
+    fi
+  fi
+fi
 
 # spec: cycle-forum-operation.md §5-4 (PR cf-4) — --pending-thread-id 명시 시
 # 기존 🟡 thread 재사용 + retag 🟡 → ⏳ + 본문 update (forum-edit). 신규 thread X.
