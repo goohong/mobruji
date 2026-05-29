@@ -251,9 +251,27 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         f"답 push 시 thread_id='{thread_id}' 사용." if thread_id
         else f"답 push 시 reply_to_msg_id='{message_id}' 사용 (thread 미생성)."
     )
+    # E2 (2026-05-29) — forum thread 안 메시지면 context 명시.
+    forum_kind = payload.get("forum_kind", "main")
+    directive_id_ctx = payload.get("directive_id", "")
+    forum_context = ""
+    if forum_kind and forum_kind != "main":
+        ctx_lines = [f"\n[forum context] 이 메시지는 **{forum_kind}** forum 의 thread 안 사용자 코멘트입니다."]
+        if directive_id_ctx:
+            ctx_lines.append(f"  - 매핑된 directive_id: {directive_id_ctx}")
+            ctx_lines.append(
+                "  - 사용자가 이 directive 의 진행 / sub-agent 작업에 대한 코멘트 / 정정 / 질문 가능."
+            )
+        else:
+            ctx_lines.append(
+                f"  - directive 매핑 미존재. 단순 {forum_kind} 사이클 thread 안 사용자 코멘트."
+            )
+        ctx_lines.append("  - 답은 같은 thread 안에서 (thread_id 명시 유지).")
+        forum_context = "\n".join(ctx_lines)
+
     user_prompt = (
         f"[사용자 메시지] (message_id={message_id}, channel_id={channel_id}, user_id={user_id})\n\n"
-        f"{body}\n\n"
+        f"{body}\n{forum_context}\n\n"
         f"위 메시지를 처리. 답이 필요하면 mcp__nmae__post_discord_message 호출 "
         f"(channel_id='{channel_id}'). {thread_directive}"
     )
