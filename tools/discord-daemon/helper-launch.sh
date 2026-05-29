@@ -8,9 +8,4 @@
 # marker 없음 → hook skip (noise 차단). 자식 process (claude) 에 env 상속.
 export MOBRUJI_HOOK_ACTOR=helper
 
-# 2026-05-29: Claude Code auto-updater 끄기 — TUI 가 "Auto-update failed" prompt 로
-# input mode 차단되는 사고 영구 방지. spec: docs/features/disable-claude-autoupdater.md.
-# systemd Environment 가 옛 tmux server 에 전파 안 되는 경우 백업 (직접 export).
-export DISABLE_AUTOUPDATER=1
-
 exec /usr/bin/claude --dangerously-skip-permissions --append-system-prompt "$(cat /home/mobruji/.mobruji/helper-role.md)"

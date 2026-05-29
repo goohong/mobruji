@@ -9,10 +9,6 @@
 # repo 사본이 분기돼 있던 것을 union 으로 통합 + DISABLE_AUTOUPDATER export 추가.
 # deploy.sh HOOK_NAMES 에 maestro-launch.sh 도 추가해 NCP 본체를 symlink 로 강제.
 
-# 2026-05-29: Claude Code auto-updater 끄기 — TUI 가 "Auto-update failed" prompt 로
-# input mode 차단되는 사고 영구 방지. spec: docs/features/disable-claude-autoupdater.md.
-export DISABLE_AUTOUPDATER=1
-
 # bootstrap watcher (NCP 본체에서 통합). maestro-bootstrap.sh 부재 시 graceful skip.
 if [[ -x /home/mobruji/.mobruji/maestro-bootstrap.sh ]]; then
   setsid /home/mobruji/.mobruji/maestro-bootstrap.sh >/dev/null 2>&1 &
