@@ -44,6 +44,33 @@ const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
   { key: "HARD", label: "Hard" },
 ];
 
+/*
+ * ADR-0018 단계 4 — /songs 페이지 토큰 swap (#1044 후속).
+ *
+ * swap 한 요소 (likes/bookmarks PR 7 동일 패턴):
+ *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950 + px-6 py-12
+ *     → --bg-subtle / --page-padding-x / --page-padding-y
+ *     (SearchPageFallback + SongSearchPageInner 본문 둘 다 동일 매핑)
+ *  2) h1 : text-zinc-900 dark:text-zinc-50 → --text-primary
+ *  3) 부제 / 보조 텍스트 : text-zinc-600 dark:text-zinc-400 → --text-secondary
+ *     (header 부제 + SearchResult empty rawCount p + FilterPanel "필터 초기화"
+ *     버튼 셋이 동일 매핑)
+ *  4) 검색 전 empty surface : border-dashed border-zinc-300 bg-white +
+ *     dark:border-zinc-700 dark:bg-zinc-900 → --cta-secondary-border /
+ *     --cta-secondary-bg (PR 11 도입 토큰 재사용 — light white→dark zinc-900
+ *     매핑이 정확) + rounded-2xl → --radius-lg
+ *  5) empty surface 본문 텍스트 : text-zinc-700 dark:text-zinc-300 → --text-label
+ *     (Input label 토큰 재사용 — light/dark 같은 단계 매핑)
+ *
+ * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element
+ * 에서 `dark:` prefix 제거.
+ *
+ * 미swap (의도):
+ *  - <Input /> / <Chip /> / <SongCard /> / <SongDetailModal /> 등 자식 컴포넌트
+ *    는 별도 PR (PR 5/6/10 등) 에서 이미 토큰화. 본 PR 은 page-level surface 만.
+ *  - SongDetailContent (recommend 공통) 잔여 zinc 는 SongCard 의 형제 후속
+ *    PR 후보.
+ */
 export default function SongSearchPage() {
   // useSearchParams는 CSR bail-out을 유발하므로 Suspense boundary로 감싼다 (Next.js 16 요구사항).
   // fallback은 결과 영역이 비어 있는 형태로 충분히 짧게 유지.
@@ -56,13 +83,13 @@ export default function SongSearchPage() {
 
 function SearchPageFallback() {
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Browse
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
           </h1>
         </header>
@@ -190,16 +217,16 @@ function SongSearchPageInner() {
     selectedGenres.size > 0 || selectedDifficulties.size > 0;
 
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Browse
           </p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
           </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="text-sm text-[var(--text-secondary)]">
             제목이나 아티스트로 카탈로그를 찾아보세요.
           </p>
         </header>
@@ -314,7 +341,7 @@ function FilterPanel({
           <button
             type="button"
             onClick={onReset}
-            className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
+            className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
           >
             필터 초기화
           </button>
@@ -347,9 +374,9 @@ function SearchResult({
     return (
       <div
         role="status"
-        className="flex flex-col items-start gap-2 rounded-2xl border border-dashed border-zinc-300 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900"
+        className="flex flex-col items-start gap-2 rounded-[var(--radius-lg)] border border-dashed border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] p-5"
       >
-        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+        <p className="text-sm text-[var(--text-label)]">
           검색어를 입력해 보세요.
         </p>
         <Link
@@ -399,7 +426,7 @@ function SearchResult({
         ? "검색 결과 없음"
         : "선택한 필터에 해당하는 곡이 없어요.";
     return (
-      <p role="status" className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p role="status" className="text-sm text-[var(--text-secondary)]">
         {message}
       </p>
     );
