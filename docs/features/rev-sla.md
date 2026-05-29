@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: []
+related_prs: [1329, 1332, 1333, 1334]
 last_reviewed: 2026-05-29
 ---
 
@@ -220,7 +220,150 @@ last_reviewed: 2026-05-29
 
 - [ ] PR 1 (본 spec 박제): docs only — 본 PR
 - [ ] PR 2 (`nmae-cycle-watchdog.md §5-7` 4중 → 5중 확장 cross-ref 보강): 본 spec status=approved 후 별 사이클
-- [ ] PR 3 (`watchdog_rev_sla_loop` 본문 신설 — bot.py + helper script): 본 spec status=approved 후 — daemon 변경 (보호 영역 X but 가중도)
+- [ ] PR 3 (`watchdog_rev_sla_loop` 본문 신설 — bot.py + helper script): 본 spec status=approved 후 — daemon 변경 (보호 영역 X but 가중도). **상세 설계 = §6-PR3 detailed design** (사전 박제 — plan round 12 / 2026-05-29).
+
+#### §6-PR3 detailed design (사전 박제, plan round 12)
+
+> 본 sub-section 은 bot.py 변경 PR 3 launch 시 first-class reference. 실제 Python 코드는 PR 3 본 사이클 — 본 spec 은 schema / 알고리즘 / 룰만.
+
+**1) `cycle-status.json` schema 확장** (`~/.mobruji/cycle-status.json`, `tools/cycle-status/update.sh` 갱신)
+
+기존 top-level keys (`be`, `fe`, `rev`, `plan`) 와 별 sibling key `rev_sla` 추가 (기존 4 actor 영역 침범 없음, watchdog idle 분류 등 기존 동작 보존):
+
+```json
+{
+  "be": {...},
+  "fe": {...},
+  "rev": {...},
+  "plan": {...},
+  "rev_sla": {
+    "last_polled_iso": "2026-05-29T10:15:00Z",
+    "open_pr_count": 7,
+    "tracked": [
+      {
+        "pr_number": 1234,
+        "pr_category": "regular|release|hotfix|security|docs",
+        "stage": "1|2|3",
+        "t0_iso": "2026-05-29T10:00:00Z",
+        "sla_target_seconds": 1800,
+        "elapsed_seconds": 900,
+        "sla_met": null,
+        "escalated": false,
+        "escalated_at_iso": null
+      }
+    ],
+    "escalated_recent": [
+      {"pr_number": 1230, "escalated_at_iso": "2026-05-29T09:55:00Z", "channel": "digest"}
+    ]
+  }
+}
+```
+
+근거:
+- 별 sibling key — 기존 `be/fe/rev/plan` actor 영역 schema 무영향 (validate.sh / cron digest / nmae-cycle-watchdog 4중 안전망 무손상).
+- `last_polled_iso` — watchdog liveness 가시화 (`tools/cycle-status/validate.sh` 확장 후보).
+- `tracked` array — 현재 open PR 만 (머지 후 entry 제거). 누적 evidence 는 `rev-sla-metrics.jsonl` 책임.
+- `escalated_recent` — 최근 N=10 escalation history (cron digest 표시용, jsonl 와 별도).
+- `sla_met=null` — 진행 중 의미 (T0 부터 SLA target 안). `true` = 통과 / `false` = 초과 후 통과 (또는 미통과). 미통과 PR 은 `tracked` 유지.
+- `tools/cycle-status/update.sh` 신규 sub-command: `rev-sla update <pr> <field>=<value>` (atomic write + validate.sh schema 가드).
+
+**2) `rev-sla-metrics.jsonl` schema 확정** (§3-5 보강)
+
+```jsonl
+{"pr_number":1234,"stage":"1","pr_category":"regular","t0_iso":"2026-05-29T10:00:00Z","completed_iso":"2026-05-29T10:25:00Z","elapsed_seconds":1500,"sla_target_seconds":1800,"sla_met":true,"escalated":false,"escalated_at_iso":null,"escalation_channels":[],"recorded_iso":"2026-05-29T10:25:01Z","watchdog_version":"v1"}
+{"pr_number":1235,"stage":"1","pr_category":"security","t0_iso":"2026-05-29T10:10:00Z","completed_iso":"2026-05-29T10:30:00Z","elapsed_seconds":1200,"sla_target_seconds":900,"sla_met":false,"escalated":true,"escalated_at_iso":"2026-05-29T10:25:00Z","escalation_channels":["digest","main_channel","user_reply"],"recorded_iso":"2026-05-29T10:30:01Z","watchdog_version":"v1"}
+```
+
+근거:
+- append-only — 1 PR 1 stage 당 1 entry (PR 라이프타임 동안 최대 3 entry: 단계 1/2/3). escalation 발생 시 같은 entry 의 escalated=true 로 단계별 1줄 박제.
+- `escalation_channels` array — `["digest", "main_channel", "user_reply"]` (security 분기) / `["digest"]` (정규 분기) / `[]` (escalation 없음).
+- `recorded_iso` — file write 시점 (clock skew evidence).
+- `watchdog_version` — schema migration 가드 (v1 default, v2 신설 시 별 키 추가).
+- write 시점:
+  - SLA 통과 시점 (Stage 통과 detect 직후 1회 write, completed_iso + sla_met=true)
+  - escalation 발생 시점 (escalated=true write, completed_iso=null 상태로 1회 write 후 통과 시 같은 entry update — append-only 룰 위반이므로 별 entry 2개로 분리: `event="escalated"` + `event="completed"` 형태).
+- 호환성: jsonl 손상 시 graceful skip (다음 polling 정상). retention §8 Q4 미결정.
+
+**3) PR 분류 lookup 알고리즘** (§3-1 매트릭스 매핑)
+
+`gh pr list --base develop --state open --json number,labels,createdAt,body` 출력 → 각 PR 의 `pr_category` 분류:
+
+```text
+function classify_pr(pr) {
+  labels = set(pr.labels.name)
+
+  // 우선순위 1: type:release (최강 우선)
+  if "type:release" in labels:
+    return ("release", "1": "exempt", "2": "24h", "3": "7d")
+
+  // 우선순위 2: type:emergency-hotfix + security
+  if "type:emergency-hotfix" in labels:
+    if pr.body contains keyword in ["security", "보안", "CVE", "vulnerability"]:
+      return ("security", "1": "exempt", "2": "15m", "3": "24h")
+    return ("hotfix", "1": "exempt", "2": "30m", "3": "24h")
+
+  // 우선순위 3: type:docs
+  if "type:docs" in labels:
+    return ("docs", "1": "5m", "2": "exempt", "3": "exempt")
+
+  // default: 정규
+  return ("regular", "1": "30m", "2": "24h", "3": "7d")
+}
+```
+
+근거:
+- 우선순위: release > hotfix > docs > regular (`emergency-hotfix-flow.md §3-1` 기준).
+- security 분류 = `type:emergency-hotfix` AND body keyword match. body 가 없을 시 hotfix 등급 fallback.
+- 다중 type:* 라벨 (예: `type:feat` + `type:docs`) 시 위 우선순위 first-match wins.
+- `type:release` 단계 1 면제 = `rev-gate.yml` whitelist 와 정합 (사용자 명시 확인 강제 = §8 Q6 SoT).
+- 분류 알고리즘은 cycle 마다 재계산 (캐싱 X) — PR labels 변경 시 즉시 반영.
+
+**4) 30분 SLA timer 시작점 (T0) 정의 보강** (§3-2 상세)
+
+`t0_iso` 결정 우선순위 (단계 1 기준):
+
+| 단계 | T0 출처 | 정밀도 | fallback |
+|---|---|---|---|
+| **1순위** | `rev-queue.sh register <PR>` 호출 시 jsonl write 시각 | 초 단위 (UTC ISO) | 누락 시 2순위 |
+| **2순위** | `cycle-status.json` 의 `rev.in_progress.started_at` 또는 nmae cycle event log `rev_launch_iso` | 분 단위 | 누락 시 3순위 |
+| **3순위** | PR `createdAt` (GitHub API) | 분 단위 | watchdog warning + jsonl `t0_source="pr_created"` 박제 (정밀도 ↓ evidence) |
+
+단계 2 T0 = PR `mergedAt` (1차 정확) / 단계 3 T0 = release PR `mergedAt` (`type:release` 라벨).
+
+`elapsed_seconds` = `now() - t0_iso` (epoch second 차). watchdog polling 마다 재계산.
+
+근거:
+- 1순위 우선 — rev launch 큐 등록 시점 = 실제 rev 작업 의무 발생 시점.
+- 3순위 fallback (PR createdAt) 은 정밀도 ↓ (PR 생성 후 nmae rev launch 사이 lag). `t0_source` 박제로 evidence visibility 보존.
+- single source 강제 X — watchdog 가 graceful fallback 으로 모든 PR 추적 가능 (false-negative 0).
+
+**5) 통계 집계 매트릭** (월간 회고 spec 후보 — §6 PR 7 trigger)
+
+`rev-sla-metrics.jsonl` 으로 도출 가능한 지표:
+
+| 지표 | 정의 | 목표값 | 알람 |
+|---|---|---|---|
+| **단계 1 SLA 달성률** | (sla_met=true entries) / (stage="1" entries) | ≥ 90% / 월 | < 80% = 회고 spec trigger |
+| **단계 1 평균 elapsed** | mean(elapsed_seconds where stage="1") | ≤ 1200s (20m) | > 1800s (30m) = nmae 큐 race 진단 |
+| **단계 1 P95 elapsed** | p95(elapsed_seconds where stage="1") | ≤ 1800s | > 3600s = 1h+ outlier 진단 |
+| **escalation 발생률** | (escalated=true) / (total entries) | ≤ 10% | > 20% = watchdog 학습 의존 ↓ 추가 박제 |
+| **security 분류 SLA 달성률** | (sla_met=true where pr_category="security") / (stage="2" where pr_category="security") | 100% | < 100% = 즉시 회고 (보안 사고 risk) |
+| **분류별 entry 분포** | count by pr_category | regular ≥ 70% / 월 | hotfix > 20% = 안정성 회고 trigger |
+
+집계 명령 예시 (jq 가능):
+
+```bash
+# 단계 1 SLA 달성률 (월간)
+jq -s --arg month "2026-05" \
+  '[.[] | select(.stage == "1" and (.recorded_iso | startswith($month)))] |
+   (map(select(.sla_met == true)) | length) / length * 100' \
+  ~/.mobruji/rev-sla-metrics.jsonl
+```
+
+근거:
+- 회고 spec (§6 PR 7) 이 본 매트릭 6 지표를 cron 월 1회 자동 집계 → DIGEST 보고.
+- 목표값 / 알람 = 초기 박제값 (운영 1개월 후 §8 Q1 따라 조정).
+- 본 매트릭은 SLA 자체 박제 후 첫 회고 사이클에서 활용 — PR 3 자체는 jsonl write 만 책임.
 - [ ] PR 4 (`tools/rev-queue/rev-sla.sh` self-query script): 본 spec status=approved 후
 - [ ] PR 5 (`06-domain-model.md §4` 보강 — `RevSlaTarget` / `RevSlaMetricEntry` / `RevSlaEscalation` / `WatchdogRevSlaLoop` 4건 등재): 본 spec status=approved 후
 - [ ] PR 6 (`rev-e2e-3-stages.md §3` SLA cross-ref 보강): 본 spec status=shipped 후
@@ -267,3 +410,4 @@ last_reviewed: 2026-05-29
 ## 9) 결정 로그
 
 - 2026-05-29: 초안 작성 (status=draft). `nmae-cycle-watchdog.md §5-7` 4중 안전망 + `rev-e2e-3-stages.md §3-1` 응답 SLA 부재 사례 박제. plan round 9 trigger.
+- **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — bot.py `watchdog_rev_sla_loop` 구현 launch 시 first-class reference. 5 sub-section: (1) `cycle-status.json` schema 확장 (별 sibling `rev_sla` key 추가, 기존 4 actor 영역 무영향), (2) `rev-sla-metrics.jsonl` schema 확정 (`recorded_iso` + `watchdog_version` 추가, append-only 룰), (3) PR 분류 lookup 알고리즘 (release > hotfix > docs > regular 우선순위, security = type:emergency-hotfix AND body keyword), (4) 30분 SLA timer T0 정의 (3 fallback 우선순위, `t0_source` evidence 박제), (5) 통계 집계 매트릭 6 지표 (단계 1 달성률 / 평균 elapsed / P95 / escalation 발생률 / security 100% / 분류 분포). 트리거 — plan round 12 작업 지시 + watchdog 본문 PR launch 직전 사전 spec 확정 의무. 실제 Python 코드 본문은 PR 3 본 사이클, 본 spec 은 schema / 알고리즘 / 룰만.
