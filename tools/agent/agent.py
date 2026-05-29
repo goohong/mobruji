@@ -51,20 +51,73 @@ AGENT_EVENT_KINDS: frozenset[str] = frozenset({
 # ─── event handlers ──────────────────────────────────────────────────────────
 
 
-async def handle_user_message(payload: dict[str, Any]) -> None:
-    """사용자 Discord 메시지 처리.
+NMAE_SYSTEM_PROMPT = """\
+너는 mobruji 의 nmae — Discord 기반 노래방 추천 서비스의 orchestration agent.
 
-    Phase 1.4: stub — 로그만. Phase 2 에서 Claude Agent SDK query() 호출 +
-    tool dispatch (post_discord_message / launch_subagent 등).
+[역할]
+- 사용자 Discord 메시지를 받아 작업을 4 cycle (be / fe / rev / plan) 에 위임.
+- be: Spring Boot 백엔드. fe: Next.js 프론트엔드. rev: 코드 리뷰 / QA. plan: 큰 spec / ADR.
+- 단순 정보 / 답변 가능한 질문이면 직접 답 (post_discord_message).
+- 작업 위임이 필요하면 (1) register_directive_pending 으로 directive 등록 →
+  (2) launch_subagent 로 cycle 시작.
+
+[규칙]
+1. 사용자 메시지 받으면 **항상** post_discord_message 한 번 호출 (답 또는 진행 알림).
+2. paused 모드 (사이클 정지) 면 launch_subagent reject — 사용자 정정 / 단순 답만.
+3. plan cycle 위임 시 delegation_reason 명시.
+4. release / 파괴적 작업은 사용자 확인 받기 (직접 launch 금지).
+5. 4 cycle 중복 launch 금지 — in_flight_agents lock 확인.
+
+[도구 사용]
+- 12 tool 만 사용 (정의 안 된 작업 불가).
+- launch_subagent 의 directive_id 인자는 register_directive_pending 의 결과.
+- forum_comment 만 사용, forum_create_thread 는 register_directive_pending 안에서만 호출됨.
+"""
+
+
+async def handle_user_message(payload: dict[str, Any]) -> None:
+    """사용자 Discord 메시지 → Claude Agent SDK query() → tool dispatch.
+
+    SDK 가 nmae LLM 호출 + tool_use 실행 + result 처리. 답 push 는 LLM 이
+    post_discord_message tool 호출로 처리 (학습 의존 X — system prompt 명시).
     """
     body = payload.get("body", "")
     channel_id = payload.get("channel_id", "")
     user_id = payload.get("user_id", "")
-    logger.info(
-        "user_message received (Phase 1.4 stub) — channel=%s user=%s body=%r",
-        channel_id, user_id, body[:120],
+    message_id = payload.get("message_id", "")
+
+    try:
+        from claude_agent_sdk import query, ClaudeAgentOptions  # type: ignore[import-not-found]
+        from tool_definitions import ALL_TOOLS
+    except ImportError as exc:
+        logger.warning(
+            "claude_agent_sdk import 실패 (Phase 2 미설치) — fallback to log only: %r", exc,
+        )
+        logger.info(
+            "user_message Phase 1.4 fallback — channel=%s user=%s body=%r",
+            channel_id, user_id, body[:120],
+        )
+        return
+
+    options = ClaudeAgentOptions(
+        system_prompt=NMAE_SYSTEM_PROMPT,
+        permission_mode="acceptEdits",
     )
-    # TODO Phase 2: SDK query + tool dispatch.
+
+    user_prompt = (
+        f"[사용자 메시지] (message_id={message_id}, channel_id={channel_id}, user_id={user_id})\n\n"
+        f"{body}\n\n"
+        f"위 메시지를 처리. 답이 필요하면 post_discord_message 호출 "
+        f"(channel_id='{channel_id}', reply_to_msg_id='{message_id}')."
+    )
+
+    logger.info("user_message → SDK query: user=%s body=%r", user_id, body[:120])
+    try:
+        async for message in query(prompt=user_prompt, options=options):
+            logger.debug("SDK message: %r", message)
+        logger.info("user_message handled: message_id=%s", message_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("SDK query 실패 message_id=%s: %r", message_id, exc)
 
 
 async def handle_user_pause(payload: dict[str, Any]) -> None:
