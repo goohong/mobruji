@@ -4980,12 +4980,78 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     intents.message_content = True
     client = discord.Client(intents=intents)
 
+    # 2026-05-29 — `/mb auto` / `/mb ask` / `/mb status` slash command.
+    # Discord 의 핀 메시지 view 에서 button 작동 X 한계 (사용자 정정) 우회.
+    # autocomplete 표준 UX — typing 최소 + 어디서나 작동.
+    tree = discord.app_commands.CommandTree(client)
+    client._mb_tree = tree  # type: ignore[attr-defined] — on_ready 안 sync 위해 보존
+
     allowed_user_ids = parse_allowed_user_ids(env["ALLOWED_USER_IDS"])
     try:
         target_channel_id = int(env["MOBRUJI_CHANNEL_ID"])
     except ValueError:
         logger.error("MOBRUJI_CHANNEL_ID 가 정수 아님: %r", env["MOBRUJI_CHANNEL_ID"])
         sys.exit(1)
+
+    # ─── /mb slash command group ─────────────────────────────────────────────
+    # `/mb auto` / `/mb ask` / `/mb status` — mode toggle 핀 메시지 button 한계 우회.
+    mb_group = discord.app_commands.Group(
+        name="mb", description="mobruji 명령 (mode toggle 등)",
+    )
+
+    @mb_group.command(name="auto", description="자율 모드 (사용자에게 묻지 않음)")
+    async def _mb_auto(interaction: discord.Interaction) -> None:
+        if interaction.user.id not in allowed_user_ids:
+            await interaction.response.send_message(
+                "권한이 없습니다.", ephemeral=True,
+            )
+            return
+        try:
+            write_user_mode("AUTO")
+        except (OSError, ValueError) as exc:
+            logger.warning("/mb auto write 실패: %r", exc)
+            await interaction.response.send_message(
+                f"❌ 변경 실패: {exc}", ephemeral=True,
+            )
+            return
+        logger.info("/mb auto: user=%s", interaction.user.id)
+        await interaction.response.send_message(
+            "✅ 모드가 **AUTO** 로 변경되었습니다.", ephemeral=True,
+        )
+
+    @mb_group.command(name="ask", description="질문 모드 (확인 받음)")
+    async def _mb_ask(interaction: discord.Interaction) -> None:
+        if interaction.user.id not in allowed_user_ids:
+            await interaction.response.send_message(
+                "권한이 없습니다.", ephemeral=True,
+            )
+            return
+        try:
+            write_user_mode("ASK")
+        except (OSError, ValueError) as exc:
+            logger.warning("/mb ask write 실패: %r", exc)
+            await interaction.response.send_message(
+                f"❌ 변경 실패: {exc}", ephemeral=True,
+            )
+            return
+        logger.info("/mb ask: user=%s", interaction.user.id)
+        await interaction.response.send_message(
+            "✅ 모드가 **ASK** 로 변경되었습니다.", ephemeral=True,
+        )
+
+    @mb_group.command(name="status", description="현재 모드 조회")
+    async def _mb_status(interaction: discord.Interaction) -> None:
+        if interaction.user.id not in allowed_user_ids:
+            await interaction.response.send_message(
+                "권한이 없습니다.", ephemeral=True,
+            )
+            return
+        current = read_user_mode()
+        await interaction.response.send_message(
+            f"현재 모드: **{current}**", ephemeral=True,
+        )
+
+    tree.add_command(mb_group)
 
     # DIGEST_CHANNEL_ID (rename, #1019). load_env 에서 backward-compat
     # NOTIFY_CHANNEL_ID fallback 처리 후 env["DIGEST_CHANNEL_ID"] 보장.
@@ -5342,6 +5408,15 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
 
     @client.event
     async def on_ready() -> None:  # noqa: D401
+        # 2026-05-29 — /mb slash command tree sync (global). Discord 가 등록된
+        # command list 를 모든 guild 로 propagate. 첫 sync 후 cache 됨 — 명령 변경
+        # 없으면 cost 0. graceful — sync 실패 시 warning 만 (다른 path 차단 X).
+        try:
+            synced = await tree.sync()
+            logger.info("/mb slash commands sync OK: count=%d", len(synced))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("/mb slash commands sync 실패: %r", exc)
+
         logger.info(
             "Discord Gateway 연결 OK: user=%s channel=%s digest=%s alert=%s allowed=%d digest_enabled=%s auto_ack=%s auto_ack_emoji=%s secondary_reaction=%s secondary_emojis=(idle=%s partial=%s full=%s)",
             client.user,
