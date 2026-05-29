@@ -5,7 +5,7 @@ status: draft
 owner: @mobruji-maestro
 scope: infra
 related_issues: [1248]
-related_prs: []
+related_prs: [1252]
 last_reviewed: 2026-05-29
 ---
 
@@ -254,6 +254,53 @@ DIRECTIVE_POLISH_ACTIVE_STATUSES: Final[frozenset[str]] = frozenset({
 })
 ```
 
+#### status enum cross-reference 매트릭스 (SoT: `directive-board-template-and-tags.md §5-1`)
+
+**중요**: 본 spec 의 allowlist 와 [[directive-board-template-and-tags]] 의 status enum 은 **다른 spec 에 분산** 되므로 enum 변경 시 정합성 cross-ref 필수. 본 표는 양 spec 간 contract 박제.
+
+| status (한글) | 의미 | tag (emoji) | 정의 spec | 본 polish allowlist | inject (mark-polished) | 사유 |
+|---|---|---|---|---|---|---|
+| `대기` | 등록 직후 default | 🟡 | template-and-tags §5-1 | ✅ allow | ✅ allow | helper sub-agent 정제 대상 — polish + inject 모두 필요 |
+| `진행 중` | sub-agent / nmae 작업 중 | 🔵 | template-and-tags §5-1 | ✅ allow | ✅ allow | 진행 중 entry 도 추가 정제 / re-inject 가능 (rare) |
+| `결정 대기` | plan 분석 완료, 사용자 결정 대기 | 🟣 | template-and-tags §5-1 (PR E) | ❌ skip | ❌ skip | plan 이 이미 정제 → 사용자 결정 lock. polish 재실행 noise |
+| `완료` | PR 머지 / 결정 적용 | 🟢 | template-and-tags §5-1 | ❌ skip | ❌ skip | 본 spec 의 핵심 차단 대상 (issue #1248 false positive 6건) |
+| `폐기` (취소) | 취소 / reject | 🔴 | template-and-tags §5-1 | ❌ skip | ❌ skip | 종결 entry — 어떤 update 도 noise |
+| `보류` | defer (timeline 미정) | ⚪ | template-and-tags §5-1 | ❌ skip | ❌ skip | 보류 = 사용자 의도적 대기 — polish 재실행 시 alert false positive |
+
+**enum 명명 매핑 주의**:
+- template-and-tags §5-1 의 `directive_status.sh` 호출 인자: `in_progress` (코드) → 본문 tag `진행 중` (한글).
+- 본 spec 의 jsonl `entry.status` 값은 **한글** (예: `"진행 중"`, `"완료"`) 으로 박힘.
+- bot.py / mark-polished.sh 는 한글 string 매칭 (`"대기"` / `"진행 중"`) — allowlist constant 도 한글 string 유지.
+- `취소` 는 §5-1 표 의 `🔴 폐기` 와 동일 (사용자 표기 가변). impl PR 시 jsonl 실측 후 정합.
+
+#### 신규 status enum 추가 시 영향 path (cross-spec)
+
+`directive-board-template-and-tags.md §5-1` 의 status enum 에 신규 값 추가 시 (예: 가설 `검토 중` 🟠) — 본 spec allowlist 가 **default deny** 이므로 자동으로 polish skip. 안전 default. 단 다음 path 검토 의무:
+
+| # | 영향 file | 영향 내용 | 의사결정 |
+|---|---|---|---|
+| 1 | `docs/features/directive-board-template-and-tags.md §5-1` | status enum 표 update | 신규 status 정의 (의미 / tag emoji / 부착 시점) |
+| 2 | `docs/features/directive-polish-alert-status-filter.md §5-7` (본 spec) | 위 cross-ref 매트릭스 update | 신규 status 가 polish 적합 (✅) / 부적합 (❌) 결정 + 사유 박제 |
+| 3 | `tools/discord-daemon/bot.py` `DIRECTIVE_POLISH_ACTIVE_STATUSES` | allowlist 갱신 (적합 시) | 적합 시 frozenset add, 부적합 시 default deny 유지 (코드 변경 0) |
+| 4 | `tools/directive-board/mark-polished.sh` case 분기 | allowlist 갱신 (적합 시) | bot.py 와 동일 정합 |
+| 5 | `tools/discord-daemon/tests/test_directive_polish_loop.py` | 신규 status 테스트 케이스 add | allowlist 갱신 시 ✅ 케이스 / 미갱신 시 ❌ skip 케이스 |
+| 6 | `tools/discord-daemon/tests/test_mark_polished.sh` | 신규 status 테스트 케이스 add | 동일 |
+| 7 | `tools/directive-board/directive_status.sh` 분기 | status 전이 API 확장 | 신규 status 진입 / 이탈 분기 정의 |
+| 8 | `tools/directive-board/backlog-scan.sh` filter | scan 대상 분기 update | 신규 status 가 backlog 진입 / 이탈 대상인지 결정 |
+| 9 | bot.py `directive_polish_loop` skip 사유 enum | `skipped_reason` 값 확장 | 신규 status 별 사유 명시 (예: `under_review` 등) |
+
+**checklist (신규 status 추가 PR)**:
+
+- [ ] template-and-tags §5-1 표에 신규 status 1행 add.
+- [ ] 본 spec §5-7 cross-ref 매트릭스에 신규 status 1행 add (✅/❌ 결정 + 사유).
+- [ ] 신규 status 가 polish allowlist 적합 결정 시 → bot.py `DIRECTIVE_POLISH_ACTIVE_STATUSES` + mark-polished.sh case + test fixture 양쪽 정합 commit.
+- [ ] 부적합 결정 시 → 코드 변경 0 (default deny 자동), spec 본문 사유 박제만.
+- [ ] `directive_status.sh` 의 status 전이 분기 update — 신규 status 로 / 부터의 전이 가능 path 정의.
+- [ ] `backlog-scan.sh` filter 검토 — 신규 status 가 nmae 분배 대상인지 결정 (현행 default: `대기` 만).
+- [ ] forum tag setup 안내 (template-and-tags §5-7) — 사용자 수동 1회 신규 tag emoji + 이름 등록.
+
+**회귀 가드**: 본 spec §11 표에 "status enum 추가 시 default deny" 행 (line 382-383) 이 이미 명시. 신규 status 가 잘못 적합 분류되어 false positive 재발 시 → spec §12 의 env escape hatch (`BOT_DIRECTIVE_POLISH_STATUS_FILTER=0` / `MARK_POLISHED_STATUS_FILTER=0`) 로 fast roll-back.
+
 #### 멱등성
 
 `skipped, skipped_reason=*` mark 된 queue entry 는 다음 iter 에서
@@ -349,6 +396,12 @@ bash tools/discord-daemon/tests/test_mark_polished.sh
 - 2026-05-29: 초안 작성 (status=draft). 사용자 false positive 6건 (알림 ID
   1507983360-1508005692) 박제. issue #1248 의 root cause + fix 후보 (a)+(b)
   채택 + Q1/Q2 결정 동시 박제. (본 spec PR)
+- 2026-05-29: §5-7 status enum cross-reference 매트릭스 + 신규 enum 추가 시
+  영향 path (9 file) + checklist 추가. 사유: 본 spec allowlist 와
+  [[directive-board-template-and-tags]] §5-1 enum 이 다른 spec 에 분산 →
+  enum 변경 시 정합성 누락 가능성 박제. 6 status (대기/진행 중/결정 대기/완료/
+  폐기/보류) 각각의 polish + inject 적합성 결정 박제. plan sub-agent 후속 PR
+  (#1252 보강 사이클).
 
 ## 10) 관련
 
