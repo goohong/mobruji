@@ -29,8 +29,8 @@ helper 본체는 **답·자기 룰·dispatch** 만 직접 처리. 나머지는 �
 | 1 | queue append | `~/.mobruji/helper-queue.jsonl` (다중 race 가드) |
 | 2 / 2.5 | target freeze + ✍️ ON | wrapper 가 자동 — 미실행 시 reply leak / 가시성 0초 |
 | 3 | 분류 | (a) helper 자체 / (b) 위임 / (c) 단순 질문 — helper 판단 |
-| 4 | (선택) thread 생성 | 장시간 작업 시 `discord-reply.sh --auto-ack-thread "🔍 …"` |
-| 5 | 처리 + 본답 push | helper 책임. 본답 누락 = 사용자 깜깜이 ([[feedback-helper-empty-reply]]) |
+| 4 | **본답 즉시 push** | `discord-reply.sh "<본답>"` — turn 분류 직후 본답 직행. **ack thread / "받았어 …" 류 ack 문구 신설 금지** (§12-8). 처리 시간 30초+ 예상 시만 짧은 "처리 중 …" 1줄 자율 판단 허용. |
+| 5 | 진행 / 완료 push (필요 시) | helper 책임. 본답에 모두 담겼으면 추가 push 0건. 위임 후 진행 stream 이 필요한 경우만 §12-5 launch thread (sub-agent 전용) 또는 main 채널 reply 로. 본답 누락 = 사용자 깜깜이 ([[feedback-helper-empty-reply]]). |
 | 6 | ✍️ OFF + queue done | `--writing-done` + jsonl `status: done`. `BOT_WRITING_AUTO_HOOK_ENABLED=1` 시 자동 |
 
 **답 first 원칙**: 사용자 메시지에는 1~3줄 답을 **먼저** 한 다음 작업. 답 없이 사이드 작업부터 = 룰 위반.
@@ -104,6 +104,58 @@ bash /home/mobruji/.mobruji/discord-reply.sh --choices "<질문>" "<opt1>" "<opt
 
 관련 메모리: [[feedback-helper-discord-choices-only]] [[feedback-askuser-discord-push]] [[feedback-autonomous-default]] [[feedback-sub-agent-no-user-wait]] [[feedback-verify-and-iterate]]
 관련 spec: `docs/features/discord-reaction-choice-input.md` (mode toggle + reaction handler SoT)
+
+### 12-8) 매 turn ack thread / ack 문구 신설 **금지** — input 받으면 즉시 본답 push (2026-05-29 정정)
+
+helper 본체는 **매 사용자 input turn 시작 시점에 별도 ack thread 를 신설하거나 "받았어 …" 류 ack 문구를 push 하지 않는다**. input 분류 직후 곧장 본답을 main 채널에 push 한다 (사용자 directive 2026-05-29 — 직전 작성된 'ack thread 의무' 룰을 정반대로 정정).
+
+```bash
+# 정답 — turn 분류 직후 본답 직행
+bash /home/mobruji/.mobruji/discord-reply.sh "<본답>"
+
+# 금지 — ack thread / ack 문구 신설
+# bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack-thread "받았어 …"   # 금지
+# bash /home/mobruji/.mobruji/discord-reply.sh "받았어요 처리하겠습니다"      # 금지 (ack 문구 단독 push)
+# bash /home/mobruji/.mobruji/discord-reply.sh --auto-ack                       # 금지
+```
+
+#### Why (사용자 정정 사유)
+
+- ack thread / ack 문구 = **noise + delay**. 사용자가 메시지 보낸 직후 시각 즉시 답을 보기를 기대하는데 "받았어 …" 한 줄이 끼면 본답이 한 박자 늦게 + 두 곳에 분산.
+- thread 안에 본답을 stream 하면 사용자가 main 채널 view 만 보고 있을 때 **본답이 보이지 않는 사고** 가 발생 (thread expand 안 하면 알림 외에 보이지 않음). main 채널 직접 push 가 가장 단순·명확.
+- bot.py 가 사용자 메시지 도착 시 1초 안에 ✍️ writing marker 를 자동으로 표시 ([[feedback-helper-ack-removed]]) — helper 가 추가 ack 문구 push 할 필요 없음. ack 는 bot.py 책임, helper 는 본답 책임.
+- 직전 anchor (PR #1298 head commit `c0cb1ab`) 의 'ack thread 의무' 룰은 사용자 directive 와 정반대 방향 — 본 anchor 가 **취소·전복** 한다.
+
+#### How to apply
+
+1. `helper-turn-start.sh` 가 끝나고 helper 가 turn 분류 (§12-2 step 3) 완료 → **곧장 본답 작성** → `discord-reply.sh "<본답>"` 한 줄로 main 채널 push (bot.py 가 사용자 메시지에 자동 reply 묶음 — [[feedback-helper-discord-reply-to]]).
+2. `--auto-ack-thread` / `--auto-ack` / 별도 ack 문구 단독 push **호출 자체 금지**. 코드 / prompt / wrapper 어디서든 이 옵션을 새로 박지 않는다.
+3. 처리 시간이 30초+ 예상되는 경우만 짧은 "처리 중 — <한 줄 컨텍스트>" 1줄 push 자율 판단 (사용자 timeout 회피 목적). 그 1줄도 main 채널 직접 push, thread 신설 금지. 30초 안에 본답 가능하면 그 1줄도 생략.
+4. 본답 push 후 추가 진행 / 완료 stream 이 필요한 경우 — 본답 안에 같이 담거나, 같은 사용자 메시지에 reply 이어가기 (`discord-reply.sh "[진행] …"`). 별도 thread 신설 금지.
+5. helper sub-agent launch (§12-5) 의 launch thread 는 **본 anchor 영향 없음** — sub-agent stream 전용 thread 는 launch thread 그대로 유지. 본 anchor 는 helper 본체 응답 (turn-start ack) 에만 적용.
+6. directive 채택 (§12-3) 의 directive forum thread 와도 독립 — directive board 는 view 용 forum thread 그대로 유지. 본 anchor 는 main `#모부르지` 채널 응답 흐름에만 적용.
+
+#### 위반 정의
+
+- turn 시작 후 `--auto-ack-thread` 호출 → 위반 (도구 옵션 자체 금지).
+- 본답 없이 "받았어요 처리하겠습니다" 류 ack 문구만 push 후 turn 종료 → 위반 (본답 직행 룰 위반).
+- main 채널 본답 전에 ack 1줄 + 본답 1줄 두 번 push → 위반 (1 turn = 1 본답 push 권장, ack 분리 금지).
+- 본답을 thread 안 push 후 main 채널 reply 미생성 → 위반 (사용자 main view 에서 안 보임).
+
+#### 예외
+
+- 처리 시간 30초+ 예상 시 "처리 중 — <한 줄>" 1줄 main 채널 push 후 본답 push (총 2건). 자율 판단.
+- `discord-reply.sh --choices` (§12-7 Discord 선택지 / 질문) 는 본 anchor 영향 없음 — 선택지 자체가 본답 역할. 별도 ack 문구 추가 금지.
+
+#### 기존 룰과의 관계
+
+- [[feedback-helper-ack-removed]] (#963) "helper 본체 ack push 폐기, bot.py 가 1초 auto-ack" 와 **완전 동일 방향** — 본 anchor 가 그 룰을 thread 형태까지 확장 정정한다.
+- [[feedback-helper-thread-usage]] (2026-05-24) "본답은 main 채널 / thread 는 진행 stream 만" 은 **본 anchor 와 정렬** — 본답 main 채널 직행 그대로 유효. 단 "진행 stream 도 thread 신설 없이 main reply 또는 본답 안 inline" 으로 한 단계 더 강화 (직전 PR #1298 의 'thread 안 stream' 룰을 폐기).
+- [[feedback-user-reply-channel]] "사용자 응답 = MOBRUJI_CHANNEL_ID 전용" 그대로 유효 — 본답 = main 채널 직접 push 가 본 anchor 와 정렬.
+- 직전 commit `c0cb1ab` (PR #1298 head, 'ack thread 의무') 본문은 **본 anchor 가 전체 취소** — 같은 PR 안에서 본 commit 으로 swap.
+
+관련 메모리: [[feedback-helper-ack-removed]] [[feedback-helper-thread-usage]] [[feedback-helper-discord-reply-to]] [[feedback-user-reply-channel]] [[feedback-autonomous-default]]
+관련 wrapper / script: `~/.mobruji/discord-reply.sh` (bare body 본답 직행 패턴), `tools/discord-daemon/bot.py` (1초 auto-ack writing marker)
 
 ---
 
