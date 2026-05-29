@@ -23,7 +23,11 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 User=mobruji
-WorkingDirectory=/home/mobruji/mobruji
+# 2026-05-29: cwd 를 /home/mobruji 로 변경 (git repo 아닌 dir). Claude Code 가
+# cwd 의 git context 자동 로드 시 사용자 명령을 git 작업으로 잘못 해석 → helper
+# 본체 relay-only 룰 ([[feedback-helper-relay-only]]) 위반 사고 영구 방지.
+# spec: docs/features/helper-cwd-not-git-repo.md.
+WorkingDirectory=/home/mobruji
 Environment=HOME=/home/mobruji
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # spec: docs/features/helper-tool-visibility.md (2026-05-29).
@@ -32,7 +36,7 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # systemd 가 ExecStop=kill-session 후 ExecStart 가 새 tmux session 만들 때
 # 자식 process (claude) 가 직접 상속받도록 ENV 명시.
 Environment=MOBRUJI_HOOK_ACTOR=helper
-ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; then /usr/bin/tmux new-session -d -s helper -c /home/mobruji/mobruji "/home/mobruji/.mobruji/helper-launch.sh"; fi'
+ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; then /usr/bin/tmux new-session -d -s helper -c /home/mobruji "/home/mobruji/.mobruji/helper-launch.sh"; fi'
 ExecStop=/usr/bin/tmux kill-session -t helper
 
 [Install]
