@@ -16,6 +16,24 @@
 ## 리뷰어 참고 포인트
 - 특히 봐주면 좋은 포인트를 적어주세요.
 
+## visual baseline update
+
+> **조건부 의무**: `type:feat scope:web` PR 만 본 섹션 작성 의무 (그 외 scope 옵션).
+> 본 섹션은 `docs/features/visual-regression-ci.md §3-2 / §3-4` SoT 의 baseline drift
+> 룰 (ADR-0026 §Decision 2 후보 (a)) 강제 — rev sub-agent 가 단계 1 review 시
+> 본 섹션 부재 + visual diff > 0.1% 발견 시 `rev단계1: 🔴 시각 회귀 의심` 코멘트.
+> 본 spec 머지 후 PR template auto-check workflow (`visual-baseline-pr-body-check.yml`)
+> 신설 여부는 `visual-regression-ci.md §8 Q6` 결론 의존.
+
+다음 둘 중 하나 선택:
+
+- [ ] **baseline 변경 없음** (UI 영향 변경 X, 또는 visual diff 0% 확인)
+- [ ] **N 페이지 baseline 갱신** — 사유 + 영향 페이지 명시
+  - 갱신 페이지 수:
+  - 사유 (예: ADR-0018 단계 4 color swap):
+  - 영향 페이지 (예: `/`, `/history`, `/voice` light + dark, desktop + mobile):
+  - baseline 갱신 명령 (참고): `cd web && npx playwright test --update-snapshots`
+
 ## 라벨 부여 확인
 - [ ] `type:*` 라벨 1개 부여 완료
 - [ ] `scope:*` 라벨 1개 부여 완료
