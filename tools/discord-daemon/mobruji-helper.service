@@ -32,6 +32,10 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # systemd 가 ExecStop=kill-session 후 ExecStart 가 새 tmux session 만들 때
 # 자식 process (claude) 가 직접 상속받도록 ENV 명시.
 Environment=MOBRUJI_HOOK_ACTOR=helper
+# 2026-05-29: Claude Code auto-updater 끄기 — helper TUI 가 "Auto-update failed"
+# prompt 로 input mode 차단되어 사용자 메시지 처리 불가 사고 영구 방지.
+# spec: docs/features/disable-claude-autoupdater.md.
+Environment=DISABLE_AUTOUPDATER=1
 ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; then /usr/bin/tmux new-session -d -s helper -c /home/mobruji/mobruji "/home/mobruji/.mobruji/helper-launch.sh"; fi'
 ExecStop=/usr/bin/tmux kill-session -t helper
 
