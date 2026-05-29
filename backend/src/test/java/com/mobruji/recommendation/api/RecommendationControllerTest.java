@@ -1,5 +1,6 @@
 package com.mobruji.recommendation.api;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -29,6 +31,7 @@ import com.mobruji.recommendation.domain.ScoredRecommendation;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
+import com.mobruji.web.GlobalExceptionHandler;
 
 /**
  * MockMvc 슬라이스 가드: {@link RecommendationController}.
@@ -43,6 +46,7 @@ import com.mobruji.song.domain.Song;
  * 슬라이스한다. spec 상 sessionId 는 body 내부 필드로 받으며 path 인증은 적용 대상 아님.
  */
 @WebMvcTest(RecommendationController.class)
+@Import(GlobalExceptionHandler.class)
 @ActiveProfiles("test")
 class RecommendationControllerTest {
 
@@ -93,7 +97,7 @@ class RecommendationControllerTest {
     }
 
     @Test
-    @DisplayName("POST /recommendations: sessionId blank → 400 (@NotBlank)")
+    @DisplayName("POST /recommendations: sessionId blank → 400 + fieldErrors[].field=sessionId + rejectedValue 마스킹")
     void create_blankSessionId_returns400() throws Exception {
         mockMvc.perform(post("/api/v1/recommendations")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -104,11 +108,16 @@ class RecommendationControllerTest {
                           "voiceRangeHigh": 72
                         }
                         """))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status", is(400)))
+                .andExpect(jsonPath("$.error", is("Bad Request")))
+                .andExpect(jsonPath("$.message").isNotEmpty())
+                // sessionId 의 rejectedValue 는 sensitive — 마스킹 의무 (보안 정책 §04-security-policy).
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'sessionId')].rejectedValue", hasItem("***")));
     }
 
     @Test
-    @DisplayName("POST /recommendations: voiceRangeLow null → 400 (@NotNull)")
+    @DisplayName("POST /recommendations: voiceRangeLow null → 400 + fieldErrors[].field=voiceRangeLow")
     void create_nullVoiceRangeLow_returns400() throws Exception {
         mockMvc.perform(post("/api/v1/recommendations")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -118,11 +127,12 @@ class RecommendationControllerTest {
                           "voiceRangeHigh": 72
                         }
                         """.formatted(SESSION_ID)))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'voiceRangeLow')]").exists());
     }
 
     @Test
-    @DisplayName("POST /recommendations: voiceRangeHigh > 119 → 400 (@Max)")
+    @DisplayName("POST /recommendations: voiceRangeHigh > 119 → 400 + 사용자에게 rejectedValue 200 노출")
     void create_voiceRangeHighOutOfRange_returns400() throws Exception {
         mockMvc.perform(post("/api/v1/recommendations")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -133,7 +143,42 @@ class RecommendationControllerTest {
                           "voiceRangeHigh": 200
                         }
                         """.formatted(SESSION_ID)))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'voiceRangeHigh')].rejectedValue", hasItem(200)));
+    }
+
+    @Test
+    @DisplayName("POST /recommendations: mood enum 미허용 값 → 400 + fieldErrors[].field=mood (HttpMessageNotReadable)")
+    void create_invalidMoodEnum_returns400WithFieldError() throws Exception {
+        mockMvc.perform(post("/api/v1/recommendations")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "sessionId": "%s",
+                          "voiceRangeLow": 48,
+                          "voiceRangeHigh": 72,
+                          "mood": "HAPPY"
+                        }
+                        """.formatted(SESSION_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'mood')]").exists())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'mood')].rejectedValue", hasItem("HAPPY")));
+    }
+
+    @Test
+    @DisplayName("POST /recommendations: sessionId 가 legacy sess_ 포맷 → 400 (@Pattern UUIDv4) + rejectedValue 마스킹")
+    void create_legacySessionIdPattern_returns400Masked() throws Exception {
+        mockMvc.perform(post("/api/v1/recommendations")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "sessionId": "sess_1709000000_abc123",
+                          "voiceRangeLow": 48,
+                          "voiceRangeHigh": 72
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'sessionId')].rejectedValue", hasItem("***")));
     }
 
     @Test
