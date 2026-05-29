@@ -81,6 +81,15 @@ PIN_REGISTERED_EMOJI: Final[str] = "✅"
 CONTROL_STOP_EMOJI: Final[str] = "⏹"  # SIGINT — helper claude tmux pane Ctrl-C
 CONTROL_WHY_EMOJI: Final[str] = "❓"  # 다음 turn 에 helper 가 직전 작업/결정 사유 설명
 
+# directive 적재 dialogue (dialogue_style="register") 의 3 button — 사용자
+# 의제: 1️⃣/2️⃣ keycap 의 OX 가 모호 → ⭕ 등록 / ✏️ 수정 / 🗑️ 제거 로 swap.
+# ✏️ click → agent 가 "어떤 점 수정?" 묻고 summary 정정 loop (max 3회).
+# 🗑️ click → directive 폐기 (agent path).
+REGISTER_DIALOGUE_EMOJIS: Final[list[str]] = ["⭕", "✏️", "🗑️"]
+REGISTER_DIALOGUE_EMOJI_TO_IDX: Final[dict[str, int]] = {
+    e: i for i, e in enumerate(REGISTER_DIALOGUE_EMOJIS)
+}
+
 # Discord keycap number emoji → 0-based index (1️⃣ = 0, 🔟 = 9).
 # 1-9 = digit + VS16 + keycap (U+FE0F U+20E3). 🔟 = U+1F51F.
 NUMBER_KEYCAP_TO_INDEX: Final[dict[str, int]] = {
@@ -1952,9 +1961,14 @@ async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
     """
     channel_id = int(payload.get("channel_id", 0))
     body = payload.get("body", "")
-    reply_to_msg_id = payload.get("reply_to_msg_id")
     thread_id = payload.get("thread_id")
     choices = payload.get("choices")
+    dialogue_style = payload.get("dialogue_style")
+
+    # 2026-05-30 — reply_to_msg_id path 폐기. 사용자 정정: "엉뚱한 메세지에 답글
+    # 걸어서 답한다 — 제대로 못할 거 같으면 제거". 옛 last-user-msg-id.txt +
+    # helper path 의 race + 사고. thread 안 메시지 자체가 컨텍스트 가시화 충분.
+    # payload.reply_to_msg_id 는 받아도 무시 (backwards compat).
 
     target_id = int(thread_id) if thread_id else channel_id
     channel = client.get_channel(target_id)
@@ -1963,36 +1977,37 @@ async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
         return
 
     reference = None
-    if reply_to_msg_id and not thread_id:
-        try:
-            reference = discord.MessageReference(
-                message_id=int(reply_to_msg_id),
-                channel_id=channel_id,
-                fail_if_not_exists=False,
-            )
-        except (ValueError, TypeError):
-            logger.warning("agent_reply: 잘못된 reply_to_msg_id=%r — ignore", reply_to_msg_id)
 
-    # choices 있으면 본문에 선택지 numbered list append
+    # choices 있으면 본문에 선택지 numbered list append.
+    # dialogue_style="register" (directive 적재 dialogue) 면 ⭕/✏️/🗑️ 3 button,
+    # 그 외 일반 N-choice 케이스 (사이클 결정 등) 는 keycap 1️⃣–🔟.
+    if isinstance(choices, list) and choices:
+        if dialogue_style == "register" and len(choices) <= len(REGISTER_DIALOGUE_EMOJIS):
+            choice_emojis = REGISTER_DIALOGUE_EMOJIS[:len(choices)]
+        else:
+            choice_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+                             "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][:len(choices[:10])]
+    else:
+        choice_emojis = []
+
     final_body = body
     if isinstance(choices, list) and choices:
-        choice_keycaps = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
-                          "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         choice_lines = "\n".join(
-            f"{choice_keycaps[i]} {c}" for i, c in enumerate(choices[:10])
+            f"{choice_emojis[i]} {c}" for i, c in enumerate(choices[:10])
         )
         final_body = f"{body}\n\n{choice_lines}"
 
     msg = await channel.send(content=final_body, reference=reference)
-    logger.info("agent_reply pushed: channel=%s len=%d", target_id, len(final_body))
+    logger.info(
+        "agent_reply pushed: channel=%s len=%d style=%s",
+        target_id, len(final_body), dialogue_style or "default",
+    )
 
-    # choices keycap reaction 부착 + ledger
+    # choices reaction 부착 + ledger
     if isinstance(choices, list) and choices:
-        choice_keycaps = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
-                          "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         for i in range(min(len(choices), 10)):
             try:
-                await msg.add_reaction(choice_keycaps[i])
+                await msg.add_reaction(choice_emojis[i])
             except Exception as exc:  # noqa: BLE001
                 logger.warning("agent_reply choice reaction 부착 실패 i=%d exc=%r", i, exc)
         # ledger — message_id → choices list 저장 (on_raw_reaction_add 가 lookup)
@@ -6421,77 +6436,92 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
             return
 
-        # keycap (1️⃣–🔟) 선택지 응답 분기.
+        # 선택지 응답 분기 — keycap (1️⃣–🔟) 또는 register dialogue 3 button
+        # (⭕ 등록 / ✏️ 수정 / 🗑️ 제거). 둘 중 매칭 못 하면 ignore.
         choice_idx = parse_choice_emoji(emoji_str)
+        if choice_idx is None:
+            choice_idx = REGISTER_DIALOGUE_EMOJI_TO_IDX.get(emoji_str)
         if choice_idx is None:
             return
 
         bot_msg_id = str(raw_payload.message_id)
         register = lookup_choice_prompt(bot_msg_id)
-        if register is None:
-            return  # not a registered choice prompt or already consumed
+        # 2026-05-30 — agent SDK choice_prompt fallback. legacy ledger 미등록 +
+        # agent path (events.choice_prompt) 만 등록된 케이스 (사용자 보고
+        # "O 눌렀는데 무반응") 해소. 어느 한 path 라도 등록돼 있으면 처리.
+        agent_choice_value: str | None = None
+        try:
+            agent_choice_value = _lookup_agent_choice(bot_msg_id, choice_idx)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent choice lookup 실패: %r", exc)
 
-        choices = register.get("choices") or []
-        if not isinstance(choices, list) or choice_idx >= len(choices):
-            return
-        label = str(choices[choice_idx])
+        if register is None and agent_choice_value is None:
+            return  # 미등록 message — silent skip
+
+        if register is not None:
+            choices = register.get("choices") or []
+            if not isinstance(choices, list) or choice_idx >= len(choices):
+                return
+            label = str(choices[choice_idx])
+        else:
+            # agent path 만 — label 은 agent value 그대로.
+            label = agent_choice_value or ""
 
         # dedup — Gateway reconnect / 사용자 toggle reaction race 가드.
         dedup_key = f"choice:{bot_msg_id}:{choice_idx}"
         if ledger is not None and not ledger.claim(dedup_key):
             return
 
-        mark_choice_consumed(
-            message_id=bot_msg_id,
-            choice_idx=choice_idx,
-            user_id=str(raw_payload.user_id),
-        )
+        if register is not None:
+            mark_choice_consumed(
+                message_id=bot_msg_id,
+                choice_idx=choice_idx,
+                user_id=str(raw_payload.user_id),
+            )
 
-        synthetic_text = f"[choice {choice_idx + 1}/{len(choices)}] {label}"
+        synthetic_text = f"[choice {choice_idx + 1}] {label}"
         ts_iso = datetime.now(timezone.utc).isoformat()
-        payload: dict[str, str] = {
-            "text": synthetic_text,
-            "author": str(raw_payload.user_id),
-            "author_name": "<reaction-choice>",
-            "ts": ts_iso,
-            "message_id": dedup_key,
-            "channel_id": str(raw_payload.channel_id),
-        }
 
         logger.info(
-            "choice reaction received: bot_msg=%s idx=%d label=%r user=%s",
+            "choice reaction received: bot_msg=%s idx=%d label=%r user=%s "
+            "register=%s agent=%s",
             bot_msg_id,
             choice_idx,
             label,
             raw_payload.user_id,
+            register is not None,
+            agent_choice_value is not None,
         )
 
-        append_inbox(payload)
         # helper 답 push 시 reply target = choice prompt message (시각적 연결).
         write_last_user_msg_id(bot_msg_id)
 
-        if not ensure_tmux_session(session_name, claude_bin):
-            logger.warning(
-                "choice reaction tmux 세션 확보 실패 — dropped: bot_msg=%s",
-                bot_msg_id,
-            )
-            return
-        if not tmux_send_payload(target_pane, synthetic_text):
-            logger.warning(
-                "choice reaction tmux send 실패 — dropped: bot_msg=%s",
-                bot_msg_id,
-            )
-            return
+        # legacy path — register OK 시만 helper tmux send. agent SDK only path
+        # (register None) 는 tmux send skip 후 agent INSERT 만.
+        if register is not None:
+            legacy_payload: dict[str, str] = {
+                "text": synthetic_text,
+                "author": str(raw_payload.user_id),
+                "author_name": "<reaction-choice>",
+                "ts": ts_iso,
+                "message_id": dedup_key,
+                "channel_id": str(raw_payload.channel_id),
+            }
+            append_inbox(legacy_payload)
+            if not ensure_tmux_session(session_name, claude_bin):
+                logger.warning(
+                    "choice reaction tmux 세션 확보 실패 — legacy path skip: "
+                    "bot_msg=%s",
+                    bot_msg_id,
+                )
+            elif not tmux_send_payload(target_pane, synthetic_text):
+                logger.warning(
+                    "choice reaction tmux send 실패 — legacy path skip: "
+                    "bot_msg=%s",
+                    bot_msg_id,
+                )
 
-        # 2026-05-29 — agent SDK path 도 choice 처리. events.choice_prompt lookup
-        # → 선택 value 추출 → user_message INSERT (body = 선택 value, thread_id
-        # 동일). agent_loop 가 next polling 시 그것을 SDK query 호출.
-        try:
-            choice_value = _lookup_agent_choice(bot_msg_id, choice_idx)
-        except Exception as exc:  # noqa: BLE001
-            choice_value = None
-            logger.warning("agent choice lookup 실패: %r", exc)
-        if choice_value is not None:
+        if agent_choice_value is not None:
             # 사용자 thread (사용자 reaction 채널) — agent_reply 가 push 한 thread
             user_thread_id = str(raw_payload.channel_id)
             append_agent_event("user_message", {
@@ -6500,12 +6530,12 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 "thread_id": user_thread_id if user_thread_id != str(target_channel_id) else "",
                 "user_id": str(raw_payload.user_id),
                 "user_name": "<reaction-choice>",
-                "body": choice_value,
+                "body": agent_choice_value,
                 "ts_iso": datetime.now(timezone.utc).isoformat(),
             })
             logger.info(
                 "agent choice → user_message INSERT: bot_msg=%s idx=%d value=%r",
-                bot_msg_id, choice_idx, choice_value[:40],
+                bot_msg_id, choice_idx, agent_choice_value[:40],
             )
 
     return client

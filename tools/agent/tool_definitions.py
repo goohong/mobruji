@@ -48,9 +48,14 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
     name="post_discord_message",
     description=(
         "Discord 채널 또는 thread 에 message push. "
-        "선택지 묻는 케이스 (cycle 결정, O/X, 우선순위 등) 는 `choices` 인자에 "
-        "최대 10 선택지 list 전달 — bot 가 keycap reaction (1️⃣-🔟) 미리 부착, "
-        "사용자 tap 시 그 선택지 value 가 새 user_message 로 들어옴. 단순 답이면 choices 생략."
+        "선택지 묻는 케이스 (cycle 결정, 우선순위 등) 는 `choices` 인자에 "
+        "최대 10 선택지 list 전달 — bot 가 keycap reaction (1️⃣–🔟) 미리 부착, "
+        "사용자 tap 시 그 value 가 새 user_message 로 들어옴. "
+        "**directive 적재 dialogue 케이스 (📌 → 사용자에게 작업 큐 등록 확인)** "
+        "는 `dialogue_style='register'` 명시 — bot 가 keycap 대신 "
+        "⭕ 등록 / ✏️ 수정 / 🗑️ 제거 3 button 부착. choices 는 정확히 3개 "
+        "(`['등록','수정','제거']`) 로 보내고 body 는 '다음 지시를 작업 큐에 "
+        "등록할까요?' 같이 자연 한국어. 단순 답이면 choices 생략."
     ),
     input_schema={
         "channel_id": str,
@@ -58,12 +63,13 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
         "reply_to_msg_id": str,
         "thread_id": str,
         "choices": list,  # optional — 선택지 list (str). 최대 10.
+        "dialogue_style": str,  # optional — "register" 또는 "default".
     },
 )
 async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
     try:
         # B안 가시화 + 선택지 UI (2026-05-29) — choices payload 에 포함.
-        # bot.py _push_agent_reply 가 choices 보고 keycap reaction 부착.
+        # bot.py _push_agent_reply 가 choices + dialogue_style 보고 emoji 부착.
         choices_raw = args.get("choices")
         choices = (
             [str(c)[:80] for c in choices_raw[:10]]
@@ -76,6 +82,7 @@ async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
             reply_to_msg_id=args.get("reply_to_msg_id") or None,
             thread_id=args.get("thread_id") or None,
             choices=choices,
+            dialogue_style=args.get("dialogue_style") or None,
         )
         return _wrap_result(result)
     except Exception as exc:  # noqa: BLE001
