@@ -5773,6 +5773,43 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             forum_channel_ids["rev"] or "unset",
             forum_channel_ids["plan"] or "unset",
         )
+        # 2026-05-29 — forum 채널 5개 의 bot 권한 probe. 사용자 보고
+        # "forum 채널 자체에 단 댓글 답 0" root cause 추적: on_message event 자체
+        # 미수신 → bot 권한 부재 가설. View Channel + Read Message History 가
+        # forum thread message_create event 수신의 필요조건.
+        for forum_kind, forum_id in forum_channel_ids.items():
+            if not forum_id:
+                continue
+            forum_channel = None
+            forum_guild = None
+            for guild in client.guilds:
+                candidate = guild.get_channel(forum_id)
+                if candidate is not None:
+                    forum_channel = candidate
+                    forum_guild = guild
+                    break
+            if forum_channel is None:
+                logger.warning(
+                    "forum permission probe: kind=%s id=%s NOT VISIBLE — bot 가 "
+                    "채널 보지 못함 (Role 미부여 또는 권한 부재). 사용자 Discord "
+                    "UI 에서 채널별 권한 부여 필요.",
+                    forum_kind,
+                    forum_id,
+                )
+                continue
+            bot_member = forum_guild.me  # type: ignore[union-attr]
+            perms = forum_channel.permissions_for(bot_member)
+            logger.info(
+                "forum permission probe: kind=%s id=%s name=%r view=%s "
+                "read_history=%s send_in_threads=%s create_public_threads=%s",
+                forum_kind,
+                forum_id,
+                forum_channel.name,
+                perms.view_channel,
+                perms.read_message_history,
+                perms.send_messages_in_threads,
+                perms.create_public_threads,
+            )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
             # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
             client._digest_task_started = True  # type: ignore[attr-defined]
