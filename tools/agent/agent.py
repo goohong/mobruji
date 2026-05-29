@@ -170,28 +170,33 @@ AGENT_EVENT_KINDS: frozenset[str] = frozenset({
 # ─── event handlers ──────────────────────────────────────────────────────────
 
 
-NMAE_SYSTEM_PROMPT = """\
-너는 mobruji 의 nmae — Discord 기반 노래방 추천 서비스의 orchestration agent.
+def _load_nmae_system_prompt() -> str:
+    """nmae-role.md (repo SoT, NCP symlink ~/.mobruji/nmae-role.md) 에서 로드.
 
-[역할]
-- 사용자 Discord 메시지를 받아 작업을 4 cycle (be / fe / rev / plan) 에 위임.
-- be: Spring Boot 백엔드. fe: Next.js 프론트엔드. rev: 코드 리뷰 / QA. plan: 큰 spec / ADR.
-- 단순 정보 / 답변 가능한 질문이면 직접 답 (post_discord_message).
-- 작업 위임이 필요하면 (1) register_directive_pending 으로 directive 등록 →
-  (2) launch_subagent 로 cycle 시작.
+    2026-05-29 Phase D STRICT 룰 (자동 위임 폐기) — agent.py 에 하드코딩하면
+    nmae-role.md 와 분리되어 룰 drift 발생 (사용자 정정: agent 가 자율 directive
+    등록 시도). 단일 SoT 로 통일.
 
-[규칙]
-1. 사용자 메시지 받으면 **항상** post_discord_message 한 번 호출 (답 또는 진행 알림).
-2. paused 모드 (사이클 정지) 면 launch_subagent reject — 사용자 정정 / 단순 답만.
-3. plan cycle 위임 시 delegation_reason 명시.
-4. release / 파괴적 작업은 사용자 확인 받기 (직접 launch 금지).
-5. 4 cycle 중복 launch 금지 — in_flight_agents lock 확인.
+    fallback: file 부재 시 minimal STRICT 룰 (자동 위임 폐기 핵심만).
+    """
+    from pathlib import Path as _Path
+    for candidate in (
+        _Path.home() / ".mobruji" / "nmae-role.md",
+        _Path(__file__).resolve().parent.parent / "discord-daemon" / "nmae-role.md",
+    ):
+        try:
+            if candidate.exists():
+                return candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return (
+        "[STRICT] 너는 mobruji nmae. 사용자가 명시 적재 (events 'directive_approved') "
+        "한 directive 만 처리. 사용자 메시지 직접 처리 X — 단순 답 또는 '📌 누르세요' "
+        "안내. launch_subagent 는 directive_approved event 만 trigger."
+    )
 
-[도구 사용]
-- 12 tool 만 사용 (정의 안 된 작업 불가).
-- launch_subagent 의 directive_id 인자는 register_directive_pending 의 결과.
-- forum_comment 만 사용, forum_create_thread 는 register_directive_pending 안에서만 호출됨.
-"""
+
+NMAE_SYSTEM_PROMPT = _load_nmae_system_prompt()
 
 
 async def handle_user_message(payload: dict[str, Any]) -> None:
