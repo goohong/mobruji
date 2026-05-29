@@ -208,6 +208,21 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
     # stream 은 모두 그 thread 안. fallback: thread_id 빈 문자열이면 채널 push.
     thread_id = payload.get("thread_id", "")
 
+    # 2026-05-29 fix — invalid event (fake user_id / channel_id) drop.
+    # events 테이블에 외부 INSERT 된 stale test data (user_id=111, channel=999 등)
+    # 가 agent_loop 의 SDK query 호출을 방해 → 실제 사용자 메시지 처리 차단.
+    # ALLOWED_USER_IDS env (bot.py 와 같은 .env) 기준 — 그 외 drop.
+    import os as _os
+    allowed_raw = _os.environ.get("ALLOWED_USER_IDS", "")
+    if allowed_raw:
+        allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()}
+        if str(user_id) not in allowed:
+            logger.warning(
+                "user_message drop: user_id=%s not in ALLOWED_USER_IDS (channel=%s body=%r)",
+                user_id, channel_id, body[:60],
+            )
+            return
+
     try:
         from claude_agent_sdk import query, ClaudeAgentOptions  # type: ignore[import-not-found]
     except ImportError as exc:
