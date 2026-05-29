@@ -373,8 +373,8 @@ CHOICE_KEYCAPS_URLENC=(
 #      세부 부분만 disable (default 둘 다 ENABLED=1).
 #   B) bare body 자동 hook — bare body 본답 push 호출 시 자동으로 (a) ✍️ reaction +
 #      typing → push → (c) ✍️ remove 수행. helper 본체가 명시 호출을 까먹어도 강제
-#      가시화. 회귀 안전을 위해 default OFF — `BOT_WRITING_AUTO_HOOK_ENABLED=1` 로
-#      옵트인.
+#      가시화. 2026-05-29 PR #1252 §10-1 결정에 따라 default ON 전환 —
+#      `BOT_WRITING_AUTO_HOOK_ENABLED=0` 명시로 roll-back 가능.
 #
 # default emoji: ✍️ (U+270D + U+FE0F variation selector) — URL-encoded
 # `%E2%9C%8D%EF%B8%8F`. Discord API 는 unicode emoji 를 URL-encoded 형태로 받음.
@@ -382,10 +382,11 @@ CHOICE_KEYCAPS_URLENC=(
 BOT_WRITING_REACTION_EMOJI="${BOT_WRITING_REACTION_EMOJI:-%E2%9C%8D%EF%B8%8F}"
 BOT_WRITING_REACTION_ENABLED="${BOT_WRITING_REACTION_ENABLED:-1}"
 BOT_TYPING_INDICATOR_ENABLED="${BOT_TYPING_INDICATOR_ENABLED:-1}"
-# bare body 자동 hook — default OFF. 명시 호출 (--writing-marker / --writing-done)
-# 와 두 path 분리. 운영 단계에서 helper 본체가 `--writing-marker` 호출 룰을
-# 안정적으로 학습하면 1 로 전환해 자동화 보강 가능 (docs/ai-harness/actors/helper.md 참고).
-BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-0}"
+# bare body 자동 hook — default ON (2026-05-29 PR #1252 §10-1).
+# 명시 호출 (--writing-marker / --writing-done) 과 두 path 분리. helper 본체가 OFF
+# 호출을 까먹어도 fallback OFF 보장 → ✍️ 잔존 0건. 회귀 roll-back 시
+# `BOT_WRITING_AUTO_HOOK_ENABLED=0` 명시 (systemd/launchd unit env 또는 ad-hoc).
+BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-1}"
 
 # Discord API retry 설정 (#911 G-6).
 # 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
