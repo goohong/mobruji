@@ -4706,111 +4706,10 @@ async def claude_usage_watch_loop(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def directive_register_watch_loop(
-    client: "discord.Client",
-    notify_channel_id: int,
-    *,
-    detect_path: Path = DIRECTIVE_DETECT_PATH_DEFAULT,
-    board_path: Path = DIRECTIVE_BOARD_JSONL_PATH_DEFAULT,
-    poll_interval: int = DIRECTIVE_DETECT_WATCH_DEFAULT_INTERVAL_SECONDS,
-    window_minutes: int = DIRECTIVE_DETECT_WATCH_DEFAULT_WINDOW_MINUTES,
-    grace_count: int = DIRECTIVE_DETECT_WATCH_DEFAULT_GRACE_COUNT,
-    debounce_seconds: int = DIRECTIVE_DETECT_WATCH_DEBOUNCE_SECONDS,
-    initial_delay: int = 180,
-) -> None:
-    """directive-detect.jsonl ↔ directive-board.jsonl mismatch 감시 loop (#1071).
-
-    배경 (사용자 P0 frustration, 2026-05-24):
-        "내가 지시한 거 왜 지시 forum에 추가 안해". helper 가 사용자 directive 메시지를
-        받았지만 forum 등록을 까먹는 사고. 메모리 룰 학습만으로는 누락 반복 →
-        watchdog 으로 mismatch 감지 + 사용자 채널 push.
-
-    동작:
-        1. ``initial_delay`` 초 warmup 후 polling 시작.
-        2. ``poll_interval`` 초 마다 ``detect_mismatch`` 로 directive-detect 와
-           directive-board 의 최근 ``window_minutes`` 분 카운트 비교.
-        3. ``detect_count > board_count + grace_count`` 면 mismatch — MOBRUJI 채널 push.
-        4. ``debounce_seconds`` 안 같은 mismatch 재 push 안 함 (중복 noise 차단).
-        5. graceful — 파일 부재 / parse 실패는 카운트 0 처리, 절대 loop 중단 X.
-
-    Args:
-        client: discord.Client (이미 connected)
-        notify_channel_id: 사용자 응답 채널 id (MOBRUJI_CHANNEL_ID, int)
-        detect_path: directive-detect.jsonl (on_message 기록)
-        board_path: directive-board.jsonl (forum 등록 SoT)
-        poll_interval: 10분 default
-        window_minutes: 60 default
-        grace_count: 5 default (사용자 메시지 직후 helper 가 forum 등록 처리 중 일 수
-            있는 grace)
-        debounce_seconds: 1h default
-        initial_delay: 3분 warmup
-    """
-    if poll_interval <= 0:
-        logger.info("directive_register_watch_loop disabled (poll_interval<=0)")
-        return
-    if notify_channel_id <= 0:
-        logger.info(
-            "directive_register_watch_loop disabled (notify_channel_id 유효하지 않음)"
-        )
-        return
-
-    await asyncio.sleep(initial_delay)
-    last_push_ts: float = 0.0
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-            snapshot = directive_detect_mismatch(
-                detect_path=detect_path,
-                board_path=board_path,
-                now=now,
-                window_minutes=window_minutes,
-                grace_count=grace_count,
-            )
-            logger.info(
-                "directive_register_watch: window=%dmin detect=%d board=%d "
-                "mismatch=%s",
-                snapshot.window_minutes,
-                snapshot.detect_count,
-                snapshot.board_count,
-                snapshot.mismatch,
-            )
-            if snapshot.mismatch:
-                now_ts = now.timestamp()
-                if now_ts - last_push_ts < debounce_seconds:
-                    logger.info(
-                        "directive_register_watch: mismatch but debounce active "
-                        "(remaining=%ds)",
-                        int(debounce_seconds - (now_ts - last_push_ts)),
-                    )
-                else:
-                    message = directive_format_mismatch_push(snapshot)
-                    channel = client.get_channel(notify_channel_id)
-                    if channel is None:
-                        logger.warning(
-                            "directive_register_watch push 실패 — channel id=%d 미발견",
-                            notify_channel_id,
-                        )
-                    else:
-                        try:
-                            await channel.send(message)
-                            last_push_ts = now_ts
-                            logger.info(
-                                "directive_register_watch push OK: detect=%d board=%d",
-                                snapshot.detect_count,
-                                snapshot.board_count,
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning(
-                                "directive_register_watch push 실패: %s",
-                                exc,
-                                exc_info=True,
-                            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("directive_register_watch_loop iter 실패: %s", exc)
-        record_loop_heartbeat("directive_detect_register_watch_loop")
-        await asyncio.sleep(poll_interval)
+# 2026-05-29 폐기: directive_register_watch_loop (옛 design 의 자동 분류 등록 가정).
+# 새 design 은 사용자 📌 만 directive 등록 trigger — detect (모든 메시지) vs board
+# (📌 적재만) 비교는 본질적으로 항상 mismatch. noise 알림 제거.
+# directive-detect.jsonl 자체는 분류 로그로 보존 — 회고 / 통계 용도.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -6047,38 +5946,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not thread_cleanup_enabled:
             logger.info("thread_cleanup_loop disabled (THREAD_CLEANUP_ENABLED=0)")
 
-        # directive-detect register watchdog loop (#1071).
-        # 10분 polling — detect (queue) vs board (forum) mismatch 감지 + MOBRUJI push.
-        # 사용자 P0 frustration "내가 지시한 거 왜 지시 forum에 추가 안해" 직접 fix.
-        if directive_detect_watch_enabled and not hasattr(
-            client, "_directive_detect_watch_task_started"
-        ):
-            client._directive_detect_watch_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                directive_register_watch_loop(
-                    client,
-                    target_channel_id,
-                    detect_path=DIRECTIVE_DETECT_PATH_DEFAULT,
-                    board_path=directive_board_jsonl_path,
-                    poll_interval=directive_detect_watch_interval,
-                    window_minutes=directive_detect_watch_window_minutes,
-                    grace_count=directive_detect_watch_grace,
-                )
-            )
-            logger.info(
-                "directive_register_watch_loop launched: channel=%d interval=%ds "
-                "window=%dmin grace=%d detect_path=%s board_path=%s",
-                target_channel_id,
-                directive_detect_watch_interval,
-                directive_detect_watch_window_minutes,
-                directive_detect_watch_grace,
-                DIRECTIVE_DETECT_PATH_DEFAULT,
-                directive_board_jsonl_path,
-            )
-        elif not directive_detect_watch_enabled:
-            logger.info(
-                "directive_register_watch_loop disabled (DIRECTIVE_DETECT_WATCH_ENABLED=0)"
-            )
+        # 2026-05-29 폐기: directive-detect register watchdog loop launch.
+        # 새 design 은 사용자 📌 만 directive 등록 trigger — detect (모든 메시지) vs
+        # board (📌 적재만) 비교가 본질적으로 항상 mismatch. noise 알림 폐기.
 
         # Loop heartbeat watchdog (#1087, 2026-05-26 사용자 P0).
         # 다른 watchdog loop 들이 silent crash 시 가시화.
