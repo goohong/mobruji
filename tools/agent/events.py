@@ -37,6 +37,10 @@ EventKind = Literal[
     "directive_registered",
     "directive_polished",
     "directive_status_changed",
+    # Phase F (2026-05-29) — 사용자 O click → directive 적재 완료 + agent launch trigger.
+    # 사용자가 PinDialogueView 의 ⭕ button click → bot.py 가 events INSERT.
+    # agent.py 의 handle_directive_approved 가 consume → cycle 위임 결정 → launch_subagent.
+    "directive_approved",
     # webhook (PR 머지)
     "pr_merged",
 ]

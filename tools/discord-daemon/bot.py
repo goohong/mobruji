@@ -1516,8 +1516,20 @@ class PinDialogueView(discord.ui.View):
             channel=self._register_channel,
             summary=self._polished[:80],
         )
+        # Phase F (2026-05-29) — events 'directive_approved' INSERT → agent.py
+        # handle_directive_approved 가 consume → cycle 위임 결정 → launch_subagent.
+        # nmae 의 자동 위임 path 폐기 (Phase D), event-driven 만 trigger.
+        append_agent_event("directive_approved", {
+            "directive_id": self._target_message_id,
+            "summary": self._raw_summary,
+            "description": self._polished,
+            "user_id": str(self._target_user_id),
+            "channel_id": str(getattr(self._register_channel, "id", "")),
+            "thread_id": str(getattr(self._thread, "id", "")),
+            "revision_count": self._revision_count,
+        })
         await interaction.edit_original_response(
-            content=f"✅ 등록 완료.\n\n{self._polished}",
+            content=f"✅ 등록 완료 + nmae 분배 trigger.\n\n{self._polished}",
         )
         # thread 자동 archive
         try:

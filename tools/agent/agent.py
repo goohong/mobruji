@@ -45,6 +45,8 @@ AGENT_EVENT_KINDS: frozenset[str] = frozenset({
     "user_resume",
     "pr_merged",
     "subagent_completed",
+    # Phase E (2026-05-29) — 사용자 적재 directive → cycle 분배 + launch_subagent.
+    "directive_approved",
 })
 
 
@@ -154,6 +156,81 @@ async def handle_subagent_completed(payload: dict[str, Any]) -> None:
         logger.info("subagent_completed: %s", cycle)
 
 
+DIRECTIVE_APPROVED_PROMPT = """\
+[directive_approved event] 사용자가 다음 directive 를 적재했습니다 (📌 → O/X dialogue → ⭕ 등록 click).
+
+directive_id: {directive_id}
+summary: {summary}
+polished_description: {description}
+suggested_cycle_hint: {cycle_hint}
+
+위 directive 를 처리하세요:
+1. 적절한 cycle (be / fe / rev / plan) 결정 — summary + description 의 내용 보고 판단.
+2. plan 위임 시 delegation_reason 명시 (신규 도메인, 다중 PR, 사용자 의도 분석 필요 등).
+3. launch_subagent tool 호출 — directive_id, cycle, title, task 인자.
+4. paused 모드면 launch_subagent 가 PausedError raise — 사용자에게 알림 (post_discord_message).
+
+사용자 메시지 직접 처리 X (메시지는 이미 적재 완료 — 단순 launch 만).
+"""
+
+
+async def handle_directive_approved(payload: dict[str, Any]) -> None:
+    """사용자 O click 으로 적재된 directive → cycle 분배 + launch_subagent.
+
+    payload 예시 (bot.py 의 PinDialogueView ⭕ button 이 INSERT):
+    {
+        "directive_id": "1509...",
+        "summary": "추천 API 400 fix",
+        "description": "...polished 4 항목 markdown...",
+        "cycle_hint": "be",  # optional
+        "user_id": "123",
+        "channel_id": "1506...",
+    }
+    """
+    directive_id = payload.get("directive_id")
+    if not directive_id:
+        logger.warning("directive_approved: directive_id 누락 — skip payload=%s", payload)
+        return
+
+    summary = payload.get("summary", "")
+    description = payload.get("description", "")
+    cycle_hint = payload.get("cycle_hint", "")
+
+    logger.info(
+        "directive_approved: directive_id=%s cycle_hint=%s — SDK query 시작",
+        directive_id, cycle_hint,
+    )
+
+    try:
+        from claude_agent_sdk import query, ClaudeAgentOptions  # type: ignore[import-not-found]
+        from tool_definitions import ALL_TOOLS  # noqa: F401 — SDK reflection
+    except ImportError as exc:
+        logger.warning(
+            "claude_agent_sdk 미설치 — directive_approved fallback (log only): %r", exc,
+        )
+        return
+
+    from agent import NMAE_SYSTEM_PROMPT  # type: ignore[import-not-found] — same module
+    options = ClaudeAgentOptions(
+        system_prompt=NMAE_SYSTEM_PROMPT,
+        permission_mode="acceptEdits",
+    )
+
+    prompt = DIRECTIVE_APPROVED_PROMPT.format(
+        directive_id=directive_id,
+        summary=summary,
+        description=description,
+        cycle_hint=cycle_hint or "(자동 판단)",
+    )
+
+    try:
+        async for message in query(prompt=prompt, options=options):
+            logger.debug("SDK directive_approved message: %r", message)
+        logger.info("directive_approved handled: directive_id=%s", directive_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("SDK query 실패 directive_id=%s: %r", directive_id, exc)
+
+
 HANDLERS = {
     "user_message": handle_user_message,
     "user_reaction": handle_user_message,  # Phase 1.4 stub — 동일 path
@@ -161,6 +238,8 @@ HANDLERS = {
     "user_resume": handle_user_resume,
     "pr_merged": handle_pr_merged,
     "subagent_completed": handle_subagent_completed,
+    # Phase E (2026-05-29) — 사용자 적재 directive 처리
+    "directive_approved": handle_directive_approved,
 }
 
 
