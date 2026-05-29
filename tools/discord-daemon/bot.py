@@ -5837,8 +5837,12 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info("context auto-clear disabled (CONTEXT_AUTO_CLEAR_ENABLED=0)")
 
         # nmae cycle watchdog (#941, spec: docs/features/nmae-cycle-watchdog.md).
-        # 5분 polling cycle-status.json — idle 워크트리 자동 nmae 알림 + Discord push.
-        if cycle_idle_watch_enabled and not hasattr(
+        # 2026-05-29 폐기 — agent SDK design 에서 nmae 자동 위임 path 폐기됨
+        # (STRICT 룰 — directive_approved event 통해서만 launch). idle alert /
+        # escalation push 가 nmae 에 자동 trigger 보내는 path 가 새 design 위반.
+        # cycle_idle_watch_loop disabled (env 토글 무관). 함수 자체는 dead code 로
+        # 유지 — 후속 PR 에서 함수 정의 + escalation 헬퍼 정리.
+        if False and cycle_idle_watch_enabled and not hasattr(
             client, "_cycle_idle_watch_task_started"
         ):
             client._cycle_idle_watch_task_started = True  # type: ignore[attr-defined]
@@ -6213,38 +6217,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     exc_info=True,
                 )
 
-        # secondary reaction (#1080) — primary auto-ack 직후 nmae 점유 상태를
-        # emoji 로 시각화. cycle-status.json 부재 / parse 실패 시 silent skip.
-        # auto-ack 와 독립적인 try/except — primary 가 실패해도 secondary 시도.
-        if bot_secondary_reaction_enabled:
-            try:
-                secondary_emoji = classify_nmae_status(
-                    cycle_status_path,
-                    emoji_idle=bot_secondary_reaction_emoji_idle,
-                    emoji_partial=bot_secondary_reaction_emoji_partial,
-                    emoji_full=bot_secondary_reaction_emoji_full,
-                )
-                if secondary_emoji is not None:
-                    await message.add_reaction(secondary_emoji)
-                    logger.info(
-                        "bot secondary reaction OK: message_id=%s emoji=%s",
-                        message_id,
-                        secondary_emoji,
-                    )
-                else:
-                    logger.info(
-                        "bot secondary reaction skip (cycle-status 없음/깨짐): "
-                        "message_id=%s",
-                        message_id,
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "bot secondary reaction 실패: message_id=%s exc=%r",
-                    message_id,
-                    exc,
-                    exc_info=True,
-                )
-
         # 📌 directive 등록 후보 marker (spec: directive-pushpin-registration.md).
         # 매 사용자 메시지에 📌 자동 부착 (passive). 사용자가 추적 원하는 메시지에서
         # 📌 tap 시 `on_raw_reaction_add` 의 📌 분기가 directive_append.sh 호출.
@@ -6259,26 +6231,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "📌 pin marker 부착 실패: message_id=%s exc=%r",
-                message_id,
-                exc,
-                exc_info=True,
-            )
-
-        # ⏹ control emoji 자동 부착 (2026-05-29).
-        # 사용자 정정: "stop button은 내가 보낸 메세지에 붙는게 맞는거같은데".
-        # ⏹ 의 의미 = 이 명령으로 시작된 helper 작업 중단 → 사용자 자기 메시지에 부착.
-        # tap 시 on_raw_reaction_add 의 ⏹ branch 가 helper claude 에 Ctrl-C send.
-        # (❓ 는 helper 답 메시지에 부착 — discord-reply.sh 가 처리.)
-        try:
-            await message.add_reaction(CONTROL_STOP_EMOJI)
-            logger.info(
-                "⏹ control marker OK: message_id=%s emoji=%s",
-                message_id,
-                CONTROL_STOP_EMOJI,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "⏹ control marker 부착 실패: message_id=%s exc=%r",
                 message_id,
                 exc,
                 exc_info=True,
