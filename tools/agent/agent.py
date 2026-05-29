@@ -37,6 +37,36 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 1.0
 EVENTS_BATCH_SIZE = 10
 
+
+_MCP_SERVER_CACHE: object | None = None
+
+
+def _get_mcp_server():  # noqa: ANN202 — SDK return type 미공개
+    """MCP server (12 tool 묶음) lazy singleton.
+
+    SDK docs: create_sdk_mcp_server(name, version, tools=[@tool decorated fns]).
+    """
+    global _MCP_SERVER_CACHE
+    if _MCP_SERVER_CACHE is not None:
+        return _MCP_SERVER_CACHE
+    from claude_agent_sdk import create_sdk_mcp_server  # type: ignore[import-not-found]
+    from tool_definitions import ALL_TOOLS
+    _MCP_SERVER_CACHE = create_sdk_mcp_server(
+        name="nmae", version="1.0.0", tools=ALL_TOOLS,
+    )
+    return _MCP_SERVER_CACHE
+
+
+def _get_allowed_tools() -> list[str]:
+    """allowed_tools list — MCP 명명 규칙 (mcp__<server>__<tool>)."""
+    from tool_definitions import ALL_TOOLS
+    names: list[str] = []
+    for t in ALL_TOOLS:
+        tool_name = getattr(t, "name", None) or getattr(t, "__name__", "")
+        if tool_name:
+            names.append(f"mcp__nmae__{tool_name}")
+    return names
+
 # agent 가 처리할 event kind list (bot.py 는 'agent_*' 처리).
 AGENT_EVENT_KINDS: frozenset[str] = frozenset({
     "user_message",
@@ -90,7 +120,6 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
 
     try:
         from claude_agent_sdk import query, ClaudeAgentOptions  # type: ignore[import-not-found]
-        from tool_definitions import ALL_TOOLS
     except ImportError as exc:
         logger.warning(
             "claude_agent_sdk import 실패 (Phase 2 미설치) — fallback to log only: %r", exc,
@@ -104,12 +133,14 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
     options = ClaudeAgentOptions(
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
+        mcp_servers={"nmae": _get_mcp_server()},
+        allowed_tools=_get_allowed_tools(),
     )
 
     user_prompt = (
         f"[사용자 메시지] (message_id={message_id}, channel_id={channel_id}, user_id={user_id})\n\n"
         f"{body}\n\n"
-        f"위 메시지를 처리. 답이 필요하면 post_discord_message 호출 "
+        f"위 메시지를 처리. 답이 필요하면 mcp__nmae__post_discord_message 호출 "
         f"(channel_id='{channel_id}', reply_to_msg_id='{message_id}')."
     )
 
@@ -207,17 +238,17 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
 
     try:
         from claude_agent_sdk import query, ClaudeAgentOptions  # type: ignore[import-not-found]
-        from tool_definitions import ALL_TOOLS  # noqa: F401 — SDK reflection
     except ImportError as exc:
         logger.warning(
             "claude_agent_sdk 미설치 — directive_approved fallback (log only): %r", exc,
         )
         return
 
-    from agent import NMAE_SYSTEM_PROMPT  # type: ignore[import-not-found] — same module
     options = ClaudeAgentOptions(
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
+        mcp_servers={"nmae": _get_mcp_server()},
+        allowed_tools=_get_allowed_tools(),
     )
 
     prompt = DIRECTIVE_APPROVED_PROMPT.format(
