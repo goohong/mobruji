@@ -1,0 +1,6 @@
+# Phase 1.1 — agent venv (옵션 1, tools/agent/venv/) gitignore.
+venv/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
