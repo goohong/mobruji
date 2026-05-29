@@ -404,7 +404,9 @@ async def agent_loop(stop_event: asyncio.Event) -> None:
     logger.info("agent_loop started — poll interval=%.1fs", POLL_INTERVAL_SECONDS)
     while not stop_event.is_set():
         try:
-            events = ev.read_unconsumed_events("agent", limit=EVENTS_BATCH_SIZE)
+            events = ev.read_unconsumed_events(
+            "agent", limit=EVENTS_BATCH_SIZE, kinds=tuple(AGENT_EVENT_KINDS),
+        )
         except Exception as exc:  # noqa: BLE001
             logger.warning("read_unconsumed_events 실패: %r — sleep & retry", exc)
             await asyncio.sleep(POLL_INTERVAL_SECONDS * 5)

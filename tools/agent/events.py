@@ -123,6 +123,7 @@ def read_unconsumed_events(
     *,
     limit: int = 100,
     path: Path | None = None,
+    kinds: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     """소비자별 미처리 events 읽기 (FIFO 순서).
 
@@ -131,15 +132,28 @@ def read_unconsumed_events(
     - agent polling: kind='user_message' / 'user_reaction' / 'user_pause' / 'user_resume'
       / 'pr_merged' 처리.
 
-    필터링은 consumer 가 자기 책임 kind 만 처리하도록 호출자가 결정.
+    `kinds` 인자 (2026-05-29 fix): consumer 가 자기 책임 kind 만 SELECT.
+    인자 없으면 모든 kind. 호출자가 'directive_registered' 같이 자기 책임 아닌
+    kind 를 skip 하면 mark_consumed 안 되어 batch limit 안에 영구 누적 → 자기
+    책임 events 도달 못 함. kinds 명시로 cursor 가 무관 kind 건너뜀.
     """
     with connect(path) as conn:
-        rows = conn.execute(
-            "SELECT id, kind, payload, ts_iso FROM events "
-            "WHERE consumed_by IS NULL "
-            "ORDER BY id ASC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if kinds:
+            placeholders = ",".join(["?"] * len(kinds))
+            rows = conn.execute(
+                "SELECT id, kind, payload, ts_iso FROM events "
+                "WHERE consumed_by IS NULL "
+                f"AND kind IN ({placeholders}) "
+                "ORDER BY id ASC LIMIT ?",
+                (*kinds, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, kind, payload, ts_iso FROM events "
+                "WHERE consumed_by IS NULL "
+                "ORDER BY id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
     return [
         {"id": r["id"], "kind": r["kind"],
          "payload": json.loads(r["payload"]), "ts_iso": r["ts_iso"]}
