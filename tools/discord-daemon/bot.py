@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -3458,7 +3459,12 @@ async def directive_complete_on_merge_loop(
 # ────────────────────────────────────────────────────────────────────────────
 DIRECTIVE_POLISH_POLL_INTERVAL_DEFAULT: Final[int] = 60  # 1분
 DIRECTIVE_POLISH_CLAUDE_TIMEOUT: Final[int] = 180  # 3분
-CLAUDE_CLI_BIN: Final[str] = os.environ.get("CLAUDE_BIN", "/usr/bin/claude")
+# env CLAUDE_BIN 은 multi-token (예: "claude --dangerously-skip-permissions") 가능 →
+# shlex.split 으로 args list 화. 미설정 시 단일 path default. (2026-05-29: NCP
+# /etc/.../discord-bridge.env 가 multi-token 값 사용하던 것 호환.)
+CLAUDE_CLI_ARGV: Final[list[str]] = shlex.split(
+    os.environ.get("CLAUDE_BIN") or "/usr/bin/claude"
+)
 
 
 def _polish_prompt(raw_body: str, directive_id: str) -> str:
@@ -3478,8 +3484,8 @@ def _polish_prompt(raw_body: str, directive_id: str) -> str:
 def _run_claude_polish(raw_body: str, directive_id: str) -> str:
     """claude -p subprocess — polish 결과 stdout. 실패 시 빈 문자열."""
     try:
-        result = subprocess.run(  # noqa: S603 — explicit bin path
-            [CLAUDE_CLI_BIN, "-p", _polish_prompt(raw_body, directive_id)],
+        result = subprocess.run(  # noqa: S603 — explicit argv from env
+            [*CLAUDE_CLI_ARGV, "-p", _polish_prompt(raw_body, directive_id)],
             timeout=DIRECTIVE_POLISH_CLAUDE_TIMEOUT,
             capture_output=True, text=True, check=False,
         )
