@@ -20,7 +20,7 @@ Playwright visual regression CI 를 검토 단계 (proposed) 로 도입. 구체 
 2. **baseline 관리** — 의도 변경 vs 회귀 구분 룰 (§8 Q4 후보 a/b/c). **proposed: 후보 (a)** — `playwright --update-snapshots` 명시 PR 만 baseline 갱신 + PR body `## visual baseline update` 섹션 의무.
 3. **CI 실행 위치** — 단계 1 (`rev-gate.yml` 또는 별 workflow `visual-regression.yml`) + 단계 2 (dev 환경 nightly).
 4. **drift threshold** — pixelmatch 기준 0.1% (proposed, fe sub-agent 사이클이 첫 baseline 확보 후 조정).
-5. **rev 자율 판단** — rev 가 baseline 갱신 PR 의 `## visual baseline update` 섹션 review (의도 명시 여부 검사) — 미명시 시 `🔴 시각 회귀 의심` 코멘트.
+5. **rev 자율 판단** — rev 가 baseline 갱신 PR 의 `## visual baseline update` 섹션 review (의도 명시 여부 검사) — 미명시 시 `🔴 시각 회귀 의심` 코멘트. 상세 판단 표 (no change 🟢 / 의도 명시 🟢 / 섹션 부재 + diff > 0.1% 🔴) 는 `docs/features/visual-regression-ci.md §3-4` SoT — 본 ADR 머지 후 spec PR (#1311 후보) 머지 시점에 reference 활성화.
 
 본 ADR 은 status `proposed` 로 박제. accepted 격상은 ADR-0018 단계 4 완료 후 fe sub-agent 가 visual-regression-ci.md spec draft + 첫 baseline PR 머지 시점.
 
@@ -49,4 +49,4 @@ Playwright visual regression CI 를 검토 단계 (proposed) 로 도입. 구체 
 - ADR-0019 (event-driven 아키텍처) — agent 망각 의존 폐기 원칙
 - `docs/features/rev-direct-qa-extension.md` §3 후보 E + §8 Q4 (baseline drift 룰 후보)
 - PR #1236 (fe 단계 4 swap in_progress directive 2026-05-29)
-- 후속 spec: `docs/features/visual-regression-ci.md` (accepted 격상 시 작성)
+- 후속 spec: `docs/features/visual-regression-ci.md` (PR #1311 draft, 머지 후 §3-4 rev 자율 판단 표 활성화)
