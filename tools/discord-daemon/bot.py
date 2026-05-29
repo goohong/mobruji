@@ -2082,6 +2082,30 @@ async def _forum_edit_starter(client: discord.Client, payload: dict) -> None:
         logger.warning("forum_edit_starter 실패 thread=%s exc=%r", thread_id, exc)
 
 
+def _lookup_directive_by_thread_id(thread_id: str) -> str | None:
+    """directive-board.jsonl 에서 thread_id 매칭 → directive_id 반환.
+
+    E2 옵션 (2026-05-29) — forum thread 안 사용자 메시지 시 어떤 directive 의
+    thread 인지 매핑. 미매칭 시 None — agent 가 forum_kind 만으로 답.
+    """
+    board_path = Path.home() / ".mobruji" / "directive-board.jsonl"
+    if not board_path.exists():
+        return None
+    try:
+        for line in board_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(entry.get("thread_id") or "") == thread_id:
+                return str(entry.get("message_id") or entry.get("directive_id") or "")
+    except OSError:
+        return None
+    return None
+
+
 def append_agent_event(kind: str, payload: dict) -> int:
     """Phase 2.1 — new agent (tools/agent/) 의 events 테이블 에 INSERT.
 
@@ -6016,16 +6040,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
-        # 2026-05-29 (B 옵션) — thread 안 사용자 메시지도 agent 처리.
-        # target_channel_id 직접 또는 그 채널 안 thread (parent == target) 통과.
-        # B안 가시화 thread 안 사용자 정정 ("잠깐 멈춰", "be 가 아니라 plan" 등) 가능.
+        # 2026-05-29 (B+E2 옵션) — main 채널 thread + 4 cycle forum + directive forum 의
+        # thread 안 사용자 메시지 모두 agent 처리. E2: forum_kind / directive_id 매핑으로
+        # context 명시 → agent 가 어느 cycle / directive 의 thread 안 코멘트인지 인식.
         is_thread_of_target = False
+        forum_kind: str | None = None  # be/fe/rev/plan/directive/main
         if message.channel.id != target_channel_id:
             parent = getattr(message.channel, "parent", None)
             parent_id = getattr(parent, "id", None)
-            if parent_id != target_channel_id:
-                return
-            is_thread_of_target = True
+            if parent_id == target_channel_id:
+                is_thread_of_target = True
+                forum_kind = "main"
+            else:
+                # forum thread 분기 — parent.id 가 4 cycle / directive forum 매칭.
+                for kind, fid in forum_channel_ids.items():
+                    if fid and parent_id == fid:
+                        forum_kind = kind
+                        is_thread_of_target = True
+                        break
+                if forum_kind is None:
+                    return
         if message.author.id not in allowed_user_ids:
             logger.info("허용되지 않은 사용자 무시: user_id=%s", message.author.id)
             return
@@ -6087,13 +6121,19 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # thread 안에서 계속 처리. agent 는 같은 thread 안 stream 유지 (대화 흐름).
         thread_id_str = ""
         channel_id_str = str(message.channel.id)
+        directive_id_str: str | None = None
         if is_thread_of_target:
-            # 사용자가 기존 thread 안 메시지 (B 옵션) — 그 thread 안 처리.
+            # 사용자가 기존 thread 안 메시지 (B+E2 옵션) — 그 thread 안 처리.
             thread_id_str = channel_id_str
-            channel_id_str = str(target_channel_id)
+            # forum thread 면 channel_id = forum, main thread 면 channel_id = main.
+            parent_id = getattr(getattr(message.channel, "parent", None), "id", None)
+            channel_id_str = str(parent_id or target_channel_id)
+            # E2 — forum thread → directive_id 매핑 (directive-board.jsonl scan).
+            if forum_kind and forum_kind != "main":
+                directive_id_str = _lookup_directive_by_thread_id(thread_id_str)
             logger.info(
-                "user_message in existing thread: id=%s body=%r",
-                thread_id_str, original_body[:60],
+                "user_message in thread: forum_kind=%s thread=%s directive=%s body=%r",
+                forum_kind, thread_id_str, directive_id_str, original_body[:60],
             )
         else:
             try:
@@ -6116,6 +6156,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             "body": original_body,
             "referenced_content": referenced_content,
             "ts_iso": ts_iso,
+            # E2 — forum context. agent 가 어디서 / 어떤 directive 의 코멘트인지 인식.
+            "forum_kind": forum_kind or "main",
+            "directive_id": directive_id_str or "",
         })
 
         # #1071 / PR #1140: directive classify + jsonl 로그 (자동 등록 path 폐지).
