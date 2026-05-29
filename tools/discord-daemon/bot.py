@@ -1471,6 +1471,194 @@ async def _handle_pin_reaction(
         )
 
 
+async def agent_outbox_loop() -> None:
+    """Phase 2.3 — agent events 'agent_reply' / 'agent_forum_action' consume.
+
+    1초 polling. tools/agent/ 가 events 에 INSERT 한 메시지를 Discord 로 push.
+    graceful — 개별 push 실패 시 mark_consumed 만 (재시도는 agent 책임).
+    """
+    while True:
+        try:
+            rows = _agent_outbox_fetch_batch(limit=20)
+            for row in rows:
+                try:
+                    await _agent_outbox_dispatch(row)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "agent_outbox dispatch 실패 id=%s kind=%s exc=%r",
+                        row["id"], row["kind"], exc,
+                    )
+                _agent_outbox_mark_consumed(row["id"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent_outbox_loop iter 실패: %r", exc)
+        await asyncio.sleep(1.0)
+
+
+def _agent_outbox_fetch_batch(limit: int = 20) -> list[dict]:
+    """events 의 미처리 agent_reply / agent_forum_action SELECT (FIFO)."""
+    try:
+        conn = sqlite3.connect(str(AGENT_EVENTS_DB_PATH), isolation_level=None, timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, kind, payload FROM events "
+                "WHERE consumed_by IS NULL "
+                "AND kind IN ('agent_reply', 'agent_forum_action') "
+                "ORDER BY id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("agent_outbox fetch 실패: %r", exc)
+        return []
+    return [
+        {"id": r["id"], "kind": r["kind"], "payload": json.loads(r["payload"])}
+        for r in rows
+    ]
+
+
+def _agent_outbox_mark_consumed(event_id: int) -> None:
+    """consume 완료 mark — 다음 polling skip."""
+    ts_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        conn = sqlite3.connect(str(AGENT_EVENTS_DB_PATH), isolation_level=None, timeout=5.0)
+        try:
+            conn.execute(
+                "UPDATE events SET consumed_by = 'bot', consumed_at = ? "
+                "WHERE id = ? AND consumed_by IS NULL",
+                (ts_iso, event_id),
+            )
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("agent_outbox mark_consumed 실패 id=%s: %r", event_id, exc)
+
+
+async def _agent_outbox_dispatch(row: dict) -> None:
+    """단일 event → Discord 실제 push (discord.py API 사용).
+
+    agent_reply payload: {channel_id, body, reply_to_msg_id?, thread_id?}
+    agent_forum_action payload: {action: create_thread/comment/retag/edit_starter, ...}
+    """
+    kind = row["kind"]
+    payload = row["payload"]
+    if kind == "agent_reply":
+        await _push_agent_reply(payload)
+    elif kind == "agent_forum_action":
+        await _dispatch_agent_forum_action(payload)
+
+
+async def _push_agent_reply(payload: dict) -> None:
+    """agent_reply → discord channel.send (또는 thread.send)."""
+    channel_id = int(payload.get("channel_id", 0))
+    body = payload.get("body", "")
+    reply_to_msg_id = payload.get("reply_to_msg_id")
+    thread_id = payload.get("thread_id")
+
+    target_id = int(thread_id) if thread_id else channel_id
+    channel = client.get_channel(target_id)
+    if channel is None:
+        logger.warning("agent_reply: channel %s 미발견 — drop", target_id)
+        return
+
+    reference = None
+    if reply_to_msg_id and not thread_id:
+        try:
+            reference = discord.MessageReference(
+                message_id=int(reply_to_msg_id),
+                channel_id=channel_id,
+                fail_if_not_exists=False,
+            )
+        except (ValueError, TypeError):
+            logger.warning("agent_reply: 잘못된 reply_to_msg_id=%r — ignore", reply_to_msg_id)
+
+    await channel.send(content=body, reference=reference)
+    logger.info("agent_reply pushed: channel=%s len=%d", target_id, len(body))
+
+
+async def _dispatch_agent_forum_action(payload: dict) -> None:
+    """agent_forum_action → action 별 dispatch."""
+    action = payload.get("action")
+    if action == "create_thread":
+        await _forum_create_thread(payload)
+    elif action == "comment":
+        await _forum_comment(payload)
+    elif action == "retag":
+        await _forum_retag(payload)
+    elif action == "edit_starter":
+        await _forum_edit_starter(payload)
+    else:
+        logger.warning("agent_forum_action: unknown action=%r", action)
+
+
+async def _forum_create_thread(payload: dict) -> None:
+    """forum 채널 (type=15) 에 신규 thread 생성. discord.py forum API 사용."""
+    forum_id = int(payload.get("forum_id", 0))
+    title = payload.get("title", "")[:99]
+    body = payload.get("body", "")
+    forum = client.get_channel(forum_id)
+    if forum is None or not hasattr(forum, "create_thread"):
+        logger.warning("forum_create_thread: forum %s 미발견 / type 불일치 — drop", forum_id)
+        return
+    # tags 는 discord.py 의 ForumTag 객체. 단순 path = applied_tags 없이 생성.
+    result = await forum.create_thread(name=title, content=body)
+    logger.info("forum_create_thread: forum=%s thread=%s", forum_id, getattr(result.thread, "id", "?"))
+
+
+async def _forum_comment(payload: dict) -> None:
+    thread_id = int(payload.get("thread_id", 0))
+    body = payload.get("body", "")
+    thread = client.get_channel(thread_id)
+    if thread is None:
+        logger.warning("forum_comment: thread %s 미발견 — drop", thread_id)
+        return
+    await thread.send(content=body)
+    logger.info("forum_comment: thread=%s len=%d", thread_id, len(body))
+
+
+async def _forum_retag(payload: dict) -> None:
+    """forum thread tag 변경 — REST API PATCH /channels/{thread_id} applied_tags."""
+    thread_id = payload.get("thread_id")
+    tag_name = payload.get("tag_name")
+    if not thread_id or not tag_name:
+        return
+    # discord.py 의 thread.edit(applied_tags=[...]) 사용. tag 객체 lookup 필요.
+    thread = client.get_channel(int(thread_id))
+    if thread is None or not hasattr(thread, "parent"):
+        logger.warning("forum_retag: thread %s 미발견 — drop", thread_id)
+        return
+    forum = thread.parent
+    target_tag = None
+    for tag in getattr(forum, "available_tags", []):
+        if tag.name == tag_name:
+            target_tag = tag
+            break
+    if target_tag is None:
+        logger.warning("forum_retag: tag=%r forum 의 available_tags 에 없음 — drop", tag_name)
+        return
+    await thread.edit(applied_tags=[target_tag])
+    logger.info("forum_retag: thread=%s tag=%s", thread_id, tag_name)
+
+
+async def _forum_edit_starter(payload: dict) -> None:
+    """forum thread starter message body PATCH (starter message_id = thread_id)."""
+    thread_id = int(payload.get("thread_id", 0))
+    body = payload.get("body", "")
+    thread = client.get_channel(thread_id)
+    if thread is None:
+        logger.warning("forum_edit_starter: thread %s 미발견 — drop", thread_id)
+        return
+    try:
+        starter = await thread.fetch_message(thread_id)
+        await starter.edit(content=body)
+        logger.info("forum_edit_starter: thread=%s len=%d", thread_id, len(body))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("forum_edit_starter 실패 thread=%s exc=%r", thread_id, exc)
+
+
 def append_agent_event(kind: str, payload: dict) -> int:
     """Phase 2.1 — new agent (tools/agent/) 의 events 테이블 에 INSERT.
 
@@ -5445,6 +5633,15 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 "directive_polish_loop launched: interval=%ds (1min polling)",
                 DIRECTIVE_POLISH_POLL_INTERVAL_DEFAULT,
             )
+
+        # Phase 2.3 (2026-05-29) — agent outbox consumer.
+        # tools/agent/ 가 events 테이블 에 'agent_reply' / 'agent_forum_action' INSERT.
+        # bot.py 가 1초 polling → consume → Discord 실제 push.
+        # spec: tools/agent/README.md (Phase 2.3).
+        if not hasattr(client, "_agent_outbox_task_started"):
+            client._agent_outbox_task_started = True  # type: ignore[attr-defined]
+            client.loop.create_task(agent_outbox_loop())
+            logger.info("agent_outbox_loop launched: interval=1s polling")
 
         # PR cf-3 (2026-05-29) — cycle forum thread ✅ 자동 retag.
         # 5분 polling — PR body 의 cycle-forum: <cycle>:<thread_id> 매칭 시 자동
