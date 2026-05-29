@@ -139,6 +139,56 @@ class RecommendationIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E (directive 1509473362760695818): 400 응답 body 에 message + fieldErrors 노출 — sessionId 마스킹")
+    void e2e_validationFailure_returnsActionableBody() {
+        // sessionId 가 UUIDv4 가 아니면 RecommendationCreateRequest 의 @Pattern 위반.
+        final String invalidBody = """
+                {
+                  "sessionId": "sess_1709000000_abc123",
+                  "voiceRangeLow": 48,
+                  "voiceRangeHigh": 72,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(invalidBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.BAD_REQUEST.value())
+                .body("status", equalTo(400))
+                .body("error", equalTo("Bad Request"))
+                .body("message", notNullValue())
+                .body("fieldErrors.find { it.field == 'sessionId' }", notNullValue())
+                // 보안 요건: sessionId 원문 노출 금지 — rejectedValue 마스킹 확인.
+                .body("fieldErrors.find { it.field == 'sessionId' }.rejectedValue", equalTo("***"));
+    }
+
+    @Test
+    @DisplayName("E2E: voiceRangeHigh 가 spec(@Max 119) 초과 → 400 + field/rejectedValue 노출")
+    void e2e_voiceRangeOutOfBounds_returnsFieldError() {
+        final String outOfRangeBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2eaa",
+                  "voiceRangeLow": 48,
+                  "voiceRangeHigh": 200
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(outOfRangeBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.BAD_REQUEST.value())
+                .body("fieldErrors.find { it.field == 'voiceRangeHigh' }", notNullValue())
+                .body("fieldErrors.find { it.field == 'voiceRangeHigh' }.rejectedValue", equalTo(200));
+    }
+
+    @Test
     @DisplayName("E2E: 같은 아티스트 ≤ 2 다양성 후처리 작동")
     void e2e_diversityRespectsArtistCap() {
         // BTS 2곡, IU 2곡 시드. 모두 점수 높게 잡혀도 결과 내 BTS 곡은 최대 2 (cap 2)
