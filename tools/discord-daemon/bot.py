@@ -1368,6 +1368,15 @@ async def ensure_mode_toggle_message(
             "mode toggle message 기존 발견 (auto-post skip): msg_id=%s",
             existing.id,
         )
+        # 2026-05-29 사용자 정정 — 기존 메시지도 핀 안 됐으면 핀.
+        if not getattr(existing, "pinned", False):
+            try:
+                await existing.pin(reason="mode toggle UI 가시화")
+                logger.info("mode toggle 기존 메시지 핀 OK: msg_id=%s", existing.id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "mode toggle 기존 메시지 pin 실패 (권한?): %r", exc
+                )
         return
     try:
         content = build_mode_toggle_content(read_user_mode())
