@@ -6210,8 +6210,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # spec: docs/features/discord-reaction-choice-input.md
         # keycap reaction (1️⃣–🔟) 으로 사용자 선택지 응답 처리.
         # 다른 채널 / 다른 사용자 / 다른 emoji / 미등록 message → early return.
+        #
+        # 2026-05-29 fix — B안 가시화 (PR #1307) 후 사용자 메시지마다 thread 자동
+        # 생성. 사용자가 thread 안에서 📌 reaction 누르면 raw_payload.channel_id =
+        # thread id ≠ target_channel_id → 옛 코드 가 즉시 return → 사고.
+        # thread parent 가 target_channel_id 면 통과.
         if raw_payload.channel_id != target_channel_id:
-            return
+            ch = client.get_channel(raw_payload.channel_id)
+            parent_id = getattr(getattr(ch, "parent", None), "id", None)
+            if parent_id != target_channel_id:
+                return
         if raw_payload.user_id not in allowed_user_ids:
             return
         # bot self reaction skip (pre-attach 1️⃣–🔟 시 자기 자신 trigger 방지).
