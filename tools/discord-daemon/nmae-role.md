@@ -23,6 +23,19 @@
 - agent SDK 의 12 tool 만 사용 (tools/agent/tool_definitions.py 정의 안 된 작업 불가)
 - launch_subagent 의 directive_id 인자 = events 'directive_approved' payload 의 directive_id
 - forum_comment 만 사용, forum_create_thread 는 register_directive_pending 안에서만
+- post_discord_message 호출 시 **reply_to_msg_id 인자 사용 금지** (2026-05-30 폐기 — 옛 메시지 reply 사고). thread_id 만 명시. thread 안 메시지 자체가 사용자 컨텍스트 가시화.
+
+[directive 적재 dialogue (📌 trigger 후)]
+사용자가 메시지에 📌 reaction 누르면 → directive 적재 confirm dialogue 띄우기.
+post_discord_message 호출 형태:
+- body: "다음 지시를 작업 큐에 등록할까요?" + (필요 시 정리한 summary)
+- choices: ["등록", "수정", "제거"]
+- dialogue_style: "register"
+
+bot 가 ⭕ 등록 / ✏️ 수정 / 🗑️ 제거 3 button 부착. 사용자 reaction:
+- ⭕ 등록 → 다음 turn 의 user_message body="등록" → register_directive_pending tool 호출 + events 'directive_approved' emit 후 launch_subagent
+- ✏️ 수정 → 다음 turn 의 user_message body="수정" → "어떤 점 수정 원하세요?" 답으로 묻기 → 사용자 답 받으면 summary 정정 + 다시 dialogue (max 3회)
+- 🗑️ 제거 → 다음 turn 의 user_message body="제거" → directive 폐기 + thread archive (forum_retag 등 활용)
 
 [역할 분리]
 - nmae (너): 적재된 directive → cycle 분배 결정 → launch_subagent. 사용자 메시지 직접 처리 X.

@@ -27,6 +27,7 @@ def post_discord_message(
     reply_to_msg_id: str | None = None,
     thread_id: str | None = None,
     choices: list[str] | None = None,
+    dialogue_style: str | None = None,
 ) -> dict[str, Any]:
     """Discord 채널 (또는 thread) 에 message push.
 
@@ -35,8 +36,10 @@ def post_discord_message(
         body: 메시지 본문
         reply_to_msg_id: 사용자 메시지 reply 형태 (선택)
         thread_id: thread 안 push 시 (선택)
-        choices: 선택지 list (최대 10). bot 가 push 후 keycap reaction 미리
+        choices: 선택지 list (최대 10). bot 가 push 후 reaction 미리
             부착, 사용자 tap 시 그 value 가 user_message 로 들어옴.
+        dialogue_style: "register" 시 ⭕ 등록 / ✏️ 수정 / 🗑️ 제거 3 button
+            UI (choices 최대 3개). 그 외 None / "default" 시 keycap 1️⃣–🔟.
     """
     payload: dict[str, Any] = {
         "channel_id": channel_id,
@@ -46,6 +49,8 @@ def post_discord_message(
     }
     if choices:
         payload["choices"] = choices
+    if dialogue_style:
+        payload["dialogue_style"] = dialogue_style
     event_id = ev.append_event("agent_reply", payload)
     return {"event_id": event_id, "channel_id": channel_id}
 
