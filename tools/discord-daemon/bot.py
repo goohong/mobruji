@@ -6016,8 +6016,16 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
+        # 2026-05-29 (B 옵션) — thread 안 사용자 메시지도 agent 처리.
+        # target_channel_id 직접 또는 그 채널 안 thread (parent == target) 통과.
+        # B안 가시화 thread 안 사용자 정정 ("잠깐 멈춰", "be 가 아니라 plan" 등) 가능.
+        is_thread_of_target = False
         if message.channel.id != target_channel_id:
-            return
+            parent = getattr(message.channel, "parent", None)
+            parent_id = getattr(parent, "id", None)
+            if parent_id != target_channel_id:
+                return
+            is_thread_of_target = True
         if message.author.id not in allowed_user_ids:
             logger.info("허용되지 않은 사용자 무시: user_id=%s", message.author.id)
             return
@@ -6075,21 +6083,33 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # 2026-05-29 B안 가시화 — 사용자 메시지마다 thread 자동 생성.
         # agent 의 도구 호출 / 답 모두 그 thread 안 stream. 채널 noise 0.
         # graceful: thread 생성 실패 시 thread_id="" — agent 가 채널 push fallback.
+        # B 옵션 (2026-05-29) — thread 안 사용자 메시지면 새 thread 생성 X, 기존
+        # thread 안에서 계속 처리. agent 는 같은 thread 안 stream 유지 (대화 흐름).
         thread_id_str = ""
-        try:
-            thread_name = (original_body[:50] or "대화") + " 진행"
-            agent_thread = await message.create_thread(name=thread_name[:99])
-            thread_id_str = str(agent_thread.id)
+        channel_id_str = str(message.channel.id)
+        if is_thread_of_target:
+            # 사용자가 기존 thread 안 메시지 (B 옵션) — 그 thread 안 처리.
+            thread_id_str = channel_id_str
+            channel_id_str = str(target_channel_id)
             logger.info(
-                "user_message thread 생성: id=%s name=%r",
-                thread_id_str, thread_name[:30],
+                "user_message in existing thread: id=%s body=%r",
+                thread_id_str, original_body[:60],
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("user_message thread 생성 실패 — fallback 채널: %r", exc)
+        else:
+            try:
+                thread_name = (original_body[:50] or "대화") + " 진행"
+                agent_thread = await message.create_thread(name=thread_name[:99])
+                thread_id_str = str(agent_thread.id)
+                logger.info(
+                    "user_message thread 생성: id=%s name=%r",
+                    thread_id_str, thread_name[:30],
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("user_message thread 생성 실패 — fallback 채널: %r", exc)
 
         append_agent_event("user_message", {
             "message_id": message_id,
-            "channel_id": str(message.channel.id),
+            "channel_id": channel_id_str,
             "thread_id": thread_id_str,  # B안 — agent 가 답/진행 thread 안 push
             "user_id": str(message.author.id),
             "user_name": message.author.name,
