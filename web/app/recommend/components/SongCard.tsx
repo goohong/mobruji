@@ -66,6 +66,7 @@ import {
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
 import { AlbumCoverThumbnail } from "./SongDetailContent";
@@ -119,6 +120,9 @@ export function SongCard(props: SongCardProps) {
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
+  // closes #1284 — 한국 곡의 한국어 표시 우선 (lib/songTitle.formatSongDisplayTitle SoT).
+  // 카드 표면 / aria-label / 자식 컴포넌트 prop 까지 동일한 표시명을 사용해 일관성 유지.
+  const displayTitle = formatSongDisplayTitle(song);
   const keyLabel = formatMusicalKey(song.keyOriginal);
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
@@ -149,7 +153,7 @@ export function SongCard(props: SongCardProps) {
             </p>
           ) : null}
           <h2 className="truncate text-lg font-semibold text-[var(--text-primary)]">
-            {song.title}
+            {displayTitle}
           </h2>
           <p className="truncate text-sm text-[var(--text-secondary)]">
             {song.artist}
@@ -231,10 +235,10 @@ export function SongCard(props: SongCardProps) {
   // 모달 모드가 아니면 종전대로 카드에서 직접 새 탭으로 검색.
   const feedbackPanel = (
     <div className="flex flex-wrap items-center gap-2">
-      <LikeButton songId={song.id} songTitle={song.title} />
-      <BookmarkButton songId={song.id} songTitle={song.title} />
+      <LikeButton songId={song.id} songTitle={displayTitle} />
+      <BookmarkButton songId={song.id} songTitle={displayTitle} />
       {!isModalMode ? (
-        <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
+        <YouTubeSearchLink songTitle={displayTitle} songArtist={song.artist} />
       ) : null}
     </div>
   );
@@ -248,7 +252,7 @@ export function SongCard(props: SongCardProps) {
         <button
           type="button"
           onClick={onShowDetail}
-          aria-label={`${song.title} 상세 보기`}
+          aria-label={`${displayTitle} 상세 보기`}
           aria-haspopup="dialog"
           className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
@@ -269,7 +273,7 @@ export function SongCard(props: SongCardProps) {
       <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
         <Link
           href={href}
-          aria-label={`${song.title} 상세 보기`}
+          aria-label={`${displayTitle} 상세 보기`}
           className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
