@@ -67,6 +67,93 @@ def _get_allowed_tools() -> list[str]:
             names.append(f"mcp__nmae__{tool_name}")
     return names
 
+
+# ─── B안 가시화 — SDK message stream → events 'agent_progress' INSERT ────────
+# 사용자 정정 (2026-05-29): "helper 가 뭐하고 있는지 보고 싶다" → agent 도 동일.
+# SDK 의 async generator 가 yield 하는 message (TextBlock / ToolUseBlock / 등) 를
+# 받아 사용자 메시지 thread 안 stream. 채널 noise 0, 사용자가 thread 열어 추적.
+
+TOOL_EMOJI_MAP = {
+    "post_discord_message": "💬",
+    "forum_create_thread": "📂",
+    "forum_comment": "📝",
+    "forum_retag": "🏷️",
+    "forum_edit_starter": "✏️",
+    "launch_subagent": "🚀",
+    "register_directive_pending": "📌",
+    "update_directive_status": "🔄",
+    "get_cycle_state": "🔍",
+    "set_cycle_state": "🎛️",
+    "pause_global": "⏸️",
+    "resume_global": "▶️",
+}
+
+
+def _format_tool_progress(tool_name: str, tool_input: dict) -> str | None:
+    """ToolUseBlock 의 tool_name + input 을 사용자 친화 1-line 으로.
+
+    post_discord_message 는 답 자체이므로 progress 표시 X (중복 push 방지).
+    """
+    if tool_name == "post_discord_message":
+        return None  # 답은 _push_agent_reply 가 처리 — 중복 X
+    base = tool_name.replace("mcp__nmae__", "")
+    emoji = TOOL_EMOJI_MAP.get(base, "🔧")
+
+    if base == "launch_subagent":
+        return f"{emoji} {base}: cycle={tool_input.get('cycle', '?')}, title={tool_input.get('title', '')[:60]}"
+    if base == "register_directive_pending":
+        return f"{emoji} {base}: directive_id={tool_input.get('directive_id', '?')[:20]}"
+    if base == "update_directive_status":
+        return f"{emoji} {base}: {tool_input.get('directive_id', '?')[:20]} → {tool_input.get('new_status', '?')}"
+    if base in ("forum_comment", "forum_retag", "forum_edit_starter"):
+        return f"{emoji} {base}: thread_id={tool_input.get('thread_id', '?')[:20]}"
+    if base == "forum_create_thread":
+        return f"{emoji} {base}: forum={tool_input.get('forum_id', '?')[:20]}, title={tool_input.get('title', '')[:50]}"
+    if base in ("get_cycle_state", "set_cycle_state"):
+        return f"{emoji} {base}: cycle={tool_input.get('cycle', '?')}"
+    if base in ("pause_global", "resume_global"):
+        return f"{emoji} {base}"
+    return f"{emoji} {base}"
+
+
+async def _emit_progress_from_sdk_message(
+    message: object, thread_id: str, channel_id: str,
+) -> None:
+    """SDK message → events 'agent_reply' INSERT (thread_id 포함).
+
+    SDK message type:
+    - AssistantMessage(content=[TextBlock, ToolUseBlock, ...])
+    - ResultMessage
+    - UserMessage (tool_result)
+    각 ToolUseBlock 만 progress 로 표시. 답 (TextBlock) 은 LLM 이 직접 tool 호출
+    하는 post_discord_message 가 처리.
+    """
+    if thread_id == "" or not thread_id:
+        return  # thread 미생성 시 progress stream X (채널 noise 방지)
+    content = getattr(message, "content", None)
+    if not content or not isinstance(content, list):
+        return
+    for block in content:
+        block_type = type(block).__name__
+        if block_type != "ToolUseBlock":
+            continue
+        tool_name = getattr(block, "name", "")
+        tool_input = getattr(block, "input", {})
+        if not isinstance(tool_input, dict):
+            continue
+        progress_text = _format_tool_progress(tool_name, tool_input)
+        if progress_text is None:
+            continue
+        try:
+            ev.append_event("agent_reply", {
+                "channel_id": channel_id,
+                "thread_id": thread_id,
+                "body": progress_text,
+            })
+            logger.info("agent_progress: %s", progress_text[:80])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent_progress emit 실패: %r", exc)
+
 # agent 가 처리할 event kind list (bot.py 는 'agent_*' 처리).
 AGENT_EVENT_KINDS: frozenset[str] = frozenset({
     "user_message",
@@ -117,6 +204,9 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
     channel_id = payload.get("channel_id", "")
     user_id = payload.get("user_id", "")
     message_id = payload.get("message_id", "")
+    # B안 가시화 — bot.py 가 사용자 메시지 thread 자동 생성. agent 의 답/진행
+    # stream 은 모두 그 thread 안. fallback: thread_id 빈 문자열이면 채널 push.
+    thread_id = payload.get("thread_id", "")
 
     try:
         from claude_agent_sdk import query, ClaudeAgentOptions  # type: ignore[import-not-found]
@@ -137,16 +227,24 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         allowed_tools=_get_allowed_tools(),
     )
 
+    thread_directive = (
+        f"답 push 시 thread_id='{thread_id}' 사용." if thread_id
+        else f"답 push 시 reply_to_msg_id='{message_id}' 사용 (thread 미생성)."
+    )
     user_prompt = (
         f"[사용자 메시지] (message_id={message_id}, channel_id={channel_id}, user_id={user_id})\n\n"
         f"{body}\n\n"
         f"위 메시지를 처리. 답이 필요하면 mcp__nmae__post_discord_message 호출 "
-        f"(channel_id='{channel_id}', reply_to_msg_id='{message_id}')."
+        f"(channel_id='{channel_id}'). {thread_directive}"
     )
 
-    logger.info("user_message → SDK query: user=%s body=%r", user_id, body[:120])
+    logger.info(
+        "user_message → SDK query: user=%s thread=%s body=%r",
+        user_id, thread_id or "(채널)", body[:120],
+    )
     try:
         async for message in query(prompt=user_prompt, options=options):
+            await _emit_progress_from_sdk_message(message, thread_id, channel_id)
             logger.debug("SDK message: %r", message)
         logger.info("user_message handled: message_id=%s", message_id)
     except Exception as exc:  # noqa: BLE001
@@ -259,7 +357,12 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
     )
 
     try:
+        # directive_approved 시 thread_id = directive 의 PinDialogueView thread
+        # (payload.get("thread_id") = bot.py 가 전달). 없으면 채널 push fallback.
+        dir_thread_id = payload.get("thread_id", "")
+        dir_channel_id = payload.get("channel_id", "")
         async for message in query(prompt=prompt, options=options):
+            await _emit_progress_from_sdk_message(message, dir_thread_id, dir_channel_id)
             logger.debug("SDK directive_approved message: %r", message)
         logger.info("directive_approved handled: directive_id=%s", directive_id)
     except Exception as exc:  # noqa: BLE001
