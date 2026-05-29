@@ -1281,6 +1281,16 @@ class ModeToggleView(discord.ui.View):
         await interaction.response.edit_message(
             content=build_mode_toggle_content(new_mode), view=self
         )
+        # 2026-05-29 사용자 정정 — 모드 토글 시 ack 가 필요.
+        # button color change 만으로는 사용자가 변경 인지 약함. ephemeral followup
+        # 으로 명시 ack push (사용자만 보임 — 채널 noise 0).
+        try:
+            await interaction.followup.send(
+                f"✅ 모드가 **{new_mode}** 로 변경되었습니다.",
+                ephemeral=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — ack 실패 가 toggle 작동 차단 안 함
+            logger.warning("mode toggle ack followup 실패: %r", exc)
 
     @discord.ui.button(
         label="ASK",
@@ -1367,6 +1377,14 @@ async def ensure_mode_toggle_message(
             posted.id,
             read_user_mode(),
         )
+        # 2026-05-29 사용자 정정 — mode toggle 메시지가 채널 history 깊이 묻히면
+        # 사용자가 다시 찾기 어려움. Discord pin 으로 채널 상단 고정.
+        # bot 권한 (MANAGE_MESSAGES) 필요. graceful — 실패 시 warning 만.
+        try:
+            await posted.pin(reason="mode toggle UI 가시화")
+            logger.info("mode toggle message 핀 OK: msg_id=%s", posted.id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mode toggle message pin 실패 (권한?): %r", exc)
     except Exception as exc:  # noqa: BLE001 — graceful
         logger.warning("mode toggle message post 실패: %r", exc)
 
