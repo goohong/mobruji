@@ -31,6 +31,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { searchSongs, type SongResponse } from "@/lib/api/song";
 import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip, Input } from "@/components/ui";
 
 import { SongCard } from "../recommend/components/SongCard";
@@ -473,7 +474,7 @@ function SongSearchResultList({ songs }: SongSearchResultListProps) {
       <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
-        titleLabel={selected ? selected.title : ""}
+        titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
       </SongDetailModal>

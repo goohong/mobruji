@@ -56,6 +56,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { midiToCombinedNoteName } from "@/lib/notes";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
@@ -522,7 +523,7 @@ function RecommendationFeed({
       <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
-        titleLabel={selected ? selected.song.title : ""}
+        titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
       >
         {selected ? (
           <SongDetailContent item={selected} userVoiceRange={userRange} />
