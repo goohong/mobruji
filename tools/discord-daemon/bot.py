@@ -1944,11 +1944,17 @@ async def _agent_outbox_dispatch(client: discord.Client, row: dict) -> None:
 
 
 async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
-    """agent_reply → discord channel.send (또는 thread.send)."""
+    """agent_reply → discord channel.send (또는 thread.send).
+
+    2026-05-29 choices UI: payload.choices 가 있으면 push 후 keycap reaction
+    1️⃣–🔟 미리 부착 + agent_choice_prompts ledger 에 저장. 사용자 tap 시
+    on_raw_reaction_add keycap 분기가 choice value 를 user_message event 로 INSERT.
+    """
     channel_id = int(payload.get("channel_id", 0))
     body = payload.get("body", "")
     reply_to_msg_id = payload.get("reply_to_msg_id")
     thread_id = payload.get("thread_id")
+    choices = payload.get("choices")
 
     target_id = int(thread_id) if thread_id else channel_id
     channel = client.get_channel(target_id)
@@ -1967,8 +1973,37 @@ async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
         except (ValueError, TypeError):
             logger.warning("agent_reply: 잘못된 reply_to_msg_id=%r — ignore", reply_to_msg_id)
 
-    await channel.send(content=body, reference=reference)
-    logger.info("agent_reply pushed: channel=%s len=%d", target_id, len(body))
+    # choices 있으면 본문에 선택지 numbered list append
+    final_body = body
+    if isinstance(choices, list) and choices:
+        choice_keycaps = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+                          "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        choice_lines = "\n".join(
+            f"{choice_keycaps[i]} {c}" for i, c in enumerate(choices[:10])
+        )
+        final_body = f"{body}\n\n{choice_lines}"
+
+    msg = await channel.send(content=final_body, reference=reference)
+    logger.info("agent_reply pushed: channel=%s len=%d", target_id, len(final_body))
+
+    # choices keycap reaction 부착 + ledger
+    if isinstance(choices, list) and choices:
+        choice_keycaps = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+                          "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        for i in range(min(len(choices), 10)):
+            try:
+                await msg.add_reaction(choice_keycaps[i])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("agent_reply choice reaction 부착 실패 i=%d exc=%r", i, exc)
+        # ledger — message_id → choices list 저장 (on_raw_reaction_add 가 lookup)
+        try:
+            append_agent_event("choice_prompt", {
+                "message_id": str(msg.id),
+                "channel_id": str(target_id),
+                "choices": list(choices[:10]),
+            })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("choice_prompt event INSERT 실패: %r", exc)
 
 
 async def _dispatch_agent_forum_action(client: discord.Client, payload: dict) -> None:
@@ -6389,7 +6424,60 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
             return
 
+        # 2026-05-29 — agent SDK path 도 choice 처리. events.choice_prompt lookup
+        # → 선택 value 추출 → user_message INSERT (body = 선택 value, thread_id
+        # 동일). agent_loop 가 next polling 시 그것을 SDK query 호출.
+        try:
+            choice_value = _lookup_agent_choice(bot_msg_id, choice_idx)
+        except Exception as exc:  # noqa: BLE001
+            choice_value = None
+            logger.warning("agent choice lookup 실패: %r", exc)
+        if choice_value is not None:
+            # 사용자 thread (사용자 reaction 채널) — agent_reply 가 push 한 thread
+            user_thread_id = str(raw_payload.channel_id)
+            append_agent_event("user_message", {
+                "message_id": f"choice:{bot_msg_id}:{choice_idx}",
+                "channel_id": str(target_channel_id),
+                "thread_id": user_thread_id if user_thread_id != str(target_channel_id) else "",
+                "user_id": str(raw_payload.user_id),
+                "user_name": "<reaction-choice>",
+                "body": choice_value,
+                "ts_iso": datetime.now(timezone.utc).isoformat(),
+            })
+            logger.info(
+                "agent choice → user_message INSERT: bot_msg=%s idx=%d value=%r",
+                bot_msg_id, choice_idx, choice_value[:40],
+            )
+
     return client
+
+
+def _lookup_agent_choice(message_id: str, choice_idx: int) -> str | None:
+    """events.choice_prompt 에서 message_id 매칭 + idx 의 선택 value 반환."""
+    try:
+        conn = sqlite3.connect(str(AGENT_EVENTS_DB_PATH), isolation_level=None, timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT payload FROM events WHERE kind = ? AND "
+                "json_extract(payload, '$.message_id') = ? ORDER BY id DESC LIMIT 1",
+                ("choice_prompt", message_id),
+            ).fetchone()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("_lookup_agent_choice 실패: %r", exc)
+        return None
+    if not row:
+        return None
+    try:
+        p = json.loads(row["payload"])
+        choices = p.get("choices", [])
+        if 0 <= choice_idx < len(choices):
+            return str(choices[choice_idx])
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return None
 
 
 def main() -> None:

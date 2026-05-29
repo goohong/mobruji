@@ -46,21 +46,36 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
 
 @tool(
     name="post_discord_message",
-    description="Discord 채널 또는 thread 에 message push. 사용자 메시지에 답 작성 시 의무.",
+    description=(
+        "Discord 채널 또는 thread 에 message push. "
+        "선택지 묻는 케이스 (cycle 결정, O/X, 우선순위 등) 는 `choices` 인자에 "
+        "최대 10 선택지 list 전달 — bot 가 keycap reaction (1️⃣-🔟) 미리 부착, "
+        "사용자 tap 시 그 선택지 value 가 새 user_message 로 들어옴. 단순 답이면 choices 생략."
+    ),
     input_schema={
         "channel_id": str,
         "body": str,
         "reply_to_msg_id": str,
         "thread_id": str,
+        "choices": list,  # optional — 선택지 list (str). 최대 10.
     },
 )
 async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
     try:
+        # B안 가시화 + 선택지 UI (2026-05-29) — choices payload 에 포함.
+        # bot.py _push_agent_reply 가 choices 보고 keycap reaction 부착.
+        choices_raw = args.get("choices")
+        choices = (
+            [str(c)[:80] for c in choices_raw[:10]]
+            if isinstance(choices_raw, list) and choices_raw
+            else None
+        )
         result = td.post_discord_message(
             args["channel_id"],
             args["body"],
             reply_to_msg_id=args.get("reply_to_msg_id") or None,
             thread_id=args.get("thread_id") or None,
+            choices=choices,
         )
         return _wrap_result(result)
     except Exception as exc:  # noqa: BLE001

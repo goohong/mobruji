@@ -26,24 +26,26 @@ def post_discord_message(
     *,
     reply_to_msg_id: str | None = None,
     thread_id: str | None = None,
+    choices: list[str] | None = None,
 ) -> dict[str, Any]:
     """Discord 채널 (또는 thread) 에 message push.
 
     Args:
         channel_id: Discord 채널 ID (snowflake)
-        body: 메시지 본문 (multi-line OK, Discord 자동 chunk)
-        reply_to_msg_id: 사용자 메시지에 reply 형태 (선택)
-        thread_id: thread 안 push 시 (선택, channel_id 와 같이 사용 시 우선)
-
-    Returns:
-        {"event_id": int, "channel_id": str}
+        body: 메시지 본문
+        reply_to_msg_id: 사용자 메시지 reply 형태 (선택)
+        thread_id: thread 안 push 시 (선택)
+        choices: 선택지 list (최대 10). bot 가 push 후 keycap reaction 미리
+            부착, 사용자 tap 시 그 value 가 user_message 로 들어옴.
     """
-    payload = {
+    payload: dict[str, Any] = {
         "channel_id": channel_id,
         "body": body,
         "reply_to_msg_id": reply_to_msg_id,
         "thread_id": thread_id,
     }
+    if choices:
+        payload["choices"] = choices
     event_id = ev.append_event("agent_reply", payload)
     return {"event_id": event_id, "channel_id": channel_id}
 
