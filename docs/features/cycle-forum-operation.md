@@ -5,8 +5,8 @@ status: approved
 owner: @mobruji-maestro
 scope: infra
 related_issues: []
-related_prs: []
-last_reviewed: 2026-05-28
+related_prs: [1306]
+last_reviewed: 2026-05-29
 ---
 
 # Cycle forum 운영 모델
@@ -133,6 +133,8 @@ bash tools/agent-launch-wrapper.sh --register-pending <cycle> "<title>" \
 2. 본문 = template (단계 6 체크박스 모두 unchecked, 결과/다음 빈, 🆔 cycle 정보).
 3. tag = `🟡 대기` 부착 (`discord-reply.sh --forum-post-auto-tag` 의 fallback chain 에 `대기` 우선).
 4. stdout: `PENDING_THREAD_ID=<id>` (nmae 가 cache 가능).
+
+> **fallback chain 가드 (PR #1306)**: `PENDING_THREAD_ID` / `LAUNCH_THREAD_ID` 가 `LaunchThreadCacheFile` (`~/.mobruji/last-launch-thread.txt`) 로 atomic write 되는 경로는 PlaceholderThreadId (예: `99999`) 오염에 노출됩니다. 4 갈래 가드 (F-1 write 검증 / F-2 auto-ack 추출 검증 / F-3 reader quarantine / F-4 wrapper stale invalidate / F-5 test fixture env override / F-6 hook mock isolation 검증) 는 `docs/features/cycle-forum-placeholder-guard.md` SoT (도메인 용어: `06-domain-model.md §4` PlaceholderThreadId 항목).
 
 ### 5-4) wrapper — launch mode 가 기존 🟡 thread 재사용
 

@@ -96,6 +96,8 @@ gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --la
 
 **[STRICT — 2026-05-29 PR #1247]** sub-agent 의 모든 진행 / 결과 push 는 `$LAUNCH_THREAD_ID` (또는 `$PENDING_THREAD_ID`) thread **안** 에만 한다. **별 thread 생성 절대 금지** — `--forum-post`, `--forum-post-auto-tag`, `forum_create_thread` 호출 금지. 결과 보고 / 분석 완료 / 의견 / 진행 메모 모두 `--forum-edit` (본문 PATCH) 또는 `--forum-comment` / `--auto-thread` (thread 안 stream) 로만. 사용자 정정 (2026-05-29): "양식 안 맞는 게시물" = sub-agent 가 별 thread 생성한 noise. 1 task = 1 thread 원칙 강제.
 
+**단, PlaceholderThreadId 가드 (PR #1306) 통과 후 DIGEST fallback 채널 진행 가능** — `LaunchThreadCacheFile` (`~/.mobruji/last-launch-thread.txt`) 가 placeholder (예: `99999`) 로 오염되어 `--auto-thread` reject + helper-current-thread 미가용일 때, sub-agent 는 별 thread 신설 금지 룰을 그대로 유지하되 DIGEST 채널 (`discord-reply.sh --digest` 또는 `--reply` 단발) 로 1회 알림 push + nmae 보고 후 사이클 종결. 즉 fallback chain 의 종착이 "사일런스" 가 아니라 "DIGEST 단발 + nmae 알림" 으로 강제. 상세: `docs/features/cycle-forum-placeholder-guard.md` F-3 (reader quarantine) + F-4 (wrapper stale invalidate) + `06-domain-model.md §4` PlaceholderThreadId.
+
 **4 tag 라이프사이클** (모든 cycle 작업 = individual thread, backlog single thread 폐기):
 - 🟡 대기: nmae 가 `wrapper --register-pending` 호출 시 신설
 - ⏳ 진행: wrapper launch 시 기존 🟡 thread 재사용 + retag (코드 강제)
