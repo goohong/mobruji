@@ -272,8 +272,13 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
     user_prompt = (
         f"[사용자 메시지] (message_id={message_id}, channel_id={channel_id}, user_id={user_id})\n\n"
         f"{body}\n{forum_context}\n\n"
-        f"위 메시지를 처리. 답이 필요하면 mcp__nmae__post_discord_message 호출 "
-        f"(channel_id='{channel_id}'). {thread_directive}"
+        f"**STRICT 의무 (2026-05-29)**: 위 메시지에 **반드시** "
+        f"mcp__nmae__post_discord_message tool 호출로 답하세요. "
+        f"답 텍스트만 생성하고 tool 호출 안 하면 사용자에게 안 보임 = 사고.\n\n"
+        f"- channel_id='{channel_id}'\n"
+        f"- {thread_directive}\n"
+        f"- 답이 짧아도 (예: \"OK\", \"확인했습니다\") 반드시 tool 호출.\n"
+        f"- 작업 적재 의도면 \"📌 reaction 으로 적재해주세요\" 라고 답 (자율 등록 X)."
     )
 
     logger.info(
