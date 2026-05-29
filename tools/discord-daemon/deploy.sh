@@ -50,6 +50,9 @@ HOOK_NAMES=(
   # 2026-05-29: helper-tool-progress.sh — PreToolUse hook script.
   # spec: docs/features/helper-tool-visibility.md.
   helper-tool-progress.sh
+  # 2026-05-29: maestro-launch.sh — NCP 본체와 repo SoT 통합 (bootstrap watcher
+  # + DISABLE_AUTOUPDATER export). spec: PR fix/maestro-launch-bootstrap-merge.
+  maestro-launch.sh
 )
 DRY_RUN=0
 
