@@ -1441,6 +1441,211 @@ class PinConfirmView(discord.ui.View):
         )
 
 
+# ─── Phase B+C — 등록 직전 정리 + O/X dialogue ────────────────────────────────
+# 사용자 의도 (2026-05-29): "정리해서 추가할까요? O / X 이모지, O 면 적재, X 면 어떤 점을
+# 수정할까요?". claude -p 호출 → 4 항목 markdown → 사용자 메시지 아래 thread → O/X.
+
+PIN_DIALOGUE_MAX_REVISIONS: Final[int] = 3
+PIN_DIALOGUE_TIMEOUT: Final[float] = 900.0  # 15분
+
+
+async def _generate_directive_description(
+    raw_summary: str, directive_id: str, user_feedback: str | None = None,
+) -> str:
+    """claude -p subprocess → 4 항목 markdown description.
+
+    user_feedback 가 있으면 prompt 에 추가 — 사용자 X 후 수정 요청 반영.
+    실패 시 raw_summary 그대로 반환 (graceful — dialogue 진행).
+    """
+    body = raw_summary
+    if user_feedback:
+        body = f"{raw_summary}\n\n[사용자 수정 요청]\n{user_feedback}"
+    polished = await asyncio.to_thread(_run_claude_polish, body, directive_id)
+    return polished or raw_summary
+
+
+class PinDialogueView(discord.ui.View):
+    """O/X dialogue — 정리된 description 확인 + 수정 loop.
+
+    O = `_do_register_directive` 호출 + thread close.
+    X = `_request_revision` (modal 또는 thread 안 메시지 수신) → 재정리 → 다시 O/X.
+    max retry = 3, timeout = 15분 (default 취소).
+    """
+
+    def __init__(
+        self,
+        *,
+        target_message_id: str,
+        target_user_id: int,
+        raw_summary: str,
+        polished_description: str,
+        revision_count: int,
+        thread,  # noqa: ANN001 — discord thread duck-typed
+        register_channel,  # noqa: ANN001
+    ) -> None:
+        super().__init__(timeout=PIN_DIALOGUE_TIMEOUT)
+        self._target_message_id = target_message_id
+        self._target_user_id = target_user_id
+        self._raw_summary = raw_summary
+        self._polished = polished_description
+        self._revision_count = revision_count
+        self._thread = thread
+        self._register_channel = register_channel
+
+    async def _verify_user(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self._target_user_id:
+            await interaction.response.send_message(
+                "버튼은 원래 사용자만 사용할 수 있습니다.", ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="등록", style=discord.ButtonStyle.success, emoji="⭕")
+    async def _approve(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        if not await self._verify_user(interaction):
+            return
+        await interaction.response.edit_message(
+            content=f"✅ 등록 진행 중…\n\n{self._polished}", view=None,
+        )
+        await _do_register_directive(
+            interaction.client,
+            self._target_message_id,
+            self._target_user_id,
+            channel=self._register_channel,
+            summary=self._polished[:80],
+        )
+        await interaction.edit_original_response(
+            content=f"✅ 등록 완료.\n\n{self._polished}",
+        )
+        # thread 자동 archive
+        try:
+            await self._thread.edit(archived=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin dialogue thread archive 실패: %r", exc)
+        self.stop()
+
+    @discord.ui.button(label="수정", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def _revise(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        if not await self._verify_user(interaction):
+            return
+        if self._revision_count >= PIN_DIALOGUE_MAX_REVISIONS:
+            await interaction.response.edit_message(
+                content=(
+                    f"🚫 수정 최대 {PIN_DIALOGUE_MAX_REVISIONS}회 도달 — 등록 취소.\n\n"
+                    f"다시 시도하려면 메시지에 📌 reaction 재시도."
+                ),
+                view=None,
+            )
+            self.stop()
+            return
+
+        await interaction.response.edit_message(
+            content=(
+                f"❓ 어떤 점을 수정할까요? 이 thread 안에 메시지로 입력하세요. "
+                f"(현재 시도 {self._revision_count + 1}/{PIN_DIALOGUE_MAX_REVISIONS})"
+            ),
+            view=None,
+        )
+
+        # 사용자 다음 메시지 wait (thread 안)
+        def _check(m: discord.Message) -> bool:
+            return (
+                m.author.id == self._target_user_id
+                and m.channel.id == self._thread.id
+            )
+
+        try:
+            user_msg = await interaction.client.wait_for(
+                "message", check=_check, timeout=PIN_DIALOGUE_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            await self._thread.send("⏱ 수정 입력 timeout — 등록 취소.")
+            self.stop()
+            return
+
+        # 재정리
+        await self._thread.send(f"🔄 재정리 중 (시도 {self._revision_count + 1})…")
+        new_polished = await _generate_directive_description(
+            self._raw_summary, self._target_message_id,
+            user_feedback=user_msg.content,
+        )
+
+        # 새 PinDialogueView 으로 재게시
+        new_view = PinDialogueView(
+            target_message_id=self._target_message_id,
+            target_user_id=self._target_user_id,
+            raw_summary=self._raw_summary,
+            polished_description=new_polished,
+            revision_count=self._revision_count + 1,
+            thread=self._thread,
+            register_channel=self._register_channel,
+        )
+        await self._thread.send(
+            content=(
+                f"📝 재정리 (시도 {self._revision_count + 1}):\n\n"
+                f"{new_polished}\n\n"
+                f"등록할까요?"
+            ),
+            view=new_view,
+        )
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        logger.info(
+            "📌 pin dialogue timeout: msg_id=%s revision=%d — default 취소",
+            self._target_message_id, self._revision_count,
+        )
+        try:
+            await self._thread.send("⏱ 시간 만료 — 등록 취소.")
+            await self._thread.edit(archived=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin dialogue timeout 정리 실패: %r", exc)
+
+
+async def _start_pin_dialogue(
+    message,  # noqa: ANN001
+    target_user_id: int,
+    raw_summary: str,
+    register_channel,  # noqa: ANN001
+) -> None:
+    """Phase B+C — message 아래 Discord thread 생성 + 정리 + O/X.
+
+    message.create_thread → claude -p 정리 → PinDialogueView 게시.
+    실패 시 _do_register_directive fallback (graceful).
+    """
+    try:
+        thread = await message.create_thread(name=f"📌 등록 확인 — {raw_summary[:50]}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("📌 pin dialogue thread 생성 실패 — 즉시 등록 fallback: %r", exc)
+        await _do_register_directive(
+            message.guild.me._state._get_client(), str(message.id), target_user_id,
+            channel=register_channel, summary=raw_summary,
+        )
+        return
+
+    await thread.send("📝 정리 중… (claude -p 호출, 5-10초)")
+
+    polished = await _generate_directive_description(raw_summary, str(message.id))
+
+    view = PinDialogueView(
+        target_message_id=str(message.id),
+        target_user_id=target_user_id,
+        raw_summary=raw_summary,
+        polished_description=polished,
+        revision_count=0,
+        thread=thread,
+        register_channel=register_channel,
+    )
+    await thread.send(
+        content=f"📝 다음 내용으로 정리해서 추가할까요?\n\n{polished}",
+        view=view,
+    )
+
+
 async def _do_register_directive(
     client: discord.Client,
     message_id: str,
@@ -1587,10 +1792,22 @@ async def _handle_pin_reaction(
                 "📌 pin match: confirm view 전송 실패 — 즉시 등록 fallback: %r", exc,
             )
 
-    # 매칭 없거나 confirm 전송 실패 — 즉시 등록 (caller 가 알고 있는 channel + summary 전달).
-    await _do_register_directive(
-        client, message_id, user_id, channel=channel, summary=summary,
-    )
+    # 매칭 없음 — Phase B+C: 등록 직전 정리 + 사용자 O/X dialogue.
+    # raw summary 가 빈 본문이면 dialogue 의미 없음 → 즉시 등록 (graceful).
+    if not summary or summary == "(빈 본문)":
+        await _do_register_directive(
+            client, message_id, user_id, channel=channel, summary=summary,
+        )
+        return
+    try:
+        await _start_pin_dialogue(message, user_id, summary, channel)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "📌 pin dialogue 시작 실패 — 즉시 등록 fallback: %r", exc,
+        )
+        await _do_register_directive(
+            client, message_id, user_id, channel=channel, summary=summary,
+        )
 
 
 # 2026-05-29 — legacy _legacy_handle_pin_reaction 폐기 (dead code 정리).

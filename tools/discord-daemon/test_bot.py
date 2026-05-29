@@ -539,69 +539,9 @@ class PinReactionTests(unittest.IsolatedAsyncioTestCase):
         )
         client.get_channel.assert_called_once_with(999)
 
-    async def test_handle_pin_reaction_calls_append_script_and_attaches_check(
-        self,
-    ) -> None:
-        msg = mock.MagicMock()
-        msg.content = "release 머지 가도 될까요?"
-        msg.add_reaction = mock.AsyncMock()
-
-        channel = mock.MagicMock()
-        channel.fetch_message = mock.AsyncMock(return_value=msg)
-
-        client = mock.MagicMock()
-        client.get_channel.return_value = channel
-
-        # subprocess.run 가 rc=0 반환하도록 mock.
-        fake_result = mock.MagicMock()
-        fake_result.returncode = 0
-        fake_result.stderr = b""
-
-        # directive_append.sh 존재 여부도 mock (실제 파일 의존 X).
-        with mock.patch.object(bot.subprocess, "run", return_value=fake_result) as run, \
-             mock.patch.object(bot.Path, "exists", return_value=True):
-            await bot._handle_pin_reaction(
-                client=client,
-                channel_id=1506,
-                message_id="9001",
-                user_id=42,
-            )
-
-        run.assert_called_once()
-        call_args = run.call_args.args[0]
-        self.assertEqual(call_args[0], "bash")
-        self.assertTrue(call_args[1].endswith("directive_append.sh"))
-        self.assertEqual(call_args[2], "9001")
-        self.assertEqual(call_args[3], "release 머지 가도 될까요?")
-        # 성공 시 ✅ 부착 검증.
-        msg.add_reaction.assert_awaited_once_with(bot.PIN_REGISTERED_EMOJI)
-
-    async def test_handle_pin_reaction_skips_check_on_subprocess_failure(self) -> None:
-        msg = mock.MagicMock()
-        msg.content = "hello"
-        msg.add_reaction = mock.AsyncMock()
-
-        channel = mock.MagicMock()
-        channel.fetch_message = mock.AsyncMock(return_value=msg)
-
-        client = mock.MagicMock()
-        client.get_channel.return_value = channel
-
-        fake_result = mock.MagicMock()
-        fake_result.returncode = 1
-        fake_result.stderr = b"already registered"
-
-        with mock.patch.object(bot.subprocess, "run", return_value=fake_result), \
-             mock.patch.object(bot.Path, "exists", return_value=True):
-            await bot._handle_pin_reaction(
-                client=client,
-                channel_id=1506,
-                message_id="9001",
-                user_id=42,
-            )
-
-        # rc != 0 → ✅ 부착 skip.
-        msg.add_reaction.assert_not_called()
+    # 2026-05-29 폐기: 즉시 등록 검증 2종 — Phase B+C dialogue path 도입 후
+    # 매칭 없을 때 = dialogue thread + O/X (사용자 명시 확인). 즉시 등록 path 는
+    # empty body + dialogue 시작 실패 fallback 시만. dialogue unit test 별도 작성 권장.
 
     async def test_handle_pin_reaction_empty_body_uses_placeholder(self) -> None:
         msg = mock.MagicMock()
