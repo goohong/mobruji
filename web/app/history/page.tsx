@@ -181,10 +181,13 @@ export default function HistoryPage() {
    *     rounded-2xl + CTA bg-zinc-900 → tokens + brand-500/600
    *  5) EmptyHistory : bg-zinc-50 dark:bg-zinc-950, h1 + CTA → tokens
    *
-   * 미swap (후속 PR 양보):
-   *  - count live 영역 부제 (`text-zinc-600 dark:text-zinc-400`) — 텍스트 토큰 매핑 후속 더불어 결정.
-   *  - 삭제 button / 미리보기 button — secondary CTA 토큰 패턴 아직 미정.
-   *  - SongCard 등 자식 컴포넌트 — 본 페이지 범위 밖.
+   * 잔존 swap (sub-PR 5 — 매트릭스 PR #1263):
+   *  - count live 영역 부제 → --text-secondary (likes/bookmarks 동일 패턴)
+   *  - 전체 삭제 button (border/text/hover) → border/--text-label + hover:bg-muted
+   *  - HistoryCard time → --text-body-emphasis
+   *  - HistoryCard 삭제 button hover → border/--text-primary
+   *  - HistoryCard 더보기 button → --text-label
+   *  본 sub-PR 로 /history 의 zinc-* className 잔존 0 달성.
    */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
@@ -209,7 +212,7 @@ export default function HistoryPage() {
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            className="text-sm text-zinc-600 dark:text-zinc-400"
+            className="text-sm text-[var(--text-secondary)]"
           >
             {isBackendSource
               ? `세션 ID 기준 ${displayEntries.length}건의 추천을 서버에서 불러왔어요.`
@@ -241,7 +244,7 @@ export default function HistoryPage() {
           <button
             type="button"
             onClick={handleClear}
-            className="rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-medium text-[var(--text-label)] transition-colors hover:bg-[var(--bg-muted)]"
           >
             {clearButtonLabel}
           </button>
@@ -375,7 +378,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
         <div className="flex flex-col gap-0.5">
           <time
             dateTime={entry.requestedAt}
-            className="text-sm font-medium text-zinc-800 dark:text-zinc-200"
+            className="text-sm font-medium text-[var(--text-body-emphasis)]"
           >
             {relativeTime}
           </time>
@@ -392,7 +395,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
             type="button"
             onClick={onRemove}
             aria-label={`${relativeTime} 추천 삭제`}
-            className="rounded-full border border-transparent px-2 py-1 text-xs font-medium text-[var(--text-caption)] transition-colors hover:border-zinc-300 hover:text-zinc-800 dark:hover:border-zinc-700 dark:hover:text-zinc-100"
+            className="rounded-full border border-transparent px-2 py-1 text-xs font-medium text-[var(--text-caption)] transition-colors hover:border-[var(--border)] hover:text-[var(--text-primary)]"
           >
             삭제
           </button>
@@ -414,7 +417,7 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
-          className="self-start text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
+          className="self-start text-sm font-medium text-[var(--text-label)] underline-offset-4 hover:underline"
         >
           {expanded ? "접기" : `이 추천 다시 보기 (+${remaining}개 더보기)`}
         </button>
