@@ -1361,6 +1361,11 @@ class DiscordReplyBareBodyTests(unittest.TestCase):
             # #987: 운영 ~/.mobruji 격리.
             "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
             "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            # PR #1233 (9b0ade1) 본답 push 직후 ❓ control emoji 자동 부착이
+            # main channel POST 외 reaction PUT 1건을 추가 — 본 테스트는 bare
+            # body 의 단일 main POST 시나리오만 검증하므로 제어 emoji 격리.
+            # 제어 emoji 자체 동작 검증은 별도 케이스 (scope 분리).
+            "MOBRUJI_CONTROL_EMOJI": "0",
         })
         run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         result = subprocess.run(
@@ -1664,6 +1669,12 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
             "LAST_USER_MSG_ID_FILE": str(last_id_path),
             "HELPER_TARGET_FILE": str(target_path),
             "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            # PR #1233 (9b0ade1) 본답 push 직후 ❓ control emoji 자동 부착이
+            # writing marker hook 호출 카운트에 reaction PUT 1건을 추가 — 본
+            # 테스트 클래스는 writing marker / auto-hook 의 호출 패턴만
+            # 검증하므로 제어 emoji 격리. 개별 케이스가 extra_env 로 명시
+            # override 가능.
+            "MOBRUJI_CONTROL_EMOJI": "0",
         })
         run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         if extra_env:
