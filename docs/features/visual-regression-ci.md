@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: [1044, 1283]
-related_prs: [1305, 1309, 1319]
+related_prs: [1305, 1309, 1319, 1339]
 last_reviewed: 2026-05-29
 ---
 
@@ -317,6 +317,7 @@ web/tests/visual/
 - [ ] **PR 4 (PR 3 머지 후, plan)**: `docs/ai-harness/actors/sub-agent.md §2-rev` 에 단계 1 visual diff 판단 표 (§3-4) reference 1 줄 추가.
 - [ ] **PR 5 (PR 3 머지 후, fe / 옵션)**: `.github/workflows/visual-regression-nightly.yml` 신설 (단계 2 dev 서버 nightly cron). 상세 spec **§6-PR5** 박제.
 - [ ] **PR 6 (별 spec, 후보 E ADR accepted 격상 트리거)**: ADR-0026 status `proposed` → `accepted` (PR 3 머지 + 첫 baseline 확보 완료 후).
+- [ ] **PR 7 (PR 3 머지 후, plan / §8 Q6 closure 후속)**: `.github/workflows/visual-baseline-pr-body-check.yml` 신설 — `scope:web` PR 의 visual-regression workflow `failure()` 시 PR body 의 `## visual baseline update` 섹션 존재 여부 자동 검증 (행 ≥ 2 또는 `baseline 변경 없음` 명시). 검증 실패 시 workflow fail + auto-label `regression:visual-body-missing`. 사유: §8 Q6 closure (c) 둘 다 채택 — 자동 검증 (학습 의존 ↓) + rev §3-4 자율 판단 (사유 합리성 review) 병행. PR 7 머지 가능 시기 = PR 3 머지 + 첫 baseline 확보 완료 후 (workflow 가 fail 가능 상태가 돼야 본 검증의 의미 발생).
 
 ### §6-PR5) `visual-regression-nightly.yml` 상세 spec (사전 박제)
 
@@ -449,7 +450,7 @@ jobs:
 | Q3 | OS font rendering false-positive 가드 | (a) Playwright Docker 통일 (proposed) / (b) 시스템 font install / (c) `fontFamily` CSS 강제 | fe sub-agent / PR 3 |
 | ~~Q4~~ ✅ | ~~nightly workflow (단계 2) 운영 — diff 발견 시 사용자 알림 방식~~ — **§6-PR5 §C 매트릭스 채택** (default = DIGEST / 3 일 연속 = Discord 본 채널 + 사용자 reply + GitHub issue 자동). 결정 로그 §9 참조. | — | @goohong / **closed 2026-05-29 (round 13)** |
 | ~~Q5~~ ✅ | ~~ADR-0026 §8 Q1~Q4 와 본 spec §8 Q1~Q4 의 매핑 — accepted 격상 시 ADR 결정 로그 vs 본 spec 결정 로그 우선순위~~ — **(c) 양쪽 동일 갱신** 채택. ADR-0026 §8 신설 (PR #1319 머지 후) 이후 본 spec §8 Q1~Q4 와 ADR 의 Q1~Q4 는 결정 로그 양쪽 같은 일자 / 같은 내용으로 갱신. PR #1319 본문 self-link 형태. 결정 로그 §9 참조. | — | @goohong / **closed 2026-05-29** |
-| Q6 (본 spec 신규) | `## visual baseline update` 섹션 의무 부착 — 자동 검증 workflow 신설 vs rev 자율 판단 | (a) `visual-baseline-pr-body-check.yml` workflow 신설 / (b) rev §3-4 판단 표만 / (c) 둘 다 | rev sub-agent / PR 3 머지 후 |
+| ~~Q6~~ ✅ | ~~`## visual baseline update` 섹션 의무 부착 — 자동 검증 workflow 신설 vs rev 자율 판단~~ — **(c) 둘 다 채택 후보 권고** (closure 2026-05-29 plan round 14). 자동 검증 workflow (`visual-baseline-pr-body-check.yml` 신설) + rev §3-4 판단 표 병행 (사유 합리성 review 는 rev 책임 유지). 본 closure 의 후속 PR = §6 PR 7. 사유는 §9 결정 로그 참조. | — | @goohong / **closed 2026-05-29 (권고, 실제 workflow yml 본문은 §6 PR 7)** |
 
 ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 시 동기화):
 
@@ -473,3 +474,4 @@ ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 �
 - **2026-05-29**: **§8 Q5 closure** — (c) 양쪽 동일 갱신 채택. 사유: ADR-0026 §8 (PR #1319, OPEN) 신설 후에는 ADR 본문 §8 Q1~Q4 가 본 spec §8 Q1~Q4 의 super-set 이 아니라 동일 매트릭스의 1:1 mirror — 한쪽 결정 누락 시 sync drift 사고 risk ↑. 결정 로그도 양쪽 같은 일자 / 사유 / PR 번호로 동시 박제. 운영 룰: ADR-0026 §Decision 갱신 PR 은 본 spec §9 같이 갱신 의무 (rev 단계 1 audit grep — `0026-visual-regression-ci.md` 와 `visual-regression-ci.md` 동시 diff 확인). 본 closure 의 머지 가능 시기 = PR #1319 머지 후 (PR body self-link 의무 박제). 본 PR 머지 후 ADR-0026 §8 작성 PR (#1319) 본문에 본 closure 참조 link 의무.
 - **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — fe sub-agent 가 PR 3 launch 시 첫 reference. 5 sub-section: (1) Playwright workflow yaml 골격 (container Docker / scope:web 조건 / concurrency cancel / 30 일 artifact retention), (2) baseline 디렉토리 구조 (`web/tests/visual/__snapshots__/` + `chromium-linux` 단일 browser), (3) pixelmatch 0.1% 근거 5 row 비교표 (pixelmatch 공식 권장 + Chromium 안정 시 false-positive < 5%), (4) artifact 저장 룰 (failure 시만 / 30 일 / free tier 안), (5) fail 조건 + rev 단계 1 판단 매핑 6 row. 트리거 — plan round 12 작업 지시 + PR 3 launch 직전 사전 spec 확정 의무 (망각 가드 — ADR-0019 정신). workflow yml 실제 코드 본문은 PR 3 본 사이클, 본 spec 은 골격 / 근거 / 룰만.
 - **2026-05-29 (plan round 13)**: **§6-PR5 사전 spec 박제** — `visual-regression-nightly.yml` 의 cron 시각 (KST 03:00 = UTC 18:00), dev 서버 호출 (`MOBRUJI_DEV_BASE_URL` 단일 SoT), DIGEST push 분기 매트릭스 (5 행 — 통과 / diff / dev down / Docker pull fail / 3 일 연속), graceful skip 분기 (4 시나리오), workflow yaml skeleton, fe sub-agent 검증 의무 4 항목. 사유: PR 5 가 옵션 단계 (§6 "옵션") 라 학습 의존 risk 높음 — 사전 spec 박제로 PR 3 머지 직후 fe sub-agent 가 본 sub-section 만 읽고 작성 가능. §8 Q4 (nightly diff 발견 시 사용자 알림 방식) closure 매트릭스 일부 포함 — (a) DIGEST push default 채택 + (b) 사용자 reply 는 3 일 연속에만 추가 + (c) issue 자동 생성은 3 일 연속에만 trigger. plan round 13 trigger.
+- **2026-05-29 (plan round 14)**: **§8 Q6 closure** — (c) 둘 다 채택 후보 권고. 사유: (a) workflow 자동 검증만 = 사유 합리성 review 부재 (PR body 에 "section 채움" 만 형식 통과 가능, semantic check 부재) → 회귀 catch rate ↓ / (b) rev §3-4 자율 판단만 = ADR-0019 정신 위반 (rev 망각 의존 — 학습 가드 부재) → 단계 1 게이트 부실. (c) 둘 다 = 자동 검증 (학습 의존 ↓, 형식 가드) + rev §3-4 (사유 합리성 review, semantic 가드) = 단계 1 게이트 강화 + rev 부담 ↓ (형식 fail 은 자동 차단, rev 는 의도 검증 집중). 본 closure 의 후속 PR = §6 PR 7 (`visual-baseline-pr-body-check.yml` 신설). 머지 가능 시기 = PR 3 머지 + 첫 baseline 확보 완료 후 (본 workflow 가 fail trigger 되려면 visual-regression workflow 가 fail 가능 상태여야 함). PR 7 본문은 `## visual baseline update` 섹션 행 ≥ 2 또는 "baseline 변경 없음" 명시 가드 — auto-label `regression:visual-body-missing` 자동 부착. rev 자율 판단 룰 §3-4 는 그대로 유지 — sub-agent.md §2-rev 의 (§6 PR 4) reference 도 그대로. 본 PR (plan round 14) 머지 후 rev 단계 1 audit grep — `visual-regression-ci.md §8 Q6` 가 closure 표기 인지 확인.
