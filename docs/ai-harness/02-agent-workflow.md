@@ -37,6 +37,14 @@
 - 단, 예외 머지도 PR은 생성해야 하며 사유를 본문에 기록한다.
 - 단, 예외 머지는 사후 리뷰를 필수로 수행한다. (머지 후 24시간 이내)
 
+### 4-1) rev-gate 합법 우회 — `type:emergency-hotfix` 라벨 (cross-ref)
+- production-down / security / data-integrity / CI-down 즉시 패치 한정.
+- 라벨 부착 시 `rev-gate.yml` whitelist skip → 즉시 머지 가능, 단 사후 audit 의무.
+- 사후 의무: `rev-gate-audit.yml` 자동 issue (`audit:emergency-hotfix-followup`) + DIGEST push + 다음 사이클 rev 단계 2 launch.
+- 부적합 사유 (rev 대기 길어서 / docs only / admin 자체 검토) 라벨 사용 금지.
+- 상세 정책 / PR body 필수 섹션 / 사용 이력: **`docs/features/emergency-hotfix-flow.md` SoT**.
+- 관련 spec: `docs/features/rev-gate-required-check-enforcement.md` §3-2 (whitelist) + `docs/features/rev-gate-audit-workflow.md` §3-3-2 (사후 분기).
+
 ## 5) 사후 리뷰(Post Review) 프로세스
 1. 머지 당일 담당자가 `Post-Review` 라벨을 PR에 추가한다.
 2. 리뷰어 1명이 24시간 내 아래 항목을 검토한다.
