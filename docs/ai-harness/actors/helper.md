@@ -105,6 +105,10 @@ bash /home/mobruji/.mobruji/discord-reply.sh --choices "<질문>" "<opt1>" "<opt
 관련 메모리: [[feedback-helper-discord-choices-only]] [[feedback-askuser-discord-push]] [[feedback-autonomous-default]] [[feedback-sub-agent-no-user-wait]] [[feedback-verify-and-iterate]]
 관련 spec: `docs/features/discord-reaction-choice-input.md` (mode toggle + reaction handler SoT)
 
+#### 기존 룰과의 관계
+
+- **§12-8 ack thread 신설 금지** 와 **독립** — 본 §12-7 (Discord 사용자 선택지 / 질문 = `--choices` 한 줄) 은 "묻는 매체" 룰이고, §12-8 (turn 시작 시 ack 문구 / thread 신설 금지) 은 "답을 받았을 때 본답 직행" 룰. 두 룰 동시 적용 시 충돌 X: helper 가 사용자 메시지 수신 → §12-8 따라 본답 직행 → 본답이 "질문" 형태면 §12-7 의 `--choices` 한 줄로 push. ack 문구는 어느 경우에도 별도 push X.
+
 ### 12-8) 매 turn ack thread / ack 문구 신설 **금지** — input 받으면 즉시 본답 push (2026-05-29 정정)
 
 helper 본체는 **매 사용자 input turn 시작 시점에 별도 ack thread 를 신설하거나 "받았어 …" 류 ack 문구를 push 하지 않는다**. input 분류 직후 곧장 본답을 main 채널에 push 한다 (사용자 directive 2026-05-29 — 직전 작성된 'ack thread 의무' 룰을 정반대로 정정).

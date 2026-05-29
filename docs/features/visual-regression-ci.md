@@ -200,7 +200,7 @@ baseline 갱신 PR 흐름:
 | Q2 | drift threshold — pixelmatch 0.1% 가 적정한가 | (a) 0.1% (proposed) / (b) 0.05% / (c) SSIM 0.99 / (d) baseline 1 주 운영 후 조정 | rev sub-agent / 첫 baseline 1 주 후 |
 | Q3 | OS font rendering false-positive 가드 | (a) Playwright Docker 통일 (proposed) / (b) 시스템 font install / (c) `fontFamily` CSS 강제 | fe sub-agent / PR 3 |
 | Q4 | nightly workflow (단계 2) 운영 — diff 발견 시 사용자 알림 방식 | (a) rev DIGEST push (rev-qa-protocol §5-9) / (b) Discord 사용자 reply / (c) GitHub issue 자동 생성 | @goohong / PR 5 머지 전 |
-| Q5 (본 spec 신규) | ADR-0026 §8 Q1~Q4 와 본 spec §8 Q1~Q4 의 매핑 — accepted 격상 시 ADR 결정 로그 vs 본 spec 결정 로그 우선순위 | (a) ADR 결정 우선 / (b) 본 spec 우선 / (c) 양쪽 동일 갱신 | @goohong / ADR accepted 격상 시 |
+| ~~Q5~~ ✅ | ~~ADR-0026 §8 Q1~Q4 와 본 spec §8 Q1~Q4 의 매핑 — accepted 격상 시 ADR 결정 로그 vs 본 spec 결정 로그 우선순위~~ — **(c) 양쪽 동일 갱신** 채택. ADR-0026 §8 신설 (PR #1319 머지 후) 이후 본 spec §8 Q1~Q4 와 ADR 의 Q1~Q4 는 결정 로그 양쪽 같은 일자 / 같은 내용으로 갱신. PR #1319 본문 self-link 형태. 결정 로그 §9 참조. | — | @goohong / **closed 2026-05-29** |
 | Q6 (본 spec 신규) | `## visual baseline update` 섹션 의무 부착 — 자동 검증 workflow 신설 vs rev 자율 판단 | (a) `visual-baseline-pr-body-check.yml` workflow 신설 / (b) rev §3-4 판단 표만 / (c) 둘 다 | rev sub-agent / PR 3 머지 후 |
 
 ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 시 동기화):
@@ -222,3 +222,4 @@ ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 �
 - **2026-05-29**: §3-5 CI 실행 위치 — 단계 1 (PR 차단 게이트) 의무 / 단계 2 (nightly) 옵션 / 단계 3 (production smoke) 별 cycle. ADR-0026 §Decision 3 와 일치.
 - **2026-05-29**: §4 제외 — Playwright e2e infra (PR #1200) 머지 의존 명시 + baseline LFS 전환 별 ADR + percy/Chromatic SaaS 보안 정책 위반 risk 채택 X (ADR-0026 Alternatives A).
 - **2026-05-29**: §6 PR 6 (ADR-0026 accepted 격상) 트리거 = PR 3 머지 + 첫 baseline 확보 완료 시점 — ADR 본문 §Decision 의 격상 조건과 일치.
+- **2026-05-29**: **§8 Q5 closure** — (c) 양쪽 동일 갱신 채택. 사유: ADR-0026 §8 (PR #1319, OPEN) 신설 후에는 ADR 본문 §8 Q1~Q4 가 본 spec §8 Q1~Q4 의 super-set 이 아니라 동일 매트릭스의 1:1 mirror — 한쪽 결정 누락 시 sync drift 사고 risk ↑. 결정 로그도 양쪽 같은 일자 / 사유 / PR 번호로 동시 박제. 운영 룰: ADR-0026 §Decision 갱신 PR 은 본 spec §9 같이 갱신 의무 (rev 단계 1 audit grep — `0026-visual-regression-ci.md` 와 `visual-regression-ci.md` 동시 diff 확인). 본 closure 의 머지 가능 시기 = PR #1319 머지 후 (PR body self-link 의무 박제). 본 PR 머지 후 ADR-0026 §8 작성 PR (#1319) 본문에 본 closure 참조 link 의무.
