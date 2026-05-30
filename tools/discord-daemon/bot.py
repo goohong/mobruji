@@ -341,33 +341,43 @@ CYCLE_STALE_ACTIVE_INJECT_TEMPLATE: Final[str] = (
     "즉시 sub-agent 상태 확인 후 set-idle (완료 시) 또는 재 launch 결정."
 )
 
-# rev e2e 단계 2 (post-merge) 자동 trigger (#1008, spec: docs/features/rev-e2e-3-stages.md §3-2).
+# rev e2e Post-merge audit (단계 2) 자동 trigger (#1008,
+# spec: docs/features/rev-e2e-2-stages.md §3-2).
 # 5분 polling — develop 머지된 PR 중 `rev-post-merge-pass` 라벨 없는 항목을
 # gh CLI 로 발굴해 nmae tmux pane 에 audit launch 알림 inject + Discord push.
 # 동일 PR 반복 inject 방지를 위해 in-process debounce (기본 15분).
+#
+# 명명 (2026-05-30 rev2s-1 / PR #1367 머지 후 통일):
+#   - 단계 1 = 🟡 Pre-merge review (PR 머지 전)
+#   - 단계 2 = 🔵 Post-merge audit (develop 머지 후 dev 환경 회귀 검증) ← 본 loop 대상
+#   - 단계 3 (release 후 production 검증) = 폐기. 사유: production 환경 부재
+#     (cd-prod.yml / cd-release.yml 워크플로우 없음). 향후 production 환경
+#     신설 시 부활 가능 — `[[project_rev_stage_3_prod_revival]]` 메모리 절차.
 REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED: Final[str] = "1"
 REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
 REV_POST_MERGE_AUDIT_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 90  # boot warmup
 REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET: Final[str] = "mobruji:0.0"
 # 동일 PR 재 inject 차단 — nmae 가 라벨 부여하기까지 polling 사이클 사이의
-# 중복 방지. 15분이면 단계 2 audit 시작/완료를 기다리기엔 충분.
+# 중복 방지. 15분이면 Post-merge audit (단계 2) 시작/완료를 기다리기엔 충분.
 REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
 # debounce cache 사이즈 cap — 메모리 누수 방지 (LRU 비슷한 단순 cap).
 REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
 # gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
 # 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
 REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "1h"
-# label 조회 시 사용할 label 이름 — rev sub-agent 가 단계 2 통과 시 부여.
+# label 조회 시 사용할 label 이름 — rev sub-agent 가 Post-merge audit (단계 2)
+# 통과 시 부여.
 REV_POST_MERGE_PASS_LABEL: Final[str] = "rev-post-merge-pass"
 # inject prompt template — {pr_numbers} 콤마 join.
 REV_POST_MERGE_AUDIT_INJECT_TEMPLATE: Final[str] = (
-    "[rev e2e post-merge] PR {pr_numbers} 단계 2 audit launch — "
-    "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-3-stages.md §3-2). "
-    "rev 단계 2 pass 시 라벨 `rev-post-merge-pass` 부여."
+    "[rev e2e post-merge] PR {pr_numbers} Post-merge audit (단계 2) launch — "
+    "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-2-stages.md §3-2). "
+    "Post-merge audit pass 시 라벨 `rev-post-merge-pass` 부여."
 )
 # Discord push template.
 REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE: Final[str] = (
-    "🔍 rev post-merge audit trigger — PR {pr_numbers} (단계 2 nmae inject)"
+    "🔍 rev post-merge audit trigger — PR {pr_numbers} "
+    "(Post-merge audit (단계 2) nmae inject)"
 )
 # gh CLI 실행 timeout (#1008). 네트워크 hang 시 loop block 방어.
 REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS: Final[int] = 30
@@ -873,7 +883,7 @@ def load_env() -> dict[str, str]:
     env["STALE_ACTIVE_THRESHOLD_MIN"] = os.environ.get(
         "STALE_ACTIVE_THRESHOLD_MIN", str(STALE_ACTIVE_THRESHOLD_DEFAULT_MIN)
     )
-    # rev e2e 단계 2 post-merge audit loop (#1008)
+    # rev e2e Post-merge audit (단계 2) loop (#1008)
     env["REV_POST_MERGE_AUDIT_LOOP"] = os.environ.get(
         "REV_POST_MERGE_AUDIT_LOOP", REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED
     )
@@ -4284,8 +4294,12 @@ async def cycle_idle_watch_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# rev e2e 단계 2 (post-merge) 자동 trigger (#1008)
-# spec: docs/features/rev-e2e-3-stages.md §3-2
+# rev e2e Post-merge audit (단계 2) 자동 trigger (#1008)
+# spec: docs/features/rev-e2e-2-stages.md §3-2
+#
+# 단계 3 (release 후 production 검증) 은 2026-05-30 폐기 — production 환경
+# 부재 (cd-prod.yml / cd-release.yml 워크플로우 없음). 부활 절차는
+# `[[project_rev_stage_3_prod_revival]]` 메모리.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -4296,18 +4310,19 @@ def fetch_rev_post_merge_candidates(
     timeout_seconds: int = REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS,
     runner=subprocess.run,
 ) -> list[int]:
-    """develop 머지된 PR 중 단계 2 audit 필요한 PR 번호 리스트를 반환합니다.
+    """develop 머지된 PR 중 Post-merge audit (단계 2) 필요한 PR 번호 리스트를
+    반환합니다.
 
     `gh pr list --state merged --base develop --search 'merged:>{window} ago -label:{pass_label}'`
     을 호출해 JSON 으로 결과를 받습니다. 호출 실패 / parse fail 은 빈 리스트로
     graceful fallback (호출부 loop 가 다음 iter 에서 재시도).
 
     Args:
-        pass_label: 단계 2 통과 라벨 (rev sub-agent 가 부여). 이 라벨이 부재한
-            PR 만 후보로 잡힙니다.
+        pass_label: Post-merge audit (단계 2) 통과 라벨 (rev sub-agent 가 부여).
+            이 라벨이 부재한 PR 만 후보로 잡힙니다.
         search_window: gh CLI `merged:>${X} ago` 윈도우 — 너무 오래된 머지는
-            polling 부담만 누적되므로 1시간만 본다 (단계 2 deploy 후 audit 끝났을
-            시각). 외부 override 가능.
+            polling 부담만 누적되므로 1시간만 본다 (Post-merge audit (단계 2)
+            deploy 후 audit 끝났을 시각). 외부 override 가능.
         timeout_seconds: gh CLI 호출 timeout. 네트워크 hang 시 loop block 방어.
         runner: ``subprocess.run`` 호환 콜러블. 테스트 stub 용.
 
@@ -4775,16 +4790,18 @@ async def rev_post_merge_audit_loop(
     candidate_fetcher=None,
     time_source=time.monotonic,
 ) -> None:
-    """5분 polling — develop 머지된 PR 단계 2 audit 자동 trigger (#1008).
+    """5분 polling — develop 머지된 PR Post-merge audit (단계 2) 자동 trigger
+    (#1008).
 
-    spec: docs/features/rev-e2e-3-stages.md §3-2.
+    spec: docs/features/rev-e2e-2-stages.md §3-2.
 
     동작:
       1. ``initial_delay`` 초 warmup 후 polling 시작.
       2. ``poll_interval`` 초마다 `gh pr list ... -label:rev-post-merge-pass` 호출.
       3. 후보 PR ≥ 1 → debounce 적용 후 fresh PR 만 추출.
       4. fresh ≥ 1:
-         - nmae tmux pane (``inject_target``) 에 inject (단계 2 audit launch 알림).
+         - nmae tmux pane (``inject_target``) 에 inject
+           (Post-merge audit (단계 2) launch 알림).
          - Discord ``digest_channel_id`` 에 push (cycle digest 채널 공유).
          - 각 fresh PR `last_inject_at` 갱신.
       5. graceful skip — gh CLI 실패 / fresh 없음 / tmux 부재 / Discord channel 부재 시
@@ -6152,9 +6169,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not cycle_idle_watch_enabled:
             logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
 
-        # rev e2e 단계 2 (post-merge) 자동 trigger (#1008).
-        # 5분 polling — develop 머지된 PR 단계 2 audit 자동 launch.
-        # spec: docs/features/rev-e2e-3-stages.md §3-2.
+        # rev e2e Post-merge audit (단계 2) 자동 trigger (#1008).
+        # 5분 polling — develop 머지된 PR Post-merge audit (단계 2) 자동 launch.
+        # spec: docs/features/rev-e2e-2-stages.md §3-2.
         if rev_post_merge_audit_enabled and not hasattr(
             client, "_rev_post_merge_audit_task_started"
         ):
