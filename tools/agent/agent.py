@@ -271,6 +271,7 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         return
 
     options = ClaudeAgentOptions(
+        model="claude-opus-4-8",
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
         mcp_servers={"nmae": _get_mcp_server()},
@@ -416,6 +417,7 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
         return
 
     options = ClaudeAgentOptions(
+        model="claude-opus-4-8",
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
         mcp_servers={"nmae": _get_mcp_server()},
