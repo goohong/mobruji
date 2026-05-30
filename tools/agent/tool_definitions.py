@@ -144,7 +144,16 @@ async def forum_retag(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     name="forum_edit_starter",
-    description="Forum thread starter body PATCH. 진행 / 완료 footer update.",
+    description=(
+        "Forum thread starter body PATCH. "
+        "**template 양식 의무** (PR F, docs/features/forum-starter-template-guard.md §5-2 SoT) — "
+        "기존 starter body 를 read 한 뒤 6 marker 유지한 채 update. "
+        "marker = 📌 또는 🛠️ title / 💬 본문(원본) / 🆔 id / 📋 진행 / 🔖 관련 / footer (---/_갱신:). "
+        "PASS_THRESHOLD = 5/6 — 1 marker 누락 허용 (graceful), 2개+ 누락 시 bot.py 가 graceful reject + DIGEST alert + cycle thread 댓글 + violation jsonl 박제. "
+        "정상 예 (5/6 또는 6/6): cat <<EOF 안 6 marker 모두 유지한 milestone PATCH "
+        "(📌 **title** / 💬 원본 / 🆔 id / 📋 진행 [x] / 🔖 관련 PR #1234 / --- _갱신: ts_). "
+        "위배 예 (0/6): 'PR #1234 작업 끝' (모든 marker 없음 — 즉시 reject)."
+    ),
     input_schema={"thread_id": str, "body": str},
 )
 async def forum_edit_starter(args: dict[str, Any]) -> dict[str, Any]:

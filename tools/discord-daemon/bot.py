@@ -58,6 +58,17 @@ from directive_detect import (
     format_mismatch_push as directive_format_mismatch_push,
     make_detect_entry,
 )
+from lib.forum_template_validator import (  # noqa: E402 — sibling package
+    TOTAL_MARKERS as _FORUM_TEMPLATE_TOTAL_MARKERS,
+    ValidationResult as ForumTemplateValidationResult,
+    format_alert as forum_template_format_alert,
+    validate as forum_template_validate,
+)
+
+
+def forum_template_total_markers() -> int:
+    """forum template marker total count — log / alert 양식 격리."""
+    return _FORUM_TEMPLATE_TOTAL_MARKERS
 
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
@@ -2106,19 +2117,204 @@ async def _forum_retag(client: discord.Client, payload: dict) -> None:
 
 
 async def _forum_edit_starter(client: discord.Client, payload: dict) -> None:
-    """forum thread starter message body PATCH (starter message_id = thread_id)."""
+    """forum thread starter message body PATCH (starter message_id = thread_id).
+
+    PR F (forum-starter-template-guard, #1362) — `lib.forum_template_validator`
+    의 `validate(body)` 6 marker 가드 적용. matched < PASS_THRESHOLD (5/6) 시
+    graceful reject — starter 보존 + warning log + violation jsonl append +
+    DIGEST 채널 alert + cycle forum thread 안 댓글 (sub-agent 자기 사고 인지).
+    같은 thread 위배 1h debounce — `~/.mobruji/forum-template-violation-debounce.jsonl`.
+    """
     thread_id = int(payload.get("thread_id", 0))
     body = payload.get("body", "")
     thread = client.get_channel(thread_id)
     if thread is None:
         logger.warning("forum_edit_starter: thread %s 미발견 — drop", thread_id)
         return
+
+    # ─── PR F (forum-starter-template-guard) — validation 가드 ────────────
+    validation = forum_template_validate(body)
+    if not validation.passed:
+        logger.warning(
+            "forum_edit_starter REJECT: thread=%s matched=%d/%d missing=%s body_head=%r",
+            thread_id,
+            validation.matched,
+            forum_template_total_markers(),
+            validation.missing,
+            body[:80],
+        )
+        _append_forum_template_violation(thread_id, payload, validation)
+        await _alert_forum_template_violation(client, thread_id, validation)
+        return
+    # ──────────────────────────────────────────────────────────────────────
+
     try:
         starter = await thread.fetch_message(thread_id)
         await starter.edit(content=body)
         logger.info("forum_edit_starter: thread=%s len=%d", thread_id, len(body))
     except Exception as exc:  # noqa: BLE001
         logger.warning("forum_edit_starter 실패 thread=%s exc=%r", thread_id, exc)
+
+
+# ─── PR F — forum template violation 박제 + alert 헬퍼 ────────────────────
+
+
+FORUM_TEMPLATE_VIOLATION_LOG_PATH: Final[Path] = (
+    Path.home() / ".mobruji" / "forum-template-violations.jsonl"
+)
+FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH: Final[Path] = (
+    Path.home() / ".mobruji" / "forum-template-violation-debounce.jsonl"
+)
+# 같은 thread 위배 1h debounce — heartbeat_watch_loop 패턴 거울.
+FORUM_TEMPLATE_VIOLATION_DEBOUNCE_SECONDS: Final[int] = 60 * 60
+
+
+def _append_forum_template_violation(
+    thread_id: int,
+    payload: dict,
+    validation: "ForumTemplateValidationResult",
+) -> None:
+    """forum-template-violations.jsonl append — 회고 / 통계 용도.
+
+    graceful — OSError 발생 시 warning 만, daemon 중단 X.
+    """
+    try:
+        FORUM_TEMPLATE_VIOLATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "thread_id": str(thread_id),
+            "actor": payload.get("actor") or "",
+            "cycle": payload.get("cycle") or "",
+            "attempted_body_head": str(payload.get("body", ""))[:80],
+            "matched": validation.matched,
+            "missing": validation.missing,
+            "ts": datetime.now(CYCLE_DIGEST_TZ).isoformat(),
+        }
+        with FORUM_TEMPLATE_VIOLATION_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning(
+            "forum-template-violations.jsonl append 실패 thread=%s: %r", thread_id, exc,
+        )
+
+
+def _should_debounce_forum_template_violation(thread_id: int) -> bool:
+    """같은 thread 위배 1h 안 두 번째 alert skip 여부 판단.
+
+    Returns
+    -------
+    bool
+        True = 1h 안 이미 push 된 적 있음 (skip). False = push 가능.
+    """
+    now_ts = time.time()
+    cutoff = now_ts - FORUM_TEMPLATE_VIOLATION_DEBOUNCE_SECONDS
+    try:
+        if not FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.exists():
+            return False
+        for line in FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.read_text(
+            encoding="utf-8",
+        ).splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(entry.get("thread_id") or "") != str(thread_id):
+                continue
+            try:
+                ts_epoch = float(entry.get("ts_epoch") or 0)
+            except (TypeError, ValueError):
+                continue
+            if ts_epoch >= cutoff:
+                return True
+    except OSError as exc:
+        logger.warning(
+            "forum-template-violation-debounce read 실패 thread=%s: %r", thread_id, exc,
+        )
+    return False
+
+
+def _record_forum_template_violation_debounce(thread_id: int) -> None:
+    """debounce jsonl append — 다음 1h alert skip 표식."""
+    try:
+        FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.parent.mkdir(
+            parents=True, exist_ok=True,
+        )
+        entry = {
+            "thread_id": str(thread_id),
+            "ts_epoch": time.time(),
+            "ts_iso": datetime.now(CYCLE_DIGEST_TZ).isoformat(),
+        }
+        with FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.open(
+            "a", encoding="utf-8",
+        ) as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning(
+            "forum-template-violation-debounce append 실패 thread=%s: %r",
+            thread_id, exc,
+        )
+
+
+async def _alert_forum_template_violation(
+    client: discord.Client,
+    thread_id: int,
+    validation: "ForumTemplateValidationResult",
+) -> None:
+    """DIGEST 채널 + cycle forum thread 댓글 alert 발사 (1h debounce 적용).
+
+    DIGEST = 사용자 가시. thread 댓글 = sub-agent 가 다음 turn 안 자기 thread
+    보고 사고 인지 (학습 path). graceful — push 실패 시 warning 만.
+    """
+    if _should_debounce_forum_template_violation(thread_id):
+        logger.info(
+            "forum_template_violation alert debounced thread=%s (1h 이내 중복)",
+            thread_id,
+        )
+        return
+
+    alert_body = forum_template_format_alert(
+        thread_id, validation.matched, validation.missing,
+    )
+
+    digest_raw = os.environ.get("DIGEST_CHANNEL_ID")
+    digest_channel_id = 0
+    if digest_raw:
+        try:
+            digest_channel_id = int(digest_raw)
+        except ValueError:
+            logger.warning(
+                "DIGEST_CHANNEL_ID 가 정수 아님(%r) — forum template alert skip",
+                digest_raw,
+            )
+
+    if digest_channel_id:
+        digest_channel = client.get_channel(digest_channel_id)
+        if digest_channel is None:
+            logger.warning(
+                "forum_template_violation DIGEST 채널 미발견 — skip channel_id=%s",
+                digest_channel_id,
+            )
+        else:
+            try:
+                await digest_channel.send(content=alert_body)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "forum_template_violation DIGEST push 실패 thread=%s: %r",
+                    thread_id, exc,
+                )
+
+    thread = client.get_channel(thread_id)
+    if thread is not None and hasattr(thread, "send"):
+        try:
+            await thread.send(content=alert_body)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "forum_template_violation thread 댓글 push 실패 thread=%s: %r",
+                thread_id, exc,
+            )
+
+    _record_forum_template_violation_debounce(thread_id)
 
 
 def _lookup_directive_by_thread_id(thread_id: str) -> str | None:

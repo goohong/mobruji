@@ -229,6 +229,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 품질 게이트 (push 전): `cd backend && ./gradlew checkstyleMain spotlessCheck test` — 포맷 위반 시 `./gradlew spotlessApply`
 - **새 엔드포인트 = 성공 케이스 E2E (RestAssured) 필수** (`07-testing-guide.md`)
 - DDD 계층 침범 금지 (Controller → Repository 직접 호출 등)
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-fe (mobruji-fe)
 
@@ -238,6 +239,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - API 호출 = `web/src/lib/api/` 집중. `NEXT_PUBLIC_*` / 서버 전용 구분.
 - **의존성 설치 / `node_modules` 조작 절대 금지** ([[feedback-npm-install-symlink-swap]]) — `npm install` / `npm ci` / `pnpm install` / `yarn` / `rm` / `mv` / `ln` 모두 금지. symlink 보존이 필수. 누락 (`Cannot find module …`) 시 nmae 보고 + 사이클 일시 정지.
 - `web/package.json` / lockfile 변경 = 정보성 보호 영역 (라벨 의무 폐지 2026-05-28, rev 가 review 대행).
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-rev (mobruji-rev)
 
@@ -270,6 +272,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   ```
 
 - 발견 사항은 PR 코멘트만. 이슈 등록은 nmae.
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. round 종료 보고 PATCH 시도 시도 양식 유지 의무 — 통째 덮어쓰기는 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-plan (mobruji-plan)
 
@@ -277,6 +280,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 금지: `backend/**` / `web/**` 구현 코드
 - ADR/spec 규약: `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md`
 - **신규 spec frontmatter 의무** ([[feedback-spec-frontmatter-required]]) — `_template.md` 의 `---` ~ `---` 블록 복제 + 8 필드 (feature/slug/status/owner/scope/related_issues/related_prs/last_reviewed). push 전 `head -1 docs/features/<slug>.md` 가 `---` 인지 확인. `.github/workflows/spec-status-check.yml` 가 누락 시 fail → 머지 차단.
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-helper (sub-agent, helper 본체가 `Agent` 도구로 launch)
 
