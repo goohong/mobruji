@@ -1,5 +1,5 @@
 ---
-feature: GitHub PR 이벤트 → rev forum thread 자동화 (open=1차 review, merge=사후 E2E QA)
+feature: GitHub PR 이벤트 → rev forum thread 자동화 (open=1차 review, merge=사후 E2E QA) — actor trigger + PostToolUse hook 채택
 slug: pr-webhook-rev-forum
 status: draft
 owner: @goohong
@@ -15,26 +15,33 @@ last_reviewed: 2026-05-30
 
 - 사용자 의도 (#1358 본문 / #1357 평가 결과): "PR 이 올라가면 rev 의 할 일에 자동으로 쌓이고, 그게 forum 형태로 추적 가능해야 한다."
 - 현재 상태 (evidence): bot.py 에는 GitHub PR 이벤트를 입력으로 받는 webhook / polling 핸들러가 **자체적으로 존재하지 않습니다**. 머지 시 cycle forum thread 를 ✅ retag 하는 `cycle_thread_complete_on_merge_loop` (bot.py:4476) 만 있고, 이는 **이미 launch 된 cycle thread 가 닫히는 흐름**입니다. 새 PR 이 올라왔을 때 rev forum 에 새 thread 신설 + 1차 review directive 적재 흐름은 없습니다.
-- `tools/agent/tools_cycle.py:97` `register_directive_pending` 의 state schema 에 `thread_id` 필드는 있으나 등록 시점에는 `None` 으로 박힙니다 — 어디서 thread_id 를 채우는지의 wiring 이 PR open 이벤트와 연결되지 않은 상태입니다.
+- `tools/agent/tools_cycle.py:73-108` `register_directive_pending` 의 state schema 에 `thread_id` 필드는 있으나 등록 시점에는 `None` 으로 박힙니다 — 어디서 thread_id 를 채우는지의 wiring 이 PR open 이벤트와 연결되지 않은 상태입니다.
 - 결과: 사용자가 PR 진행 / 후속 회귀 검증을 forum 한 곳에서 추적할 수 없습니다 ("잘 관리 안 됨" 평가).
-- 본 spec = **GitHub PR 이벤트 (`opened` / `closed.merged`) 를 입력으로 받아 rev forum thread 라이프사이클 (신설 → 단계 전이) 을 자동으로 끌고 가는 인프라**의 운영 모델 + 구현 방향 박제. 코드 자체는 다음 be / infra 사이클이 본 spec 기반으로 구현합니다.
-- **사용자 결정 (2026-05-30, round 17)**: 옵션 A (HTTP webhook + aiohttp + HMAC + nginx 또는 Cloudflare Tunnel) **즉시 채택**. 옵션 B (polling) 는 마이그레이션 path 가 **아니라** webhook 다운 시 catchup fallback safety net 으로 보존. REV_FORUM_ID 는 신규 Discord rev forum 채널 (사용자 manual 신설). 상세 §11 결정 로그.
+- 본 spec = **PR 생성·머지를 trigger 한 actor (helper / be / fe / nmae / rev / plan) 가 직접 `register_directive_pending` 을 호출해 rev forum thread 라이프사이클을 끌고 가는 인프라**의 운영 모델 + 구현 방향 박제. 강제 메커니즘은 **각 actor 의 `.claude/settings.json` PostToolUse Bash hook** 단독 (CLAUDE.md §17 메커니즘 단 우선순위 적용 — system prompt < hook < wrapper). 코드 자체는 다음 be / infra 사이클이 본 spec 기반으로 구현합니다.
+- **사용자 결정 (2026-05-30, round 19)** — round 17 옵션 A 채택을 **재정정**:
+  - **옵션 D 채택** (사용자 제안): actor trigger + PostToolUse Bash hook 단독. PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor 가 hook 을 통해 `register_directive_pending(cycle=rev, kind=pr_review|pr_audit, pr_url=..., thread_id=None)` 호출 → rev 작업 큐 entry → rev forum thread 신설 (PR open) 또는 단계 전이 (PR merge).
+  - **옵션 A 폐기** (HTTP webhook / Cloudflare Tunnel / nginx / aiohttp / HMAC / `GITHUB_WEBHOOK_SECRET` / Q9). 사유: NCP 인바운드 / Cloudflare 의존 운영 부담 회피 + CLAUDE.md §17 강제 메커니즘 일관성 (다른 mobruji 흐름이 모두 hook / wrapper / system prompt 로 강제).
+  - **옵션 B 폐기** (polling 5분 + webhook fallback safety net). 사유: 사용자 명시 redirect — polling 자체가 학습 의존 + 항시 부하 + actor trigger 가 자연 멱등 (PR 생성·머지는 actor 가 1회 호출).
+  - **fallback** = 사용자 수동 trigger (외부 PR / hook 누락 / agent crash 시). 자동 polling 없음.
+  - 상세 §11 결정 로그.
 
 ## 2) 사용자 시나리오
 
-- **시나리오 1 (PR open)**: be sub-agent 가 `feat(song): ...` PR 을 develop base 로 생성 → 인프라가 5분 안에 (옵션 B) 또는 즉시 (옵션 A) 감지 → rev forum 채널에 신규 thread 신설 (제목 `🟡 rev #1234 — feat(song): ...`), 본문 = PR 메타 + rev 1차 review 체크리스트 template + `cycle-forum:` 본문 cross-ref. directive board jsonl 에 `type=rev_review_pending`, `pr_number=1234`, `thread_id=<신설 thread>` entry 1건 append. nmae 가 다음 rev launch 시 본 directive 를 큐 head 로 잡아 rev sub-agent 에 위임.
-- **시나리오 2 (PR merge)**: 같은 PR #1234 가 develop 머지 → 인프라가 같은 PR 에 연결된 기존 rev thread 를 lookup (PR body `rev-forum:` cross-ref 또는 launch cache) → 같은 thread 에 단계 전이 `🟡 1차 review → 🔵 머지됨 — 사후 E2E QA` retag + 본문 `✅ 1차 review pass` 섹션 + `📋 사후 단계 2 QA 체크리스트` 섹션 PATCH. directive board 에 `type=rev_post_merge_audit`, `pr_number=1234`, `parent_thread_id=<같은 thread>` entry append. nmae 가 다음 rev launch 시 단계 2 audit 으로 위임.
+- **시나리오 1 (PR open)**: be sub-agent 가 `gh pr create --base develop --title "feat(song): ..."` 호출 → Claude Code PostToolUse hook (`pr-register-rev.sh`) 가 `tool_input.command` 정규식 매칭 + `tool_response.output` 에서 PR URL parse → `register_directive_pending(directive_id="rev-1234-open", kind="pr_review", pr_url=..., cycle_hint="rev")` 호출 → rev 작업 큐 entry 1건 + rev forum 채널 (`PR_REVIEW_FORUM_ID`) 에 새 thread 신설 (제목 `🟡 rev #1234 — feat(song): ...`), 본문 = PR 메타 + rev 1차 review 체크리스트 template + `cycle-forum:` 본문 cross-ref. nmae 가 다음 rev launch 시 본 directive 를 큐 head 로 잡아 rev sub-agent 에 위임.
+- **시나리오 2 (PR merge)**: 같은 PR #1234 가 `gh pr merge --squash` 로 develop 머지 → 같은 hook 이 `gh pr merge` 정규식 매칭 → `register_directive_pending(directive_id="rev-1234-merge", kind="pr_audit", pr_url=..., parent_directive_id="rev-1234-open", cycle_hint="rev")` 호출 → 기존 rev thread lookup (`rev-forum-cache.jsonl` 의 `pr_number ↔ thread_id` 매핑) → 같은 thread 에 단계 전이 `🟡 1차 review → 🔵 머지됨 — 사후 E2E QA` retag + 본문 `✅ 1차 review pass` 섹션 + `📋 사후 단계 2 QA 체크리스트` 섹션 PATCH. directive board 에 `kind=pr_audit`, `pr_number=1234`, `parent_thread_id=<같은 thread>` entry append. nmae 가 다음 rev launch 시 단계 2 audit 으로 위임.
 - **시나리오 3 (rev sub-agent 작업)**: rev sub-agent 가 큐에서 본 directive 를 받아 단계 1 또는 단계 2 작업 수행 → milestone 마다 같은 thread 에 댓글 stream (`--auto-thread`) + 본문 체크박스 갱신 (`--forum-edit`). 결론은 PR 코멘트 `rev단계1: 🟢/🟡/🔴 ...` + `reviewed:claude` 라벨.
-- **시나리오 4 (사용자 forum 회고)**: 사용자가 rev forum sidebar 에서 PR 번호 또는 scope 별 thread filter 가능. 1 PR = 1 rev thread (open ~ post-merge 통합) 또는 1 PR = 2 thread (open / merge 별) 중 선택은 §3 결정.
+- **시나리오 4 (사용자 forum 회고)**: 사용자가 rev forum sidebar 에서 PR 번호 또는 scope 별 thread filter 가능. 1 PR = 1 rev thread (open ~ post-merge 통합).
+- **시나리오 5 (외부 PR / hook 우회)**: 사용자가 mac GitHub Desktop / GitHub UI 로 직접 PR 만들거나 Claude Code 외 환경에서 `gh pr create` 호출 → hook capture 불가 → 사용자가 명시적으로 `📌` 등록 또는 helper 에 "PR #1234 rev 등록해" 명령 → helper 가 `register_directive_pending` 직접 호출. nmae 가 매일 GitHub PR open / merge count vs rev directive entry count cross-check (PR 5 에서 별 검증 loop 검토).
 
 ## 3) 요구사항
 
 ### 기능 요구사항
 
-#### 3-1. PR open 이벤트 처리
+#### 3-1. PR open 이벤트 처리 (actor `gh pr create` 호출 시점)
 
-- [ ] GitHub PR `opened` (+ `reopened` 검토 필요 — §10 Q1) 이벤트를 1 회만 감지합니다 (멱등성). 이미 처리된 PR 번호는 skip.
-- [ ] rev forum 채널 (`REV_FORUM_ID`) 에 새 thread 신설. thread 제목 = `🟡 rev #{pr_num} — {pr_title 첫 60자}`.
+- [ ] PostToolUse hook (`pr-register-rev.sh`) 가 `tool_input.command` 정규식 `^\s*gh\s+pr\s+create\b` 매칭. `tool_response.output` (또는 `tool_output`) 에서 PR URL 추출 (`https://github.com/[^/]+/[^/]+/pull/\d+`). URL parse 실패 시 graceful skip + warning log.
+- [ ] 멱등성 가드: `~/.mobruji/pr-register-dedupe.jsonl` 에 `{pr_url, kind, ts}` append-only + 메모리 set (cap 1000). 같은 `(pr_url, kind="pr_review")` 2회 trigger 시 dedupe skip + 200.
+- [ ] rev forum 채널 (`PR_REVIEW_FORUM_ID`) 에 새 thread 신설. thread 제목 = `🟡 rev #{pr_num} — {pr_title 첫 60자}`.
 - [ ] thread 본문 template:
   ```text
   🔍 **rev 1차 review — PR #{pr_num}**
@@ -64,29 +71,43 @@ last_reviewed: 2026-05-30
   _갱신: {ts} (open 자동 등록)_
   ```
 - [ ] tag `🟡 1차 review` 부착 (forum `available_tags` 에 사전 등록 — §10 Q3).
-- [ ] directive board (`~/.mobruji/directives.jsonl` 또는 `tools/agent/tools_cycle.py` event store) 에 entry 1건 append:
+- [ ] `register_directive_pending` 호출 (확장 시그니처 — PR 2-b):
+  ```python
+  register_directive_pending(
+      directive_id="rev-1234-open",
+      summary="PR #1234 — feat(song): ...",
+      cycle_hint="rev",
+      kind="pr_review",               # 신규 키워드 (PR 2-b)
+      pr_url="https://github.com/...", # 신규 키워드 (PR 2-b)
+      thread_id="<신설 thread snowflake>",  # PR 2-b 에서 wiring 완성
+      source="pr_register_rev_hook",
+  )
+  ```
+  결과 jsonl entry schema:
   ```json
   {
     "directive_id": "rev-1234-open",
-    "type": "rev_review_pending",
+    "kind": "pr_review",
     "pr_number": 1234,
     "pr_url": "https://github.com/...",
     "thread_id": "<신설 thread snowflake>",
     "assigned_cycle": "rev",
     "status": "pending",
     "created_at": "<ts>",
-    "source": "pr_open_handler"
+    "source": "pr_register_rev_hook"
   }
   ```
-- [ ] PR 자체에 코멘트 1건 push (선택, §10 Q2): `🔍 rev 1차 review thread 신설 — https://discord.com/...`.
+- [ ] PR 자체에 코멘트 1건 push (Q2=a 유지): `🔍 rev 1차 review thread 신설 — https://discord.com/...`. hook 실행 후 `gh pr comment {pr_num} -b ...` 호출 (graceful — 실패 시 warning).
 
-#### 3-2. PR merge 이벤트 처리
+#### 3-2. PR merge 이벤트 처리 (actor `gh pr merge` 호출 시점)
 
-- [ ] GitHub PR `closed` + `merged=true` 이벤트를 1 회만 감지합니다 (멱등성, base=develop 한정 — release PR `main` 머지는 §10 Q4).
+- [ ] PostToolUse hook 이 `tool_input.command` 정규식 `^\s*gh\s+pr\s+merge\b` 매칭. `tool_response.output` 또는 `tool_input.command` 의 PR 번호 / URL 인자 (`gh pr merge 1234` / `gh pr merge https://...`) 에서 PR URL 추출.
+- [ ] 멱등성 가드: 같은 `(pr_url, kind="pr_audit")` 2회 trigger 시 dedupe skip.
 - [ ] 같은 PR 번호의 기존 rev thread lookup:
   - 우선순위 1: `~/.mobruji/rev-forum-cache.jsonl` 의 `pr_number ↔ thread_id` 매핑 (open 시점에 박힘).
   - 우선순위 2: PR body 의 `rev-forum: <thread_id>` cross-ref line (PR 작성자가 박은 경우).
   - 우선순위 3: rev forum 채널 검색 (제목 prefix `rev #1234`). 마지막 수단.
+  - 우선순위 4: 모두 miss (외부 PR 또는 open hook 누락) → `pr_open_handler` 폴백 호출 후 즉시 단계 전이 처리.
 - [ ] 같은 thread 에 단계 전이:
   - tag 변경: `🟡 1차 review` → `🔵 사후 E2E QA` (또는 `✅ 1차 review pass + 🔵 사후 audit` 2-tag 표현, §10 Q5).
   - 본문 PATCH:
@@ -106,27 +127,26 @@ last_reviewed: 2026-05-30
     rev sub-agent 단계 2 audit launch 대기
     ```
 - [ ] thread 댓글 1건 append (`--auto-thread` 또는 `--forum-comment`): `✅ 머지됨 — 사후 E2E QA 단계 진입 (commit={sha})`.
-- [ ] directive board 에 단계 2 entry append:
-  ```json
-  {
-    "directive_id": "rev-1234-merge",
-    "type": "rev_post_merge_audit",
-    "pr_number": 1234,
-    "thread_id": "<같은 thread>",
-    "parent_directive_id": "rev-1234-open",
-    "assigned_cycle": "rev",
-    "status": "pending",
-    "created_at": "<ts>",
-    "source": "pr_merge_handler"
-  }
+- [ ] `register_directive_pending` 호출 (단계 2):
+  ```python
+  register_directive_pending(
+      directive_id="rev-1234-merge",
+      summary="PR #1234 머지 — 사후 E2E QA",
+      cycle_hint="rev",
+      kind="pr_audit",                # 신규 키워드 (PR 2-b)
+      pr_url="https://github.com/...",
+      thread_id="<같은 thread>",       # 기존 cache lookup 결과
+      parent_directive_id="rev-1234-open",
+      source="pr_register_rev_hook",
+  )
   ```
 - [ ] 기존 `cycle_thread_complete_on_merge_loop` (cycle forum thread ✅ retag) 와의 관계 — **별 모듈** (rev forum 은 별 채널, cycle forum 은 cycle 별 BE/FE/REV/PLAN 채널). 본 spec 의 rev forum thread 는 cycle forum 의 rev launch thread 와 다름. 둘 다 살아 있음. cross-ref 는 §6-1 모듈 경계 표 참조.
 
 #### 3-3. 멱등성 / state
 
-- [ ] PR open 이벤트 1회 처리 보장: `~/.mobruji/pr-open-seen.jsonl` append-only (PR 번호 + open_ts). 5분 polling 시 seen set lookup.
-- [ ] PR merge 이벤트 1회 처리 보장: `~/.mobruji/pr-merge-seen.jsonl` 또는 기존 `cycle_thread_complete_on_merge_loop` 패턴의 `seen_prs` cap 200 메모리 set 재사용 + jsonl 백업.
-- [ ] bot.py 재시작 시 누락 복구: `gh pr list --state open --search "created:>24h ago"` + `--state merged --search "merged:>24h ago"` 로 last 24h 재 scan. seen jsonl 이 있으므로 중복 발사 없음.
+- [ ] hook 1회 처리 보장: `~/.mobruji/pr-register-dedupe.jsonl` append-only (`pr_url + kind + ts`). 같은 actor 가 실수로 `gh pr create` 두 번 호출하거나 retry 시 dedupe.
+- [ ] `register_directive_pending` 의 기존 `duplicate` 분기 (`tools_cycle.py:90-91`) 가 같은 `directive_id` 2회 호출을 자연 차단 — 두 번째 layer 가드.
+- [ ] hook 호출 누락 시 (bot.py 재시작 / Claude Code crash / 외부 PR / 사용자 mac UI) — **자동 catchup 없음** (round 19 사용자 결정). 사용자 수동 trigger 의무 (helper 에 명령 또는 `📌` 등록). monitoring 은 §9 nmae digest cross-check.
 
 #### 3-4. 라벨 / scope 필터
 
@@ -137,433 +157,487 @@ last_reviewed: 2026-05-30
 ### 비기능 요구사항
 
 - **신뢰성**:
-  - Discord 4xx / token 만료 / network 일시 장애 → stderr warning + 다음 polling iter 재시도. bot.py 흐름 차단 X (기존 `cycle_thread_complete_on_merge_loop` 패턴 재사용).
-  - GitHub API rate limit 도달 → exponential backoff (1m → 5m → 15m), polling skip + log.
+  - hook script 실패 시 graceful — `gh pr create` / `gh pr merge` 자체 차단 X (mobruji `helper-tool-progress.sh` 패턴: `trap exit_graceful ERR` + `exit 0`).
+  - `register_directive_pending` 호출 실패 시 stderr warning + actor 흐름 계속. 다음 helper turn 또는 nmae digest 가 누락 감지 (§9).
+  - Discord 4xx / network 일시 장애 → stderr warning + 재시도 안 함 (사용자 수동 trigger 또는 nmae digest fallback).
 - **보안**:
-  - 옵션 A (HTTP webhook) 채택 시 `X-Hub-Signature-256` HMAC-SHA256 검증 의무 (secret = `GITHUB_WEBHOOK_SECRET` env, `.env` 박제). 검증 실패 시 401 + log.
-  - 옵션 B (polling) 채택 시 외부 inbound 부재 — secret 검증 불필요 (`gh` CLI 가 PAT 로 인증).
-  - PR body 의 사용자 입력은 forum body 에 그대로 embed 시 mention injection / 큰 mass push risk — `@everyone` / `@here` / `<@&...>` mention escape 의무.
+  - 외부 inbound endpoint 부재 (옵션 D = 내부 hook 만). HMAC / TLS / cert / secret 검증 불필요.
+  - PR title / body 의 사용자 입력은 forum body 에 그대로 embed 시 mention injection / 큰 mass push risk — `@everyone` / `@here` / `<@&...>` mention escape 의무.
+  - hook script 가 stdin JSON parsing 시 jq 사용 — malformed JSON 에 대해 silent skip (graceful).
 - **관측성**:
-  - 각 핸들러 발사 시 `record_loop_heartbeat("pr_open_handler")` / `record_loop_heartbeat("pr_merge_handler")` — 기존 watchdog SoT (`docs/features/nmae-cycle-watchdog.md`) 통합.
-  - PR 별 thread 신설 시 logger.info `pr_open_handler: PR #1234 → thread <id> 신설`.
-  - `~/.mobruji/rev-forum-cache.jsonl` cap 1000 (FIFO truncate, 기존 cycle launch cache 패턴 재사용).
+  - hook 발사 시 stderr log `pr-register-rev: PR #1234 kind=pr_review → thread <id> 신설` + (옵션) `~/.mobruji/pr-register-rev.log` append.
+  - `register_directive_pending` 호출 결과 (`event_id` / `duplicate`) 를 `~/.mobruji/pr-register-rev.log` 에 박제 — 누락 추적용.
+  - nmae digest (선택 PR 5) — 매일 GitHub PR open / merge count vs rev directive entry count cross-check.
 - **보존**:
   - rev forum thread = Discord history (archive 정책은 Discord 채널 설정에 의존, 인프라가 자동 삭제 X).
-  - `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` = 1만 entry 도달 시 30일 이상된 entry 정리 (운영 후 결정).
+  - `pr-register-dedupe.jsonl` = 1000 entry FIFO truncate (운영 후 조정).
   - `rev-forum-cache.jsonl` = cap 1000 FIFO.
 
 ## 4) 범위 / 비범위
 
 ### 포함
 
-- GitHub PR `opened` + `closed.merged` 이벤트를 인프라 (bot.py 또는 workflow) 가 감지해 rev forum thread 신설 / 단계 전이 + directive 적재.
-- 멱등성 가드 (`seen.jsonl`).
+- actor (helper / be / fe / nmae / rev / plan) 가 `gh pr create` / `gh pr merge` 호출 시 PostToolUse hook 이 rev forum thread 신설 / 단계 전이 + directive 적재.
+- 멱등성 가드 (`pr-register-dedupe.jsonl` + `register_directive_pending` 자체 duplicate 분기).
 - rev forum thread template + 단계 전이 본문 PATCH.
-- 옵션 A / B / C 비교 + 권고 (§5).
+- 옵션 A / B / C / D 비교 + 옵션 D 채택 사유 (§5).
 - 기존 `cycle_thread_complete_on_merge_loop` (cycle forum) 과의 모듈 경계.
 
 ### 제외 (Out of Scope)
 
 - rev sub-agent 의 review 코드 자체 (`tools/rev-queue/` 의 큐 처리 알고리즘 변경 X). 본 spec 은 **directive 등록 + thread 신설까지** 만 책임.
-- GitHub Actions workflow 의 정책 변경 (`auto-label.yml` / `rev-gate.yml` / `discord-notify.yml` 의 핵심 로직 수정 X). 단, **옵션 C 채택 시** `discord-notify.yml` 가 `repository_dispatch` 또는 별 trigger 채널을 추가하는 경량 수정은 검토 대상 (§5-3).
+- GitHub Actions workflow 의 정책 변경 (`auto-label.yml` / `rev-gate.yml` / `discord-notify.yml` 의 핵심 로직 수정 X).
 - nmae 의 큐 정책 변경 — directive 가 적재되면 nmae 가 다음 rev launch 시 queue head 선정. 본 spec 은 등록까지만.
 - `cycle_thread_complete_on_merge_loop` (cycle forum thread ✅ retag) 의 폐기 — 별 모듈로 공존 (§6-1).
-- PR draft → ready_for_review 이벤트 처리 (§10 Q1 으로 보류).
-- main base release PR 머지 (§10 Q4 으로 보류).
+- PR draft → ready_for_review 이벤트 처리 (옵션 D 에서는 hook 매칭 정규식 확장 시 자연 처리 가능 — §10 Q1 로 보류).
+- main base release PR 머지 (§10 Q4 으로 보류 — hook 정규식 같으나 면제 분기 의무).
 - review thread 안 사용자 댓글 → 새 directive 등록 흐름 (`cycle-forum-operation.md` PR E §5-6 별 spec scope).
+- 외부 PR (mac GitHub Desktop / GitHub UI / Claude Code 외 환경) 자동 capture — 사용자 수동 trigger 의무 (§9 Q10).
+- 자동 polling fallback — round 19 사용자 명시 redirect (옵션 B 폐기). nmae digest cross-check 만 (선택 PR 5).
 
 ## 5) 설계 — 옵션 비교 + 권고
 
-### 5-1) 옵션 A: HTTP webhook server (bot.py + aiohttp) — **채택 (사용자 결정 2026-05-30)**
+### 5-1) 옵션 A: HTTP webhook server (bot.py + aiohttp) — **폐기 (round 19 사용자 결정)**
 
-bot.py 가 같은 asyncio 이벤트 루프 안 aiohttp app 띄움 (`POST {WEBHOOK_PATH}`). GitHub repo settings → Webhooks 에서 URL 등록. nginx reverse proxy (Let's Encrypt SSL) 또는 Cloudflare Tunnel 로 NCP VM 의 내부 port 를 public HTTPS 로 노출 (§10 Q9 — 사용자 결정 대기).
+원안 (round 17): bot.py 가 같은 asyncio 이벤트 루프 안 aiohttp app 띄움 (`POST {WEBHOOK_PATH}`). GitHub repo settings → Webhooks 에서 URL 등록. nginx reverse proxy (Let's Encrypt SSL) 또는 Cloudflare Tunnel 로 NCP VM 의 내부 port 를 public HTTPS 로 노출.
 
-- **구성 요소**:
-  - **aiohttp app**: `tools/discord-daemon/pr_webhook_handler.py` 신규 모듈. `web.Application()` 한 개 — POST `{WEBHOOK_PATH}` (default `/webhook/github`) 라우트 1개.
-  - **bot.py mount**: discord.py `client.setup_hook()` 또는 `on_ready()` 안에서 같은 asyncio loop 에 `web.AppRunner(app).setup()` + `web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT).start()` 호출. 별 process / 별 thread X — single asyncio loop 안 cooperative scheduling (discord.py heartbeat 60s 안에서 webhook 처리 시간이 충분히 짧으므로 race 없음). 검증: PR 2-a 의 통합 테스트 (§8) 에서 webhook 처리 중 discord.py heartbeat miss 가 발생하지 않는지 확인.
-  - **포트**: env `WEBHOOK_PORT` (default `8443`). 내부 listen 만 — public 노출은 reverse proxy 가 담당.
-  - **경로**: env `WEBHOOK_PATH` (default `/webhook/github`). 추측 어려운 경로 권장 (예: `/webhook/github-{nonce}`) — defense-in-depth, HMAC 이 1차 가드.
-- **HMAC 검증 (의무)**:
-  - GitHub 가 webhook payload 송신 시 header `X-Hub-Signature-256: sha256=<hex>` 부착 (secret = env `GITHUB_WEBHOOK_SECRET`, GitHub 채널 settings 의 secret 과 같은 값).
-  - 핸들러 시작 시 `hmac.compare_digest(expected, received)` 로 timing-safe 검증. 실패 시 `web.Response(status=401)` 반환 + `logger.warning` (rate limit + 출처 IP log — defense).
-  - secret 부재 (`GITHUB_WEBHOOK_SECRET` env 미설정) 시 startup fail-fast — webhook handler 등록 skip + `logger.error` (fallback polling loop 만 가동).
-- **이벤트 핸들러**:
-  - GitHub `X-GitHub-Event: pull_request` + payload `action ∈ {opened, reopened, closed}` 만 처리. 그 외는 200 + skip.
-  - `action == "opened"` → `pr_open_handler(payload["pull_request"])` 호출.
-  - `action == "reopened"` → Q1 default (b) 기존 thread retag 분기 — `pr_reopen_handler` 호출 (PR 2-b 에서 구현).
-  - `action == "closed"` + `payload["pull_request"]["merged"] == true` → `pr_merge_handler` 호출. `merged == false` (close 만) → skip + log.
-- **멱등성 (`X-GitHub-Delivery` UUID 기반)**:
-  - GitHub 가 각 webhook delivery 마다 unique UUID (`X-GitHub-Delivery` header) 부여. retry 시에도 같은 UUID 재사용.
-  - `~/.mobruji/github-webhook-dedupe.jsonl` 에 처리한 UUID + timestamp append. 새 delivery 도착 시 lookup → hit 이면 200 + skip.
-  - 24h window FIFO truncate (GitHub retry 윈도우 = 24h). 메모리 set (cap 5000) + jsonl 백업.
-  - PR 번호 단위의 `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` 은 옵션 B fallback 과 공유하는 별 가드 (delivery UUID 만으로는 옵션 B 와 cross-validation 불가).
-- **공개 노출 path (nginx vs Cloudflare Tunnel)** — §10 Q9 사용자 결정 대기:
-  - **nginx + Let's Encrypt**: NCP VM 에 inbound 443 open + nginx reverse proxy → `localhost:WEBHOOK_PORT`. cert 자동 갱신 (`certbot renew` cron). 도메인 신설 또는 기존 NCP 도메인 sub-path. 장점 = 운영 컨트롤 완전, 단점 = inbound port 노출 + cert monitoring 의무.
-  - **Cloudflare Tunnel**: NCP VM 에 `cloudflared` daemon → Cloudflare edge 가 inbound 대신 수신 → outbound tunnel 로 VM 에 forward. 장점 = inbound port 노출 0 + Cloudflare WAF / DDoS 가드 무료, 단점 = Cloudflare 의존 + 도메인 Cloudflare zone 의무.
-  - 본 spec 권고: **Cloudflare Tunnel** (NCP inbound 정책 보수적 + 운영 부담 ↓). 사용자 redirect 시 nginx 로 정정 가능.
-- **장점**:
-  - 즉시 발사 (latency 0). open ↔ merge 가 같은 PR 에 30초 안에 발생해도 race 없음.
-  - 멱등성 자연 (`X-GitHub-Delivery` UUID).
-  - 외부 trigger 가 명시적 — 운영 가시성 ↑.
-- **단점 (운영 부담)**:
-  - public endpoint 운영 — cert / tunnel / monitoring 의무.
-  - bot.py 단일 process — aiohttp 와 discord.py 가 같은 asyncio loop 공유. webhook handler 의 blocking 작업 (예: gh API 호출) 시 discord.py heartbeat 영향 가능 → 모든 외부 호출 `asyncio.to_thread()` 또는 `aiohttp.ClientSession` 으로 비동기화 의무.
-  - HMAC secret 관리 (`GITHUB_WEBHOOK_SECRET` rotation 정책 — 6 개월 1회 권고).
-  - bot.py 재시작 윈도우 (GitHub 24h retry) 안 다운 시 누락 — fallback polling loop 가 보완 (§5-2 옵션 B 가 fallback safety net 으로 가동).
+**round 19 폐기 사유**:
+- NCP 인바운드 / Cloudflare zone 의존 운영 부담 회피 (사용자 결정).
+- HMAC secret rotation / TLS cert 만료 monitoring / asyncio loop 충돌 가드 / 외부 endpoint 노출 등 운영 surface 가 옵션 D 대비 과대.
+- mobruji 의 다른 강제 메커니즘 (helper-tool-progress.sh / agent-launch-wrapper.sh / cycle-status/update.sh) 이 모두 hook / wrapper / system prompt 로 일관 — 옵션 A 만 외부 endpoint 패턴 = 운영 모델 불일치.
+- 같은 효과 (즉시 발사 + 멱등성 자연) 를 옵션 D 가 actor trigger + dedupe jsonl 로 달성.
+- 폐기되는 인프라: aiohttp `web.Application()` / `web.AppRunner` / `web.TCPSite` / `X-Hub-Signature-256` HMAC / `X-GitHub-Delivery` UUID dedupe / Cloudflare Tunnel / nginx + Let's Encrypt / `GITHUB_WEBHOOK_SECRET` env / `WEBHOOK_PORT` env / `WEBHOOK_PATH` env / Q9 (nginx vs Cloudflare).
 
-### 5-2) 옵션 B: GitHub polling (bot.py 5분 loop) — **fallback safety net (옵션 A 다운 시 catchup)**
+### 5-2) 옵션 B: GitHub polling (bot.py 5분 loop) — **폐기 (round 19 사용자 결정, fallback safety net 도 채택 안 함)**
 
-기존 `cycle_thread_complete_on_merge_loop` 의 패턴 재사용 — `gh pr list --state open --base develop --search "created:>1h ago" --json number,url,title,body,headRefName,labels,user` + `--state merged --search "merged:>1h ago"` 두 query 를 5분 polling.
+원안: `gh pr list --state open --search "created:>1h ago"` + `--state merged --search "merged:>1h ago"` 두 query 를 5분 polling.
 
-**역할 (사용자 결정 2026-05-30 후)**: 옵션 A webhook 이 정상 동작 시 polling loop 는 **dormant** (heartbeat 만). webhook handler 가 30분+ 동안 새 delivery 못 받았거나 (`X-GitHub-Delivery` jsonl 의 마지막 timestamp 기준), HMAC 검증 실패가 N회 누적되면 polling loop 가 자율 활성화 → last 24h 재 scan 으로 누락 catchup. webhook 복구 감지 시 dormant 로 복귀. PR 3 에서 구현.
+**round 19 폐기 사유 (사용자 명시 redirect)**:
+- polling 자체가 학습 의존 + 항시 부하 (heartbeat / dormant 상태 관리 / `gh` CLI rate limit cross-check 등).
+- actor trigger (옵션 D) 가 자연 멱등 — PR 생성·머지는 actor 가 1회 호출하므로 polling 의 "누락 catchup" 가치가 actor 흐름에서는 무의미.
+- 외부 PR (mac UI / GitHub Desktop) capture 만이 polling 의 잔여 가치인데, 사용자가 수동 trigger 로 cover 의무 (§9 위험 + §10 Q10).
+- fallback safety net 으로도 채택 안 함 — round 17 안의 "옵션 A primary + 옵션 B fallback" 듀얼 stack 부담 회피.
+- 폐기되는 인프라: `pr_event_polling_loop_fallback` / `fetch_recent_opened_prs` helper / `PR_EVENT_FALLBACK_POLL_INTERVAL_SECONDS` env / `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` (옵션 D 의 `pr-register-dedupe.jsonl` 가 대체).
 
-- **장점 (fallback 으로서)**:
-  - **NCP inbound 인프라 변경 0** — outbound `gh` CLI 호출만. 보안 표면 변화 없음.
-  - 기존 `cycle_thread_complete_on_merge_loop` / `rev_post_merge_audit_loop` / `directive_complete_on_merge_loop` 와 동일 패턴 — 재사용 가능한 helper (`fetch_recent_merged_prs_with_body`) 가 이미 있음 (bot.py:4227).
-  - 멱등성 = 기존 `seen_prs` set + jsonl 백업 패턴 (cap 200, FIFO). webhook handler 의 `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` 과 같은 jsonl 공유 — cross-validation.
-  - bot.py 재시작 시 last 24h 재 scan 으로 자연 복구.
-- **단점 (primary 가 아닌 사유)**:
-  - 최대 5분 latency — 옵션 A 0 latency 대비.
-  - webhook 이 발사한 처리 결과와의 중복 가드 — `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` 공유로 해결.
-  - 항시 가동 시 `gh` CLI rate limit (PAT 기준 시간당 5000) — 5분 polling × 2 query = 시간당 24 호출 (안전). dormant 시 0.
+### 5-3) 옵션 C: GitHub Actions workflow → bot.py 수신 — **폐기 (기존 round 16 결정 유지)**
 
-### 5-3) 옵션 C: GitHub Actions workflow → bot.py 수신
+워크플로우 → Discord DIGEST 메시지 → bot.py message handler 의 중간 layer 가 fragile + 옵션 D 가 더 직접적.
 
-기존 `discord-notify.yml` 가 PR `opened` / `closed` 이벤트 trigger 중. workflow 가 새 step 으로 (a) Discord 본 채널 DIGEST 메시지 발사 또는 (b) `repository_dispatch` event + bot.py 가 수신.
+### 5-4) 옵션 D: actor trigger + PostToolUse Bash hook — **채택 (round 19 사용자 결정)**
 
-- **장점**:
-  - GitHub Actions 가 webhook 인프라 대행 — NCP inbound 부담 0.
-  - workflow 변경만 — bot.py 핵심 polling loop 추가 없음.
-- **단점**:
-  - 중간 layer 1 추가 (workflow → Discord 메시지 → bot.py message handler) — 디버깅 복잡 ↑.
-  - workflow 실행 latency 5~30 초 + Discord API 송신 + bot.py 수신 — 옵션 A 보다 느림 / 옵션 B 와 비슷.
-  - bot.py 가 DIGEST 메시지 parsing 로직 추가 필요 — 사용자 일반 메시지와 구분 키 (예: prefix `[GH-EVENT]`) 가 fragile.
-  - `discord-notify.yml` 의 graceful skip (DISCORD_WEBHOOK_URL 부재 시) 패턴이 본 흐름과 호환 안 됨 — 별 webhook URL 또는 channel 필요.
-  - `repository_dispatch` 채택 시 bot.py 가 `gh api repos/.../dispatches` listener — polling 으로 회귀 (옵션 B 와 같아짐).
+PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor (helper / be / fe / nmae / rev / plan) 가 Claude Code 의 PostToolUse hook 을 통해 `register_directive_pending` 을 호출. 외부 endpoint / polling 없음 — actor 의 도구 호출 자체가 trigger.
 
-### 5-4) 권고: 옵션 A (HTTP webhook) 채택 + 옵션 B (polling) fallback 보존 — **사용자 결정 2026-05-30**
+#### 5-4-1) 구성 요소
 
-- **사유 (사용자 결정 반영)**:
-  - 즉시성 ↑ — open ↔ merge race 가드 자연 + rev 사이클 launch SLA 단축.
-  - 멱등성 보장이 자연 (`X-GitHub-Delivery` UUID).
-  - polling loop 의 항시 가동 부하 제거 (dormant 시 0 호출).
-  - 운영 부담 (public endpoint / cert / HMAC secret) 은 Cloudflare Tunnel 채택 시 최소화 가능.
-- **fallback safety net 으로서 옵션 B**:
-  - webhook handler dormant 또는 다운 30분+ 시 자율 활성화 → last 24h 재 scan.
-  - webhook 복구 감지 시 dormant 복귀.
-  - 핸들러 thin function 추출 — `pr_open_handler` / `pr_merge_handler` / `pr_reopen_handler` 3개 함수는 webhook event handler + polling loop 양쪽이 같은 함수 호출.
-  - 같은 `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` 공유 — webhook 이 이미 처리한 PR 을 polling 이 중복 처리하지 않음 + cross-validation.
-- **구현 순서 (§7 참조)**:
-  - PR 2-a: webhook server + HMAC + dedupe (옵션 A 의 primary path).
-  - PR 2-b: `register_directive_pending` thread_id wiring + rev forum thread 신설 + tag PATCH.
-  - PR 3: fallback polling loop (옵션 B catchup).
+- **hook script**: `tools/discord-daemon/pr-register-rev.sh` (배포 path `~/.mobruji/pr-register-rev.sh` symlink — mobruji 다른 hook script 와 동일 패턴).
+  - mobruji 기존 `tools/discord-daemon/helper-tool-progress.sh` (PreToolUse Bash hook, `docs/features/helper-tool-visibility.md`) 의 구조 거울:
+    - `set -uo pipefail` + `trap exit_graceful ERR` + `exit 0` 항상 (graceful — hook 실패가 actor 도구 호출 자체 차단 X).
+    - stdin JSON read (max 64KB) + jq parsing (jq 미설치 시 silent skip).
+    - actor marker 가드 (`MOBRUJI_HOOK_ACTOR` env — helper/be/fe/nmae/rev/plan 모두 허용. helper-tool-progress.sh 는 helper 만이었으나 본 hook 은 모든 actor 허용).
+  - 핵심 로직:
+    1. stdin JSON 의 `hook_event_name == "PostToolUse"` + `tool_name == "Bash"` 확인.
+    2. `tool_input.command` 가 정규식 `^\s*gh\s+pr\s+(create|merge)\b` 매칭 확인. 매칭 안 되면 silent skip.
+    3. `tool_response.output` 에서 PR URL parse (`https://github.com/[^/]+/[^/]+/pull/(\d+)`). 없으면 `tool_input.command` 의 인자 (`gh pr merge 1234` / `gh pr merge https://...`) 에서 fallback parse. 둘 다 실패 시 warning + exit 0.
+    4. `kind` 결정 — `create` → `pr_review`, `merge` → `pr_audit`.
+    5. dedupe lookup (`~/.mobruji/pr-register-dedupe.jsonl`) — 같은 `(pr_url, kind)` hit 시 skip + exit 0.
+    6. dedupe append + `register_directive_pending` 호출 (구현 path: §6-2):
+       - 옵션 D-1 (권고): bot.py 의 IPC endpoint (Discord 메시지 또는 sqlite events) — actor 가 직접 Python import 어려운 경우.
+       - 옵션 D-2 (대안): `python3 -c "from tools.agent.tools_cycle import register_directive_pending; register_directive_pending(...)"` 직접 호출. 단, sub-agent 의 venv / PYTHONPATH 가 actor 마다 다르므로 wrapper 필요.
+       - 최종 구현은 PR 2-a 에서 actor cwd / venv 의존성 검토 후 결정 (§10 Q12 신규).
+    7. graceful log (`~/.mobruji/pr-register-rev.log` append) + exit 0.
+- **`.claude/settings.json` 등록 (per-actor)**: 기존 `PreToolUse` hook 옆에 `PostToolUse` hook 추가:
+  ```json
+  {
+    "hooks": {
+      "PreToolUse": [ ... 기존 helper-tool-progress.sh ... ],
+      "PostToolUse": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "[ -x $HOME/.mobruji/pr-register-rev.sh ] && $HOME/.mobruji/pr-register-rev.sh || true"
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+  - 등록 대상 워크트리 / actor: 본진 (mac `mobruji` 워크트리 + helper) + NCP (`mobruji-ncp` 워크트리 + nmae) + sub-agent worktree 4 (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan`) — 즉 모든 Claude Code 실행 환경.
+  - 강제 메커니즘 (CLAUDE.md §17 메커니즘 단 우선순위 적용):
+    - 1차: `tools/agent-launch-wrapper.sh` 가 sub-agent launch 직전 `.claude/settings.json` 의 hook 등록 여부 검증 — 누락 시 graceful warning + auto-patch.
+    - 2차: ci 가드 (`.github/workflows/` 의 lint job) 가 `.claude/settings.json` 의 PostToolUse hook 존재 검증 — 누락 PR 차단.
+    - 3차: 메모리 [[feedback-pr-register-hook-required]] 박제 (보조 학습).
+- **`register_directive_pending` 시그니처 확장 (PR 2-b)**:
+  - 현재 (tools_cycle.py:73-108):
+    ```python
+    def register_directive_pending(
+        directive_id: str,
+        summary: str,
+        *,
+        cycle_hint: CycleName | None = None,
+    ) -> dict[str, Any]:
+    ```
+  - 확장 후:
+    ```python
+    def register_directive_pending(
+        directive_id: str,
+        summary: str,
+        *,
+        cycle_hint: CycleName | None = None,
+        kind: Literal["user_directive", "pr_review", "pr_audit"] = "user_directive",
+        pr_url: str | None = None,
+        thread_id: str | None = None,
+        parent_directive_id: str | None = None,
+        source: str = "user_pushpin",
+    ) -> dict[str, Any]:
+    ```
+  - state schema 에 `kind` / `pr_url` / `parent_directive_id` / `source` 필드 추가. 기존 `thread_id=None` 은 호출자 (hook) 가 thread 신설 후 채움.
+  - `kind="pr_review"` / `"pr_audit"` 시 자동:
+    - rev forum 채널 (`PR_REVIEW_FORUM_ID`) 에 thread 신설 (open) 또는 lookup + 단계 전이 (merge).
+    - thread_id 박은 state set + event append (`pr_review_registered` / `pr_audit_registered`).
+
+#### 5-4-2) 채택 사유
+
+- **CLAUDE.md §17 메커니즘 단 우선순위 일관성**: mobruji 의 모든 강제는 hook / wrapper / system prompt — 옵션 D 가 hook 패턴에 자연.
+- **외부 endpoint 0 → 운영 surface 최소**: TLS / cert / inbound port / HMAC / secret rotation 전부 N/A.
+- **즉시 발사 + 자연 멱등**: actor 가 PR 명령 호출 시 hook 동기 실행 — latency 0. dedupe jsonl 가 retry 가드.
+- **외부 PR capture 제외 (의도적 trade-off)**: mac GitHub Desktop / GitHub UI / Claude Code 외 환경의 PR 은 hook 우회 → 사용자 수동 trigger 의무 (§9 Q10). 이는 옵션 A 의 webhook 도 actor 가 외부에서 PR 만들면 capture 하지만, 사용자 환경에서 PR 만드는 빈도 자체가 낮고 수동 trigger 비용도 낮다는 사용자 판단 ([[feedback-discord-tone-formal]] + [[feedback-autonomous-default]] 메모리 cross-ref).
+
+#### 5-4-3) 단점 / trade-off
+
+- actor `.claude/settings.json` hook 등록 누락 시 silent skip — wrapper / ci 가드로 보강 (§5-4-1 강제 메커니즘).
+- 외부 PR (사용자 mac UI / 다른 환경) capture 불가 — 사용자 수동 trigger 의무 + nmae 일일 cross-check digest (선택 PR 5).
+- hook script 자체 실패 시 silent (graceful exit 0) — log 박제 + nmae digest 가 alert (§9 위험 + Q11 신규).
+- `register_directive_pending` 호출 path 의 actor cwd / venv 의존 — IPC 또는 wrapper 로 추상화 의무 (§10 Q12).
 
 ### 5-5) 도메인 모델 영향 (06-domain-model.md §4 신규 용어 후보)
 
 별 commit 으로 도메인 모델 §4 등재 (sub-agent.md 룰: "도메인 용어는 §4 에 먼저 등재"):
 
-- **PR 1차 review thread** (`PrReviewThread`): GitHub PR `opened` 이벤트 시 rev forum 채널 (`REV_FORUM_ID`) 에 자동 신설되는 Discord forum thread (snowflake 18-20자리). 1 PR = 1 thread (open ~ post-merge 단계 전이 통합). thread 본문 = §3-1 template + 단계 1/2 체크박스. tag = `🟡 1차 review` → `🔵 사후 E2E QA` 자동 전이. cycle forum thread (`CycleLaunchThreadId`) 와 다른 채널 / 다른 용도 — 후자 = sub-agent launch 단위 진행 추적, 전자 = PR 단위 rev review 추적. 출처: `pr-webhook-rev-forum.md §3-1·§3-2`.
-- **PR 이벤트 핸들러** (`PrEventHandler`): bot.py 의 PR open / merge 이벤트 감지 + `PrReviewThread` 신설 + directive 적재 모듈. 구현 옵션 B (polling) 채택 — `pr_open_handler` + `pr_merge_handler` 두 함수 + 5 분 polling loop. 멱등성 가드 = `~/.mobruji/pr-open-seen.jsonl` + `~/.mobruji/pr-merge-seen.jsonl`. 출처: `pr-webhook-rev-forum.md §5-2·§5-4`.
-- **PR review forum 캐시** (`PrReviewForumCache`): `~/.mobruji/rev-forum-cache.jsonl` 의 `{pr_number, thread_id, opened_at}` 매핑 entry. PR open 시 append, PR merge 시 lookup. cap 1000 FIFO. 출처: `pr-webhook-rev-forum.md §3-2`.
+- **PR 1차 review thread** (`PrReviewThread`): actor 의 `gh pr create` 호출 시 PostToolUse hook 이 rev forum 채널 (`PR_REVIEW_FORUM_ID`) 에 자동 신설하는 Discord forum thread (snowflake 18-20자리). 1 PR = 1 thread (open ~ post-merge 단계 전이 통합). thread 본문 = §3-1 template + 단계 1/2 체크박스. tag = `🟡 1차 review` → `🔵 사후 E2E QA` 자동 전이. cycle forum thread (`CycleLaunchThreadId`) 와 다른 채널 / 다른 용도. 출처: `pr-webhook-rev-forum.md §3-1·§3-2`.
+- **rev PR directive** (`RevPrDirective`): `register_directive_pending(kind="pr_review" | "pr_audit", pr_url=..., thread_id=..., parent_directive_id=...)` 호출로 등록되는 rev 작업 큐 entry. `kind="pr_review"` = 단계 1 (PR open, 머지 전), `kind="pr_audit"` = 단계 2 (머지 후 사후 E2E QA). `parent_directive_id` 가 같은 PR 의 단계 1↔2 link. nmae 가 큐 head 선정 시 우선순위 적용 (§7 PR 4 에서 sub-agent.md 룰 박제). 출처: `pr-webhook-rev-forum.md §5-4·§3-1·§3-2`.
+- **PostToolUse hook 가드** (`PostToolUseHookGuard`): actor 의 `.claude/settings.json` 에 등록되는 PostToolUse Bash hook (`pr-register-rev.sh`). `gh pr create` / `gh pr merge` 도구 호출을 감지해 `RevPrDirective` 적재 + `PrReviewThread` 신설 / 단계 전이를 자동 trigger. mobruji 의 `PreToolUseHookGuard` (`helper-tool-progress.sh`, `helper-tool-visibility.md`) 와 거울 패턴. graceful (실패 시 도구 호출 차단 X). 출처: `pr-webhook-rev-forum.md §5-4-1`.
+- **PR review forum 캐시** (`PrReviewForumCache`): `~/.mobruji/rev-forum-cache.jsonl` 의 `{pr_number, thread_id, opened_at, kind}` 매핑 entry. PR open hook 시 append, PR merge hook 시 lookup. cap 1000 FIFO. 출처: `pr-webhook-rev-forum.md §3-2`.
 
-### 5-6) Mermaid 시퀀스 (옵션 A 기준)
+### 5-6) Mermaid 시퀀스 (옵션 D 기준)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor BE as be sub-agent
-    participant GH as GitHub
-    participant Proxy as Cloudflare Tunnel / nginx
-    participant Bot as bot.py + aiohttp
-    participant Dedupe as github-webhook-dedupe.jsonl
+    actor BE as be sub-agent (Claude Code)
+    participant Hook as pr-register-rev.sh (PostToolUse)
+    participant Dedupe as pr-register-dedupe.jsonl
     participant Cache as rev-forum-cache.jsonl
+    participant RegFn as register_directive_pending
     participant Discord as Discord rev forum
-    participant DB as directive store
+    participant DB as directive state store
 
-    BE->>GH: gh pr create --base develop
-    GH-->>BE: PR #1234 created
-    GH->>Proxy: POST /webhook/github (event=pull_request, action=opened, X-GitHub-Delivery=UUID-a, X-Hub-Signature-256=...)
-    Proxy->>Bot: forward
-    Bot->>Bot: HMAC verify (sha256 == expected)
-    Bot->>Dedupe: lookup UUID-a → miss
-    Bot->>Dedupe: append UUID-a
-    Bot->>Bot: dispatch → pr_open_handler
-    Bot->>Discord: forum_post_thread (rev_forum_id, "🟡 rev #1234 — ...")
-    Discord-->>Bot: thread_id=5566
-    Bot->>Cache: append {pr:1234, thread:5566}
-    Bot->>DB: append directive {type:rev_review_pending, pr:1234, thread:5566}
-    Bot->>GH: gh pr comment 1234 "🔍 rev 1차 review thread 신설 (rev forum: ...)"  # Q2=a
-    Bot-->>Proxy: 200 OK
-    Proxy-->>GH: 200 OK
+    BE->>BE: gh pr create --base develop --title "feat(song): ..."
+    BE-->>Hook: PostToolUse stdin JSON {tool_name:"Bash", tool_input.command:"gh pr create ...", tool_response.output:"https://github.com/.../pull/1234"}
+    Hook->>Hook: regex match "gh pr create" → kind=pr_review
+    Hook->>Hook: parse PR URL=https://.../pull/1234
+    Hook->>Dedupe: lookup (pr_url, "pr_review") → miss
+    Hook->>Dedupe: append
+    Hook->>RegFn: register_directive_pending(directive_id="rev-1234-open", kind="pr_review", pr_url=..., cycle_hint="rev", source="pr_register_rev_hook")
+    RegFn->>Discord: forum_post_thread (PR_REVIEW_FORUM_ID, "🟡 rev #1234 — ...")
+    Discord-->>RegFn: thread_id=5566
+    RegFn->>Cache: append {pr:1234, thread:5566, kind:pr_review}
+    RegFn->>DB: set_state directive:rev-1234-open + append_event pr_review_registered
+    RegFn-->>Hook: {event_id, directive_id:"rev-1234-open"}
+    Hook->>Hook: append ~/.mobruji/pr-register-rev.log
+    Hook-->>BE: exit 0 (graceful)
 
-    Note over BE,GH: ... 시간 경과 / rev 단계 1 통과 ...
-    BE->>GH: PR #1234 squash merge → develop
-    GH->>Proxy: POST /webhook/github (event=pull_request, action=closed, merged=true, X-GitHub-Delivery=UUID-b)
-    Proxy->>Bot: forward
-    Bot->>Bot: HMAC verify
-    Bot->>Dedupe: lookup UUID-b → miss
-    Bot->>Dedupe: append UUID-b
-    Bot->>Bot: dispatch → pr_merge_handler
-    Bot->>Cache: lookup pr:1234 → thread:5566
-    Bot->>Discord: forum_retag (thread:5566, "🔵 사후 E2E QA") + body PATCH  # Q5=a 1-tag 전이
-    Bot->>DB: append directive {type:rev_post_merge_audit, pr:1234, thread:5566}
-    Bot-->>Proxy: 200 OK
-    Proxy-->>GH: 200 OK
+    Note over BE: ... 시간 경과 / rev 단계 1 통과 ...
+    BE->>BE: gh pr merge 1234 --squash --delete-branch
+    BE-->>Hook: PostToolUse stdin JSON {tool_input.command:"gh pr merge 1234 ...", tool_response.output:"...merged..."}
+    Hook->>Hook: regex match "gh pr merge" → kind=pr_audit
+    Hook->>Hook: parse PR num=1234 → URL reconstruct
+    Hook->>Dedupe: lookup (pr_url, "pr_audit") → miss
+    Hook->>Dedupe: append
+    Hook->>RegFn: register_directive_pending(directive_id="rev-1234-merge", kind="pr_audit", pr_url=..., parent_directive_id="rev-1234-open", cycle_hint="rev")
+    RegFn->>Cache: lookup pr:1234 → thread:5566
+    RegFn->>Discord: forum_retag (thread:5566, "🔵 사후 E2E QA") + body PATCH  # Q5=a 1-tag 전이
+    RegFn->>DB: set_state directive:rev-1234-merge + append_event pr_audit_registered
+    RegFn-->>Hook: {event_id, directive_id:"rev-1234-merge"}
+    Hook-->>BE: exit 0
 
-    Note over Bot: ... bot.py 재시작 또는 webhook 다운 시 ...
-    Note over Bot: pr_event_polling_loop_fallback 가 30분+ delivery 부재 감지 → 활성화
-    Bot->>GH: gh pr list --state open --search "created:>24h ago"  # fallback catchup
-    GH-->>Bot: [...]
-    Bot->>Bot: pr-open-seen.jsonl 공유 lookup → 이미 처리 = skip
+    Note over BE: ... 외부 PR (mac GitHub UI) 시나리오 ...
+    Note over BE: hook capture 불가 → 사용자 수동 trigger 의무
+    Note over BE: 사용자 → helper "PR #5678 rev 등록해" or 📌 등록
+    Note over BE: helper 가 register_directive_pending 직접 호출 (같은 함수)
 ```
 
-## 6) 영향 / 구현 방향 (옵션 A 기준)
+## 6) 영향 / 구현 방향 (옵션 D 기준)
 
 ### 6-1) 모듈 경계 (기존 loop 와의 cross-ref)
 
 | 모듈 | 채널 / 채널 ID env | 대상 thread | trigger | 본 spec 관계 |
 |---|---|---|---|---|
-| `cycle_thread_complete_on_merge_loop` (기존) | cycle forum (BE/FE/REV/PLAN) | `CycleLaunchThreadId` (sub-agent launch 단위) | PR 머지 + body `cycle-forum:` cross-ref | **공존** (Q7=a 사용자 결정) — 본 spec 변경 X. 같은 PR 머지 이벤트가 두 모듈 모두 trigger 하나 다른 thread 갱신. |
-| `pr_webhook_handler` (신규, 옵션 A primary) | rev forum (`REV_FORUM_ID`) | `PrReviewThread` (PR 단위) | GitHub webhook POST `{WEBHOOK_PATH}` (event=pull_request, action ∈ {opened, reopened, closed.merged}) | 본 spec §3-1 / §3-2 / §5-1 |
-| `pr_event_polling_loop` (신규, 옵션 B fallback) | rev forum (`REV_FORUM_ID`) | 같은 `PrReviewThread` | dormant → 30분+ webhook 다운 감지 시 5분 polling 활성화 | 본 spec §5-2 / §5-4 (fallback) |
+| `cycle_thread_complete_on_merge_loop` (기존, bot.py:4476) | cycle forum (BE/FE/REV/PLAN) | `CycleLaunchThreadId` (sub-agent launch 단위) | PR 머지 + body `cycle-forum:` cross-ref | **공존** (Q7=a 사용자 결정 round 17 유지) — 본 spec 변경 X. 같은 PR 머지 이벤트가 본 spec hook + 기존 loop 두 곳을 trigger 하나 다른 thread 갱신. |
+| `pr-register-rev.sh` (신규, 옵션 D 단독) | rev forum (`PR_REVIEW_FORUM_ID`) | `PrReviewThread` (PR 단위) | actor 의 `gh pr create` / `gh pr merge` Bash 도구 호출 → PostToolUse hook | 본 spec §3-1 / §3-2 / §5-4 |
 | `rev_post_merge_audit_loop` (기존, bot.py:4545) | DIGEST 채널 + tmux inject | tmux pane | PR 머지 (debounce) | **별 모듈** — 본 spec 의 단계 2 directive 가 등록되면 nmae 큐 head 로 반영. 두 흐름 cross-ref 만, 코드 결합 X. |
-| `directive_complete_on_merge_loop` (기존, PR B) | directive forum | directive thread | PR body `directive:` cross-ref + 머지 | **별 모듈** — 사용자 등록 directive 라이프사이클. 본 spec 의 rev directive 와 별 entry. |
+| `directive_complete_on_merge_loop` (기존) | directive forum | directive thread | PR body `directive:` cross-ref + 머지 | **별 모듈** — 사용자 등록 directive 라이프사이클. 본 spec 의 rev directive 와 별 entry. |
+| `helper-tool-progress.sh` (기존, PreToolUse) | helper thread | helper-current-thread | helper Bash 도구 호출 직전 | **별 hook** — 같은 actor `.claude/settings.json` 에 PreToolUse + PostToolUse 두 hook 등록. 도구 호출 1회당 두 script 가 sequential 실행 (graceful). |
+
+폐기된 모듈 (round 19 사용자 결정으로 본 spec 에서 폐기):
+- `pr_webhook_handler.py` (옵션 A primary) — 폐기.
+- `pr_event_polling_loop_fallback` (옵션 B fallback) — 폐기.
 
 ### 6-2) 신규 / 수정 파일
 
-- **`tools/discord-daemon/pr_webhook_handler.py` (신규, PR 2-a 의 primary 모듈)**:
-  - aiohttp `web.Application()` factory `build_webhook_app(*, hmac_secret, dedupe_store, handlers) -> web.Application`.
-  - POST `{WEBHOOK_PATH}` route — HMAC 검증 + dedupe lookup + event dispatch.
-  - 핸들러 thin function 3개:
-    - `pr_open_handler(pr: dict, *, reply_script, cache, directive_store) -> dict`
-    - `pr_reopen_handler(pr: dict, *, reply_script, cache, directive_store) -> dict`  # Q1=b 기존 thread retag
-    - `pr_merge_handler(pr: dict, *, reply_script, cache, directive_store) -> dict`
-  - 멱등성 store: `GitHubWebhookDedupeStore` (jsonl `~/.mobruji/github-webhook-dedupe.jsonl` + 메모리 set cap 5000, 24h FIFO).
-- **`tools/discord-daemon/bot.py` (수정)**:
-  - `setup_hook` 또는 `on_ready` 안에서 `web.AppRunner` 시작 — `WEBHOOK_PORT` listen.
-  - `record_loop_heartbeat("pr_webhook_handler")` — webhook delivery 1건 처리 시마다.
-  - `pr_event_polling_loop_fallback(*, dormant=True, ...)` 신규 — webhook dormant 감지 (`github-webhook-dedupe.jsonl` 의 마지막 timestamp 가 30분+ 과거 + 새 PR 의 존재) 시 활성화. 기존 `fetch_recent_merged_prs_with_body` 재사용 + 신규 `fetch_recent_opened_prs(window="24h")` helper.
-- **`tools/discord-daemon/discord-reply.sh` (수정)**:
+- **`tools/discord-daemon/pr-register-rev.sh` (신규, PR 2-a 의 primary 모듈)**:
+  - mobruji `tools/discord-daemon/helper-tool-progress.sh` 패턴 거울 — `set -uo pipefail` + `trap exit_graceful ERR` + jq parsing + graceful exit 0.
+  - 입력: stdin JSON (Claude Code PostToolUse hook spec) — `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"..."},"tool_response":{"output":"..."}}`.
+  - 매칭: `tool_input.command` 가 정규식 `^\s*gh\s+pr\s+(create|merge)\b` 매칭 시만 발사. 그 외 silent skip.
+  - actor marker 가드: `MOBRUJI_HOOK_ACTOR` env (`helper` / `nmae` / `be` / `fe` / `rev` / `plan`) 중 1개 — helper-tool-progress.sh 와 달리 6 actor 모두 허용. unset 시 silent skip (defense).
+  - 멱등성 store: `~/.mobruji/pr-register-dedupe.jsonl` append-only (`pr_url + kind + ts`) + 메모리 set (cap 1000 FIFO).
+  - register 호출: §5-4-1 의 옵션 D-1 (bot.py IPC) 또는 D-2 (Python direct) — 최종 구현 path 는 PR 2-a 에서 결정 (§10 Q12).
+- **`tools/discord-daemon/pr-register-rev-deploy.sh` 또는 wrapper (신규)**: hook script 를 mac 본진 + NCP + 4 워크트리 의 `~/.mobruji/` 에 symlink 배포. mobruji 의 기존 `~/.mobruji/discord-reply.sh` symlink 패턴 재사용.
+- **`.claude/settings.json` (per-actor 수정, PR 2-a)**:
+  - 본진 (`/Users/goohong/workspace/github/mobruji/.claude/settings.json`) — 현재 `helper-tool-progress.sh` PreToolUse 만. PostToolUse Bash matcher 추가.
+  - sub-agent worktree 4 (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan`) — 같은 PostToolUse hook 추가. 같은 `.claude/settings.json` 또는 글로벌 user-level settings 검토 (§10 Q13).
+  - NCP nmae (`/home/mobruji/...`) — 같은 hook 추가.
+- **`tools/agent-launch-wrapper.sh` (수정, PR 2-a)**:
+  - sub-agent launch 직전 `.claude/settings.json` 에 PostToolUse hook 등록 여부 검증 — 누락 시 graceful warning + auto-patch (강제 메커니즘 1차).
+- **`tools/agent/tools_cycle.py:73-108` `register_directive_pending` (수정, PR 2-b)**:
+  - 시그니처 확장 — §5-4-1 참조 (`kind` / `pr_url` / `thread_id` / `parent_directive_id` / `source` 키워드).
+  - state schema 확장 — `kind` / `pr_url` / `parent_directive_id` / `source` 필드 추가.
+  - `kind="pr_review"` / `"pr_audit"` 분기 — rev forum thread 신설 / lookup + 단계 전이 호출 (`discord-reply.sh` 의 forum 모드 재사용).
+  - event kind 추가: `pr_review_registered` / `pr_audit_registered` (기존 `directive_registered` 와 별).
+- **`tools/discord-daemon/discord-reply.sh` (수정, PR 2-b)**:
   - 신규 mode `--forum-post-rev-thread <pr_num> <pr_title> <body>` (또는 기존 `--forum-post-auto-tag` 재사용).
   - 단계 전이 `--forum-retag <thread_id> rev "사후 audit"` + body PATCH 는 기존 `--forum-edit` 재사용.
-- **`tools/agent/tools_cycle.py:97` `register_directive_pending` (수정, PR 2-b)**:
-  - `register_directive_pending(directive_id, summary, *, cycle_hint=None, thread_id=None, source=None)` — `thread_id` / `source` 키워드 wiring 완성 (현재 함수 시그니처 `thread_id=None` 으로 박혀 있으나 호출자가 채우지 않음). webhook handler 가 thread 신설 직후 thread_id 박아 호출.
 - **신규 환경 변수 (`.env` + NCP env)**:
-  - `REV_FORUM_ID` — Discord rev forum 채널 snowflake (사용자 manual 신규 채널 신설 — §13).
-  - `WEBHOOK_PORT` (default `8443`).
-  - `WEBHOOK_PATH` (default `/webhook/github`).
-  - `GITHUB_WEBHOOK_SECRET` — GitHub webhook secret (사용자 manual generate — `python -c "import secrets; print(secrets.token_hex(32))"` 권고).
-  - `PR_EVENT_FALLBACK_POLL_INTERVAL_SECONDS` (default 300, fallback 활성화 시).
+  - `PR_REVIEW_FORUM_ID` — Discord rev forum 채널 snowflake (사용자 manual 신규 채널 신설 — §13). **round 18 정정**: 기존 `REV_FORUM_ID` 와 이름 충돌 (cycle forum rev 채널 — bot.py:787 / 5469 / discord-reply.sh:286 / .env.example:58 / 14-discord-ops.md:274 / rev-qa-protocol.md:406 다수 사용) → 신규 변수명으로 분리.
 - **신규 jsonl (런타임 생성)**:
-  - `~/.mobruji/github-webhook-dedupe.jsonl` — `X-GitHub-Delivery` UUID 멱등성 (24h FIFO).
-  - `~/.mobruji/rev-forum-cache.jsonl` — `{pr_number, thread_id, opened_at}` 매핑 (cap 1000 FIFO).
-  - `~/.mobruji/pr-open-seen.jsonl` / `~/.mobruji/pr-merge-seen.jsonl` — PR 번호 단위 가드 (webhook + fallback polling 공유).
+  - `~/.mobruji/pr-register-dedupe.jsonl` — `(pr_url, kind)` 멱등성 (cap 1000 FIFO).
+  - `~/.mobruji/rev-forum-cache.jsonl` — `{pr_number, thread_id, opened_at, kind}` 매핑 (cap 1000 FIFO).
+  - `~/.mobruji/pr-register-rev.log` — hook 실행 log (graceful 추적, cap 10000 FIFO).
 - **테스트**:
-  - `tools/discord-daemon/tests/test_pr_webhook_handler.py` (신규, PR 2-a) — HMAC 검증 (valid / invalid / missing secret) + dedupe (first / duplicate / window 만료) + event dispatch (opened / reopened / closed.merged / closed.unmerged / 그 외 action) + thin handler mock + 12~16 case.
-  - `tools/agent/tests/test_register_directive_pending.py` (확장, PR 2-b) — `thread_id` / `source` 키워드 추가 시그니처 + jsonl entry schema 검증.
-  - `tools/discord-daemon/tests/test_pr_event_fallback.py` (신규, PR 3) — webhook dormant 감지 + polling 활성화 + webhook 복구 시 dormant 복귀 + 공유 jsonl cross-validation.
+  - `tools/discord-daemon/tests/test_pr_register_rev_hook.sh` (신규, PR 2-a) — bash script 단위 (mobruji 기존 `test_forum_modes.sh` / `test_cycle_backlog_upsert.sh` 패턴 거울):
+    - `gh pr create` regex 매칭 / `gh pr merge` regex 매칭 / 그 외 명령 skip.
+    - PR URL parse (tool_response / tool_input fallback / 둘 다 fail).
+    - dedupe (first / duplicate / window FIFO).
+    - actor marker 가드 (`MOBRUJI_HOOK_ACTOR` unset / 6 actor 각각).
+    - graceful (`register_directive_pending` 실패 시 exit 0).
+    - 12~14 case.
+  - `tools/agent/tests/test_register_directive_pending.py` (확장, PR 2-b) — `kind` / `pr_url` / `parent_directive_id` / `source` 새 키워드 시그니처 + state schema + event kind 검증.
 
-### 6-3) bot.py asyncio loop 충돌 가드 (옵션 A 특이사항)
+### 6-3) 비동기 / asyncio loop 충돌 가드
 
-- aiohttp app + discord.py 가 같은 asyncio loop 공유 — webhook handler 안 모든 외부 호출은 비동기화 의무:
-  - `gh` CLI 호출 (옵션 B fallback) → `asyncio.create_subprocess_exec(...)` (block X).
-  - Discord API 호출 (`reply_script` 호출) → `asyncio.to_thread(subprocess.run, ...)`.
-  - jsonl IO (작음, 동기 OK).
-- 검증 (PR 2-a 통합 테스트): webhook 처리 시간이 discord.py heartbeat 60s window 안인지 측정.
+- **폐기**: 옵션 A 의 aiohttp + discord.py 같은 loop 충돌 가드 → 옵션 D 에서는 N/A (aiohttp 자체 폐기).
+- 옵션 D 의 hook script 는 actor process 의 별 subprocess 로 실행 — actor 의 Claude Code 흐름과 독립. `register_directive_pending` 호출 path 가 bot.py IPC (옵션 D-1) 면 discord.py asyncio loop 영향 검토 (§10 Q12).
 
 ### 6-4) DB / state schema
 
-별 RDB 마이그레이션 없음 (jsonl 만 신규). 단, `tools/agent/state.py` event store 에 `pr_event_processed` event kind 등재 검토 — sub-agent 가 본 흐름 가시성 위해.
+- 별 RDB 마이그레이션 없음 (jsonl + 기존 sqlite events 만).
+- `tools/agent/state.py` event store 에 신규 event kind 등재:
+  - `pr_review_registered` (kind=pr_review 시).
+  - `pr_audit_registered` (kind=pr_audit 시).
+  - 기존 `directive_registered` 와 별 — sub-agent / nmae digest 가 본 흐름 분리 추적 가능.
 
-## 7) 작업 분할 (예상 PR 리스트 — 옵션 A 기준)
+## 7) 작업 분할 (예상 PR 리스트 — 옵션 D 기준, round 19 재작성)
 
-- [ ] **PR 1 (본 PR, plan)**: 본 Feature Spec (옵션 A 채택 round 17 정정) + cross-ref. `06-domain-model.md §4` 신규 용어 3종 등재는 PR 5 분리.
-- [ ] **PR 2-a (be / infra cycle)** — webhook primary path:
-  - 신규 모듈 `tools/discord-daemon/pr_webhook_handler.py` (aiohttp `web.Application()` + POST route + HMAC + dedupe store).
-  - `bot.py setup_hook` 또는 `on_ready` 안 webhook server mount (같은 asyncio loop).
-  - env load (`WEBHOOK_PORT` / `WEBHOOK_PATH` / `GITHUB_WEBHOOK_SECRET`) + fail-fast 가드.
-  - `~/.mobruji/github-webhook-dedupe.jsonl` (24h FIFO) + 메모리 set.
-  - unit test (`test_pr_webhook_handler.py`) — HMAC / dedupe / event dispatch / 12~16 case.
-  - **이 PR 단계에서는 핸들러 내부가 logger.info stub** (PR 2-b 에서 채움) — webhook 인프라만 검증.
-- [ ] **PR 2-b (be / infra cycle)** — directive + thread 신설 wiring:
-  - `pr_open_handler` / `pr_reopen_handler` / `pr_merge_handler` 본문 구현 — `discord-reply.sh --forum-post-rev-thread` 호출 + `register_directive_pending` 호출.
-  - `tools/agent/tools_cycle.py:97` `register_directive_pending` 의 `thread_id` / `source` 키워드 wiring 완성 (현재 sig 는 있으나 호출자가 채우지 않음).
-  - `rev-forum-cache.jsonl` open 시 append + merge 시 lookup.
-  - `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` PR 번호 단위 가드.
-  - thread tag PATCH (`🟡 1차 review` → `🔵 사후 E2E QA` / Q5=a 1-tag 전이).
-  - `type:release` 라벨 → 면제 thread 신설 (Q4=a).
-  - unit test 확장 (`test_register_directive_pending.py`) — 새 키워드 + jsonl schema.
-- [ ] **PR 3 (be / infra cycle)** — fallback polling loop:
-  - `pr_event_polling_loop_fallback` 신규 — webhook dormant 감지 (마지막 delivery timestamp 30분+ 과거 + 새 PR 존재) → 활성화, 복구 감지 → dormant.
-  - 신규 `fetch_recent_opened_prs(window="24h")` helper.
-  - 같은 thin handler (`pr_open_handler` / `pr_merge_handler`) 호출 — webhook 과 같은 함수.
-  - `pr-open-seen.jsonl` / `pr-merge-seen.jsonl` 공유로 webhook 처리분 중복 방지.
-  - alert push (`record_loop_heartbeat("pr_event_fallback_active")` + DIGEST 채널 1회 push) — fallback 활성화 시 사용자 가시.
-  - unit test (`test_pr_event_fallback.py`) — dormant / active 전이 + 공유 jsonl cross-validation.
-- [ ] **PR 4 (rev / docs cycle)**: rev sub-agent 룰 update (`docs/ai-harness/actors/sub-agent.md §2-rev`) — 새 directive type 2종 (`rev_review_pending` / `rev_post_merge_audit`) 의 큐 head 우선순위 박제. PR 2-b 머지 후.
-- [ ] **PR 5 (plan / docs cycle)**: `docs/ai-harness/06-domain-model.md §4` 신규 용어 3종 (`PrReviewThread` / `PrEventHandler` / `PrReviewForumCache`) 등재. 본 spec 머지 직후 별 plan 사이클.
+- [ ] **PR 1 (본 PR, plan)**: 본 Feature Spec (옵션 D 채택 round 19 정정 + round 18 블로커 cleanup) + cross-ref. `06-domain-model.md §4` 신규 용어 3종 등재는 PR 5 분리.
+- [ ] **PR 2-a (be / infra cycle)** — hook script + settings.json 등록:
+  - 신규 모듈 `tools/discord-daemon/pr-register-rev.sh` (bash, helper-tool-progress.sh 패턴 거울 — graceful exit 0 + jq parsing + actor marker 가드).
+  - `tool_input.command` 정규식 매칭 (`^\s*gh\s+pr\s+(create|merge)\b`) + `tool_response.output` PR URL parse + `tool_input.command` fallback parse.
+  - `~/.mobruji/pr-register-dedupe.jsonl` (cap 1000 FIFO) + 메모리 set.
+  - register 호출 path 결정 (옵션 D-1 IPC vs D-2 Python direct) — §10 Q12 해소 후 1택 구현.
+  - `.claude/settings.json` PostToolUse Bash matcher 추가 (본진 + 4 sub-agent worktree + NCP nmae 5개 경로).
+  - `tools/agent-launch-wrapper.sh` 가 hook 등록 검증 + graceful warning + auto-patch.
+  - `~/.mobruji/pr-register-rev.sh` symlink 배포 (또는 git 추적 path 직접 호출).
+  - unit test (`test_pr_register_rev_hook.sh`) — 12~14 case (regex / parse / dedupe / actor marker / graceful).
+  - **이 PR 단계에서는 register 호출이 stub log** (PR 2-b 에서 실제 wiring) — hook 인프라만 검증.
+- [ ] **PR 2-b (be / infra cycle)** — `register_directive_pending` 시그니처 확장 + thread 신설 wiring:
+  - `tools/agent/tools_cycle.py:73-108` `register_directive_pending` 시그니처 확장 (`kind` / `pr_url` / `thread_id` / `parent_directive_id` / `source` 키워드).
+  - state schema 확장 (`kind` / `pr_url` / `parent_directive_id` / `source` 필드).
+  - `kind="pr_review"` 분기 — rev forum 채널 (`PR_REVIEW_FORUM_ID`) thread 신설 호출 (`discord-reply.sh --forum-post-rev-thread`).
+  - `kind="pr_audit"` 분기 — `rev-forum-cache.jsonl` lookup + 단계 전이 (`🟡 → 🔵` retag + body PATCH).
+  - event kind 추가 (`pr_review_registered` / `pr_audit_registered`).
+  - `type:release` 라벨 → 면제 thread 신설 (Q4=a 유지).
+  - `discord-reply.sh` 신규 mode 추가 (`--forum-post-rev-thread`).
+  - PR 2-a 의 hook script 가 stub log 에서 실제 호출로 전환.
+  - unit test 확장 (`test_register_directive_pending.py`) — 새 키워드 + state schema + event kind.
+- [ ] **PR 3 — 폐기 (round 19)**: round 17 안의 fallback polling loop. polling 자체 폐기 (사용자 명시 redirect).
+- [ ] **PR 4 (rev / docs cycle)**: rev sub-agent 룰 update (`docs/ai-harness/actors/sub-agent.md §2-rev`) — 새 `kind` 2종 (`pr_review` / `pr_audit`) 의 큐 head 우선순위 박제 (보조 학습, hook 이 1차 강제). PR 2-b 머지 후.
+- [ ] **PR 5 (plan / docs cycle)**: `docs/ai-harness/06-domain-model.md §4` 신규 용어 4종 (`PrReviewThread` / `RevPrDirective` / `PostToolUseHookGuard` / `PrReviewForumCache`) 등재. 본 spec 머지 직후 별 plan 사이클. (선택) nmae 일일 cross-check digest 흐름 (외부 PR capture monitoring) 도 동 PR 에 포함 검토.
 
 ### 보호 영역 변경 여부
 
 - 보호 영역 변경 여부: ☐ 없음 / ☑ 있음 — 변경 파일과 사유:
-  - `.env` (NCP) — PR 2-a 에서 `REV_FORUM_ID` / `WEBHOOK_PORT` / `WEBHOOK_PATH` / `GITHUB_WEBHOOK_SECRET` 추가. PR 3 에서 `PR_EVENT_FALLBACK_POLL_INTERVAL_SECONDS` 추가.
-  - `.github/workflows/discord-notify.yml` — 변경 없음 (옵션 A 채택, 옵션 C 폐기).
+  - `.env` (NCP) + `.env.example` — PR 2-a 에서 `PR_REVIEW_FORUM_ID` 추가. (round 19 폐기: `WEBHOOK_PORT` / `WEBHOOK_PATH` / `GITHUB_WEBHOOK_SECRET` / `PR_EVENT_FALLBACK_POLL_INTERVAL_SECONDS` 모두 N/A)
+  - `.github/workflows/` — 변경 없음 (옵션 C 폐기 유지). 단, PR 2-a 가 ci 가드 (`.claude/settings.json` 의 PostToolUse hook 존재 검증) 를 lint job 에 추가 — `.github/workflows/lint.yml` 또는 신규 `claude-settings-guard.yml` 신설 검토.
 
-## 8) 테스트 전략
+## 8) 테스트 전략 (옵션 D 기준, round 19 재작성)
 
-### 단위 테스트 — PR 2-a (webhook server + HMAC + dedupe)
+### 단위 테스트 — PR 2-a (hook script + dedupe + settings.json)
 
-- **HMAC 검증**:
-  - valid signature → 핸들러 dispatch 1회 (mock).
-  - invalid signature → 401 + 핸들러 dispatch 0회.
-  - missing `X-Hub-Signature-256` header → 401.
-  - secret 환경변수 부재 시 startup fail-fast log.
+- **regex 매칭** (mobruji 기존 `test_forum_modes.sh` 패턴 거울):
+  - `gh pr create --base develop --title "..."` → match, kind=pr_review.
+  - `gh pr merge 1234 --squash --delete-branch` → match, kind=pr_audit.
+  - `gh pr view 1234` → no match, skip.
+  - `git push origin feat/foo` → no match, skip.
+  - `gh pr create --draft` → match (draft PR 도 hook 발사, 면제 분기는 PR 2-b 의 `register_directive_pending` 에서).
+- **PR URL parse**:
+  - `tool_response.output` 에 `https://github.com/.../pull/1234` 포함 → parse 성공.
+  - `tool_response.output` 부재 + `tool_input.command` 에 `gh pr merge 1234` → fallback parse (PR 번호 + git remote 로 URL reconstruct).
+  - `tool_response.output` 부재 + command 도 인자 없음 → warning + exit 0 (graceful).
 - **dedupe**:
-  - 첫 `X-GitHub-Delivery` UUID → 처리 + jsonl append.
-  - 같은 UUID 재 도착 (GitHub retry) → skip + 200.
-  - 24h 윈도우 만료 UUID → FIFO truncate.
-- **event dispatch**:
-  - `X-GitHub-Event: pull_request` + action=opened → `pr_open_handler` 호출.
-  - action=reopened → `pr_reopen_handler` 호출.
-  - action=closed + merged=true → `pr_merge_handler` 호출.
-  - action=closed + merged=false → skip + log.
-  - action=labeled / edited / 그 외 → skip + 200.
-  - `X-GitHub-Event: push` 등 그 외 event → skip + 200.
+  - 첫 `(pr_url, "pr_review")` → 처리 + jsonl append.
+  - 같은 `(pr_url, "pr_review")` 재 호출 (actor retry) → skip + exit 0.
+  - 같은 PR URL + 다른 kind (`pr_review` vs `pr_audit`) → 둘 다 처리 (단계 1 + 2 별 entry).
+  - cap 1000 초과 → FIFO truncate.
+- **actor marker 가드**:
+  - `MOBRUJI_HOOK_ACTOR` unset → silent skip + exit 0.
+  - `MOBRUJI_HOOK_ACTOR=helper` / `=be` / `=fe` / `=nmae` / `=rev` / `=plan` → 처리.
+  - `MOBRUJI_HOOK_ACTOR=unknown` → silent skip (defense).
+- **graceful**:
+  - `register_directive_pending` 호출 실패 (mock raise) → stderr warning + exit 0 (actor 도구 호출 차단 X).
+  - jq 미설치 → silent skip + exit 0.
+  - stdin 비어있음 → exit 0.
 
-### 단위 테스트 — PR 2-b (handler 본문 + directive wiring)
+### 단위 테스트 — PR 2-b (`register_directive_pending` 시그니처 확장 + thread 신설)
 
-- `pr_open_handler`:
-  - PR 메타 dict mock → 신규 thread 신설 호출 1회 (reply_script mock) + `register_directive_pending` 호출 1회 (`type=rev_review_pending`, `thread_id` 박혀 있음).
-  - 이미 `pr-open-seen.jsonl` 에 있는 PR 번호 → 호출 0회 (멱등).
-  - `type:release` 라벨 → 본문 체크리스트 = "면제" 분기 (Q4=a).
+- 시그니처:
+  - `kind="pr_review"` + `pr_url=...` + `thread_id` 박혀서 호출 → state schema 의 `kind` / `pr_url` / `thread_id` 필드 박힘.
+  - `kind="pr_audit"` + `parent_directive_id=...` → state 의 `parent_directive_id` 필드 박힘 + event kind=`pr_audit_registered`.
+  - `kind` 미지정 (default `"user_directive"`) → 기존 동작 유지 (회귀 가드).
+  - `source` 키워드 → state 의 `source` 필드 박힘 (default `"user_pushpin"`).
+- thread 신설 path (`kind="pr_review"`):
+  - mock `discord-reply.sh --forum-post-rev-thread` 호출 1회 + thread_id 반환 + cache append.
+  - `PR_REVIEW_FORUM_ID` env 부재 시 graceful skip + warning log (state 는 박지만 thread_id=None).
   - PR title 60자 초과 → truncate.
   - PR title `@everyone` / `@here` → escape.
-- `pr_reopen_handler` (Q1=b):
-  - 기존 `rev-forum-cache.jsonl` lookup hit → 기존 thread `🟡 1차 review` retag + 본문 "재진입" 코멘트 append.
-  - cache miss → fallback `pr_open_handler` 호출 (새 thread 신설).
-- `pr_merge_handler`:
-  - merge PR 메타 + cache lookup hit → forum-retag (`🟡 → 🔵`) + body PATCH 호출 1회 + `register_directive_pending` 호출 1회 (`type=rev_post_merge_audit`).
-  - cache miss + PR body `rev-forum:` cross-ref hit → fallback.
-  - cache miss + cross-ref 부재 + rev forum 검색 hit → fallback.
-  - cache miss + 모두 miss → `gh pr view {pr_num}` 으로 PR 메타 재취득 + 새 thread 신설 (drive-by squash 가드, §9-3).
-  - `pr-merge-seen.jsonl` 에 있는 PR → 호출 0회.
-- `register_directive_pending` (확장):
-  - `thread_id` 키워드 전달 시 jsonl entry 의 `thread_id` 필드에 박힘.
-  - `source` 키워드 전달 시 jsonl entry 의 `source` 필드에 박힘 (예: `pr_webhook_handler`).
-  - 같은 `directive_id` 재 호출 → duplicate 분기 (기존 동작 유지).
+  - `type:release` 라벨 → 본문 체크리스트 = "면제" 분기 (Q4=a 유지).
+- 단계 전이 path (`kind="pr_audit"`):
+  - cache lookup hit → forum-retag (`🟡 → 🔵`) + body PATCH 호출 1회.
+  - cache miss + PR body `rev-forum:` cross-ref hit → fallback lookup.
+  - cache miss + 모두 miss → 새 thread 신설 (drive-by squash 가드 — PR open hook 누락 시).
+- 멱등성:
+  - 같은 `directive_id` 재 호출 → duplicate 분기 (기존 동작 유지, 회귀 가드).
 
-### 단위 테스트 — PR 3 (fallback polling)
+### 통합 테스트 (수동, sub-agent worktree 배포 후)
 
-- `pr_event_polling_loop_fallback`:
-  - dormant 시작 → heartbeat 만.
-  - webhook delivery 마지막 timestamp 30분+ 과거 AND 새 PR 존재 → active 전이.
-  - active 상태 → 5분 polling × 2 query (open + merged last 24h).
-  - 같은 PR 이 webhook 처리 후 fallback 활성화 시 `pr-open-seen.jsonl` 공유로 중복 skip.
-  - webhook 복구 (새 delivery 도착) 감지 → dormant 복귀.
-- `fetch_recent_opened_prs`:
-  - `gh pr list` mock → JSON list 반환.
-  - rate limit (rc!=0) → 빈 list + log warning.
-
-### 통합 테스트 (수동, NCP 배포 후)
-
-1. **webhook primary path**: 임시 PR (`docs:` 또는 `chore:` 사소한 변경) 생성 → 5초 안에 rev forum 에 thread 신설 확인 (옵션 A latency 0).
-2. **단계 전이**: 같은 PR squash merge → 5초 안에 같은 thread `🟡 → 🔵` retag + 본문 PATCH 확인.
-3. **HMAC 검증**: `curl -X POST {WEBHOOK_PATH}` 위장 payload (서명 부재) → 401 + log warning 확인.
-4. **dedupe**: GitHub Webhooks settings 의 "Redeliver" 버튼으로 같은 UUID 재 발사 → skip + 200 확인.
-5. **fallback dormant → active**: bot.py 의 webhook handler 강제 disable + 새 PR 생성 → 30분 이내 fallback active 전이 + last 24h 재 scan 으로 thread 신설 확인.
-6. **bot.py 재시작 윈도우**: bot.py 재시작 후 GitHub webhook retry 도착 → 같은 UUID dedupe + 처리 확인.
-7. **asyncio loop heartbeat**: webhook 처리 중 discord.py heartbeat 60s miss 발생 X 확인 (`sudo journalctl -u <bot-svc>` "heartbeat" log).
+1. **be worktree hook 동작**: be sub-agent worktree 에서 임시 PR (`docs:` 또는 `chore:`) `gh pr create` 호출 → 5초 안에 rev forum 에 thread 신설 확인.
+2. **단계 전이**: 같은 PR `gh pr merge --squash` → 5초 안에 같은 thread `🟡 → 🔵` retag + 본문 PATCH 확인.
+3. **dedupe**: 같은 PR `gh pr create` 두 번 호출 (실수 retry) → 첫 번째만 처리 + 두 번째 skip 확인 (`pr-register-dedupe.jsonl` 확인).
+4. **외부 PR (수동 trigger)**: mac GitHub UI 로 직접 PR 생성 → hook 미발사 확인 → helper 에 "PR #N rev 등록" 명령 → helper 가 `register_directive_pending` 직접 호출 → thread 신설 확인.
+5. **graceful**: hook script 강제 chmod -x 또는 jq uninstall 시뮬레이션 → `gh pr create` 자체는 정상 + hook silent skip 확인.
+6. **6 actor 별 hook 발사**: helper / nmae / be / fe / rev / plan 각 worktree 에서 `gh pr create` → 6개 모두 hook 발사 + register 호출 확인.
 
 ### 회귀 가드
 
 - 기존 `cycle_thread_complete_on_merge_loop` 동작 영향 없음 — 같은 PR 머지가 두 모듈 trigger 하나 갱신 대상 thread / 채널 분리 (Q7=a 공존).
-- discord-daemon pytest baseline 대비 신규 fail 0건 — PR 2-a / 2-b / 3 의 unit test 만 추가.
-- bot.py boot probe (forum 채널 권한 log) 에 `REV_FORUM_ID` 1개 추가 — 5개 → 6개 forum.
+- 기존 `helper-tool-progress.sh` PreToolUse hook 동작 영향 없음 — 같은 `.claude/settings.json` 에 별 matcher / 별 script 등록.
+- discord-daemon pytest baseline 대비 신규 fail 0건 — PR 2-a / 2-b 의 unit test 만 추가.
+- bot.py boot probe (forum 채널 권한 log) 에 `PR_REVIEW_FORUM_ID` 1개 추가 — 5개 → 6개 forum.
 
-## 9) 위험
+## 9) 위험 (옵션 D 기준, round 19 재작성)
 
-### 9-1) 옵션 A (webhook) 고유 위험
+### 9-1) 옵션 D 고유 위험
 
-- **public endpoint 노출 — HMAC 검증 우회 시도**: `WEBHOOK_PATH` 가 추측 가능 시 attacker 가 payload spoofing 시도. 가드: HMAC-SHA256 timing-safe 검증 + 검증 실패 IP 1분 100회 초과 시 nginx / Cloudflare rate limit 활성화 + `logger.warning` 로 침투 시도 가시화.
-- **TLS cert 만료 (nginx 채택 시)**: Let's Encrypt cert 90일 만료. `certbot renew --dry-run` cron 매주 1회 + 만료 7일 전 alert (DIGEST 채널 push). 갱신 실패 시 webhook 다운 → fallback polling 활성화.
-- **Cloudflare Tunnel 의존 (Tunnel 채택 시)**: `cloudflared` daemon 다운 시 webhook 다운. systemd `cloudflared.service` watchdog + 다운 30분+ 시 fallback polling.
-- **bot.py asyncio loop 충돌**: aiohttp app + discord.py 가 같은 loop 공유. webhook handler 의 blocking 호출 (예: `subprocess.run(...)` sync) → discord.py heartbeat 60s miss → Discord disconnect. 가드: 모든 외부 호출 비동기화 (§6-3) + 통합 테스트.
-- **bot.py 재시작 윈도우**: 재시작 동안 GitHub webhook delivery 실패 → GitHub 가 24h 안 retry (재 발사 시 같은 `X-GitHub-Delivery` UUID — dedupe 자연). 24h 초과 다운 시 누락 — fallback polling 의 last 24h 재 scan 이 보강.
-- **`GITHUB_WEBHOOK_SECRET` 누출**: env 파일 git commit 사고 시 → secret rotation (GitHub Webhook settings + `.env` 동시 갱신) + `gh secret list` 점검. 운영 룰: 6 개월 1회 정기 rotation.
+- **actor `.claude/settings.json` PostToolUse hook 등록 누락**: 6 actor (helper / nmae / be / fe / rev / plan) 중 1개라도 hook 등록 안 됐으면 그 actor 의 PR 명령 = silent skip → 누락. 가드:
+  - 1차: `tools/agent-launch-wrapper.sh` 가 sub-agent launch 직전 settings.json 검증 + auto-patch + graceful warning.
+  - 2차: `.github/workflows/` 의 lint job 또는 신규 `claude-settings-guard.yml` 이 PR 안 settings.json 의 PostToolUse Bash matcher 존재 검증 → 누락 PR 차단.
+  - 3차: 메모리 [[feedback-pr-register-hook-required]] (보조 학습).
+- **외부 PR capture 불가**: 사용자 mac GitHub Desktop / GitHub UI / Claude Code 외 환경 (예: 직접 `gh` CLI 호출 in tmux) 에서 PR 만들면 hook 우회 → 누락. 가드:
+  - 사용자 수동 trigger 의무 (`📌` 등록 또는 helper 에 "PR #N rev 등록" 명령).
+  - (선택, PR 5) nmae 일일 cross-check digest — `gh pr list --state open --limit 50` vs `rev-forum-cache.jsonl` 의 entry → diff 가 있으면 DIGEST 채널 alert.
+- **hook script 실패 silent**: graceful exit 0 이라 디버깅 가시성 ↓ (예: `register_directive_pending` 호출 실패 / `discord-reply.sh` 다운 / Discord 4xx). 가드:
+  - `~/.mobruji/pr-register-rev.log` append (cap 10000 FIFO) — 사용자 / nmae 가 grep 으로 확인.
+  - 실패 누적 N회 시 DIGEST 채널 alert 검토 (§10 Q11).
+- **`register_directive_pending` 호출 path 모호**: actor cwd / venv / PYTHONPATH 차이로 옵션 D-1 (IPC) vs D-2 (Python direct) 결정 보류 (§10 Q12). 잘못 결정 시 actor 마다 다른 wrapper 의무 → 운영 복잡.
+- **hook script 자체가 timeout / hang**: actor 의 도구 호출이 hook 완료까지 block (Claude Code spec). 가드:
+  - `register_directive_pending` 호출 최대 5초 timeout — 초과 시 graceful exit + log.
+  - jsonl IO 는 동기 (작음, 5초 안).
+- **dedupe jsonl 손상**: malformed JSON line 도착 시 lookup 실패 → 멱등성 깨짐. 가드: line-by-line read + JSON parse 실패 시 skip + log.
+- **사용자 환경에서 `gh pr create` retry (실수)**: dedupe jsonl 가 같은 `(pr_url, kind)` 자연 차단 — 안전.
 
-### 9-2) 옵션 B (fallback polling) 고유 위험
+### 9-2) 공통 위험
 
-- **fallback dormant → active 전이 false positive**: webhook 정상이지만 새 PR 이 30 분간 없어서 마지막 delivery 가 오래된 경우 → 잘못 활성화 → 중복 처리 (단, `pr-open-seen.jsonl` 가드로 멱등). 가드: dormant 감지 = (마지막 delivery 30분+ 과거) **AND** (새 PR open 이 GitHub 에 존재) 두 조건 동시 만족 시만 활성화.
-- **`gh` CLI rate limit (PAT 5000/h)**: fallback active 시 5분 polling × 2 query = 24/h, 다른 loop 합쳐도 < 200/h. dormant 시 0. 안전.
-- **`gh pr list --search "created:>1h ago"` 정확도**: `created:` filter 가 GitHub API 의 `created` 시간을 사용하는지 검증 필요. fallback 은 last 24h window 권고 — 정확도보다 누락 0 우선.
-
-### 9-3) 공통 위험
-
-- **PR open 직후 즉시 merge (drive-by squash)**: webhook 두 event 가 1초 안 도착 — `pr_open_handler` 가 thread 신설 후 `pr_merge_handler` 가 단계 전이. `rev-forum-cache.jsonl` write → read race 가드: 같은 asyncio loop 안 순차 처리 (aiohttp 의 single request handler) + open 처리 완료 await 후 merge 처리.
+- **PR open 직후 즉시 merge (drive-by squash)**: 같은 actor 가 `gh pr create` 후 즉시 `gh pr merge` 호출 — hook 두 번 sequential 실행. `rev-forum-cache.jsonl` write → read race 가드: hook 이 sequential subprocess 로 실행되므로 (Claude Code 가 도구 호출 1회당 hook 1회) race 없음. 단, `register_directive_pending` 자체가 같은 sqlite events 접근 — 동시성 검토 (§10 Q12 와 연동).
 - **Discord forum 채널 한도**: forum 채널의 thread 보관 한도 (Discord 정책 — 활성 thread 1000, archive 무한) — 1 PR = 1 thread 누적 시 1년 1000 PR 미만 (현 페이스 안 안전). 도달 시 archive 정책 검토.
-- **PR title 의 mention injection**: `@everyone` 포함 시 thread 신설 시점 대량 알림. discord-reply.sh 가 mention escape 의무.
+- **PR title 의 mention injection**: `@everyone` 포함 시 thread 신설 시점 대량 알림. `discord-reply.sh --forum-post-rev-thread` 가 mention escape 의무.
 - **`register_directive_pending` 동시성**: 같은 PR 번호로 2 회 호출 시 (race) — 함수 내 `duplicate` 분기가 보장. 안전.
-- **rev forum 채널 ID env 부재 시**: bot.py 가 startup 시 fail-fast 또는 graceful skip — `cycle_thread_complete_on_merge_loop` 의 `reply_script.exists()` 패턴 재사용.
-- **GitHub webhook delivery 순서 보장 X**: 같은 PR 의 open 후 merge 가 reverse order 도착 가능 (rare). 가드: `pr_merge_handler` 가 cache lookup 실패 시 폴백 — `gh pr view {pr_num} --json state,mergedAt` 으로 즉시 retrieve + `pr_open_handler` 먼저 실행 후 merge 처리.
+- **rev forum 채널 ID env 부재 시**: `register_directive_pending` 가 `PR_REVIEW_FORUM_ID` 부재 감지 → graceful skip + warning log + state 는 박지만 thread_id=None.
 
-## 10) 오픈 질문
+### 9-3) 폐기된 위험 (round 19)
+
+옵션 A / B 폐기로 다음 위험은 N/A:
+- public endpoint 노출 / HMAC 우회 / TLS cert 만료 / Cloudflare Tunnel 의존 / `GITHUB_WEBHOOK_SECRET` 누출.
+- bot.py asyncio loop 충돌 (aiohttp + discord.py).
+- bot.py 재시작 윈도우 + GitHub 24h retry.
+- polling false positive dormant→active 전이 / `gh` CLI rate limit / `gh pr list --search "created:>1h ago"` 정확도.
+
+## 10) 오픈 질문 (round 19 재작성)
 
 > 사용자 결정 또는 다음 사이클 의사결정 필요 항목. 해소되면 §11 결정 로그로 이동.
 >
-> **2026-05-30 round 17 정정**: Q1 / Q6 사용자 답변 받음 → §11 로 이동. Q2 / Q3 / Q4 / Q5 / Q7 본진 자율 default 채택 (사용자 redirect 시 정정 가능). Q8 N/A (옵션 A 채택). Q9 신설.
+> **2026-05-30 round 19 정정**: Q1 / Q6 / Q9 → N/A 또는 재정의 (옵션 A/B 폐기). Q2 / Q3 / Q4 / Q5 / Q7 round 17 결정 유지 (옵션 D 도 적용). Q8 N/A 유지. Q10 / Q11 / Q12 / Q13 신설.
 
 | # | 질문 | 선택지 | 담당 / 기한 |
 |---|---|---|---|
-| ~~Q1~~ | ~~PR `reopened` 처리~~ | **(b) 기존 thread retag 🟡 — 본진 자율 default + 사용자 redirect 가능** | 결정 — §11 |
-| Q2 | PR 자체에 코멘트 1건 push (`🔍 rev 1차 review thread 신설 — ...`) — 사용자가 PR 페이지에서 thread 링크 발견 가능 vs PR 코멘트 noise | **(a) push — 본진 자율 default + 사용자 redirect 가능** | @goohong / redirect 가능 |
-| Q3 | Discord rev forum 의 `available_tags` 사전 등록 — `🟡 1차 review` / `🔵 사후 E2E QA` / `✅ rev pass` / `❌ rev fail` 4종 manual 1회 vs bot.py 자동 등록 | **(a) manual 1회 (Discord 채널 신설과 같이) — 본진 자율 default** | @goohong / Discord 채널 신설 시 같이 |
-| Q4 | release PR (`develop → main` 머지) 의 rev forum 처리 — 단계 1 면제 + open thread 신설 vs 완전 skip | **(a) 면제 thread 신설 (라벨 식별만, 체크리스트 = "면제") — 본진 자율 default** | @goohong / redirect 가능 |
-| Q5 | rev thread tag 라이프사이클 표현 — 1-tag 전이 (`🟡 → 🔵 → ✅`) vs 2-tag 표현 (`✅ 1차 review pass` + `🔵 사후 audit`) 동시 부착 | **(a) 1-tag 전이 — 본진 자율 default** | @goohong / redirect 가능 |
-| ~~Q6~~ | ~~옵션 B (polling) vs 옵션 A (HTTP webhook) 최종 선택~~ | **(b) 옵션 A 즉시 채택. 옵션 B 는 fallback safety net 으로 보존 — 사용자 결정 2026-05-30** | 결정 — §11 |
-| Q7 | 폐기 vs 공존: 기존 `cycle_thread_complete_on_merge_loop` 와 본 spec 의 `pr_merge_handler` 가 같은 머지 이벤트를 두 번 처리 | **(a) 공존 — 본진 자율 default** (별 채널 / 별 thread 의미, cycle forum 폐기는 cycle 의미 무력화) | @goohong / redirect 가능 |
-| ~~Q8~~ | ~~PR open 이벤트의 polling window~~ | **N/A — 옵션 A 채택 (webhook 즉시 발사). fallback 은 last 24h 권고** | N/A |
-| **Q9 (신규)** | **옵션 A public endpoint 노출 path — nginx reverse proxy + Let's Encrypt vs Cloudflare Tunnel** | **(a) nginx + Let's Encrypt (운영 컨트롤 완전, inbound 443 노출) / (b) Cloudflare Tunnel (inbound 0, Cloudflare 의존)** — 본 spec 권고 (b). NCP 인바운드 정책 확인 의무 | @goohong / PR 2-a 구현 전 |
+| ~~Q1~~ | ~~PR `reopened` 처리~~ | **N/A — 옵션 D 에서는 hook 정규식 `gh pr create` 만 매칭. reopened 는 actor 가 명시적 `gh pr reopen` 호출 시 별 정규식 추가 검토 (PR 2-a)** | N/A — 재정의 |
+| Q2 | PR 자체에 코멘트 1건 push (`🔍 rev 1차 review thread 신설 — ...`) | **(a) push — round 17 결정 유지 (옵션 D 도 적용)** | round 17 결정 유지 |
+| Q3 | Discord rev forum 의 `available_tags` 사전 등록 4종 | **(a) manual 1회 — round 17 결정 유지** | round 17 결정 유지 |
+| Q4 | release PR 의 rev forum 처리 — 면제 thread 신설 | **(a) 면제 thread 신설 — round 17 결정 유지** | round 17 결정 유지 |
+| Q5 | rev thread tag 라이프사이클 — 1-tag 전이 | **(a) 1-tag 전이 — round 17 결정 유지** | round 17 결정 유지 |
+| ~~Q6~~ | ~~옵션 B vs 옵션 A 최종 선택~~ | **N/A — round 19 옵션 D 채택, A/B 폐기** | N/A |
+| Q7 | 공존 vs 폐기: `cycle_thread_complete_on_merge_loop` | **(a) 공존 — round 17 결정 유지** | round 17 결정 유지 |
+| ~~Q8~~ | ~~PR open 이벤트의 polling window~~ | **N/A — polling 자체 폐기** | N/A |
+| ~~Q9~~ | ~~nginx vs Cloudflare Tunnel~~ | **N/A — 옵션 A 폐기, public endpoint 부재** | N/A |
+| **Q10 (신규)** | **외부 PR (mac GitHub UI / Desktop) capture 정책** | **(a) 사용자 수동 trigger 만 (본진 자율 default) / (b) nmae 일일 cross-check digest 추가 (PR 5 검토) / (c) 둘 다** — 본 spec 권고 (c) | @goohong / PR 5 구현 전 |
+| **Q11 (신규)** | **hook 실패 silent 시 alert 채널** | **(a) `~/.mobruji/pr-register-rev.log` 만 (수동 grep) / (b) DIGEST 채널 N회 실패 시 push / (c) nmae 직접 status 채널 push** — 본 spec 권고 (b) N=5 | @goohong / PR 2-a 구현 전 |
+| **Q12 (신규)** | **`register_directive_pending` 호출 path** | **(a) 옵션 D-1: bot.py IPC (Discord 메시지 또는 sqlite events 직접 write) / (b) 옵션 D-2: Python direct (`python3 -c "from tools.agent.tools_cycle import ..."`)** — 본 spec 권고 (b) Python direct (단, actor venv / PYTHONPATH wrapper 의무) | @goohong / PR 2-a 구현 전 |
+| **Q13 (신규)** | **`.claude/settings.json` PostToolUse hook 등록 scope** | **(a) per-worktree (본진 + 4 sub-agent + NCP 5개 경로 각각) / (b) global user-level (`~/.claude/settings.json`) 1회** — 본 spec 권고 (a) (mobruji 의 `PreToolUse helper-tool-progress.sh` 가 per-worktree 패턴) | @goohong / PR 2-a 구현 전 |
 
 ## 11) 결정 로그
 
 - **2026-05-30 (round 16)** — 초안 작성 (status=draft). 본 spec scope 박제 + 옵션 A/B/C 비교 + 옵션 B 권고. evidence: #1358 본문, bot.py:4476 `cycle_thread_complete_on_merge_loop` 부재 갭, `tools/agent/tools_cycle.py:97` `thread_id=None` wiring 미완.
-- **2026-05-30 (round 17, 사용자 결정 반영)**:
-  - **Q6 → 옵션 A 채택**: 사용자가 옵션 A (HTTP webhook + aiohttp + HMAC + nginx 또는 Cloudflare Tunnel) 즉시 채택 결정. 옵션 B (polling) 는 마이그레이션 path 가 아니라 webhook 다운 시 catchup fallback safety net 으로 보존. round 16 권고 (B 우선) 정정.
-  - **REV_FORUM_ID**: 새 Discord rev forum 채널 신설 (사용자 manual). 기존 cycle forum 재사용 X.
-  - **Q1 → (b) 기존 thread retag**: PR `reopened` 시 기존 thread 🟡 retag (본진 자율 default + 사용자 redirect 가능).
-  - **Q2 → (a) PR 코멘트 push**: `🔍 rev 1차 review thread 신설 (rev forum: <thread_url>)` 1건 push (본진 자율 default + 사용자 redirect 가능).
-  - **Q3 → (a) manual 1회**: `available_tags` 4종 사용자가 Discord 채널 신설 시 같이 등록 (본진 자율 default).
-  - **Q4 → (a) 면제 thread 신설**: release PR (`develop → main`) 도 thread 신설하되 본문 체크리스트 = "면제 (release PR)" 라벨 식별만 (본진 자율 default + 사용자 redirect 가능).
-  - **Q5 → (a) 1-tag 전이**: `🟡 → 🔵 → ✅` 단일 tag 전이 (본진 자율 default + 사용자 redirect 가능).
-  - **Q7 → (a) 공존**: `cycle_thread_complete_on_merge_loop` + 본 spec `pr_merge_handler` 공존. 두 모듈의 갱신 대상 thread / 채널 분리 (cycle forum = launch 단위 / rev forum = PR 단위).
-  - **Q8 → N/A**: 옵션 A 채택으로 polling window 무관. fallback 활성화 시만 last 24h 권고.
-  - **Q9 신설**: nginx + Let's Encrypt vs Cloudflare Tunnel — 본 spec 권고 Cloudflare Tunnel. NCP 인바운드 정책 확인 의무 — 사용자 결정 대기.
+- **2026-05-30 (round 17, 사용자 결정)** — 옵션 A 채택 정정. Q1 / Q6 → §11 이동. Q2 / Q3 / Q4 / Q5 / Q7 본진 자율 default. Q8 N/A. Q9 신설. **round 19 에서 일부 폐기 (옵션 A/B 폐기 + Q1 / Q6 / Q9 N/A)** — 단, Q2 / Q3 / Q4 / Q5 / Q7 결정은 옵션 D 에서도 유지.
+- **2026-05-30 (round 18, 본진 + rev sub-agent 정정 의무 박제 — 이번 round 19 에 cleanup)**:
+  - **`REV_FORUM_ID` env 이름 충돌** — 기존 cycle forum rev 채널과 중복 (bot.py:787/5469 + discord-reply.sh:286 + .env.example:58 + 14-discord-ops.md:274/440 + rev-qa-protocol.md:406/471). **재명명**: `REV_FORUM_ID` → `PR_REVIEW_FORUM_ID` (별 채널). spec 본문 + manual 안내 정정 완료.
+  - **dead link** `§14 docs/features/rev-post-merge-audit-loop.md` 부재. 가까운 spec: `rev-qa-protocol.md` (단계 2 audit 흐름 포함). spec §14 References 정정 완료 — `rev-qa-protocol.md` cross-ref + bot.py:4545 `rev_post_merge_audit_loop` 코드만 직접 reference.
+- **2026-05-30 (round 19, 사용자 결정)**:
+  - **옵션 D 채택** (사용자 제안): actor trigger + PostToolUse Bash hook 단독. PR 생성·머지 명령을 친 actor 가 hook 을 통해 `register_directive_pending(kind=pr_review|pr_audit, ...)` 호출. CLAUDE.md §17 메커니즘 단 우선순위 (system prompt < hook < wrapper) 적용 — hook 강제가 다른 mobruji 흐름 (`helper-tool-progress.sh` PreToolUse 등) 과 일관.
+  - **옵션 A 폐기** (HTTP webhook + aiohttp + HMAC + nginx / Cloudflare Tunnel). 사유: NCP 인바운드 / Cloudflare zone 의존 운영 부담 회피 + 운영 surface 최소화 + 같은 효과를 옵션 D 가 actor trigger + dedupe jsonl 로 달성. Q9 N/A.
+  - **옵션 B 폐기** (polling 5분 + fallback safety net). 사유: 사용자 명시 redirect — polling 자체가 학습 의존 + 항시 부하 + actor trigger 가 자연 멱등.
+  - **fallback** = 사용자 수동 trigger 만 (외부 PR / hook 누락 / agent crash). 자동 polling 0.
+  - **`GITHUB_WEBHOOK_SECRET` / `WEBHOOK_PORT` / `WEBHOOK_PATH` / `PR_EVENT_FALLBACK_POLL_INTERVAL_SECONDS` env 전부 폐기**.
+  - **신규 env**: `PR_REVIEW_FORUM_ID` (round 18 재명명 결정 + round 19 옵션 D 유지).
+  - **Q10 / Q11 / Q12 / Q13 신설** — 옵션 D 의 외부 PR 정책 / hook 실패 alert / register 호출 path / settings.json scope.
+  - **Q2 / Q3 / Q4 / Q5 / Q7 결정 유지** — round 17 의 본진 자율 default 그대로 옵션 D 에 적용.
 
 ## 12) 자율 결정 (사유)
 
-- **Q6 권고 변경 (round 16 B → round 17 A 채택)**: 사용자 redirect — 즉시성 ↑ + 멱등성 자연 (`X-GitHub-Delivery` UUID) + polling 항시 가동 부하 제거. 옵션 B 는 fallback safety net 으로 보존 (webhook 다운 시 last 24h catchup).
-- **rev forum thread = 1 PR 1 thread (단계 전이 통합)** (vs 2 thread 분리): 사용자 회고 시 한 thread 가 PR 전체 라이프사이클 cover 하는 편이 sidebar filter 일관. 단계 전이는 본문 PATCH 로 표현.
-- **Q1 default (b) 기존 thread retag**: 새 thread 신설은 같은 PR 의 라이프사이클을 분리 — sidebar 회고가 깨짐. retag 이 일관.
-- **Q2 default (a) PR 코멘트 push**: 사용자가 PR 페이지에서 rev thread 발견 가능 — discovery latency ↓. 사용자 redirect 시 cycle-forum cross-ref 만으로 정정.
-- **Q3 default (a) manual 1회**: Discord forum 채널 신설 자체가 사용자 manual — 같은 작업 흐름에 tag 추가 1회는 운영 부담 미미. bot.py 자동 등록 (Discord API `available_tags` PATCH) 은 가능하나 추가 코드 + 사용자 확인 흐름 복잡.
-- **Q4 default (a) 면제 thread 신설**: release PR 도 라벨 식별을 위한 thread 1개 신설 — 회고 시 release 시점 식별 가능. skip 은 release 추적 안 됨.
-- **Q5 default (a) 1-tag 전이**: 2-tag 동시 부착은 tag 의미 충돌 (예: `✅ pass` + `🔵 audit` 같이 — pass 인지 audit 인지 헷갈림). 1-tag 전이가 단순.
-- **Q7 default (a) 공존**: cycle forum 폐기는 cycle launch 단위 추적 의미 무력화. 두 모듈 갱신 대상이 다름 — 같은 머지 이벤트가 두 thread 갱신 OK.
-- **Q9 권고 (b) Cloudflare Tunnel**: NCP 인바운드 정책이 보수적 + inbound port 노출 0 + Cloudflare WAF / DDoS 가드 무료. nginx + Let's Encrypt 는 cert monitoring 운영 부담 ↑.
+- **옵션 D 채택 (round 19, 사용자 제안 + 본진 검토)**: CLAUDE.md §17 강제 메커니즘 일관성 — mobruji 의 모든 강제 (helper-tool-progress.sh / agent-launch-wrapper.sh / helper-turn-start.sh / cycle-status/update.sh) 가 hook / wrapper / system prompt 패턴. 옵션 A 의 외부 endpoint 만 outlier. 옵션 D 가 자연.
+- **옵션 A 폐기 사유**: 운영 surface (TLS cert / Cloudflare zone / HMAC secret rotation / asyncio loop 충돌) 가 옵션 D 대비 과대. 같은 효과 (즉시 발사 + 멱등성 자연) 를 옵션 D 가 더 simple 하게 달성.
+- **옵션 B 폐기 사유 (fallback 도 안 가져감)**: 사용자 명시 redirect. polling 의 항시 가동 부하 + dormant/active 상태 관리 + `gh` CLI rate limit cross-check 부담 회피. fallback 으로도 채택 안 함 — round 17 의 듀얼 stack (옵션 A primary + 옵션 B fallback) 운영 복잡 회피.
+- **외부 PR 수동 trigger 의무 (Q10 권고 c)**: 사용자가 mac UI 로 PR 만드는 빈도가 낮음 + nmae digest cross-check 가 보조 monitoring.
+- **hook 실패 alert (Q11 권고 b)**: 완전 silent (a) 는 디버깅 가시성 0 → 사용자 가시성 ↑ 필요. nmae 직접 push (c) 는 nmae 부하 ↑ — DIGEST 채널 N회 누적 후 push 가 균형.
+- **`register_directive_pending` 호출 path (Q12 권고 b Python direct)**: bot.py IPC (a) 는 Discord 메시지 또는 sqlite write 의 추가 layer — 디버깅 복잡. Python direct (b) 는 actor venv / PYTHONPATH wrapper 의무하나 단순. 단, sub-agent worktree 마다 venv 차이 검증 의무 (PR 2-a evidence).
+- **settings.json scope (Q13 권고 a per-worktree)**: mobruji 의 기존 `PreToolUse helper-tool-progress.sh` 가 per-worktree 패턴 (`/Users/goohong/workspace/github/mobruji-plan/.claude/settings.json` 확인). global user-level (b) 는 다른 프로젝트에 leak — 회피.
+- **Q2 / Q3 / Q4 / Q5 / Q7 결정 유지 사유**: round 17 의 권고가 옵션 D 에서도 동일하게 valid (옵션과 무관한 운영 정책).
+- **rev forum thread = 1 PR 1 thread (단계 전이 통합)**: round 17 권고 유지 — 사용자 회고 시 한 thread 가 PR 전체 라이프사이클 cover 하는 편이 sidebar filter 일관.
 
-## 13) 사용자 확인 필요 (사실 진술)
+## 13) 사용자 확인 필요 (사실 진술, round 19 재정리)
 
-> 다음 4건은 사용자 manual 의무. 본진 자율 불가.
+> 다음 2건은 사용자 manual 의무 (옵션 A/B 폐기로 round 17 의 4건에서 2건으로 축소). 본진 자율 불가.
 
-1. **`REV_FORUM_ID` 신규 Discord rev forum 채널 신설** — Discord UI 에서 forum 채널 1개 생성 + 채널 ID 박제 → NCP `.env` `REV_FORUM_ID` 추가. PR 2-a 머지 전 필요.
-2. **`available_tags` 4종 manual 등록** — Discord rev forum 채널 settings UI 에서 `🟡 1차 review` / `🔵 사후 E2E QA` / `✅ rev pass` / `❌ rev fail` 4 tag 사전 등록 (Q3=a). 채널 신설과 같이 1회.
-3. **`GITHUB_WEBHOOK_SECRET` generate + 박제** — `python -c "import secrets; print(secrets.token_hex(32))"` 또는 동등 명령으로 64자 hex secret 생성 → (a) GitHub repo Settings → Webhooks → Add webhook 의 Secret 필드 박제, (b) NCP `.env` `GITHUB_WEBHOOK_SECRET` 추가. PR 2-a 머지 전 필요.
-4. **Q9 결정 (nginx vs Cloudflare Tunnel) + NCP 인바운드 정책 확인** — Cloudflare Tunnel 권고. nginx 채택 시 NCP VM 인바운드 443 open 의무. PR 2-a 구현 전 사용자 결정.
+1. **`PR_REVIEW_FORUM_ID` 신규 Discord rev forum 채널 신설** — Discord UI 에서 forum 채널 1개 생성 + 채널 ID 박제 → NCP `.env` + `.env.example` + 4 sub-agent worktree 의 환경 `PR_REVIEW_FORUM_ID` 추가. PR 2-a 머지 전 필요. **round 18 정정**: 기존 `REV_FORUM_ID` (cycle forum rev 채널) 와 다른 채널 — 별 신설.
+2. **`available_tags` 4종 manual 등록** — Discord rev forum 채널 settings UI 에서 `🟡 1차 review` / `🔵 사후 E2E QA` / `✅ rev pass` / `❌ rev fail` 4 tag 사전 등록 (Q3=a 유지). 채널 신설과 같이 1회.
 
-추가 (참고):
+**round 19 폐기**:
+- `GITHUB_WEBHOOK_SECRET` generate + 박제 — N/A (옵션 A 폐기).
+- Q9 결정 (nginx vs Cloudflare Tunnel) + NCP 인바운드 정책 확인 — N/A (옵션 A 폐기).
 
-- 본 spec 머지 자체는 4건 manual 없이 가능 (draft status).
-- Q2 / Q4 / Q5 / Q7 본진 자율 default 채택 — 사용자 redirect 시 정정 (§11 / §12 사유 참조).
+**신규 (참고, 사용자 인지 의무)**:
+- **외부 PR capture 우회 인지**: mac GitHub Desktop / GitHub UI 로 직접 PR 만들면 PostToolUse hook 우회 → 자동 등록 불가. 사용자가 수동으로 `📌` 등록 또는 helper 에 "PR #N rev 등록" 명령 의무 (Q10 권고 c — nmae 일일 cross-check digest 가 보조 monitoring).
+- 본 spec 머지 자체는 2건 manual 없이 가능 (draft status).
+- Q2 / Q3 / Q4 / Q5 / Q7 본진 자율 default — round 17 결정 유지.
 
 ## 14) References
 
@@ -572,23 +646,44 @@ sequenceDiagram
 - `docs/features/cycle-forum-operation.md` §5-5 — `cycle_thread_complete_on_merge_loop` (cycle forum) 동작 참조. 본 spec 의 rev forum 모듈은 별.
 - `docs/features/directive-board-template-and-tags.md` — directive forum 운영 SoT (rev directive entry 의 jsonl schema 참조).
 - `docs/features/rev-e2e-3-stages.md` — rev 3 단계 e2e 정의 (단계 1 = PR 머지 전, 단계 2 = develop 머지 후 dev 환경, 단계 3 = release 후 production).
-- `docs/features/rev-sla.md` — rev 단계별 SLA 매트릭스. 본 spec 의 polling latency 5 분이 단계 1 SLA 30 분 안인지 cross-ref.
-- `docs/features/rev-post-merge-audit-loop.md` (관련, bot.py:4545 `rev_post_merge_audit_loop`) — 본 spec 의 단계 2 directive 가 nmae 큐 head 로 반영되면 본 loop 가 tmux inject + DIGEST.
-- `tools/discord-daemon/bot.py` `cycle_thread_complete_on_merge_loop` (line 4476), `fetch_recent_merged_prs_with_body` (line 4227), `DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT` (line 4199) — 본 spec 의 옵션 B 구현 시 재사용.
-- `tools/agent/tools_cycle.py:73-108` `register_directive_pending` — `thread_id` / `source` 키워드 wiring 대상.
-- `tools/agent-launch-wrapper.sh` `--register-pending` mode (line 110-294) — cycle forum 의 🟡 대기 thread 신설 패턴. 본 spec 의 rev forum thread 신설 흐름 유사 (코드는 별).
-- `.github/workflows/discord-notify.yml` — 옵션 C 채택 시 확장 대상. 권고 옵션 B 에서는 무관.
-- `docs/ai-harness/06-domain-model.md §4` — 신규 용어 3종 등재 (`PrReviewThread` / `PrEventHandler` / `PrReviewForumCache`).
+- `docs/features/rev-sla.md` — rev 단계별 SLA 매트릭스. 본 spec 의 hook 즉시 발사가 단계 1 SLA 안인지 cross-ref.
+- `docs/features/rev-qa-protocol.md` §5-9 — 단계별 Discord push 정책. 본 spec 의 단계 2 directive 가 nmae 큐 head 로 반영되면 본 protocol 의 audit 흐름 trigger. **round 18 정정**: 기존 `rev-post-merge-audit-loop.md` cross-ref (dead link) 를 본 파일로 대체.
+- `docs/features/helper-tool-visibility.md` — `helper-tool-progress.sh` PreToolUse hook spec. 본 spec 의 PostToolUse hook 이 같은 패턴 거울 (graceful exit 0 + jq parsing + actor marker 가드).
+- `tools/discord-daemon/helper-tool-progress.sh` — 본 spec 의 `pr-register-rev.sh` 가 거울하는 reference 구현.
+- `tools/discord-daemon/bot.py` `cycle_thread_complete_on_merge_loop` (line 4476), `rev_post_merge_audit_loop` (line 4545) — 본 spec 의 단계 2 directive 가 trigger 하는 기존 loop.
+- `tools/agent/tools_cycle.py:73-108` `register_directive_pending` — 시그니처 확장 대상 (PR 2-b).
+- `tools/agent-launch-wrapper.sh` — sub-agent launch 직전 `.claude/settings.json` PostToolUse hook 등록 검증 + auto-patch (강제 메커니즘 1차).
+- `.claude/settings.json` (본진 + 4 sub-agent worktree + NCP 5개 경로) — PostToolUse Bash matcher 추가 대상 (PR 2-a).
+- `docs/ai-harness/06-domain-model.md §4` — 신규 용어 4종 등재 (`PrReviewThread` / `RevPrDirective` / `PostToolUseHookGuard` / `PrReviewForumCache`).
+- `docs/ai-harness/actors/sub-agent.md §2-rev` — rev sub-agent 룰 update (PR 4) — 새 `kind` 2종 큐 head 우선순위 박제.
+
+**round 19 폐기된 references**:
+- `rev-post-merge-audit-loop.md` (dead link) — round 18 정정으로 `rev-qa-protocol.md` 대체.
+- aiohttp / Cloudflare Tunnel / Let's Encrypt / nginx / `GITHUB_WEBHOOK_SECRET` 관련 외부 docs — 옵션 A 폐기.
+- `.github/workflows/discord-notify.yml` — 옵션 C 폐기.
 
 ## 15) 변경 이력
 
-- 2026-05-30 (round 16) — 초안 작성. status=draft. PR 본 spec 머지 후 §10 8건 사용자 답변 → status=approved 전환.
-- 2026-05-30 (round 17) — **옵션 A (HTTP webhook) 채택 정정** (사용자 결정). §1 / §5-1 / §5-2 / §5-4 / §5-6 / §6 / §7 / §9 / §10 / §11 / §12 / §13 일괄 정정:
-  - 옵션 A 본문 확장 — aiohttp + HMAC + nginx vs Cloudflare Tunnel 비교.
-  - 옵션 B → fallback safety net 으로 재명명 (webhook 다운 30분+ 시 catchup).
-  - §6 모듈 경계 / 신규 파일 (`pr_webhook_handler.py` 신설) / asyncio loop 충돌 가드 추가.
-  - §7 작업 분할 재작성 — PR 2-a (webhook server) / 2-b (directive + thread wiring) / 3 (fallback) / 4 (rev 룰) / 5 (도메인 모델 §4).
-  - §9 위험 옵션 A 고유 (public endpoint / TLS cert / asyncio loop) + 공통 보강.
-  - §10 Q1 / Q6 결정 → §11 이동. Q2 / Q3 / Q4 / Q5 / Q7 본진 자율 default + redirect 가능 표기. Q8 N/A. Q9 신설 (nginx vs Cloudflare Tunnel).
-  - §11 round 17 결정 로그 + §12 자율 결정 사유 + §13 사용자 manual 4건 박제.
-  - §5-6 Mermaid 시퀀스 옵션 A 기준 재작성 + fallback 흐름 추가.
+- 2026-05-30 (round 16) — 초안 작성. status=draft.
+- 2026-05-30 (round 17) — 옵션 A (HTTP webhook) 채택 정정 (사용자 결정). §1 / §5 / §6 / §7 / §9 / §10 / §11 / §12 / §13 일괄 정정.
+- 2026-05-30 (round 18, 본진 + rev sub-agent 정정 의무 박제) — 이번 round 19 에 cleanup. 2건 블로커:
+  - `REV_FORUM_ID` env 이름 충돌 → `PR_REVIEW_FORUM_ID` 재명명.
+  - `rev-post-merge-audit-loop.md` dead link → `rev-qa-protocol.md` 대체.
+- 2026-05-30 (round 19) — **옵션 D (actor trigger + PostToolUse hook) 채택 정정** (사용자 결정 + 본진 검토). 옵션 A / B 폐기. round 18 블로커 cleanup 동시 처리. §1 / §2 / §3-1 / §3-2 / §3-3 / §3 비기능 / §4 / §5 / §6 / §7 / §8 / §9 / §10 / §11 / §12 / §13 / §14 일괄 재작성:
+  - §5-1 옵션 A 폐기 표기 + 사유.
+  - §5-2 옵션 B 폐기 표기 + 사유 (fallback safety net 도 폐기).
+  - §5-3 옵션 C 폐기 유지 (기존 round 16 결정).
+  - §5-4 신규: 옵션 D (actor trigger + PostToolUse hook) 본문 + 채택 사유 + trade-off.
+  - §5-5 도메인 모델 영향 — 신규 용어 4종 재정리 (`PrReviewThread` / `RevPrDirective` / `PostToolUseHookGuard` / `PrReviewForumCache`).
+  - §5-6 Mermaid 시퀀스 옵션 D 기준 재작성.
+  - §6-1 모듈 경계 — `pr-register-rev.sh` (hook) + helper-tool-progress.sh (PreToolUse) 와 cross-ref. 폐기 모듈 (`pr_webhook_handler.py` / `pr_event_polling_loop_fallback`) 명시.
+  - §6-2 신규 / 수정 파일 — hook script + actor `.claude/settings.json` + `tools_cycle.py:73-108` 시그니처 확장 + agent-launch-wrapper.sh 가드.
+  - §6-3 비동기 loop 충돌 가드 — 폐기 (aiohttp 자체 폐기).
+  - §7 작업 분할 재작성 — PR 2-a (hook script + settings.json) / 2-b (시그니처 확장 + thread 신설) / 3 폐기 / 4 (rev 룰) / 5 (도메인 모델 §4 + 선택 nmae digest).
+  - §8 테스트 전략 — hook script bash test + `register_directive_pending` 확장 test + 통합 test (6 actor 별).
+  - §9 위험 — 옵션 D 고유 (settings.json 누락 / 외부 PR / hook 실패 silent / 호출 path 모호 / hook timeout / dedupe 손상). 옵션 A/B 폐기 위험 명시.
+  - §10 Q1 / Q6 / Q9 N/A. Q2 / Q3 / Q4 / Q5 / Q7 round 17 결정 유지. Q10 / Q11 / Q12 / Q13 신설.
+  - §11 round 18 + round 19 결정 로그 추가.
+  - §12 자율 결정 사유 옵션 D 기준 재정리.
+  - §13 사용자 manual 4건 → 2건 축소 (옵션 A/B 폐기). 외부 PR capture 우회 인지 신규.
+  - §14 References — round 18 dead link cleanup + round 19 폐기 references 명시. helper-tool-visibility.md / helper-tool-progress.sh 신규 cross-ref.
