@@ -5,14 +5,16 @@
 # 이슈: #1360 (PR 2-a — hook script + settings.json 등록).
 #
 # 배경:
-#   PR 생성·머지를 trigger 한 actor (helper / be / fe / nmae / rev / plan) 가
+#   PR 생성·머지를 trigger 한 actor (mmae / nmae / be / fe / rev / plan) 가
 #   `gh pr create` / `gh pr merge` 호출 시 Claude Code 의 PostToolUse hook 으로
 #   본 script 가 발사 → `register_directive_pending(kind=pr_review|pr_audit, ...)`
 #   호출 → rev 작업 큐 entry + rev forum thread 라이프사이클.
 #
-# Range:
-#   helper / nmae / be / fe / rev / plan 6 actor 모두 — MOBRUJI_HOOK_ACTOR env
-#   marker 가드 (helper-tool-progress.sh 는 helper 만이었으나 본 hook 은 6 actor 허용).
+# Range (PR #1372 round 19 fix 이후):
+#   mmae / nmae / be / fe / rev / plan 6 actor 허용. **helper 제외** — Discord
+#   중계 전담 (PR 절대 안 만듦, [[feedback-helper-relay-only]]). MOBRUJI_HOOK_ACTOR
+#   env marker 가드 (helper-tool-progress.sh 는 helper 만이었으나 본 hook 은
+#   helper 를 제외한 6 actor 허용).
 #
 # 입력 (stdin JSON, Claude Code PostToolUse hook spec):
 #   {"hook_event_name": "PostToolUse", "tool_name": "Bash",
@@ -24,8 +26,10 @@
 #   - exit 0 항상 (hook 실패가 actor 도구 호출 자체 차단 금지 — graceful).
 #
 # 환경 변수:
-#   MOBRUJI_HOOK_ACTOR              — helper / nmae / be / fe / rev / plan 중 1.
-#                                     unset / unknown 시 silent skip (defense).
+#   MOBRUJI_HOOK_ACTOR              — mmae / nmae / be / fe / rev / plan 중 1
+#                                     (helper 는 가드에서 제외 — relay 전담).
+#                                     unset 시 cwd fallback (가드 1 참조).
+#                                     unknown 시 silent skip (defense).
 #   MOBRUJI_PR_REGISTER_REV=0       — 임시 OFF (개발/디버깅).
 #   MOBRUJI_DIR=~/.mobruji          — dedupe / log / failures 파일 위치.
 #   MOBRUJI_AGENT_PYTHON            — Python interpreter (venv) path. 미설정 시
