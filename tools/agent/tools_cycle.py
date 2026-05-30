@@ -12,9 +12,16 @@ spec: tools/agent/README.md (Phase 1.3).
 
 from __future__ import annotations
 
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import events as ev
+import tools_discord as td
 from state import CycleName, CycleStatus, DirectiveStatus
 
 
@@ -71,6 +78,20 @@ def set_cycle_state(
 
 
 # ─── 7. register_directive_pending ───────────────────────────────────────────
+#
+# 시그니처 분기 (2026-05-30 PR 2-b, #1364):
+#   - kind=None (legacy) → 기존 behavior — pending_polish + directive_registered event.
+#   - kind="pr_review"   → rev forum (PR_REVIEW_FORUM_ID) 안 신규 thread 신설
+#                          (forum_create_thread 호출) + state schema 확장 +
+#                          dedupe (rev-forum-dedupe.jsonl) + event=pr_review_registered.
+#   - kind="pr_audit"    → 같은 pr_url 의 기존 rev thread lookup (dedupe cache) →
+#                          단계 전이 (forum_retag + forum_edit_starter +
+#                          forum_comment) + state schema 확장 +
+#                          event=pr_audit_registered.
+#
+# spec: docs/features/pr-webhook-rev-forum.md §6-2 / §7-2 / §8.
+# template SoT: docs/features/directive-board-template-and-tags.md §5-6.
+# 호출자: tools/discord-daemon/pr-register-rev.sh (PR #1361 머지, hook script).
 
 
 def register_directive_pending(
@@ -78,18 +99,74 @@ def register_directive_pending(
     summary: str,
     *,
     cycle_hint: CycleName | None = None,
+    kind: str | None = None,
+    pr_url: str | None = None,
+    thread_id: str | None = None,
+    parent_directive_id: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """📌 등록 직후 — directive entry + 🟡 forum thread (사용자 정정 path).
 
     Args:
-        directive_id: Discord message_id (snowflake)
+        directive_id: Discord message_id (snowflake) 또는 PR 단위 ID (rev-<num>-open / rev-<num>-merge)
         summary: 사용자 메시지 첫 80자 또는 polish 결과
         cycle_hint: nmae 의 추천 cycle (be/fe/rev/plan) — optional, plan 위임 시 reason 필수
+        kind: directive 분류 — None (legacy 사용자 directive) / "pr_review" (PR open) /
+            "pr_audit" (PR merge 후 사후 E2E QA). 신규 키워드 (PR 2-b).
+        pr_url: PR URL (kind != None 시 의무). 신규 키워드 (PR 2-b).
+        thread_id: 사전 신설 thread_id (호출자 가 thread 직접 신설한 경우). 보통은 본 함수가
+            kind="pr_review" 분기에서 신설 후 cache 에 박는다.
+        parent_directive_id: pr_audit 시 같은 PR 의 pr_review directive_id (단계 1↔2 link).
+        source: 호출 path 식별자 ("pr_register_rev_hook" / "user_pushpin" 등) — log + state.
     """
-    key = f"directive:{directive_id}"
-    if ev.get_state(key) is not None:
+    if ev.get_state(f"directive:{directive_id}") is not None:
         return {"directive_id": directive_id, "duplicate": True}
 
+    # 분기 1: legacy (kind=None) → 기존 behavior 유지 (회귀 가드).
+    if kind is None:
+        return _register_legacy(directive_id, summary, cycle_hint=cycle_hint)
+
+    # 분기 2: kind 알 수 없음 → ValueError (사고 path 차단 — typo 방지).
+    if kind not in ("pr_review", "pr_audit"):
+        raise ValueError(
+            f"register_directive_pending: unknown kind={kind!r} "
+            f"(expected None / 'pr_review' / 'pr_audit') — directive_id={directive_id}"
+        )
+
+    # 분기 3: kind != None → pr_url 의무.
+    if not pr_url:
+        raise ValueError(
+            f"register_directive_pending(kind={kind!r}) requires pr_url — "
+            f"directive_id={directive_id}"
+        )
+
+    if kind == "pr_review":
+        return _register_pr_review(
+            directive_id, summary,
+            pr_url=pr_url,
+            thread_id=thread_id,
+            cycle_hint=cycle_hint,
+            source=source,
+        )
+    # kind == "pr_audit"
+    return _register_pr_audit(
+        directive_id, summary,
+        pr_url=pr_url,
+        thread_id=thread_id,
+        cycle_hint=cycle_hint,
+        parent_directive_id=parent_directive_id,
+        source=source,
+    )
+
+
+def _register_legacy(
+    directive_id: str,
+    summary: str,
+    *,
+    cycle_hint: CycleName | None,
+) -> dict[str, Any]:
+    """legacy (kind=None) — 기존 behavior 그대로. 회귀 가드 path."""
+    key = f"directive:{directive_id}"
     state: dict[str, Any] = {
         "directive_id": directive_id,
         "summary": summary,
@@ -106,6 +183,170 @@ def register_directive_pending(
         {"directive_id": directive_id, "summary": summary, "cycle_hint": cycle_hint},
     )
     return {"event_id": event_id, "directive_id": directive_id}
+
+
+def _register_pr_review(
+    directive_id: str,
+    summary: str,
+    *,
+    pr_url: str,
+    thread_id: str | None,
+    cycle_hint: CycleName | None,
+    source: str | None,
+) -> dict[str, Any]:
+    """kind=pr_review — rev forum 신규 thread 신설 + state + event.
+
+    PR_REVIEW_FORUM_ID env 부재 시 graceful warning + state 박지만 thread_id=None
+    (호출자 가 추후 thread 신설 후 update_directive_status thread_id= 로 채움).
+    """
+    # dedupe (PR URL + kind) — 같은 pr_review 2회 hit 시 기존 thread reuse (race 가드).
+    cached_thread_id = _dedupe_lookup(pr_url, "pr_review")
+
+    forum_id = os.environ.get("PR_REVIEW_FORUM_ID")
+    new_thread_id: str | None = thread_id or cached_thread_id
+
+    if new_thread_id is None and forum_id:
+        # rev forum thread 신설 — directive-board-template-and-tags.md §5-2 거울 +
+        # PR 단위 양식.
+        title, body = _build_pr_review_template(directive_id, summary, pr_url)
+        try:
+            td.forum_create_thread(forum_id, title, body, tags=["🟡 1차 review"])
+        except Exception as exc:  # noqa: BLE001
+            # forum_create_thread 자체 실패 시 (NCP bot.py polling miss / sqlite IO) —
+            # state 박지만 thread_id=None 으로 graceful. hook script 가 alert counter
+            # 증가 + DIGEST push (Q11=b).
+            _stderr_warn(
+                f"register_directive_pending(pr_review): forum_create_thread 실패 "
+                f"— {type(exc).__name__}: {exc} (pr_url={pr_url})"
+            )
+            new_thread_id = None
+        else:
+            # forum_create_thread 가 thread_id 를 즉시 반환 X (bot.py polling 후 박힘).
+            # 실제 snowflake 는 bot.py 의 후속 갱신에 의존. 본 함수 단계에서는 None.
+            new_thread_id = None
+    elif new_thread_id is None and not forum_id:
+        _stderr_warn(
+            "register_directive_pending(pr_review): PR_REVIEW_FORUM_ID env 부재 — "
+            f"thread 신설 skip (pr_url={pr_url})"
+        )
+
+    key = f"directive:{directive_id}"
+    state: dict[str, Any] = {
+        "directive_id": directive_id,
+        "summary": summary,
+        "status": "pending_polish",
+        "thread_id": new_thread_id,
+        "assigned_cycle": cycle_hint,
+        "delegation_reason": None,
+        "pr_url": pr_url,
+        "closed_reason": None,
+        # 신규 필드 (PR 2-b).
+        "kind": "pr_review",
+        "parent_directive_id": None,
+        "source": source,
+    }
+    ev.set_state(key, state)
+    event_id = ev.append_event(
+        "pr_review_registered",
+        {
+            "directive_id": directive_id,
+            "summary": summary,
+            "pr_url": pr_url,
+            "thread_id": new_thread_id,
+            "cycle_hint": cycle_hint,
+            "source": source,
+        },
+    )
+
+    # dedupe cache append (선처리 — 같은 pr_url + pr_review 2번 hit 시 race 가드).
+    _dedupe_append(pr_url, "pr_review", new_thread_id)
+
+    return {"event_id": event_id, "directive_id": directive_id, "kind": "pr_review"}
+
+
+def _register_pr_audit(
+    directive_id: str,
+    summary: str,
+    *,
+    pr_url: str,
+    thread_id: str | None,
+    cycle_hint: CycleName | None,
+    parent_directive_id: str | None,
+    source: str | None,
+) -> dict[str, Any]:
+    """kind=pr_audit — 같은 PR 의 기존 rev thread lookup → 단계 전이 (🟡 → 🔵) +
+    body PATCH + comment append + state + event.
+
+    cache miss 시 graceful — state 박지만 thread_id=None (호출자 가 추후 박는다).
+    """
+    # cache lookup — 같은 pr_url 의 pr_review entry 의 thread_id.
+    lookup_thread_id = thread_id or _dedupe_lookup(pr_url, "pr_review")
+
+    if lookup_thread_id:
+        # 단계 전이: 🟡 → 🔵 retag + body PATCH + comment append.
+        try:
+            td.forum_retag(lookup_thread_id, "🔵 사후 E2E QA")
+        except Exception as exc:  # noqa: BLE001
+            _stderr_warn(
+                f"register_directive_pending(pr_audit): forum_retag 실패 — "
+                f"{type(exc).__name__}: {exc} (thread_id={lookup_thread_id})"
+            )
+        try:
+            new_body = _build_pr_audit_body(directive_id, summary, pr_url)
+            td.forum_edit_starter(lookup_thread_id, new_body)
+        except Exception as exc:  # noqa: BLE001
+            _stderr_warn(
+                f"register_directive_pending(pr_audit): forum_edit_starter 실패 — "
+                f"{type(exc).__name__}: {exc} (thread_id={lookup_thread_id})"
+            )
+        try:
+            td.forum_comment(
+                lookup_thread_id,
+                f"✅ 머지됨 — 사후 E2E QA 단계 진입 (pr_url={pr_url})",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _stderr_warn(
+                f"register_directive_pending(pr_audit): forum_comment 실패 — "
+                f"{type(exc).__name__}: {exc} (thread_id={lookup_thread_id})"
+            )
+    else:
+        _stderr_warn(
+            "register_directive_pending(pr_audit): 기존 thread cache miss — "
+            f"단계 전이 skip (pr_url={pr_url})"
+        )
+
+    key = f"directive:{directive_id}"
+    state: dict[str, Any] = {
+        "directive_id": directive_id,
+        "summary": summary,
+        "status": "pending_polish",
+        "thread_id": lookup_thread_id,
+        "assigned_cycle": cycle_hint,
+        "delegation_reason": None,
+        "pr_url": pr_url,
+        "closed_reason": None,
+        # 신규 필드 (PR 2-b).
+        "kind": "pr_audit",
+        "parent_directive_id": parent_directive_id,
+        "source": source,
+    }
+    ev.set_state(key, state)
+    event_id = ev.append_event(
+        "pr_audit_registered",
+        {
+            "directive_id": directive_id,
+            "summary": summary,
+            "pr_url": pr_url,
+            "thread_id": lookup_thread_id,
+            "parent_directive_id": parent_directive_id,
+            "cycle_hint": cycle_hint,
+            "source": source,
+        },
+    )
+
+    _dedupe_append(pr_url, "pr_audit", lookup_thread_id)
+
+    return {"event_id": event_id, "directive_id": directive_id, "kind": "pr_audit"}
 
 
 # ─── 8. update_directive_status ──────────────────────────────────────────────
@@ -173,3 +414,179 @@ def update_directive_status(
     )
     return {"event_id": event_id, "directive_id": directive_id,
             "old_status": old_status, "new_status": new_status}
+
+
+# ─── PR 2-b helpers — template + dedupe cache ────────────────────────────────
+
+
+_DEDUPE_FILENAME = "rev-forum-dedupe.jsonl"
+_DEDUPE_CAP = 1000
+
+
+def _mobruji_dir() -> Path:
+    """~/.mobruji/ — env override (테스트). 미설정 시 HOME 기준."""
+    override = os.environ.get("MOBRUJI_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path("~/.mobruji").expanduser()
+
+
+def _dedupe_path() -> Path:
+    return _mobruji_dir() / _DEDUPE_FILENAME
+
+
+def _dedupe_lookup(pr_url: str, kind: str) -> str | None:
+    """rev-forum-dedupe.jsonl 에서 같은 (pr_url, kind) 가장 최근 entry 의 thread_id."""
+    path = _dedupe_path()
+    if not path.exists():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):  # 최신 entry 먼저.
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("pr_url") == pr_url and entry.get("kind") == kind:
+            tid = entry.get("thread_id")
+            return tid if tid else None
+    return None
+
+
+def _dedupe_append(pr_url: str, kind: str, thread_id: str | None) -> None:
+    """rev-forum-dedupe.jsonl 에 entry append + cap 1000 FIFO truncate."""
+    path = _dedupe_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    entry = {
+        "pr_url": pr_url,
+        "kind": kind,
+        "thread_id": thread_id,
+        "ts": int(time.time()),
+    }
+    try:
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        return
+
+    # cap FIFO truncate (best-effort).
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if len(lines) > _DEDUPE_CAP:
+            tail = lines[-_DEDUPE_CAP:]
+            path.write_text("\n".join(tail) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _now_kst() -> str:
+    """KST timestamp (YYYY-MM-DD HH:MM KST)."""
+    now_utc = datetime.now(timezone.utc)
+    # KST = UTC+9. tzdata 없이 offset 만 더한다 (graceful).
+    from datetime import timedelta
+    kst = now_utc + timedelta(hours=9)
+    return kst.strftime("%Y-%m-%d %H:%M KST")
+
+
+def _build_pr_review_template(
+    directive_id: str, summary: str, pr_url: str,
+) -> tuple[str, str]:
+    """rev forum thread 신설 시 title + body.
+
+    SoT: docs/features/directive-board-template-and-tags.md §5-2 거울 + PR 단위 양식.
+    """
+    pr_num = _extract_pr_num(pr_url)
+    title_prefix = f"📌 PR #{pr_num} rev review" if pr_num else "📌 PR rev review"
+    # forum thread name = 100자 cap (tools_discord.forum_create_thread 가 99자 truncate).
+    # title 은 forum 의 thread title — 본 body 의 📌 line 과 별.
+    title = title_prefix
+    if summary:
+        title = f"{title_prefix} — {summary[:60]}"
+
+    now = _now_kst()
+    body = (
+        f"📌 **{title_prefix}**\n"
+        f"\n"
+        f"💬 원본\n"
+        f"> {summary}\n"
+        f"> URL: {pr_url}\n"
+        f"\n"
+        f"🆔 `{directive_id}` · 🕐 {now}\n"
+        f"\n"
+        f"📋 진행 (🟡 대기)\n"
+        f"- [ ] 정적 review (CLAUDE.md / spec 준수)\n"
+        f"- [ ] 테스트 / 검증\n"
+        f"- [ ] 머지 가능 결정\n"
+        f"\n"
+        f"🔖 관련\n"
+        f"- directive_id: `{directive_id}`\n"
+        f"- cycle: rev\n"
+        f"- 신청자: PR 2-a hook script (pr-register-rev.sh)\n"
+        f"\n"
+        f"🤖 rev sub-agent 분배 대기\n"
+        f"\n"
+        f"---\n"
+        f"_갱신: {now}_\n"
+    )
+    return title, body
+
+
+def _build_pr_audit_body(
+    directive_id: str, summary: str, pr_url: str,
+) -> str:
+    """kind=pr_audit 시 thread starter body PATCH 본문 — 단계 1 결과 + 단계 2 체크리스트."""
+    pr_num = _extract_pr_num(pr_url)
+    title_prefix = f"📌 PR #{pr_num} rev review" if pr_num else "📌 PR rev review"
+    now = _now_kst()
+    return (
+        f"📌 **{title_prefix}** (🔵 사후 E2E QA)\n"
+        f"\n"
+        f"💬 원본\n"
+        f"> {summary}\n"
+        f"> URL: {pr_url}\n"
+        f"\n"
+        f"🆔 `{directive_id}` · 🕐 {now}\n"
+        f"\n"
+        f"✅ 단계 1 결과 *(머지 시점)*\n"
+        f"- 머지 directive_id: `{directive_id}`\n"
+        f"\n"
+        f"📋 단계 2 진행 (🔵 사후 E2E QA)\n"
+        f"- [ ] dev 환경 deploy 반영 확인\n"
+        f"- [ ] e2e 회귀 (변경 영향 범위)\n"
+        f"- [ ] regression label 부착 (`regression:dev` / `rev-post-merge-pass`)\n"
+        f"\n"
+        f"🔖 관련\n"
+        f"- directive_id: `{directive_id}`\n"
+        f"- cycle: rev\n"
+        f"- 신청자: PR 2-a hook script (pr-register-rev.sh)\n"
+        f"\n"
+        f"---\n"
+        f"_갱신: {now} (단계 1 → 단계 2 전이)_\n"
+    )
+
+
+def _extract_pr_num(pr_url: str) -> str | None:
+    """https://github.com/<owner>/<repo>/pull/<num> → <num>."""
+    if not pr_url:
+        return None
+    parts = pr_url.rstrip("/").rsplit("/", 1)
+    if len(parts) != 2:
+        return None
+    num = parts[1]
+    return num if num.isdigit() else None
+
+
+def _stderr_warn(msg: str) -> None:
+    """graceful stderr — register_directive_pending 호출 실패가 actor 흐름 차단 X."""
+    try:
+        print(f"WARN: {msg}", file=sys.stderr)
+    except OSError:
+        pass
