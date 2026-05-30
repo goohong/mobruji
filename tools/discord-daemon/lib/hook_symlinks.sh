@@ -66,6 +66,11 @@ if [[ -z "${HOOK_NAMES:-}" ]]; then
       # gh pr create / gh pr merge 호출 시 rev directive 자동 등록.
       # spec: docs/features/pr-webhook-rev-forum.md (옵션 D).
       pr-register-rev.sh
+      # 2026-05-30 (#1376): mmae-launch.sh — mac mobruji 본 세션 시작 wrapper.
+      # 사용자 alias mmae='~/.mobruji/mmae-launch.sh' 박제 시 MOBRUJI_HOOK_ACTOR=mmae
+      # 자동 export → pr-register-rev.sh actor 가드 통과. spec: 옵션 D, mmae actor.
+      # NCP 환경에 박혀도 무해 (nmae 가 본 wrapper 호출 안 함).
+      mmae-launch.sh
     )
   fi
 fi
