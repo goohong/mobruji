@@ -2707,7 +2707,7 @@ def tmux_send_payload(target_pane: str, text: str) -> bool:
 def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
     """`~/.mobruji/cycle-status.json` 을 읽어 dict 로 반환합니다.
 
-    nmae(maestro 본진) 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는
+    nmae(NCP maestro 본 세션) 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는
     상태 파일입니다. 파일이 없거나 JSON 파싱이 실패하면 None 을 반환하고,
     호출부 (`format_cycle_digest`) 가 graceful fallback 합니다.
 
@@ -2942,7 +2942,7 @@ def format_cycle_digest(
 
     if status is None or not isinstance(status, dict):
         embed.description = (
-            f"{timestamp_text}\n(cycle-status.json 읽기 실패 — 본진 갱신 대기)"
+            f"{timestamp_text}\n(cycle-status.json 읽기 실패 — nmae 갱신 대기)"
         )
         embed.color = CYCLE_DIGEST_COLOR_IDLE
         _maybe_add_cycle_counts_field(embed, cycle_counts)
@@ -4603,7 +4603,7 @@ def _polish_prompt(raw_body: str, directive_id: str) -> str:
         "다음 4 항목 한국어 markdown 으로 정제 (각 항목 짧게):\n"
         "- **요약**: 1-2 줄 (사용자가 무엇을 원하는지)\n"
         "- **유형**: 신규 기능 / 버그 fix / 운영 개선 / 의견 / 질문 중 하나\n"
-        "- **위임 권장**: be / fe / rev / plan / nmae 본진 중 하나 + 한 줄 사유\n"
+        "- **위임 권장**: be / fe / rev / plan / nmae 중 하나 + 한 줄 사유\n"
         "- **상태**: 대기\n\n"
         "출력은 위 4 항목 markdown 만. 코드 펜스 / 부가 설명 / 메타코멘트 금지."
     )
