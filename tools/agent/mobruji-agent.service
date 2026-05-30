@@ -18,6 +18,10 @@ Type=simple
 User=mobruji
 WorkingDirectory=/home/mobruji/mobruji/tools/agent
 EnvironmentFile=/home/mobruji/mobruji-bridge/tools/discord-daemon/.env
+# #1374: nmae actor marker — pr-register-rev.sh PostToolUse hook 가 actor 가드
+# (mmae/nmae/be/fe/rev/plan) 통과 후 자동 등록 흐름 발화 가능하도록 박제.
+# spec: docs/features/pr-webhook-rev-forum.md (#1372 follow-up).
+Environment=MOBRUJI_HOOK_ACTOR=nmae
 # claude-agent-sdk + python-dotenv + pydantic 가 venv 안에 설치돼 있어야 함.
 ExecStart=/home/mobruji/mobruji/tools/agent/venv/bin/python main.py
 Restart=always
