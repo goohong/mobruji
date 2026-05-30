@@ -1602,6 +1602,23 @@ class PinDialogueView(discord.ui.View):
             self.stop()
             return
 
+        # fallback mode (thread == register_channel) — revise loop 차단.
+        # main 채널에서 wait_for 하면 다른 사용자 메시지 모두 false-positive 잡힘.
+        if (
+            getattr(self._thread, "id", None) is not None
+            and getattr(self._register_channel, "id", None) is not None
+            and self._thread.id == self._register_channel.id
+        ):
+            await interaction.response.edit_message(
+                content=(
+                    "🚫 main 채널 fallback 모드 — 수정 loop 불가 (revise 채널 비식별).\n"
+                    "등록 취소. 다시 시도하려면 새 메시지 + 📌 reaction."
+                ),
+                view=None,
+            )
+            self.stop()
+            return
+
         await interaction.response.edit_message(
             content=(
                 f"❓ 어떤 점을 수정할까요? 이 thread 안에 메시지로 입력하세요. "
@@ -1674,19 +1691,26 @@ async def _start_pin_dialogue(
     """Phase B+C — message 아래 Discord thread 생성 + 정리 + O/X.
 
     message.create_thread → claude -p 정리 → PinDialogueView 게시.
-    실패 시 _do_register_directive fallback (graceful).
+    thread 생성 실패 (50024 — channel type 미지원) 시 register_channel 에 PinDialogueView 직접 송신
+    (사용자 가시화 유지). revise loop 는 fallback mode 자동 차단 (PinDialogueView._revise).
     """
+    fallback_to_channel = False
     try:
         thread = await message.create_thread(name=f"📌 등록 확인 — {raw_summary[:50]}")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("📌 pin dialogue thread 생성 실패 — 즉시 등록 fallback: %r", exc)
-        await _do_register_directive(
-            message.guild.me._state._get_client(), str(message.id), target_user_id,
-            channel=register_channel, summary=raw_summary,
+        logger.warning(
+            "📌 pin dialogue thread 생성 실패 — register_channel 직접 송신 fallback: %r", exc,
         )
-        return
+        thread = register_channel  # duck-typed — channel 도 .send 가능
+        fallback_to_channel = True
 
-    await thread.send("📝 정리 중… (claude -p 호출, 5-10초)")
+    if fallback_to_channel:
+        await register_channel.send(
+            f"📝 정리 중… (claude -p 호출, 5-10초)\n"
+            f"_📌 fallback — main 채널 직접 표시 (thread 생성 불가)_",
+        )
+    else:
+        await thread.send("📝 정리 중… (claude -p 호출, 5-10초)")
 
     polished = await _generate_directive_description(raw_summary, str(message.id))
 
