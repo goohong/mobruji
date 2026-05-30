@@ -78,9 +78,9 @@ last_reviewed: 2026-05-29
 
 - check-run `name=rev-gate-audit`, `conclusion=success`, `output.title="emergency-hotfix whitelist pass"`
 - GitHub issue 자동 생성:
-  - title: `[audit][emergency-hotfix-followup] PR #${{ pr.number }} 사후 rev 단계 2 의무`
+  - title: `[audit][emergency-hotfix-followup] PR #${{ pr.number }} 사후 rev 🔵 Post-merge audit (단계 2) 의무`
   - labels: `audit:emergency-hotfix-followup`, `type:chore`, `scope:infra`
-  - body: PR 링크 / mergedAt / mergedBy / merge commit SHA / 사후 rev 단계 2 절차 (`docs/features/rev-e2e-3-stages.md §3-2`) 참조
+  - body: PR 링크 / mergedAt / mergedBy / merge commit SHA / 사후 rev 🔵 Post-merge audit (단계 2) 절차 (`docs/features/rev-e2e-2-stages.md §3-2`) 참조
 - DIGEST push (`tools/discord-daemon/discord-reply.sh --digest` 호출 또는 workflow 안에서 webhook 직접 호출 — §5-3 선택지 기재)
 
 ##### 3-3-3) audit fail (bypass 감지)

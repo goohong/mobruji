@@ -142,7 +142,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [redundant-rules-audit-2026-05-26](redundant-rules-audit-2026-05-26.md) | Redundant Rules Audit (2026-05-26) | draft | 2026-05-26 |
 | [release-cadence-v0.4.0](release-cadence-v0.4.0.md) | Release Cadence v0.4.0 — cutoff 룰 + 범위 결정 | draft | 2026-05-24 |
 | [release-fork-watchdog](release-fork-watchdog.md) | release fork watchdog (scheduled GHA + 임계치 Discord push) | draft | 2026-05-27 |
-| [rev-e2e-3-stages](rev-e2e-3-stages.md) | rev 3단계 e2e 자율 QA | draft | (frontmatter legacy) |
+| [rev-e2e-2-stages](rev-e2e-2-stages.md) | rev 2 단계 e2e 자율 QA (Pre-merge / Post-merge) | draft | 2026-05-30 |
 | [rev-qa-protocol](rev-qa-protocol.md) | rev 세션 QA 실행 검증 프로토콜 | implementing | 2026-05-24 |
 | [spec-status-check-legacy-key-fail](spec-status-check-legacy-key-fail.md) | spec-status-check legacy key hard fail | draft | 2026-05-27 |
 | [systemd-restart-always](systemd-restart-always.md) | mobruji-helper.service Type=simple + Restart=always | draft | 2026-05-26 |

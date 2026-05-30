@@ -350,7 +350,7 @@ CREATE INDEX ix_song_genre_enum ON song (genre_enum);
   - **wrapper response breaking 채택 — v2 분리 X**: consumer (fe `/songs` page) 1군데뿐. `LikeListResponse` 패턴 통일 이점이 v2 분리 비용 초과. 같은 PR atomic 갱신.
   - **2-step Flyway drop**: rollback safety. 매핑 누락 발견 시 V<n+1> 전 수동 fix.
   - **추천 알고리즘 분리 strict**: 본 spec 어떤 변경도 `RecommendationService` / `SeedDeriver` / `RecommendationScorer` 에 영향 0. 결정성 회귀 가드 명시.
-  - **rev sub-agent 가 직접 API + 브라우저 e2e QA (사용자 요청 1)** 는 본 spec 에 묶지 않음. rev 역할 확장 = scope `infra` + rev e2e 3단계 (`rev-e2e-3-stages.md`) 와 통합 검토 필요 → 별 spec `docs/features/rev-direct-api-qa-and-browser-e2e.md` 신설 권고 (nmae 백로그 분배).
+  - **rev sub-agent 가 직접 API + 브라우저 e2e QA (사용자 요청 1)** 는 본 spec 에 묶지 않음. rev 역할 확장 = scope `infra` + rev e2e 2단계 (`rev-e2e-2-stages.md`) 와 통합 검토 필요 → 별 spec `docs/features/rev-direct-api-qa-and-browser-e2e.md` 신설 권고 (nmae 백로그 분배).
 
 ## 10) 관련 spec / ADR
 
@@ -372,7 +372,7 @@ CREATE INDEX ix_song_genre_enum ON song (genre_enum);
 | A2 | `Genre` enum 7종 (BALLAD/DANCE/ROCK/TROT/POP/HIPHOP/OTHER) | 5종 (curation-100 default), 10+ 종 (장르 세분화) | curation-100 default 5종 + self-analysis-pipeline 의 HIPHOP + OTHER escape hatch = 최소 변경으로 enum promote 가능. 세분화는 v0.3+ 후보. |
 | A3 | wrapper response breaking | v2 endpoint 분리 | consumer (fe) 1군데뿐. `LikeListResponse` 패턴 통일. v2 분리 비용 (route / DTO / 테스트 2배) > wrapper 통일 이점. |
 | A4 | 페이지네이션 (offset) | 무한 스크롤 (cursor) | "둘러보기" = 위치 보존 / 공유 URL 안정성 중요. 무한 스크롤은 위치 잃기 쉬움. |
-| A5 | rev QA 확장 분리 spec | 본 spec 에 묶음 | scope `song` (도메인) vs `infra` (rev 역할) 다름. rev e2e 3단계 (`rev-e2e-3-stages.md`) 와 통합 검토 필요. 묶으면 PR / 라벨 / 사이클 모두 부정합. |
+| A5 | rev QA 확장 분리 spec | 본 spec 에 묶음 | scope `song` (도메인) vs `infra` (rev 역할) 다름. rev e2e 2단계 (`rev-e2e-2-stages.md`) 와 통합 검토 필요. 묶으면 PR / 라벨 / 사이클 모두 부정합. |
 | A6 | 2-step Flyway drop | 1-step (drop + rename 동시) | rollback safety. backfill 매핑 누락 발견 시 V<n+1> 전 SQL 수동 fix 가능. v0.2 단계 = production 데이터 보호 우선. |
 
 follow-up 이슈 분리 가능:

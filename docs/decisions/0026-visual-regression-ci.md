@@ -14,7 +14,7 @@ ADR-0018 (design tokens) 단계 4 swap 시리즈 (PR #1236 / fe in_progress dire
 
 ## Decision
 
-Playwright visual regression CI 를 검토 단계 (proposed) 로 도입. 구체 범위 / 도입 시점 / baseline 관리 룰은 본 ADR Decision 만으로 확정하지 않고 다음 사항을 후속 spec (`docs/features/visual-regression-ci.md`) + 단계 1 / 단계 2 / 단계 3 의 rev 3단계 e2e 와 동일 라이프사이클로 정한다:
+Playwright visual regression CI 를 검토 단계 (proposed) 로 도입. 구체 범위 / 도입 시점 / baseline 관리 룰은 본 ADR Decision 만으로 확정하지 않고 다음 사항을 후속 spec (`docs/features/visual-regression-ci.md`) + 🟡 Pre-merge review (단계 1) / 🔵 Post-merge audit (단계 2) 의 rev 2단계 e2e 와 동일 라이프사이클로 정한다 (단계 3 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`):
 
 1. **대상 페이지** — 다크모드 toggle 영향 받는 핵심 5-10 페이지 (`/` 홈 / 추천 결과 / 음역 입력 / 좋아요 / 북마크 등 ADR-0018 단계 4 swap 범위).
 2. **baseline 관리** — 의도 변경 vs 회귀 구분 룰 (§8 Q4 후보 a/b/c). **proposed: 후보 (a)** — `playwright --update-snapshots` 명시 PR 만 baseline 갱신 + PR body `## visual baseline update` 섹션 의무.

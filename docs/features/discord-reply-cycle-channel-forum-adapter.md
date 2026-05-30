@@ -109,7 +109,7 @@ sub-agent
 
 - [x] PR (이번, plan): spec + 메모리 박제 (`docs/features/discord-reply-cycle-channel-forum-adapter.md` + `memory/subagent/feedback_discord_reply_cycle_channel_forum.md`).
 - [ ] PR (be): `tools/discord-daemon/discord-reply.sh` adapter 구현 + bats 테스트 (cycle-channel forum / text mode 분기).
-- [ ] PR (rev): rev 사이클 3단계 audit (단계 1 머지 전 / 단계 2 develop / 단계 3 release).
+- [ ] PR (rev): rev 사이클 2단계 audit (🟡 Pre-merge review (단계 1) 머지 전 / 🔵 Post-merge audit (단계 2) develop 후). 단계 3 폐기 — `rev-e2e-2-stages.md §1-1`.
 
 ## 7) 테스트 전략
 

@@ -378,9 +378,9 @@ rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름**
 
 **사용자 정정 (2026-05-28)**: "rev 가 진행한 작업이 정확히 어떤 건지(코드 리뷰, QA, 2차 E2E 등) 잘 모르겠어. 뒤에서 동작하다보니. 작업 흐름이나 보고를 체계화하면 좋을 것 같은데". 단계 별 통일된 보고 format + Discord 가시화 차등 도입.
 
-[[rev-e2e-3-stages]] §3 의 3 단계 작업이 사용자에게 가시화 안 됨. 본 절 = 사용자 가시화 강화.
+[[rev-e2e-2-stages]] §3 의 2 단계 작업 (🟡 Pre-merge review / 🔵 Post-merge audit) 이 사용자에게 가시화 안 됨. 본 절 = 사용자 가시화 강화. (구 `rev-e2e-3-stages` — 2026-05-30 rename + 단계 3 폐기, `rev-e2e-2-stages.md §1-1` evidence 참조)
 
-#### 5-9-1) 단계 1 — PR 머지 전 (코드 리뷰)
+#### 5-9-1) 🟡 Pre-merge review (단계 1) — PR 머지 전 (코드 리뷰)
 
 **PR 코멘트 템플릿** (§5-6 의 단순 1줄 format 보강 / 검색 패턴 `rev단계1:` 추가):
 
@@ -405,7 +405,7 @@ rev단계1: 🟢 PASS · {PR title 30자}
 
 **Discord push (단계 1)**: cycle forum 채널 (`REV_FORUM_ID`) 의 round thread — `✅ reviewed:claude #N — 코드 리뷰 통과, 머지 후보` 1줄. 사용자 가시화 가치 낮음 — cycle forum 만.
 
-#### 5-9-2) 단계 2 — develop 머지 후 (회귀 검증)
+#### 5-9-2) 🔵 Post-merge audit (단계 2) — develop 머지 후 (회귀 검증)
 
 **PR 코멘트 템플릿**:
 
@@ -431,24 +431,9 @@ rev단계2: 🟢 PASS · #N · dev OK
 
 **Discord push (단계 2)**: **DIGEST 채널 (`DIGEST_CHANNEL_ID`)** 에 1줄 push — `✅ rev단계2 #N — develop 회귀 없음 (dev smoke OK)`. 사용자가 "방금 머지된 게 안전한지" 즉시 알 수 있게.
 
-#### 5-9-3) 단계 3 — release 후 (production smoke)
+#### 5-9-3) (폐기) 단계 3 — release 후 (production smoke)
 
-**PR 코멘트 템플릿**:
-
-```markdown
-## rev 단계 3 — production smoke
-
-### 실행
-- production URL: {url}
-- 시나리오: {S1/S2/...}
-
-### 결과
-🟢 PASS — {summary}
-
-rev단계3: 🟢 PASS · #N · prod OK
-```
-
-**Discord push (단계 3)**: **DIGEST 채널** + release 직후라 사용자 attention 가치 최대 — `✅ rev단계3 #N — production 안정`. DIGEST 의무.
+> **2026-05-30 폐기** (PR rev2s-2): `rev-e2e-2-stages.md §1-1` evidence (production 환경 부재 — `.github/workflows/cd-prod.yml` / `cd-release.yml` 부재) 사유로 단계 3 자체 폐기. 향후 production 환경 신설 시 (`docs/features/deployment-infrastructure.md` Hetzner CX22 머지 의존) 본 sub-section 부활 가능 — 메모리 후보 `[[project_rev_stage_3_prod_revival]]` cross-ref.
 
 #### 5-9-4) ❌ 발견 시 가시화 (단계 무관)
 
@@ -466,25 +451,24 @@ bash tools/rev-queue/round-summary.sh <round_id>
 ```
 
 wrapper 가 묶는 동작 (학습 의존 ↓ 강제 메커니즘 — [[feedback-evidence-based-root-cause]]):
-1. `rev-queue.jsonl` scan → 이번 round 의 단계 1/2/3 별 PASS / HOLD / FAIL count 산출
+1. `rev-queue.jsonl` scan → 이번 round 의 단계 1/2 별 PASS / HOLD / FAIL count 산출 (단계 3 폐기 — `rev-e2e-2-stages.md §1-1`)
 2. round 내 등록된 후속 issue 번호 list 추출
-3. 단계 1 = cycle forum (`REV_FORUM_ID`), 단계 2/3 = DIGEST 채널 (`DIGEST_CHANNEL_ID`) push 분기 (§5-9-1/2/3)
+3. 🟡 Pre-merge review (단계 1) = cycle forum (`REV_FORUM_ID`), 🔵 Post-merge audit (단계 2) = DIGEST 채널 (`DIGEST_CHANNEL_ID`) push 분기 (§5-9-1/2)
 4. ❌ 있으면 사용자 메시지 reply 추가 push (§5-9-4)
 5. 보고 format 통일 — script 가 일관 출력 (사용자가 매 round 같은 format)
 
-**출력 format 예 (DIGEST 채널)**:
+**출력 format 예 (DIGEST 채널)** (단계 3 폐기 후 — `tools/rev-queue/round-summary.sh` 본문 갱신은 PR rev2s-4 별 트랙):
 
 ```text
 rev round 12 종료
 ─────────────────
-단계 1 (PR 머지 전): 3 PASS / 1 HOLD #1203
-단계 2 (develop 후): 5 PASS / 1 ❌ #1196 (issue #1234 등록)
-단계 3 (release 후): 2 PASS
+🟡 Pre-merge review (단계 1, PR 머지 전): 3 PASS / 1 HOLD #1203
+🔵 Post-merge audit (단계 2, develop 후): 5 PASS / 1 ❌ #1196 (issue #1234 등록)
 
 후속 issue: #1234
 ```
 
-**누락 감지**: rev round 종료 후 wrapper 미호출 시 nmae 의 다음 backlog scan 에서 jsonl 의 round 종료 ts 없음 발견 → 가시화 push. (보강 강제 메커니즘은 follow-up — 단계 1 wrapper script 우선.)
+**누락 감지**: rev round 종료 후 wrapper 미호출 시 nmae 의 다음 backlog scan 에서 jsonl 의 round 종료 ts 없음 발견 → 가시화 push. (보강 강제 메커니즘은 follow-up — 🟡 Pre-merge review wrapper script 우선.)
 
 ### 5-8) release gate 연계
 

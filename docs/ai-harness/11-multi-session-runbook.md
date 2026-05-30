@@ -352,15 +352,15 @@ rev sub-agent 가 매 사이클 시작 시 `bash tools/rev-queue/rev-queue.sh al
 
 | Stage | 의미 | 후보 필터 |
 |---|---|---|
-| stage1 | PR 머지 전 (단계 1 e2e) | `reviewed:claude` 라벨 없는 open PR |
-| stage2 | develop 머지 1h+ 후 (단계 2 사후) | `rev-post-merge-pass` 라벨 없는 merged PR |
-| stage3 | 최근 release tag PR (단계 3 production) | `rev-prod-pass` 라벨 없는 release PR |
+| stage1 | PR 머지 전 (🟡 Pre-merge review, 단계 1 e2e) | `reviewed:claude` 라벨 없는 open PR |
+| stage2 | develop 머지 1h+ 후 (🔵 Post-merge audit, 단계 2 사후) | `rev-post-merge-pass` 라벨 없는 merged PR |
+| ~~stage3~~ (폐기 2026-05-30) | ~~최근 release tag PR (단계 3 production)~~ | ~~`rev-prod-pass` 라벨 없는 release PR~~ — `rev-e2e-2-stages.md §1-1` (production 환경 부재). `rev-queue.sh stage3` 정리는 PR rev2s-4. |
 
-처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-3-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
+처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-2-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
 
-**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `type:release` (2026-05-28 `needs-human-review` whitelist 폐지).
+**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 🟡 Pre-merge review (단계 1) 코멘트 부재 시 머지 차단. whitelist: `type:release` (2026-05-28 `needs-human-review` whitelist 폐지).
 
-상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-3-stages.md`, CLAUDE.md §4 품질 게이트.
+상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-2-stages.md`, CLAUDE.md §4 품질 게이트.
 
 ## 1) 셋업 (최초 1회)
 

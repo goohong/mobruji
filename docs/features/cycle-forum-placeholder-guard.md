@@ -180,7 +180,7 @@ plan round 14 자체 cycle 진행 중 발견 — `agent-launch-wrapper.sh` 가 `
 - **단위**: discord-reply.sh bash unit test (`tests/test_atomic_write_thread_file.bats` 후보) — `validate_snowflake` 호출 분기, atomic_write skip 검증, quarantine rename 검증.
 - **통합**: `tests/test_helper_ux.py` 류 fake curl mock + `LAUNCH_THREAD_FILE` tmp override 로 production 오염 없는지 검증.
 - **회귀 가드**: 기존 `99999` mock 응답 케이스에서 production `~/.mobruji/last-launch-thread.txt` mtime 변경 안 됨을 명시 검증.
-- **e2e**: 본 spec 은 인프라 스크립트라 rev 단계 1 (코드 review) + 단계 2 (dev 환경 helper turn 1회 검증) 통과로 충분. 단계 3 production 검증은 release PR 단계에서.
+- **e2e**: 본 spec 은 인프라 스크립트라 rev 🟡 Pre-merge review (단계 1, 코드 review) + 🔵 Post-merge audit (단계 2, dev 환경 helper turn 1회 검증) 통과로 충분. 단계 3 (production 검증) 폐기 — `rev-e2e-2-stages.md §1-1` (production 환경 부재).
 
 ## 8) 오픈 질문
 
