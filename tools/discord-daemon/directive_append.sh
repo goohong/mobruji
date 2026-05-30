@@ -77,17 +77,26 @@ build_template_body() {
   local _msg_id="$2"
   local _ts_kst="$3"
   local _user_id="${4:-}"
+  # (#1385) 정제된 요약 본문 (LLM 쓰레드 맥락 요약). 미명시 시 title 인용 fallback.
+  local _summary="${5:-}"
 
   local _user_line=""
   if [[ -n "${_user_id}" ]]; then
     _user_line="👤 <@${_user_id}> · "
   fi
 
+  local _body_section
+  if [[ -n "${_summary}" ]]; then
+    _body_section="${_summary}"
+  else
+    _body_section="> ${_title}"
+  fi
+
   cat <<EOF
 📌 **${_title}**
 
-💬 원본
-> ${_title}
+💬 요약
+${_body_section}
 
 🆔 \`${_msg_id}\` · ${_user_line}🕐 ${_ts_kst}
 
@@ -125,8 +134,11 @@ TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
 
 # BODY 미명시 시 template 본문 자동 빌드 (spec §5-4).
 # 명시 시 그대로 사용 (helper 정제 / nmae custom 등 override path 보존).
+# (#1385) DIRECTIVE_SUMMARY_BODY env 가 있으면 template 의 💬 요약 섹션에 삽입
+# — 6 marker 양식 보존 + LLM 정제 본문 가독성 동시 확보.
+SUMMARY_BODY="${DIRECTIVE_SUMMARY_BODY:-}"
 if [[ -z "${BODY}" ]]; then
-  BODY=$(build_template_body "${TITLE}" "${MSG_ID}" "${TS_KST}" "${USER_ID}")
+  BODY=$(build_template_body "${TITLE}" "${MSG_ID}" "${TS_KST}" "${USER_ID}" "${SUMMARY_BODY}")
 fi
 
 # atomic append — tmp 파일 mktemp + cat 으로 추가 후 rename.

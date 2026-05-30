@@ -19,6 +19,11 @@ last_reviewed: 2026-05-28
 
 본 spec = **template body + tag 체계** 도입. 직전 spec [[directive-pushpin-registration]] (등록 mechanism) 의 follow-up.
 
+> **갱신 (#1385, 2026-05-30)** — 쓰레드 맥락 요약 + LLM 제목:
+> - `build_template_body` 의 `💬 원본` 섹션 헤더를 **`💬 요약`** 으로 변경. `DIRECTIVE_SUMMARY_BODY` env 가 있으면 이 섹션에 LLM 정제 본문을 삽입 (env 미설정 시 기존처럼 `> {title}` 인용 fallback). 6 marker 양식은 그대로 유지.
+> - forum thread **제목** = 원본 80자 truncate 가 아니라 **LLM 짧은 요약 제목** (bot.py `_run_claude_summarize`). 단건 메시지가 아니라 **핀(📌) 메시지가 속한 쓰레드 전체 대화 맥락**을 요약 대상으로 사용.
+> - sub-agent cycle forum 제목도 동일 — `agent-launch-wrapper.sh` 가 `--directive-id` 로 directive-board.jsonl 의 정제 summary 를 제목 권위 소스로 사용.
+
 ## 2) 사용자 시나리오
 
 - **시나리오 1 (등록 직후)**: 사용자가 메시지에 📌 tap → `directive_append.sh` 호출. forum thread 신설 + 본문 = template (원본 본문 + 발화자 + 시각 + 진행 체크박스 + 빈 관련 섹션). status tag = 🟡 대기.

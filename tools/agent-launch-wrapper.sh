@@ -188,6 +188,20 @@ if [[ -z "$TITLE" ]]; then
   exit 2
 fi
 
+# (#1385) sub-agent forum 제목도 LLM 정제 제목을 쓰도록 — DIRECTIVE_ID 가 있으면
+# directive-board.jsonl 의 정제된 summary 를 제목 권위 소스로 사용. nmae 가 verbose
+# 제목을 넘겨도 forum sidebar 가독성 보장 (지시 forum 과 동일 제목). jq 부재 / 미발견
+# / "(빈 본문)" 이면 넘어온 TITLE 유지 (graceful, 추가 latency·LLM 호출 없음).
+_DIRECTIVE_BOARD_JSONL="${DIRECTIVE_BOARD_JSONL_PATH:-${HOME:-/tmp}/.mobruji/directive-board.jsonl}"
+if [[ -n "$DIRECTIVE_ID" && -f "$_DIRECTIVE_BOARD_JSONL" ]] && command -v jq >/dev/null 2>&1; then
+  _CLEAN_SUMMARY="$(jq -r --arg id "$DIRECTIVE_ID" \
+    'select((.message_id == $id) or (.source_queue_msg_id == $id) or (.thread_id == $id)) | .summary // empty' \
+    "$_DIRECTIVE_BOARD_JSONL" 2>/dev/null | head -n1)"
+  if [[ -n "$_CLEAN_SUMMARY" && "$_CLEAN_SUMMARY" != "(빈 본문)" ]]; then
+    TITLE="$_CLEAN_SUMMARY"
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPDATE_SH="$SCRIPT_DIR/cycle-status/update.sh"
 

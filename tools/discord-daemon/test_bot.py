@@ -680,5 +680,59 @@ class CycleForumThreadCompleteOnMergeTests(unittest.TestCase):
 # button UI 폐기 (사용자 정정), `/mb auto` / `/mb ask` / `/mb status` slash command 로 대체.
 
 
+class DirectiveSummaryParseTests(unittest.TestCase):
+    """#1385 — 쓰레드 맥락 요약 출력 파싱 / fallback 제목."""
+
+    def test_parse_title_and_body(self) -> None:
+        out = (
+            "제목: 브라우저 자동 QA 환경 도입\n"
+            "===본문===\n"
+            "- **요약**: rev 사이클에 Playwright 도입\n"
+            "- **유형**: 신규 기능\n"
+            "- **위임 권장**: rev — QA 전담\n"
+            "- **상태**: 대기"
+        )
+        title, body = bot._parse_summary_output(out)
+        self.assertEqual(title, "브라우저 자동 QA 환경 도입")
+        self.assertTrue(body.startswith("- **요약**"))
+        self.assertNotIn("제목:", body)
+        self.assertNotIn("===본문===", body)
+
+    def test_parse_title_truncated_to_max(self) -> None:
+        long_title = "가" * 80
+        title, _ = bot._parse_summary_output(f"제목: {long_title}\n===본문===\n본문")
+        self.assertEqual(len(title), bot._DIRECTIVE_TITLE_MAX_LEN)
+
+    def test_parse_no_marker_returns_body_as_is(self) -> None:
+        title, body = bot._parse_summary_output("그냥 본문만 있는 경우")
+        self.assertEqual(title, "")
+        self.assertEqual(body, "그냥 본문만 있는 경우")
+
+    def test_parse_empty(self) -> None:
+        self.assertEqual(bot._parse_summary_output(""), ("", ""))
+        self.assertEqual(bot._parse_summary_output("   "), ("", ""))
+
+    def test_fallback_title_empty_and_blank_body(self) -> None:
+        self.assertEqual(bot._fallback_title(""), "(제목 미정)")
+        self.assertEqual(bot._fallback_title("(빈 본문)"), "(제목 미정)")
+
+    def test_fallback_title_collapses_whitespace_and_truncates(self) -> None:
+        title = bot._fallback_title("여러   줄\n공백   포함 " + "끝" * 100)
+        self.assertLessEqual(len(title), bot._DIRECTIVE_TITLE_MAX_LEN)
+        self.assertNotIn("\n", title)
+
+    def test_summary_prompt_uses_thread_context_when_present(self) -> None:
+        prompt = bot._summary_prompt(
+            "raw", "id-1", thread_context="- 사용자: A\n- 키키(nmae): B",
+        )
+        self.assertIn("대화 쓰레드 전체", prompt)
+        self.assertIn("키키(nmae): B", prompt)
+        self.assertIn("제목:", prompt)
+
+    def test_summary_prompt_single_message_when_no_context(self) -> None:
+        prompt = bot._summary_prompt("단건 메시지", "id-2")
+        self.assertIn("원본 사용자 메시지: 단건 메시지", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

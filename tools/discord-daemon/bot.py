@@ -1410,10 +1410,37 @@ class PinConfirmView(discord.ui.View):
         if not await self._verify_user(interaction):
             return
         await interaction.response.edit_message(
-            content="📌 새 지시로 등록합니다…", view=None,
+            content="📝 정리 중… (쓰레드 맥락 요약, 5-15초)", view=None,
         )
+        # (#1385) 즉시 raw 등록 X — 정리 → O/X → 수정 loop dialogue 경유로 통일.
+        # 핀 메시지 + 그 쓰레드 전체 맥락을 요약해 제목/본문 산출.
+        channel = interaction.channel
+        message = None
+        try:
+            message = await channel.fetch_message(int(self._target_message_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "📌 새로 등록: fetch_message 실패 msg_id=%s exc=%r",
+                self._target_message_id, exc,
+            )
+        if message is not None:
+            try:
+                thread_context = await _fetch_thread_context(channel, message)
+                await _start_pin_dialogue(
+                    message, self._target_user_id,
+                    self._original_summary or "(빈 본문)", channel,
+                    thread_context=thread_context,
+                )
+                self.stop()
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "📌 새로 등록: dialogue 시작 실패 — 즉시 등록 fallback: %r", exc,
+                )
+        # fallback — 이미 확보한 요약으로 직접 등록 (본문 유실 방지).
         await _do_register_directive(
             interaction.client, self._target_message_id, self._target_user_id,
+            channel=channel, summary=self._original_summary,
         )
         await interaction.edit_original_response(
             content="✅ 새 지시 등록 완료.",
@@ -1494,6 +1521,65 @@ async def _generate_directive_description(
     return polished or raw_summary
 
 
+# 쓰레드 맥락 수집 cap (#1385 (C)).
+DIRECTIVE_THREAD_CONTEXT_MAX_MESSAGES: Final[int] = 40
+DIRECTIVE_THREAD_CONTEXT_MAX_CHARS: Final[int] = 6000
+
+
+async def _fetch_thread_context(channel, message) -> str | None:  # noqa: ANN001
+    """핀 메시지가 속한 쓰레드 전체 대화록 (작성자 라벨 + 시간순) 문자열.
+
+    channel 이 thread 가 아니면 None 반환 (단건 메시지만 사용). (#1385 (C))
+    핀 메시지에는 📌 마커를 달아 요약기가 "어디에 핀이 찍혔는지" 인지하게 함.
+    """
+    if not isinstance(channel, discord.Thread):
+        return None
+    lines: list[str] = []
+    try:
+        async for msg in channel.history(
+            limit=DIRECTIVE_THREAD_CONTEXT_MAX_MESSAGES, oldest_first=True,
+        ):
+            content = (getattr(msg, "content", "") or "").strip()
+            if not content:
+                continue
+            author = getattr(getattr(msg, "author", None), "name", "?")
+            is_bot = getattr(getattr(msg, "author", None), "bot", False)
+            role = "키키(nmae)" if is_bot else f"사용자({author})"
+            marker = " 📌(핀)" if str(msg.id) == str(message.id) else ""
+            lines.append(f"- {role}{marker}: {content}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "📌 thread context fetch 실패 thread=%s exc=%r",
+            getattr(channel, "id", "?"), exc,
+        )
+        return None
+    if not lines:
+        return None
+    transcript = "\n".join(lines)
+    if len(transcript) > DIRECTIVE_THREAD_CONTEXT_MAX_CHARS:
+        transcript = transcript[-DIRECTIVE_THREAD_CONTEXT_MAX_CHARS:]
+    return transcript
+
+
+async def _generate_directive_summary(
+    raw_summary: str,
+    directive_id: str,
+    *,
+    thread_context: str | None = None,
+    user_feedback: str | None = None,
+) -> tuple[str, str]:
+    """(#1385 B+C) 쓰레드 맥락 → (짧은 제목, 정제 본문). 실패 시 raw fallback."""
+    title, body = await asyncio.to_thread(
+        _run_claude_summarize, raw_summary, directive_id,
+        thread_context=thread_context, user_feedback=user_feedback,
+    )
+    if not body:
+        body = raw_summary
+    if not title:
+        title = _fallback_title(raw_summary if not thread_context else body)
+    return title, body
+
+
 class PinDialogueView(discord.ui.View):
     """O/X dialogue — 정리된 description 확인 + cycle 명시 + 수정 loop.
 
@@ -1518,6 +1604,8 @@ class PinDialogueView(discord.ui.View):
         revision_count: int,
         thread,  # noqa: ANN001 — discord thread duck-typed
         register_channel,  # noqa: ANN001
+        polished_title: str = "",
+        thread_context: str | None = None,
         initial_cycle_hint: str = "auto",
     ) -> None:
         super().__init__(timeout=PIN_DIALOGUE_TIMEOUT)
@@ -1525,6 +1613,8 @@ class PinDialogueView(discord.ui.View):
         self._target_user_id = target_user_id
         self._raw_summary = raw_summary
         self._polished = polished_description
+        self._polished_title = polished_title  # (#1385) forum thread 제목
+        self._thread_context = thread_context  # (#1385) 수정 loop 재요약용
         self._revision_count = revision_count
         self._thread = thread
         self._register_channel = register_channel
@@ -1568,14 +1658,17 @@ class PinDialogueView(discord.ui.View):
         if not await self._verify_user(interaction):
             return
         await interaction.response.edit_message(
-            content=f"✅ 등록 진행 중…\n\n{self._polished}", view=None,
+            content=f"✅ 등록 진행 중…\n\n**제목:** {self._polished_title}\n\n{self._polished}",
+            view=None,
         )
         await _do_register_directive(
             interaction.client,
             self._target_message_id,
             self._target_user_id,
             channel=self._register_channel,
-            summary=self._polished[:80],
+            summary=self._polished_title or self._polished[:80],
+            title=self._polished_title,
+            body=self._polished,
         )
         # Phase F (2026-05-29) — events 'directive_approved' INSERT → agent.py
         # handle_directive_approved 가 consume → cycle 위임 결정 → launch_subagent.
@@ -1623,10 +1716,15 @@ class PinDialogueView(discord.ui.View):
             self.stop()
             return
 
-        # fallback mode (thread == register_channel) — revise loop 차단.
+        # main 채널 fallback mode — revise loop 차단.
         # main 채널에서 wait_for 하면 다른 사용자 메시지 모두 false-positive 잡힘.
+        # 단 register_channel 이 실제 thread 면 (#1385 — 핀 메시지가 이미 thread
+        # 안이라 nested thread 불가 → thread 자신에 fallback) wait_for 가 thread
+        # scope 라 안전 → revise 허용.
+        is_real_thread = isinstance(self._thread, discord.Thread)
         if (
-            getattr(self._thread, "id", None) is not None
+            not is_real_thread
+            and getattr(self._thread, "id", None) is not None
             and getattr(self._register_channel, "id", None) is not None
             and self._thread.id == self._register_channel.id
         ):
@@ -1664,10 +1762,11 @@ class PinDialogueView(discord.ui.View):
             self.stop()
             return
 
-        # 재정리
+        # 재정리 (#1385 — 쓰레드 맥락 + 제목 동시 재산출)
         await self._thread.send(f"🔄 재정리 중 (시도 {self._revision_count + 1})…")
-        new_polished = await _generate_directive_description(
+        new_title, new_polished = await _generate_directive_summary(
             self._raw_summary, self._target_message_id,
+            thread_context=self._thread_context,
             user_feedback=user_msg.content,
         )
 
@@ -1676,15 +1775,17 @@ class PinDialogueView(discord.ui.View):
             target_message_id=self._target_message_id,
             target_user_id=self._target_user_id,
             raw_summary=self._raw_summary,
+            polished_title=new_title,
             polished_description=new_polished,
             revision_count=self._revision_count + 1,
             thread=self._thread,
             register_channel=self._register_channel,
+            thread_context=self._thread_context,
         )
         await self._thread.send(
             content=(
                 f"📝 재정리 (시도 {self._revision_count + 1}):\n\n"
-                f"{new_polished}\n\n"
+                f"**제목:** {new_title}\n\n{new_polished}\n\n"
                 f"등록할까요?"
             ),
             view=new_view,
@@ -1708,12 +1809,17 @@ async def _start_pin_dialogue(
     target_user_id: int,
     raw_summary: str,
     register_channel,  # noqa: ANN001
+    *,
+    thread_context: str | None = None,
 ) -> None:
     """Phase B+C — message 아래 Discord thread 생성 + 정리 + O/X.
 
-    message.create_thread → claude -p 정리 → PinDialogueView 게시.
-    thread 생성 실패 (50024 — channel type 미지원) 시 register_channel 에 PinDialogueView 직접 송신
-    (사용자 가시화 유지). revise loop 는 fallback mode 자동 차단 (PinDialogueView._revise).
+    message.create_thread → claude -p 정리 (#1385: 쓰레드 맥락 → 제목+본문) →
+    PinDialogueView 게시.
+    thread 생성 실패 (50024 — channel type 미지원, 또는 핀 메시지가 이미 thread 안
+    이라 nested thread 불가) 시 register_channel 에 PinDialogueView 직접 송신
+    (사용자 가시화 유지). register_channel 이 실제 thread 면 revise loop 동작,
+    main 채널 fallback 이면 revise 자동 차단 (PinDialogueView._revise).
     """
     fallback_to_channel = False
     try:
@@ -1726,26 +1832,36 @@ async def _start_pin_dialogue(
         fallback_to_channel = True
 
     if fallback_to_channel:
-        await register_channel.send(
-            f"📝 정리 중… (claude -p 호출, 5-10초)\n"
-            f"_📌 fallback — main 채널 직접 표시 (thread 생성 불가)_",
+        in_thread = isinstance(register_channel, discord.Thread)
+        note = (
+            "_📌 이 쓰레드에서 바로 확인합니다._"
+            if in_thread
+            else "_📌 main 채널 직접 표시 (thread 생성 불가 — 수정 loop 비활성)_"
         )
+        await register_channel.send(f"📝 정리 중… (쓰레드 맥락 요약, 5-15초)\n{note}")
     else:
-        await thread.send("📝 정리 중… (claude -p 호출, 5-10초)")
+        await thread.send("📝 정리 중… (쓰레드 맥락 요약, 5-15초)")
 
-    polished = await _generate_directive_description(raw_summary, str(message.id))
+    polished_title, polished = await _generate_directive_summary(
+        raw_summary, str(message.id), thread_context=thread_context,
+    )
 
     view = PinDialogueView(
         target_message_id=str(message.id),
         target_user_id=target_user_id,
         raw_summary=raw_summary,
+        polished_title=polished_title,
         polished_description=polished,
         revision_count=0,
         thread=thread,
         register_channel=register_channel,
+        thread_context=thread_context,
     )
     await thread.send(
-        content=f"📝 다음 내용으로 정리해서 추가할까요?\n\n{polished}",
+        content=(
+            f"📝 다음 내용으로 정리해서 추가할까요?\n\n"
+            f"**제목:** {polished_title}\n\n{polished}"
+        ),
         view=view,
     )
 
@@ -1757,11 +1873,16 @@ async def _do_register_directive(
     *,
     channel=None,  # noqa: ANN001 — discord channel duck-typed
     summary: str | None = None,
+    title: str | None = None,
+    body: str | None = None,
 ) -> None:
     """실제 directive 등록 — directive_append.sh + helper-queue + ✅ reaction.
 
     caller 가 channel + summary 알면 인자로 전달 (cost 0). 미전달 시 client.guilds
     scan fallback (cold start 등 edge case).
+
+    title / body (#1385): 정제된 forum thread 제목 + 본문. 전달 시 thread name 은
+    title, 본문은 body 로 등록 (raw 대신 LLM 요약). 미전달 시 summary 로 fallback.
     """
     append_script = Path(__file__).resolve().parent / "directive_append.sh"
     if not append_script.exists():
@@ -1769,11 +1890,16 @@ async def _do_register_directive(
         return
 
     # 인자 미전달 시 client.guilds fallback fetch.
+    # (#1385) text_channels 뿐 아니라 active threads 도 훑어 thread 안 메시지
+    # (핀이 thread 안 메시지에 찍힌 경우) 가 "(빈 본문)" 으로 떨어지는 사고 차단.
     if channel is None or summary is None:
         try:
             msg = None
             for guild in getattr(client, "guilds", []):
-                for ch in getattr(guild, "text_channels", []):
+                candidates = list(getattr(guild, "text_channels", [])) + list(
+                    getattr(guild, "threads", [])
+                )
+                for ch in candidates:
                     try:
                         msg = await ch.fetch_message(int(message_id))
                         if msg is not None:
@@ -1791,10 +1917,20 @@ async def _do_register_directive(
     if summary is None or not summary:
         summary = "(빈 본문)"
 
+    # directive_append.sh <msg_id> <title> — title 은 forum thread name.
+    # (#1385) 정제 본문은 DIRECTIVE_SUMMARY_BODY env 로 전달 → template 의 💬 요약
+    # 섹션에 삽입 (6 marker 양식 보존 + LLM 정제 가독성). verbatim body override 가
+    # 아니라 env 경유라 진행 체크박스 / 🆔 / footer 등 추적 마커가 유지됨.
+    thread_title = (title or summary or "(빈 본문)")[:90]
+    append_argv = ["bash", str(append_script), message_id, thread_title]
+    append_env = dict(os.environ)
+    if body:
+        append_env["DIRECTIVE_SUMMARY_BODY"] = body
+
     try:
         result = subprocess.run(  # noqa: S603 — script path hardcoded sibling
-            ["bash", str(append_script), message_id, summary],
-            check=False, timeout=10.0, capture_output=True,
+            append_argv,
+            check=False, timeout=10.0, capture_output=True, env=append_env,
         )
         if result.returncode != 0:
             logger.warning(
@@ -1897,14 +2033,18 @@ async def _handle_pin_reaction(
             )
 
     # 매칭 없음 — Phase B+C: 등록 직전 정리 + 사용자 O/X dialogue.
-    # raw summary 가 빈 본문이면 dialogue 의미 없음 → 즉시 등록 (graceful).
-    if not summary or summary == "(빈 본문)":
+    # (#1385 C) 핀 메시지가 thread 안이면 thread 전체 맥락을 요약 대상으로 수집.
+    thread_context = await _fetch_thread_context(channel, message)
+    # raw summary 가 빈 본문 + 맥락도 없으면 dialogue 의미 없음 → 즉시 등록 (graceful).
+    if (not summary or summary == "(빈 본문)") and not thread_context:
         await _do_register_directive(
             client, message_id, user_id, channel=channel, summary=summary,
         )
         return
     try:
-        await _start_pin_dialogue(message, user_id, summary, channel)
+        await _start_pin_dialogue(
+            message, user_id, summary, channel, thread_context=thread_context,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "📌 pin dialogue 시작 실패 — 즉시 등록 fallback: %r", exc,
@@ -4637,6 +4777,112 @@ def _run_claude_polish(raw_body: str, directive_id: str) -> str:
         logger.warning("directive_polish: claude -p 실패 id=%s exc=%r",
                        directive_id, exc)
         return ""
+
+
+# ── 쓰레드 맥락 기반 요약 (#1385) ──────────────────────────────────────────────
+# 사용자 요구 (2026-05-30):
+#  (B) forum thread 제목도 LLM 짧은 요약 (raw 본문 그대로면 가독성 ↓).
+#  (C) 핀(📌) 메시지 단건이 아니라 그 메시지가 속한 쓰레드 전체 맥락을 요약해
+#      사용자 실제 의도를 파악 (예: "브라우저 QA 못해?" → "도입하려면 📌" 흐름
+#      전체에서 "브라우저 자동 QA 환경 도입" directive 추론).
+# 단일 claude -p 호출로 {짧은 제목, 정제 본문} 동시 산출.
+_DIRECTIVE_TITLE_MAX_LEN: Final[int] = 40
+_DIRECTIVE_SUMMARY_BODY_MARKER: Final[str] = "===본문==="
+
+
+def _fallback_title(raw_summary: str) -> str:
+    """LLM 제목 산출 실패 시 raw 요약 앞부분으로 fallback."""
+    cleaned = re.sub(r"\s+", " ", (raw_summary or "").strip())
+    if not cleaned or cleaned == "(빈 본문)":
+        return "(제목 미정)"
+    return cleaned[:_DIRECTIVE_TITLE_MAX_LEN]
+
+
+def _summary_prompt(
+    raw_body: str,
+    directive_id: str,
+    *,
+    thread_context: str | None = None,
+    user_feedback: str | None = None,
+) -> str:
+    if thread_context:
+        context_block = (
+            "아래는 핀(📌)이 찍힌 메시지가 속한 대화 쓰레드 전체입니다 (시간순). "
+            "단건 메시지가 아니라 이 대화 흐름 전체에서 사용자가 실제로 원하는 "
+            "작업이 무엇인지 추론하세요:\n\n"
+            f"{thread_context}\n\n"
+        )
+    else:
+        context_block = f"원본 사용자 메시지: {raw_body}\n"
+    feedback_block = (
+        f"\n[사용자 수정 요청] 아래 지적을 반영해 다시 정리:\n{user_feedback}\n"
+        if user_feedback
+        else ""
+    )
+    return (
+        "mobruji 프로젝트의 directive forum thread 제목과 본문을 정제해 주세요.\n\n"
+        f"{context_block}"
+        f"directive_id: {directive_id}\n"
+        f"{feedback_block}\n"
+        "다음 형식으로 정확히 출력 (그 외 텍스트 / 코드펜스 / 메타코멘트 금지):\n"
+        f"제목: <작업을 한눈에 식별하는 짧은 한국어 명사구, {_DIRECTIVE_TITLE_MAX_LEN}자 "
+        "이내, 이모지 없이>\n"
+        f"{_DIRECTIVE_SUMMARY_BODY_MARKER}\n"
+        "- **요약**: 1-2 줄 (대화 맥락 기준 사용자가 무엇을 원하는지)\n"
+        "- **유형**: 신규 기능 / 버그 fix / 운영 개선 / 의견 / 질문 중 하나\n"
+        "- **위임 권장**: be / fe / rev / plan / nmae 중 하나 + 한 줄 사유\n"
+        "- **상태**: 대기"
+    )
+
+
+def _parse_summary_output(text: str) -> tuple[str, str]:
+    """claude -p 출력 → (제목, 본문). 형식 파싱 실패 시 ('', text) graceful."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return "", ""
+    title = ""
+    body = stripped
+    marker = _DIRECTIVE_SUMMARY_BODY_MARKER
+    head, sep, tail = stripped.partition(marker)
+    if sep:
+        body = tail.strip() or stripped
+        head = head.strip()
+    else:
+        head = ""
+    # 제목 라인 추출 — head 블록 또는 첫 줄에서 "제목:" 탐색.
+    search_zone = head if head else stripped.splitlines()[0] if stripped else ""
+    for line in search_zone.splitlines():
+        line = line.strip()
+        if line.startswith("제목:"):
+            title = line.split("제목:", 1)[1].strip()
+            break
+    title = title[:_DIRECTIVE_TITLE_MAX_LEN].strip()
+    return title, body
+
+
+def _run_claude_summarize(
+    raw_body: str,
+    directive_id: str,
+    *,
+    thread_context: str | None = None,
+    user_feedback: str | None = None,
+) -> tuple[str, str]:
+    """claude -p → (제목, 본문). 실패 시 ('', '')."""
+    prompt = _summary_prompt(
+        raw_body, directive_id,
+        thread_context=thread_context, user_feedback=user_feedback,
+    )
+    try:
+        result = subprocess.run(  # noqa: S603 — explicit argv from env
+            [*CLAUDE_CLI_ARGV, "-p", prompt],
+            timeout=DIRECTIVE_POLISH_CLAUDE_TIMEOUT,
+            capture_output=True, text=True, check=False,
+        )
+        return _parse_summary_output((result.stdout or "").strip())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("directive_summarize: claude -p 실패 id=%s exc=%r",
+                       directive_id, exc)
+        return "", ""
 
 
 def _directive_board_status_for(
