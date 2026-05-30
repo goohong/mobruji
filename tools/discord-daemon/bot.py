@@ -1344,7 +1344,7 @@ def _build_pin_match_followup(
     for m in matches[:PIN_MATCH_LIMIT]:
         if m["kind"] == "directive":
             status = m.get("status", "")
-            lines.append(f"• directive ({status}): `{m['summary']}`")
+            lines.append(f"• 지시 ({status}): `{m['summary']}`")
         else:
             forum_name = m.get("forum_name", "")
             lines.append(f"• {forum_name} forum: `{m['summary']}`")
@@ -1389,13 +1389,13 @@ class PinConfirmView(discord.ui.View):
         if not await self._verify_user(interaction):
             return
         await interaction.response.edit_message(
-            content="📌 새 directive 로 등록합니다…", view=None,
+            content="📌 새 지시로 등록합니다…", view=None,
         )
         await _do_register_directive(
             interaction.client, self._target_message_id, self._target_user_id,
         )
         await interaction.edit_original_response(
-            content="✅ 새 directive 등록 완료.",
+            content="✅ 새 지시 등록 완료.",
         )
         self.stop()
 
