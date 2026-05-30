@@ -29,7 +29,7 @@ PR #1322 (`rev-gate-required-check-enforcement`) 가 `develop` `enforce_admins=t
 - `rev-gate.yml` whitelist (PR #1322 §3-2) 매칭 → workflow skip → PR mergeable
 - nmae 또는 사용자가 즉시 머지 (T0 + 10~30분 안)
 - `rev-gate-audit.yml` (PR #1324) 가 머지 trigger → emergency-hotfix whitelist 분기 → 자동 issue 생성 (`audit:emergency-hotfix-followup`) + DIGEST push
-- nmae 가 다음 사이클 안에 사후 rev 단계 2 (rev-e2e-3-stages.md §3-2) 실행 → 통과 시 issue close
+- nmae 가 다음 사이클 안에 사후 rev 🔵 Post-merge audit (단계 2, rev-e2e-2-stages.md §3-2) 실행 → 통과 시 issue close
 - 사후 회귀 검사 결과는 후속 plan 사이클 안에서 회고 spec 갱신 (`docs/features/emergency-hotfix-flow.md §6 사용 이력`)
 
 ### 2-2) 비-emergency 일반 hotfix (라벨 부적합)
@@ -75,7 +75,7 @@ PR #1322 (`rev-gate-required-check-enforcement`) 가 `develop` `enforce_admins=t
 - [ ] issue body 의무 박제 항목:
   - PR 링크 / mergedAt / mergedBy / merge commit SHA
   - emergency-hotfix 사유 (PR body 의 `## emergency-hotfix 사유` 섹션 grep)
-  - 사후 rev 단계 2 절차 참조 (`docs/features/rev-e2e-3-stages.md §3-2`)
+  - 사후 rev 🔵 Post-merge audit (단계 2) 절차 참조 (`docs/features/rev-e2e-2-stages.md §3-2`)
   - 사후 회귀 검사 통과 기준 (production deploy 후 endpoint 정상 응답 확인)
 - [ ] nmae 가 다음 사이클 안에 본 issue 처리 — rev sub-agent launch + 통과 시 issue close
 - [ ] sub-agent 가 rev 단계 2 실패 시 → 즉시 revert PR 생성 + 사용자 DIGEST 알림

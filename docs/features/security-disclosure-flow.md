@@ -73,9 +73,9 @@ last_reviewed: 2026-05-29
 
 본 분류는 PR body `## emergency-hotfix 사유` 섹션의 `사용자 impact 범위` 한 줄에 추가 — `🔴/🟠/🟡/🟢 <분류명>` prefix 강제.
 
-#### 3-3) 사후 rev 단계 2 추가 검증 항목 (security 한정)
+#### 3-3) 사후 rev 🔵 Post-merge audit (단계 2) 추가 검증 항목 (security 한정)
 
-`rev-e2e-3-stages.md §3-2` 의 정규 단계 2 검증에 더해 다음 evidence 박제 의무 — rev sub-agent 가 통과 코멘트 (`rev단계2: 🟢 ...`) 에 포함:
+`rev-e2e-2-stages.md §3-2` 의 정규 🔵 Post-merge audit (단계 2) 검증에 더해 다음 evidence 박제 의무 — rev sub-agent 가 통과 코멘트 (`rev단계2: 🟢 ...`) 에 포함:
 
 - [ ] 시크릿 회전 완료 evidence — `gh secret list` / vault rotation log / API key revoke timestamp
 - [ ] git history 잔존 검사 — `git log --all -S "<유출 시크릿 prefix>"` 결과 0건 (또는 history rewrite + force push evidence)
@@ -113,7 +113,7 @@ last_reviewed: 2026-05-29
 - **신뢰성**: rev 단계 2 추가 검증 4 항목 (§3-3) 미통과 PR 은 자동 revert — security 회귀가 production 으로 흐르지 않음
 - **회복성**: 모든 security 패치 PR 은 squash merge SHA 1개 revert 가능 (`emergency-hotfix-flow.md §3-2` 와 sync — rollback 가능성 body 명시 의무)
 - **남용 방지**: 사용 빈도 메트릭은 `emergency-hotfix-flow.md §3-5` 가 흡수 — 본 spec 은 절차만 박제
-- **호환성**: `emergency-hotfix-flow.md` / `rev-gate-required-check-enforcement.md` / `rev-e2e-3-stages.md` 본문 수정 없이 cross-ref enhancement 만
+- **호환성**: `emergency-hotfix-flow.md` / `rev-gate-required-check-enforcement.md` / `rev-e2e-2-stages.md` 본문 수정 없이 cross-ref enhancement 만
 
 ## 4) 범위 / 비범위
 
@@ -188,7 +188,7 @@ last_reviewed: 2026-05-29
 - [ ] PR 2 (`emergency-hotfix-flow.md §2-3` + §6-2 cross-ref 보강): 본 spec status=approved 후 별 사이클
 - [ ] PR 3 (`.github/SECURITY.md` 신설): 본 spec status=approved 후 별 사이클 — **보호 영역 변경 (`.github/`)**
 - [ ] PR 4 (06-domain-model.md §4 보강 — `SecurityAdvisory` / `SecurityDisclosureCategory` / `SecurityUserNotification` 등재): 본 spec status=approved 후
-- [ ] PR 5 (`rev-e2e-3-stages.md §3-2` cross-ref 보강 — security 분류 시 §3-3 추가 검증 항목 의무): 본 spec status=shipped 후
+- [ ] PR 5 (`rev-e2e-2-stages.md §3-2` cross-ref 보강 — security 분류 시 §3-3 추가 검증 항목 의무): 본 spec status=shipped 후
 - [ ] PR 6 (`secret-scanning-hook.md` 별 spec 신설): 본 spec 과 독립
 
 ### 보호 영역 변경 여부 (필수 명시)

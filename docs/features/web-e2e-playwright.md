@@ -18,14 +18,14 @@ ADR-0018 (design tokens) 단계 4 마이그레이션 PR 11+ 가 진행되며 har
 swap 한다. 단위 테스트 (`app/tokens.test.ts`) 는 토큰 값 자체와 변수 명칭만 검증할 뿐
 실제 렌더링 결과 (라이트/다크 모드, 페이지 레이아웃, CTA 배치) 의 시각 회귀를 가드하지 못한다.
 
-rev sub-agent #1174 단계 3 e2e 시도가 Playwright 미설정 사유로 no-op pass 처리되었다 (rev-e2e-3-stages
-§3-3 룰: e2e 불가능 = 단계 1/2/3 no-op pass). 후속 design tokens PR 다수가 page 변경을 동반하므로
+rev sub-agent #1174 단계 3 (당시 명, 2026-05-30 폐기) e2e 시도가 Playwright 미설정 사유로 no-op pass 처리되었다 (rev-e2e-2-stages
+§3 룰: e2e 불가능 = 단계 1/2 no-op pass). 후속 design tokens PR 다수가 page 변경을 동반하므로
 시각 회귀 위험이 누적된다.
 
 대상 액터: fe sub-agent / rev sub-agent / nmae (머지 결정).
 
 해결: `@playwright/test` 도입 + `web/e2e/` 디렉토리 + smoke 5-7건 + GitHub Actions 통합 +
-rev 단계 3 trigger 명문화. 본 spec 은 도입 사유 / 범위 / 시나리오 / CI 통합 옵션 비교 /
+rev 🟡 Pre-merge review (단계 1) / 🔵 Post-merge audit (단계 2) trigger 명문화 (단계 3 폐기 — `rev-e2e-2-stages.md §1-1`). 본 spec 은 도입 사유 / 범위 / 시나리오 / CI 통합 옵션 비교 /
 후속 PR 분담 만 정의하고 실제 구현은 후속 PR (impl PR 1-3) 에서 처리한다.
 
 ## 2) 사용자 시나리오
@@ -34,9 +34,9 @@ rev 단계 3 trigger 명문화. 본 spec 은 도입 사유 / 범위 / 시나리�
 
 1. **fe sub-agent — design tokens PR 작성 시**: token swap 한 page 의 라이트/다크 모드
    smoke 가 로컬에서 통과하는지 `npx playwright test` 로 확인한 뒤 PR 생성.
-2. **rev sub-agent — 단계 1 / 단계 2 / 단계 3 audit 시**: 라벨 / 코드 변경 분석 → e2e 가능 판정 →
-   Playwright 실행 (단계 3 = production deploy 후 live URL 대상) → smoke 시나리오 5-7건 통과 시
-   `reviewed:claude` / `rev-post-merge-pass` / `rev-prod-pass` 라벨 부여.
+2. **rev sub-agent — 🟡 Pre-merge review (단계 1) / 🔵 Post-merge audit (단계 2) audit 시**: 라벨 / 코드 변경 분석 → e2e 가능 판정 →
+   Playwright 실행 → smoke 시나리오 5-7건 통과 시
+   `reviewed:claude` / `rev-post-merge-pass` 라벨 부여. (단계 3 폐기 — `rev-e2e-2-stages.md §1-1`)
 3. **GitHub Actions — PR open / synchronize**: `web-ci.yml` 또는 별도 job 이 Playwright smoke 실행 +
    결과 PR check 보고. red 시 머지 차단.
 
@@ -50,7 +50,7 @@ rev 단계 3 trigger 명문화. 본 spec 은 도입 사유 / 범위 / 시나리�
       retries / reporters (HTML + GitHub Actions annotations)
 - [ ] smoke 시나리오 5-7건 (§5-3 목록) — 페이지 로드 + critical CTA + 다크/라이트 토큰 회귀 가드
 - [ ] CI 통합 — GitHub Actions job 추가 (§5-4 옵션 비교 + 권장)
-- [ ] `rev-e2e-3-stages.md` §3 갱신 — Playwright trigger 조건 명문화 (config 존재 시 실행 / 부재 시 기존 no-op pass)
+- [ ] `rev-e2e-2-stages.md` §3 갱신 — Playwright trigger 조건 명문화 (config 존재 시 실행 / 부재 시 기존 no-op pass)
 - [ ] 로컬 실행 가이드 — `npm run test:e2e` script + AGENTS.md / CLAUDE.md fe 룰 1줄 안내
 - [ ] **시각 회귀 스냅샷 (Visual snapshot) 도입 여부 결정 (Q1)** — `toHaveScreenshot` 활성 / 비활성
 
@@ -61,7 +61,7 @@ rev 단계 3 trigger 명문화. 본 spec 은 도입 사유 / 범위 / 시나리�
   selector 는 `data-testid` 우선 (텍스트 의존 fragile selector 금지).
 - **재현성**: `actions/cache@v4` 로 Playwright browser binary 캐시. 캐시 부재 시 install ~30초 허용.
 - **rev 통합**: rev sub-agent 가 Playwright config 존재 여부 = e2e 가능 판정 변경 조건으로 인식.
-  rev-e2e-3-stages §3 룰과 trigger 명시적 연결.
+  rev-e2e-2-stages §3 룰과 trigger 명시적 연결.
 
 ## 4) 범위 / 비범위 (중요)
 
@@ -70,7 +70,7 @@ rev 단계 3 trigger 명문화. 본 spec 은 도입 사유 / 범위 / 시나리�
 - Playwright (`@playwright/test`) 도입 + chromium browser
 - smoke 시나리오 5-7건 (홈 / recommend / songs / voice-range / 다크 모드 토큰 가드)
 - GitHub Actions 통합 (web-ci.yml 확장 또는 별도 web-e2e.yml job)
-- rev-e2e-3-stages §3 trigger 조건 갱신 (config 존재 시 Playwright 실행)
+- rev-e2e-2-stages §3 trigger 조건 갱신 (config 존재 시 Playwright 실행)
 - 로컬 실행 가이드 (`npm run test:e2e`)
 
 ### 제외 (Out of Scope)
@@ -84,15 +84,14 @@ rev 단계 3 trigger 명문화. 본 spec 은 도입 사유 / 범위 / 시나리�
 - **백엔드 의존 E2E (RestAssured + Playwright 통합)** — 본 spec 은 frontend smoke 만.
   백엔드 의존 시나리오 (예: `/recommend` 가 BE `/api/v1/recommendations` 호출 검증) 는
   단계 도입 (mock + msw 또는 NCP dev live deploy 대상).
-- **production live URL 대상 단계 3 smoke 자동화 deploy 통합** — rev sub-agent 가 수동 trigger.
-  cron / GitHub Actions schedule 자동화는 별도 spec.
+- ~~**production live URL 대상 단계 3 smoke 자동화 deploy 통합**~~ — **2026-05-30 폐기** (`rev-e2e-2-stages.md §1-1` production 환경 부재). 향후 production 환경 신설 시 부활 — `[[project_rev_stage_3_prod_revival]]` cross-ref.
 
 ## 5) 설계
 
 ### 5-1) 도메인 모델
 
 해당 없음. 본 기능은 인프라 / 테스트 도구 도입이며 도메인 엔티티 변경 없음.
-관련: `docs/ai-harness/07-testing-guide.md` (E2E 룰), `docs/features/rev-e2e-3-stages.md` (rev 단계).
+관련: `docs/ai-harness/07-testing-guide.md` (E2E 룰), `docs/features/rev-e2e-2-stages.md` (rev 단계).
 
 ### 5-2) API 엔드포인트
 
@@ -193,9 +192,9 @@ jobs:
 해당 없음. 본 기능은 화면 변경 없음. 단 `data-testid` 추가가 smoke selector 안정성을 위해
 일부 page 에 필요할 수 있다 (홈 CTA, voice-range 측정 시작 버튼 등). 이는 impl PR 2 에서 처리.
 
-### 5-7) rev sub-agent 통합 — `rev-e2e-3-stages.md` §3 갱신
+### 5-7) rev sub-agent 통합 — `rev-e2e-2-stages.md` §3 갱신
 
-본 spec 도입 시 `docs/features/rev-e2e-3-stages.md` §3-1 의 다음 줄:
+본 spec 도입 시 `docs/features/rev-e2e-2-stages.md` §3-1 의 다음 줄:
 
 ```
 - scope:web → Playwright headless 또는 NCP dev 직접 호출
@@ -207,12 +206,11 @@ jobs:
 - scope:web:
   - `web/playwright.config.ts` 존재 + `web/e2e/` 시나리오 1건+ → **Playwright 실행 의무**
     (`cd web && npx playwright test --reporter=line`)
-  - config 부재 → 기존 no-op pass (단계 1 라벨만, 단계 2/3 skip)
+  - config 부재 → 기존 no-op pass (🟡 Pre-merge review 라벨만, 🔵 Post-merge audit skip)
 - scope:backend → RestAssured E2E 또는 curl + 응답 검증
 ```
 
-§3-3 (단계 3 release 후) 도 같은 trigger 명문화 — Playwright config 존재 시 production live URL
-(`https://mobruji.com` 또는 `.env` BASE_URL) 대상으로 smoke 재실행.
+~~§3-3 (단계 3 release 후) 도 같은 trigger 명문화~~ — **2026-05-30 폐기** (단계 3 폐기, production 환경 부재). 향후 production 환경 신설 시 부활 — `[[project_rev_stage_3_prod_revival]]`.
 
 본 갱신은 impl PR 1 (devDep + dir + smoke 1건) 머지 후 별도 `type:docs scope:infra` PR
 또는 본 spec PR 안 묶음 (자율 결정 — impl PR 1 머지 시점에 함께 처리 권장).
@@ -220,7 +218,7 @@ jobs:
 ## 6) 작업 분할 (예상 PR 리스트)
 
 - [x] **본 PR (type:docs scope:web)**: `docs/features/web-e2e-playwright.md` spec 신설
-  - 옵션 A: `rev-e2e-3-stages.md` §3 갱신 묶음 (단일 PR)
+  - 옵션 A: `rev-e2e-2-stages.md` §3 갱신 묶음 (단일 PR)
   - 옵션 B: 별도 docs PR 분리 (impl PR 1 머지 후) — **권장**: spec 합의 후 trigger 갱신
 - [ ] **impl PR 1 (type:feat scope:web)**: devDependency + `web/e2e/` dir + Playwright config + smoke S1 1건
   - `web/package.json` devDep `@playwright/test` 추가
@@ -240,7 +238,7 @@ jobs:
   - `actions/cache@v4` Playwright browser binary 캐시
   - Playwright HTML report artifact upload
   - **보호 영역** (정보성, 라벨 의무 폐지 2026-05-28): `.github/workflows/**` — rev 사이클이 추가 신중도 가중
-- [ ] **docs PR (type:docs scope:infra)**: rev-e2e-3-stages §3 trigger 명문화 (impl PR 1 머지 후)
+- [ ] **docs PR (type:docs scope:infra)**: rev-e2e-2-stages §3 trigger 명문화 (impl PR 1 머지 후)
 - [ ] **ADR 필요 여부 검토 (선택)**: §9 결정 로그 — Playwright = 외부 도구 도입. ADR-NNNN 신설 권고는 본 spec 자체 결정으로 갈음 (Vitest / RestAssured 와 같은 단순 도구 도입). 별도 ADR 불요.
 
 ## 7) 테스트 전략
@@ -250,7 +248,7 @@ jobs:
 - **impl PR 1**: 로컬 `cd web && npm install && npx playwright install chromium && npm run test:e2e` 통과 + CI green
 - **impl PR 2**: 5-7건 모두 CI green + 다크 모드 토큰 회귀 가드 (S6) 가 `--bg-base` 변경 시 실제 fail 인지 sanity check (token swap mutation test 1회)
 - **impl PR 3**: GitHub Actions 실제 trigger + report artifact 업로드 확인 + cache hit ratio 측정 (2번째 PR 부터 cache 활용)
-- **rev 통합 검증**: impl PR 1 머지 후 rev sub-agent 가 다음 PR 에서 `rev-e2e-3-stages.md` 갱신 룰을 따라 Playwright 실제 실행하는지 확인 (rev-queue.sh 첫 액션 + rev launch prompt)
+- **rev 통합 검증**: impl PR 1 머지 후 rev sub-agent 가 다음 PR 에서 `rev-e2e-2-stages.md` 갱신 룰을 따라 Playwright 실제 실행하는지 확인 (rev-queue.sh 첫 액션 + rev launch prompt)
 
 ### mock 전략
 
@@ -269,18 +267,19 @@ jobs:
 | Q2 | CI 통합 옵션 — 별도 workflow vs `web-ci.yml` 안 별 job | (A) 별도 / (B) matrix / (C) 안 별 job | @goohong / impl PR 3 작성 전. 권장 = (A) |
 | Q3 | browser matrix — chromium-only vs +firefox/webkit | (a) chromium only / (b) chromium + firefox / (c) 3-browser nightly | @goohong / impl PR 1 작성 전. 권장 = (a) — flaky risk 최소 |
 | Q4 | BE mock 전략 — msw vs Playwright `page.route()` | (a) msw / (b) page.route() | @goohong / impl PR 2 작성 전. 권장 = (b) |
-| Q5 | rev-e2e-3-stages §3 갱신 — 본 spec PR 묶음 vs 별도 docs PR | (A) 본 PR 묶음 / (B) impl PR 1 머지 후 별도 PR | @goohong / 본 spec 머지 시점. 권장 = (B) |
+| Q5 | rev-e2e-2-stages §3 갱신 — 본 spec PR 묶음 vs 별도 docs PR | (A) 본 PR 묶음 / (B) impl PR 1 머지 후 별도 PR | @goohong / 본 spec 머지 시점. 권장 = (B) |
 | Q6 | ADR 신규 필요 여부 (Playwright = 외부 도구) | (a) ADR-NNNN 신설 / (b) 본 spec 결정으로 갈음 | @goohong / 본 spec draft 시점. 권장 = (b) — Vitest/RestAssured 와 동일 단순 도구 도입 |
 
 ## 9) 결정 로그
 
-- 2026-05-28: 초안 작성 (status=draft). 이슈 #1191 대응. rev #1174 단계 3 no-op pass 사유 (Playwright 미설정) 박제 및 후속 design tokens PR 11+ 시각 회귀 가드 필요성 명문화.
+- 2026-05-28: 초안 작성 (status=draft). 이슈 #1191 대응. rev #1174 단계 3 (당시 명) no-op pass 사유 (Playwright 미설정) 박제 및 후속 design tokens PR 11+ 시각 회귀 가드 필요성 명문화.
+- **2026-05-30 (PR rev2s-2 propagation cleanup)**: `rev-e2e-3-stages.md` → `rev-e2e-2-stages.md` rename + 단계 3 폐기. 본 spec §1 / §2 / §3 / §4 / §5-7 / §6 / §7 / §8 / §10 의 `rev-e2e-3-stages` reference → `rev-e2e-2-stages` 정정. 단계 3 (release 후 production smoke) 박제 모두 폐기 marker — production 환경 신설 시 부활 가능 (`[[project_rev_stage_3_prod_revival]]`).
 
 ## 10) 관련
 
 - 이슈 #1191 (본 spec 트리거), #1044 (UI/UX 4단계 audit)
 - ADR `docs/decisions/0018-design-tokens.md` (마이그레이션 spec)
 - 기존 spec `docs/features/ui-ux-redesign.md` (단계 4 PR 11+ 마이그레이션 계획)
-- 기존 spec `docs/features/rev-e2e-3-stages.md` (§3 trigger 갱신 대상)
+- 기존 spec `docs/features/rev-e2e-2-stages.md` (§3 trigger 갱신 대상)
 - 테스트 가이드 `docs/ai-harness/07-testing-guide.md` (§86 "E2E: Playwright (도입 시점은 추후 ADR)" — 본 spec 으로 ADR 갈음)
 - 메모리 [[feedback-rev-e2e-always]] [[feedback-rev-release-gate]] [[feedback-spec-frontmatter-required]]

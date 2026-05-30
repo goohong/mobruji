@@ -244,7 +244,7 @@ ADR-0019 동반 spec `work-cycle-refactor.md` 의 5단계 마이그 위에, 본 
 - **work-cycle-refactor.md** (`docs/features/work-cycle-refactor.md`) — 5단계 refactor 마이그. 본 spec Phase 1-3 의 대응표는 §5-4.
 - **clear-pre-hook.md** (`docs/features/clear-pre-hook.md`) — `/clear` 직전 doc-check 강제 (PR #1066 머지). 본 spec 의 Hook 3 / Hook 5 와 연관 (turn-end hook).
 - **directive-status-enum.md** (예정) — directive status enum 정규화 (event-action-mapping §5-4 분리 후속).
-- **rev-e2e-3-stages.md** (`docs/features/rev-e2e-3-stages.md`) — rev 3단계 e2e. 본 spec 항목 6 의 rev QA hook 보강.
+- **rev-e2e-2-stages.md** (`docs/features/rev-e2e-2-stages.md`) — rev 2단계 e2e (🟡 Pre-merge review / 🔵 Post-merge audit, 단계 3 폐기 2026-05-30). 본 spec 항목 6 의 rev QA hook 보강.
 
 ## 변경 이력
 

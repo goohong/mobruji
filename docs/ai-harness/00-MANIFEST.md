@@ -27,7 +27,7 @@ nmae 는 sub-agent launch 시 역할에 따라 아래 문서만 발췌 주입 (�
 | **Plan** | `mobruji-plan` | Governance, Architect | Standards (형식 참조) |
 | **BE** | `mobruji-be` | Governance, Standards, `actors/sub-agent §2 be` | Architect (BC/엔티티) |
 | **FE** | `mobruji-fe` | Governance, Standards, `actors/sub-agent §2 fe` | - |
-| **Rev** | `mobruji-rev` | Governance, Standards, `rev-e2e-3-stages.md` | Architect (설계 의도) |
+| **Rev** | `mobruji-rev` | Governance, Standards, `rev-e2e-2-stages.md` | Architect (설계 의도) |
 | **Helper** | (mac `helper:0.0`) | `docs/ai-harness/actors/helper.md` (SoT) | Governance (말투) |
 
 > sub-agent 는 `docs/ai-harness/actors/sub-agent.md` 한 개만 로드하면 공통+역할 룰이 모두 들어옵니다 (CLAUDE.md §13 포인터와 동일).
@@ -38,7 +38,7 @@ nmae 가 백로그/지시를 분류해 트랙을 결정합니다. 실제 사이�
 
 ### A. Standard Track (설계 우선)
 - **조건**: 신규 도메인, 외부 연동, 다중 PR, 복잡 비즈니스 로직.
-- **흐름**: `Plan`(Feature Spec/ADR) → 합의 → `BE`/`FE`(구현) → `Rev`(3단계 e2e 검증).
+- **흐름**: `Plan`(Feature Spec/ADR) → 합의 → `BE`/`FE`(구현) → `Rev`(2단계 e2e 검증 — 🟡 Pre-merge review / 🔵 Post-merge audit).
 
 ### B. Fast Track (구현 우선)
 - **조건**: 명확한 버그 수정, 단순 UI/텍스트 변경, 파일 변경 < 3개, 기존 패턴 반복.

@@ -645,7 +645,7 @@ sequenceDiagram
 - PR #1357 (사용자 평가 — "잘 관리 안 됨" → 본 spec trigger).
 - `docs/features/cycle-forum-operation.md` §5-5 — `cycle_thread_complete_on_merge_loop` (cycle forum) 동작 참조. 본 spec 의 rev forum 모듈은 별.
 - `docs/features/directive-board-template-and-tags.md` — directive forum 운영 SoT (rev directive entry 의 jsonl schema 참조).
-- `docs/features/rev-e2e-3-stages.md` — rev 3 단계 e2e 정의 (단계 1 = PR 머지 전, 단계 2 = develop 머지 후 dev 환경, 단계 3 = release 후 production).
+- `docs/features/rev-e2e-2-stages.md` — rev 2 단계 e2e 정의 (🟡 Pre-merge review (단계 1) = PR 머지 전 / 🔵 Post-merge audit (단계 2) = develop 머지 후 dev 환경). 단계 3 폐기 (2026-05-30, production 환경 부재 — §1-1).
 - `docs/features/rev-sla.md` — rev 단계별 SLA 매트릭스. 본 spec 의 hook 즉시 발사가 단계 1 SLA 안인지 cross-ref.
 - `docs/features/rev-qa-protocol.md` §5-9 — 단계별 Discord push 정책. 본 spec 의 단계 2 directive 가 nmae 큐 head 로 반영되면 본 protocol 의 audit 흐름 trigger. **round 18 정정**: 기존 `rev-post-merge-audit-loop.md` cross-ref (dead link) 를 본 파일로 대체.
 - `docs/features/helper-tool-visibility.md` — `helper-tool-progress.sh` PreToolUse hook spec. 본 spec 의 PostToolUse hook 이 같은 패턴 거울 (graceful exit 0 + jq parsing + actor marker 가드).
