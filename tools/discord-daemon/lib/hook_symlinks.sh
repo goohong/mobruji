@@ -62,6 +62,10 @@ if [[ -z "${HOOK_NAMES:-}" ]]; then
       # .claude/settings.json 의 hook command path 는 $HOME/.mobruji/helper-tool-progress.sh
       # 고정 — repo 변경 즉시 반영을 위해 symlink 강제. spec: docs/features/helper-tool-visibility.md.
       helper-tool-progress.sh
+      # 2026-05-30 (#1360): pr-register-rev.sh — Claude Code PostToolUse hook.
+      # gh pr create / gh pr merge 호출 시 rev directive 자동 등록.
+      # spec: docs/features/pr-webhook-rev-forum.md (옵션 D).
+      pr-register-rev.sh
     )
   fi
 fi
