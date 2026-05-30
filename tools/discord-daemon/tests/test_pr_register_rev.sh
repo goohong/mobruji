@@ -300,8 +300,10 @@ JSON
   _assert "case7 exit 0" "[[ $rc -eq 0 ]]"
   _assert "case7 python3 미호출" "[[ ! -f $tmpdir/py_capture.txt ]]"
 
-  # 6 actor 모두 발사 확인 (be/fe/rev/plan/helper/nmae).
-  for valid_actor in helper nmae be fe rev plan; do
+  # 6 actor 모두 발사 확인 (#1372 정정 — helper 제외, mmae 추가).
+  # 사고 박제: helper 는 Discord 중계 전담 (PR 안 만듦, [[feedback-helper-relay-only]])
+  # → 본 hook 의 actor list 에서 제외. PR 만드는 6 actor (mmae/nmae/be/fe/rev/plan) 만.
+  for valid_actor in mmae nmae be fe rev plan; do
     local tmp2
     tmp2=$(mktemp -d)
     _write_fake_python "$tmp2" 0
@@ -458,6 +460,83 @@ JSON
   rm -rf "$tmpdir"
 }
 
+# ── case 15: cwd fallback — 변수 미설정 시 작업 폴더 기반 자동 판단 (#1372) ──
+case15_cwd_fallback() {
+  echo "[case15] cwd fallback — env 미설정 시 cwd 기반 actor 자동 판단"
+  local stdin_json
+  stdin_json=$(cat <<'JSON'
+{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create --base develop"},"tool_response":{"output":"https://github.com/goohong/mobruji/pull/1234"}}
+JSON
+)
+  for sub in be fe rev plan; do
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    local fake_cwd="$tmpdir/mobruji-$sub"
+    mkdir -p "$fake_cwd"
+    _write_fake_python "$fake_cwd" 0
+    _write_fake_discord_reply "$fake_cwd"
+
+    (cd "$fake_cwd" && env -u MOBRUJI_HOOK_ACTOR \
+      PATH="$fake_cwd:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin" \
+      HOME="$fake_cwd" \
+      MOBRUJI_DIR="$fake_cwd" \
+      MOBRUJI_AGENT_PYTHON="$fake_cwd/python3" \
+      MOBRUJI_AGENT_DIR="$fake_cwd/agent_stub" \
+      bash "$SCRIPT_PATH" <<< "$stdin_json") >/dev/null 2>&1
+
+    _assert "case15 cwd=mobruji-$sub → actor=$sub 자동 판단 발화" \
+      "[[ -f $fake_cwd/py_capture.txt ]]"
+    rm -rf "$tmpdir"
+  done
+}
+
+# ── case 16: cwd 미매칭 + env 미설정 → 가드 exit 0 (#1372) ──────────────────
+case16_cwd_no_match_skip() {
+  echo "[case16] cwd 미매칭 (mac mmae / NCP nmae 등) + env 미설정 → skip"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  local fake_cwd="$tmpdir/mobruji"  # sub-agent 워크트리 아님
+  mkdir -p "$fake_cwd"
+  _write_fake_python "$fake_cwd" 0
+
+  local stdin_json
+  stdin_json=$(cat <<'JSON'
+{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create"},"tool_response":{"output":"https://github.com/foo/bar/pull/1"}}
+JSON
+)
+  (cd "$fake_cwd" && env -u MOBRUJI_HOOK_ACTOR \
+    PATH="$fake_cwd:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin" \
+    HOME="$fake_cwd" \
+    MOBRUJI_DIR="$fake_cwd" \
+    MOBRUJI_AGENT_PYTHON="$fake_cwd/python3" \
+    MOBRUJI_AGENT_DIR="$fake_cwd/agent_stub" \
+    bash "$SCRIPT_PATH" <<< "$stdin_json") >/dev/null 2>&1
+
+  _assert "case16 cwd 미매칭 → python3 미호출" "[[ ! -f $fake_cwd/py_capture.txt ]]"
+  rm -rf "$tmpdir"
+}
+
+# ── case 17: helper actor 명시 → skip (Discord 중계 전담, PR 안 만듦) (#1372) ──
+case17_helper_excluded() {
+  echo "[case17] helper actor — 본 hook 발화 X (PR 안 만드는 역할)"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  _write_fake_python "$tmpdir" 0
+
+  local stdin_json
+  stdin_json=$(cat <<'JSON'
+{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create"},"tool_response":{"output":"https://github.com/foo/bar/pull/1"}}
+JSON
+)
+  _run_hook "$tmpdir" "$stdin_json" "helper" >/dev/null 2>&1
+  local rc=$?
+
+  _assert "case17 exit 0 (graceful)" "[[ $rc -eq 0 ]]"
+  _assert "case17 helper python3 미호출 (PR 안 만드는 역할)" \
+    "[[ ! -f $tmpdir/py_capture.txt ]]"
+  rm -rf "$tmpdir"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 case1_gh_pr_create_match
 case2_gh_pr_merge_match
@@ -473,6 +552,9 @@ case11_counter_reset_on_success
 case12_multiple_urls
 case13_malformed_json
 case14_auto_merge_guard
+case15_cwd_fallback
+case16_cwd_no_match_skip
+case17_helper_excluded
 
 echo
 echo "결과: PASS=$PASS FAIL=$FAIL"

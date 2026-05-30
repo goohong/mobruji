@@ -48,10 +48,26 @@ exit_graceful() {
 }
 trap exit_graceful ERR
 
-# ─── 가드 1: actor marker ────────────────────────────────────────────────────
-# helper-tool-progress.sh 는 helper 만 허용. 본 hook 은 6 actor 허용.
+# ─── 가드 1: actor marker (#1372) ────────────────────────────────────────────
+# 사고 박제: helper 는 Discord 중계 전담 (PR 절대 안 만듦, [[feedback-helper-relay-only]])
+# 라 자동 등록 흐름과 무관. PR 만드는 actor = mmae / nmae / be / fe / rev / plan
+# 6명. spec `pr-webhook-rev-forum.md` 의 actor list 정정도 별 plan 사이클 의무.
+#
+# fallback: 변수 미설정 시 cwd 보고 자동 판단 — sub-agent 4 actor 즉시 cover.
+# mmae (mac mobruji 워크트리) / nmae (NCP mobruji 워크트리) 는 같은 cwd 끝 (mobruji) 라
+# cwd 만으론 구분 불가 → 각자 launch path 의 env 박제로 별 트랙 cover.
+if [[ -z "${MOBRUJI_HOOK_ACTOR:-}" ]]; then
+  case "$PWD" in
+    */mobruji-be|*/mobruji-be/*) MOBRUJI_HOOK_ACTOR=be ;;
+    */mobruji-fe|*/mobruji-fe/*) MOBRUJI_HOOK_ACTOR=fe ;;
+    */mobruji-rev|*/mobruji-rev/*) MOBRUJI_HOOK_ACTOR=rev ;;
+    */mobruji-plan|*/mobruji-plan/*) MOBRUJI_HOOK_ACTOR=plan ;;
+    *) ;;  # 미매칭 (mac mmae / NCP nmae / 무관 cwd) → 다음 가드 exit 0
+  esac
+fi
+
 case "${MOBRUJI_HOOK_ACTOR:-}" in
-  helper|nmae|be|fe|rev|plan) ;;
+  mmae|nmae|be|fe|rev|plan) ;;
   *) exit 0 ;;
 esac
 
