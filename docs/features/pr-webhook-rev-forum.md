@@ -4,8 +4,8 @@ slug: pr-webhook-rev-forum
 status: draft
 owner: @goohong
 scope: infra
-related_issues: [1358]
-related_prs: []
+related_issues: [1358, 1372]
+related_prs: [1373]
 last_reviewed: 2026-05-30
 ---
 
@@ -17,7 +17,8 @@ last_reviewed: 2026-05-30
 - 현재 상태 (evidence): bot.py 에는 GitHub PR 이벤트를 입력으로 받는 webhook / polling 핸들러가 **자체적으로 존재하지 않습니다**. 머지 시 cycle forum thread 를 ✅ retag 하는 `cycle_thread_complete_on_merge_loop` (bot.py:4476) 만 있고, 이는 **이미 launch 된 cycle thread 가 닫히는 흐름**입니다. 새 PR 이 올라왔을 때 rev forum 에 새 thread 신설 + 1차 review directive 적재 흐름은 없습니다.
 - `tools/agent/tools_cycle.py:73-108` `register_directive_pending` 의 state schema 에 `thread_id` 필드는 있으나 등록 시점에는 `None` 으로 박힙니다 — 어디서 thread_id 를 채우는지의 wiring 이 PR open 이벤트와 연결되지 않은 상태입니다.
 - 결과: 사용자가 PR 진행 / 후속 회귀 검증을 forum 한 곳에서 추적할 수 없습니다 ("잘 관리 안 됨" 평가).
-- 본 spec = **PR 생성·머지를 trigger 한 actor (helper / be / fe / nmae / rev / plan) 가 직접 `register_directive_pending` 을 호출해 rev forum thread 라이프사이클을 끌고 가는 인프라**의 운영 모델 + 구현 방향 박제. 강제 메커니즘은 **각 actor 의 `.claude/settings.json` PostToolUse Bash hook** 단독 (CLAUDE.md §17 메커니즘 단 우선순위 적용 — system prompt < hook < wrapper). 코드 자체는 다음 be / infra 사이클이 본 spec 기반으로 구현합니다.
+- 본 spec = **PR 생성·머지를 trigger 한 actor (mmae / nmae / be / fe / rev / plan — 6 actor) 가 직접 `register_directive_pending` 을 호출해 rev forum thread 라이프사이클을 끌고 가는 인프라**의 운영 모델 + 구현 방향 박제. 강제 메커니즘은 **각 actor 의 `.claude/settings.json` PostToolUse Bash hook** 단독 (CLAUDE.md §17 메커니즘 단 우선순위 적용 — system prompt < hook < wrapper). 코드 자체는 다음 be / infra 사이클이 본 spec 기반으로 구현합니다.
+- **helper 제외 사유** (2026-05-30 round 20, 사용자 결정 + PR #1372/#1373 사고 박제): helper 는 Discord 중계 전담 actor (메모리 [[feedback-helper-relay-only]]) — `gh pr create` / `gh pr merge` 호출을 하지 않습니다. 따라서 본 hook 의 발화 대상 actor list 에서 제외합니다. mmae (mac mobruji 워크트리, orchestration 본 세션) 는 PR 을 실제 만드는 6 actor 중 하나로 추가합니다. round 19 까지 명기되어 있던 "helper / be / fe / nmae / rev / plan" 6 actor list 는 helper 가 PR 을 만들지 않는 사실과 모순이라 사고로 분류 — round 20 에서 일괄 정정합니다.
 - **사용자 결정 (2026-05-30, round 19)** — round 17 옵션 A 채택을 **재정정**:
   - **옵션 D 채택** (사용자 제안): actor trigger + PostToolUse Bash hook 단독. PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor 가 hook 을 통해 `register_directive_pending(cycle=rev, kind=pr_review|pr_audit, pr_url=..., thread_id=None)` 호출 → rev 작업 큐 entry → rev forum thread 신설 (PR open) 또는 단계 전이 (PR merge).
   - **옵션 A 폐기** (HTTP webhook / Cloudflare Tunnel / nginx / aiohttp / HMAC / `GITHUB_WEBHOOK_SECRET` / Q9). 사유: NCP 인바운드 / Cloudflare 의존 운영 부담 회피 + CLAUDE.md §17 강제 메커니즘 일관성 (다른 mobruji 흐름이 모두 hook / wrapper / system prompt 로 강제).
@@ -177,7 +178,7 @@ last_reviewed: 2026-05-30
 
 ### 포함
 
-- actor (helper / be / fe / nmae / rev / plan) 가 `gh pr create` / `gh pr merge` 호출 시 PostToolUse hook 이 rev forum thread 신설 / 단계 전이 + directive 적재.
+- actor (mmae / nmae / be / fe / rev / plan — 6 actor, helper 제외 round 20) 가 `gh pr create` / `gh pr merge` 호출 시 PostToolUse hook 이 rev forum thread 신설 / 단계 전이 + directive 적재.
 - 멱등성 가드 (`pr-register-dedupe.jsonl` + `register_directive_pending` 자체 duplicate 분기).
 - rev forum thread template + 단계 전이 본문 PATCH.
 - 옵션 A / B / C / D 비교 + 옵션 D 채택 사유 (§5).
@@ -225,7 +226,7 @@ last_reviewed: 2026-05-30
 
 ### 5-4) 옵션 D: actor trigger + PostToolUse Bash hook — **채택 (round 19 사용자 결정)**
 
-PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor (helper / be / fe / nmae / rev / plan) 가 Claude Code 의 PostToolUse hook 을 통해 `register_directive_pending` 을 호출. 외부 endpoint / polling 없음 — actor 의 도구 호출 자체가 trigger.
+PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor (mmae / nmae / be / fe / rev / plan — 6 actor, helper 제외 round 20) 가 Claude Code 의 PostToolUse hook 을 통해 `register_directive_pending` 을 호출. 외부 endpoint / polling 없음 — actor 의 도구 호출 자체가 trigger.
 
 #### 5-4-1) 구성 요소
 
@@ -233,7 +234,7 @@ PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor (helper 
   - mobruji 기존 `tools/discord-daemon/helper-tool-progress.sh` (PreToolUse Bash hook, `docs/features/helper-tool-visibility.md`) 의 구조 거울:
     - `set -uo pipefail` + `trap exit_graceful ERR` + `exit 0` 항상 (graceful — hook 실패가 actor 도구 호출 자체 차단 X).
     - stdin JSON read (max 64KB) + jq parsing (jq 미설치 시 silent skip).
-    - actor marker 가드 (`MOBRUJI_HOOK_ACTOR` env — helper/be/fe/nmae/rev/plan 모두 허용. helper-tool-progress.sh 는 helper 만이었으나 본 hook 은 모든 actor 허용).
+    - actor marker 가드 (`MOBRUJI_HOOK_ACTOR` env — `mmae` / `nmae` / `be` / `fe` / `rev` / `plan` 6 actor 만 허용. helper 는 Discord 중계 전담이라 PR 안 만듦 → 제외. helper-tool-progress.sh 는 helper 만이었으나 본 hook 은 PR 만드는 6 actor 허용 — 두 hook 의 발화 actor 가 의도적으로 disjoint).
   - 핵심 로직:
     1. stdin JSON 의 `hook_event_name == "PostToolUse"` + `tool_name == "Bash"` 확인.
     2. `tool_input.command` 가 정규식 `^\s*gh\s+pr\s+(create|merge)\b` 매칭 확인. 매칭 안 되면 silent skip.
@@ -264,7 +265,7 @@ PR 생성·머지 명령 (`gh pr create` / `gh pr merge`) 을 친 actor (helper 
     }
   }
   ```
-  - 등록 대상 워크트리 / actor: 본진 (mac `mobruji` 워크트리 + helper) + NCP (`mobruji-ncp` 워크트리 + nmae) + sub-agent worktree 4 (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan`) — 즉 모든 Claude Code 실행 환경.
+  - 등록 대상 워크트리 / actor (round 20 정정 — mmae / helper 분리 명시): mac `mobruji` 워크트리 (mmae = orchestration 본 세션) + NCP `mobruji` 워크트리 (nmae) + sub-agent worktree 4 (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan`) — 즉 PR 을 만드는 6 actor 의 모든 Claude Code 실행 환경. helper 워크트리 (Discord 중계 전담) 는 `gh pr create` / `gh pr merge` 를 호출하지 않아 등록 대상에서 제외합니다 — 대신 helper 워크트리에는 기존 PreToolUse `helper-tool-progress.sh` 만 등록 유지합니다.
   - 강제 메커니즘 (CLAUDE.md §17 메커니즘 단 우선순위 적용):
     - 1차: `tools/agent-launch-wrapper.sh` 가 sub-agent launch 직전 `.claude/settings.json` 의 hook 등록 여부 검증 — 누락 시 graceful warning + auto-patch.
     - 2차: ci 가드 (`.github/workflows/` 의 lint job) 가 `.claude/settings.json` 의 PostToolUse hook 존재 검증 — 누락 PR 차단.
@@ -391,12 +392,12 @@ sequenceDiagram
   - mobruji `tools/discord-daemon/helper-tool-progress.sh` 패턴 거울 — `set -uo pipefail` + `trap exit_graceful ERR` + jq parsing + graceful exit 0.
   - 입력: stdin JSON (Claude Code PostToolUse hook spec) — `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"..."},"tool_response":{"output":"..."}}`.
   - 매칭: `tool_input.command` 가 정규식 `^\s*gh\s+pr\s+(create|merge)\b` 매칭 시만 발사. 그 외 silent skip.
-  - actor marker 가드: `MOBRUJI_HOOK_ACTOR` env (`helper` / `nmae` / `be` / `fe` / `rev` / `plan`) 중 1개 — helper-tool-progress.sh 와 달리 6 actor 모두 허용. unset 시 silent skip (defense).
+  - actor marker 가드: `MOBRUJI_HOOK_ACTOR` env (`mmae` / `nmae` / `be` / `fe` / `rev` / `plan`) 중 1개 — PR 만드는 6 actor (round 20 정정, helper 제외). unset 시 cwd suffix fallback (`mobruji-be|fe|rev|plan` 매칭 → 자동 set, mac mmae / NCP nmae 는 cwd 끝이 `mobruji` 라 fallback 미매칭 → 명시 env 의무, PR #1373 머지 결과). 다음 가드 unknown actor (`helper` 포함) → silent skip + exit 0 (defense).
   - 멱등성 store: `~/.mobruji/pr-register-dedupe.jsonl` append-only (`pr_url + kind + ts`) + 메모리 set (cap 1000 FIFO).
   - register 호출: §5-4-1 의 옵션 D-1 (bot.py IPC) 또는 D-2 (Python direct) — 최종 구현 path 는 PR 2-a 에서 결정 (§10 Q12).
-- **`tools/discord-daemon/pr-register-rev-deploy.sh` 또는 wrapper (신규)**: hook script 를 mac 본진 + NCP + 4 워크트리 의 `~/.mobruji/` 에 symlink 배포. mobruji 의 기존 `~/.mobruji/discord-reply.sh` symlink 패턴 재사용.
+- **`tools/discord-daemon/pr-register-rev-deploy.sh` 또는 wrapper (신규)**: hook script 를 mac mmae 워크트리 + NCP nmae 워크트리 + 4 sub-agent 워크트리 (be/fe/rev/plan) 의 `~/.mobruji/` 에 symlink 배포 — 총 6 actor 워크트리. mobruji 의 기존 `~/.mobruji/discord-reply.sh` symlink 패턴 재사용. helper 워크트리는 본 hook 발화 대상 X 라 배포 제외.
 - **`.claude/settings.json` (per-actor 수정, PR 2-a)**:
-  - 본진 (`/Users/goohong/workspace/github/mobruji/.claude/settings.json`) — 현재 `helper-tool-progress.sh` PreToolUse 만. PostToolUse Bash matcher 추가.
+  - mac mmae 워크트리 (`/Users/goohong/workspace/github/mobruji/.claude/settings.json`) — 현재 `helper-tool-progress.sh` PreToolUse 만. PostToolUse Bash matcher 추가.
   - sub-agent worktree 4 (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan`) — 같은 PostToolUse hook 추가. 같은 `.claude/settings.json` 또는 글로벌 user-level settings 검토 (§10 Q13).
   - NCP nmae (`/home/mobruji/...`) — 같은 hook 추가.
 - **`tools/agent-launch-wrapper.sh` (수정, PR 2-a)**:
@@ -446,7 +447,7 @@ sequenceDiagram
   - `tool_input.command` 정규식 매칭 (`^\s*gh\s+pr\s+(create|merge)\b`) + `tool_response.output` PR URL parse + `tool_input.command` fallback parse.
   - `~/.mobruji/pr-register-dedupe.jsonl` (cap 1000 FIFO) + 메모리 set.
   - register 호출 path 결정 (옵션 D-1 IPC vs D-2 Python direct) — §10 Q12 해소 후 1택 구현.
-  - `.claude/settings.json` PostToolUse Bash matcher 추가 (본진 + 4 sub-agent worktree + NCP nmae 5개 경로).
+  - `.claude/settings.json` PostToolUse Bash matcher 추가 (mac mmae + NCP nmae + 4 sub-agent 워크트리 — 6 actor 경로, round 20 정정).
   - `tools/agent-launch-wrapper.sh` 가 hook 등록 검증 + graceful warning + auto-patch.
   - `~/.mobruji/pr-register-rev.sh` symlink 배포 (또는 git 추적 path 직접 호출).
   - unit test (`test_pr_register_rev_hook.sh`) — 12~14 case (regex / parse / dedupe / actor marker / graceful).
@@ -490,10 +491,12 @@ sequenceDiagram
   - 같은 `(pr_url, "pr_review")` 재 호출 (actor retry) → skip + exit 0.
   - 같은 PR URL + 다른 kind (`pr_review` vs `pr_audit`) → 둘 다 처리 (단계 1 + 2 별 entry).
   - cap 1000 초과 → FIFO truncate.
-- **actor marker 가드**:
-  - `MOBRUJI_HOOK_ACTOR` unset → silent skip + exit 0.
-  - `MOBRUJI_HOOK_ACTOR=helper` / `=be` / `=fe` / `=nmae` / `=rev` / `=plan` → 처리.
-  - `MOBRUJI_HOOK_ACTOR=unknown` → silent skip (defense).
+- **actor marker 가드** (round 20 정정 — PR #1373 머지 결과 거울):
+  - `MOBRUJI_HOOK_ACTOR` unset + cwd suffix `mobruji-be|fe|rev|plan` → 자동 set + 처리.
+  - `MOBRUJI_HOOK_ACTOR` unset + cwd 끝이 `mobruji` (mac mmae / NCP nmae) → fallback 미매칭, env 명시 안 됐으니 silent skip + exit 0.
+  - `MOBRUJI_HOOK_ACTOR=mmae` / `=nmae` / `=be` / `=fe` / `=rev` / `=plan` → 처리 (PR 만드는 6 actor).
+  - `MOBRUJI_HOOK_ACTOR=helper` → silent skip + exit 0 (Discord 중계 전담, PR 안 만드는 역할).
+  - `MOBRUJI_HOOK_ACTOR=unknown` → silent skip + exit 0 (defense).
 - **graceful**:
   - `register_directive_pending` 호출 실패 (mock raise) → stderr warning + exit 0 (actor 도구 호출 차단 X).
   - jq 미설치 → silent skip + exit 0.
@@ -526,7 +529,7 @@ sequenceDiagram
 3. **dedupe**: 같은 PR `gh pr create` 두 번 호출 (실수 retry) → 첫 번째만 처리 + 두 번째 skip 확인 (`pr-register-dedupe.jsonl` 확인).
 4. **외부 PR (수동 trigger)**: mac GitHub UI 로 직접 PR 생성 → hook 미발사 확인 → helper 에 "PR #N rev 등록" 명령 → helper 가 `register_directive_pending` 직접 호출 → thread 신설 확인.
 5. **graceful**: hook script 강제 chmod -x 또는 jq uninstall 시뮬레이션 → `gh pr create` 자체는 정상 + hook silent skip 확인.
-6. **6 actor 별 hook 발사**: helper / nmae / be / fe / rev / plan 각 worktree 에서 `gh pr create` → 6개 모두 hook 발사 + register 호출 확인.
+6. **6 actor 별 hook 발사** (round 20 정정): mmae / nmae / be / fe / rev / plan 각 워크트리에서 `gh pr create` → 6개 모두 hook 발사 + register 호출 확인. helper 워크트리에서는 (가설 — helper 가 PR 만드는 일은 없으나 만약 호출했다고 가정 시) hook silent skip 확인 (`test_pr_register_rev.sh` case17 회귀 가드).
 
 ### 회귀 가드
 
@@ -539,7 +542,7 @@ sequenceDiagram
 
 ### 9-1) 옵션 D 고유 위험
 
-- **actor `.claude/settings.json` PostToolUse hook 등록 누락**: 6 actor (helper / nmae / be / fe / rev / plan) 중 1개라도 hook 등록 안 됐으면 그 actor 의 PR 명령 = silent skip → 누락. 가드:
+- **actor `.claude/settings.json` PostToolUse hook 등록 누락**: PR 만드는 6 actor (mmae / nmae / be / fe / rev / plan — round 20 정정, helper 제외) 중 1개라도 hook 등록 안 됐으면 그 actor 의 PR 명령 = silent skip → 누락. 가드:
   - 1차: `tools/agent-launch-wrapper.sh` 가 sub-agent launch 직전 settings.json 검증 + auto-patch + graceful warning.
   - 2차: `.github/workflows/` 의 lint job 또는 신규 `claude-settings-guard.yml` 이 PR 안 settings.json 의 PostToolUse Bash matcher 존재 검증 → 누락 PR 차단.
   - 3차: 메모리 [[feedback-pr-register-hook-required]] (보조 학습).
@@ -589,16 +592,16 @@ sequenceDiagram
 | Q7 | 공존 vs 폐기: `cycle_thread_complete_on_merge_loop` | **(a) 공존 — round 17 결정 유지** | round 17 결정 유지 |
 | ~~Q8~~ | ~~PR open 이벤트의 polling window~~ | **N/A — polling 자체 폐기** | N/A |
 | ~~Q9~~ | ~~nginx vs Cloudflare Tunnel~~ | **N/A — 옵션 A 폐기, public endpoint 부재** | N/A |
-| **Q10 (신규)** | **외부 PR (mac GitHub UI / Desktop) capture 정책** | **(a) 사용자 수동 trigger 만 (본진 자율 default) / (b) nmae 일일 cross-check digest 추가 (PR 5 검토) / (c) 둘 다** — 본 spec 권고 (c) | @goohong / PR 5 구현 전 |
+| **Q10 (신규)** | **외부 PR (mac GitHub UI / Desktop) capture 정책** | **(a) 사용자 수동 trigger 만 (mmae 자율 default) / (b) nmae 일일 cross-check digest 추가 (PR 5 검토) / (c) 둘 다** — 본 spec 권고 (c) | @goohong / PR 5 구현 전 |
 | **Q11 (신규)** | **hook 실패 silent 시 alert 채널** | **(a) `~/.mobruji/pr-register-rev.log` 만 (수동 grep) / (b) DIGEST 채널 N회 실패 시 push / (c) nmae 직접 status 채널 push** — 본 spec 권고 (b) N=5 | @goohong / PR 2-a 구현 전 |
 | **Q12 (신규)** | **`register_directive_pending` 호출 path** | **(a) 옵션 D-1: bot.py IPC (Discord 메시지 또는 sqlite events 직접 write) / (b) 옵션 D-2: Python direct (`python3 -c "from tools.agent.tools_cycle import ..."`)** — 본 spec 권고 (b) Python direct (단, actor venv / PYTHONPATH wrapper 의무) | @goohong / PR 2-a 구현 전 |
-| **Q13 (신규)** | **`.claude/settings.json` PostToolUse hook 등록 scope** | **(a) per-worktree (본진 + 4 sub-agent + NCP 5개 경로 각각) / (b) global user-level (`~/.claude/settings.json`) 1회** — 본 spec 권고 (a) (mobruji 의 `PreToolUse helper-tool-progress.sh` 가 per-worktree 패턴) | @goohong / PR 2-a 구현 전 |
+| **Q13 (신규)** | **`.claude/settings.json` PostToolUse hook 등록 scope** | **(a) per-worktree (mac mmae + NCP nmae + 4 sub-agent 6 actor 경로 각각, round 20 정정) / (b) global user-level (`~/.claude/settings.json`) 1회** — 본 spec 권고 (a) (mobruji 의 `PreToolUse helper-tool-progress.sh` 가 per-worktree 패턴) | @goohong / PR 2-a 구현 전 |
 
 ## 11) 결정 로그
 
 - **2026-05-30 (round 16)** — 초안 작성 (status=draft). 본 spec scope 박제 + 옵션 A/B/C 비교 + 옵션 B 권고. evidence: #1358 본문, bot.py:4476 `cycle_thread_complete_on_merge_loop` 부재 갭, `tools/agent/tools_cycle.py:97` `thread_id=None` wiring 미완.
-- **2026-05-30 (round 17, 사용자 결정)** — 옵션 A 채택 정정. Q1 / Q6 → §11 이동. Q2 / Q3 / Q4 / Q5 / Q7 본진 자율 default. Q8 N/A. Q9 신설. **round 19 에서 일부 폐기 (옵션 A/B 폐기 + Q1 / Q6 / Q9 N/A)** — 단, Q2 / Q3 / Q4 / Q5 / Q7 결정은 옵션 D 에서도 유지.
-- **2026-05-30 (round 18, 본진 + rev sub-agent 정정 의무 박제 — 이번 round 19 에 cleanup)**:
+- **2026-05-30 (round 17, 사용자 결정)** — 옵션 A 채택 정정. Q1 / Q6 → §11 이동. Q2 / Q3 / Q4 / Q5 / Q7 mmae 자율 default. Q8 N/A. Q9 신설. **round 19 에서 일부 폐기 (옵션 A/B 폐기 + Q1 / Q6 / Q9 N/A)** — 단, Q2 / Q3 / Q4 / Q5 / Q7 결정은 옵션 D 에서도 유지.
+- **2026-05-30 (round 18, mmae + rev sub-agent 정정 의무 박제 — 이번 round 19 에 cleanup)**:
   - **`REV_FORUM_ID` env 이름 충돌** — 기존 cycle forum rev 채널과 중복 (bot.py:787/5469 + discord-reply.sh:286 + .env.example:58 + 14-discord-ops.md:274/440 + rev-qa-protocol.md:406/471). **재명명**: `REV_FORUM_ID` → `PR_REVIEW_FORUM_ID` (별 채널). spec 본문 + manual 안내 정정 완료.
   - **dead link** `§14 docs/features/rev-post-merge-audit-loop.md` 부재. 가까운 spec: `rev-qa-protocol.md` (단계 2 audit 흐름 포함). spec §14 References 정정 완료 — `rev-qa-protocol.md` cross-ref + bot.py:4545 `rev_post_merge_audit_loop` 코드만 직접 reference.
 - **2026-05-30 (round 19, 사용자 결정)**:
@@ -609,11 +612,18 @@ sequenceDiagram
   - **`GITHUB_WEBHOOK_SECRET` / `WEBHOOK_PORT` / `WEBHOOK_PATH` / `PR_EVENT_FALLBACK_POLL_INTERVAL_SECONDS` env 전부 폐기**.
   - **신규 env**: `PR_REVIEW_FORUM_ID` (round 18 재명명 결정 + round 19 옵션 D 유지).
   - **Q10 / Q11 / Q12 / Q13 신설** — 옵션 D 의 외부 PR 정책 / hook 실패 alert / register 호출 path / settings.json scope.
-  - **Q2 / Q3 / Q4 / Q5 / Q7 결정 유지** — round 17 의 본진 자율 default 그대로 옵션 D 에 적용.
+  - **Q2 / Q3 / Q4 / Q5 / Q7 결정 유지** — round 17 의 mmae 자율 default 그대로 옵션 D 에 적용.
+- **2026-05-30 (round 20, 사용자 결정 + PR #1372/#1373 사고 박제)**:
+  - **actor list 정정**: round 19 까지 명기된 "helper / be / fe / nmae / rev / plan" 6 actor list 가 사고로 분류됨. **사유 1 (helper 제외)** — helper 는 Discord 중계 전담 actor (메모리 [[feedback-helper-relay-only]]) 라 `gh pr create` / `gh pr merge` 호출을 하지 않습니다. helper 를 actor list 에 포함하면 자동 등록 흐름과 무관한 actor 가 명세에 박혀 다른 actor 가 혼동합니다. **사유 2 (mmae 추가)** — mmae (mac mobruji 워크트리, orchestration 본 세션) 가 actor list 에 누락되어 있어 mmae 가 직접 PR 만들 때 hook 발화 안 되는 사고가 발생합니다. 정정된 6 actor list = **mmae / nmae / be / fe / rev / plan** (PR 실제 만드는 6 actor).
+  - **PR #1372 코드 정정 (#1373 머지)** — `tools/discord-daemon/pr-register-rev.sh` 의 actor 가드 본문이 6 actor list 를 mmae / nmae / be / fe / rev / plan 로 정정 + cwd suffix fallback (`mobruji-be|fe|rev|plan`) 도 추가됨. spec body 와 코드 일치 확보.
+  - **test_pr_register_rev.sh 정정** — case7 (6 actor 발사) + case16 (cwd 미매칭) + case17 (helper 명시 skip) 추가. 회귀 가드.
+  - **spec body 정정 범위 (본 round 20 PR)** — §1 / §3-3 (포함) / §5-4 본문 + 5-4-1 / §6-2 / §7 PR 2-a / §8 단위 + 통합 / §9 위험 / §10 Q10 + Q13 / §11 round 20 박제 / §12 자율 결정 사유 추가 / §13 사용자 인지 항목 update / §15 round 20 항목 추가.
+  - **표현 룰 동시 정정** ([[feedback-mmae-not-bonjin]] + [[feedback-no-jargon-korean]]) — spec body 안 "본진" 단어 0건 (mmae 또는 "mac mmae 워크트리" 직접 명명). round 17 ~ round 19 결정 로그의 과거 "본진 자율 default" 표현도 "mmae 자율 default" 로 일괄 정정 — 사고 학습 의존 회피.
+  - **다른 spec / docs 영향** — `docs/features/directive-board-template-and-tags.md` 의 actor 역할 표는 별 박제 (helper relay-only 가 명시되어 있고 actor list 박제 패턴 아님) → 정정 대상 아님. `docs/ai-harness/actors/sub-agent.md` / `docs/ai-harness/actors/helper.md` / `docs/ai-harness/actors/nmae.md` 의 actor 정의도 본 spec 의 actor list 와 직접 충돌 없음 → round 20 정정 대상 외.
 
 ## 12) 자율 결정 (사유)
 
-- **옵션 D 채택 (round 19, 사용자 제안 + 본진 검토)**: CLAUDE.md §17 강제 메커니즘 일관성 — mobruji 의 모든 강제 (helper-tool-progress.sh / agent-launch-wrapper.sh / helper-turn-start.sh / cycle-status/update.sh) 가 hook / wrapper / system prompt 패턴. 옵션 A 의 외부 endpoint 만 outlier. 옵션 D 가 자연.
+- **옵션 D 채택 (round 19, 사용자 제안 + mmae 검토)**: CLAUDE.md §17 강제 메커니즘 일관성 — mobruji 의 모든 강제 (helper-tool-progress.sh / agent-launch-wrapper.sh / helper-turn-start.sh / cycle-status/update.sh) 가 hook / wrapper / system prompt 패턴. 옵션 A 의 외부 endpoint 만 outlier. 옵션 D 가 자연.
 - **옵션 A 폐기 사유**: 운영 surface (TLS cert / Cloudflare zone / HMAC secret rotation / asyncio loop 충돌) 가 옵션 D 대비 과대. 같은 효과 (즉시 발사 + 멱등성 자연) 를 옵션 D 가 더 simple 하게 달성.
 - **옵션 B 폐기 사유 (fallback 도 안 가져감)**: 사용자 명시 redirect. polling 의 항시 가동 부하 + dormant/active 상태 관리 + `gh` CLI rate limit cross-check 부담 회피. fallback 으로도 채택 안 함 — round 17 의 듀얼 stack (옵션 A primary + 옵션 B fallback) 운영 복잡 회피.
 - **외부 PR 수동 trigger 의무 (Q10 권고 c)**: 사용자가 mac UI 로 PR 만드는 빈도가 낮음 + nmae digest cross-check 가 보조 monitoring.
@@ -622,10 +632,14 @@ sequenceDiagram
 - **settings.json scope (Q13 권고 a per-worktree)**: mobruji 의 기존 `PreToolUse helper-tool-progress.sh` 가 per-worktree 패턴 (`/Users/goohong/workspace/github/mobruji-plan/.claude/settings.json` 확인). global user-level (b) 는 다른 프로젝트에 leak — 회피.
 - **Q2 / Q3 / Q4 / Q5 / Q7 결정 유지 사유**: round 17 의 권고가 옵션 D 에서도 동일하게 valid (옵션과 무관한 운영 정책).
 - **rev forum thread = 1 PR 1 thread (단계 전이 통합)**: round 17 권고 유지 — 사용자 회고 시 한 thread 가 PR 전체 라이프사이클 cover 하는 편이 sidebar filter 일관.
+- **round 20 actor list 정정 사유 (자율 결정 보강)**: 사용자 명시 결정 + PR #1372/#1373 evidence 가 1차 강제. 보조 자율 결정 사유:
+  - helper 가 PR 절대 안 만든다는 사실은 메모리 [[feedback-helper-relay-only]] + systemd launch 의 `--append-system-prompt` 강제 (relay-only) 로 이미 확정. 명세에 helper 포함하면 helper 가 다음 turn 에 "본 spec 의 hook 발화 대상이니 내가 PR 만들어도 되겠다" 잘못된 학습 risk.
+  - mmae 는 매 사이클 신규 issue 등록 / release PR 생성 / 사용자 결정 받은 follow-up PR 생성 등 PR 만드는 빈도가 sub-agent 와 동등하거나 더 많음. mmae 누락은 사고 risk 가 가장 큼.
+  - round 20 정정 = "PR 만드는 6 actor" 라는 일관 기준으로 list 재정의 → 다른 actor 의 학습 모호성 제거.
 
 ## 13) 사용자 확인 필요 (사실 진술, round 19 재정리)
 
-> 다음 2건은 사용자 manual 의무 (옵션 A/B 폐기로 round 17 의 4건에서 2건으로 축소). 본진 자율 불가.
+> 다음 2건은 사용자 manual 의무 (옵션 A/B 폐기로 round 17 의 4건에서 2건으로 축소). mmae 자율 불가.
 
 1. **`PR_REVIEW_FORUM_ID` 신규 Discord rev forum 채널 신설** — Discord UI 에서 forum 채널 1개 생성 + 채널 ID 박제 → NCP `.env` + `.env.example` + 4 sub-agent worktree 의 환경 `PR_REVIEW_FORUM_ID` 추가. PR 2-a 머지 전 필요. **round 18 정정**: 기존 `REV_FORUM_ID` (cycle forum rev 채널) 와 다른 채널 — 별 신설.
 2. **`available_tags` 4종 manual 등록** — Discord rev forum 채널 settings UI 에서 `🟡 1차 review` / `🔵 사후 E2E QA` / `✅ rev pass` / `❌ rev fail` 4 tag 사전 등록 (Q3=a 유지). 채널 신설과 같이 1회.
@@ -637,7 +651,7 @@ sequenceDiagram
 **신규 (참고, 사용자 인지 의무)**:
 - **외부 PR capture 우회 인지**: mac GitHub Desktop / GitHub UI 로 직접 PR 만들면 PostToolUse hook 우회 → 자동 등록 불가. 사용자가 수동으로 `📌` 등록 또는 helper 에 "PR #N rev 등록" 명령 의무 (Q10 권고 c — nmae 일일 cross-check digest 가 보조 monitoring).
 - 본 spec 머지 자체는 2건 manual 없이 가능 (draft status).
-- Q2 / Q3 / Q4 / Q5 / Q7 본진 자율 default — round 17 결정 유지.
+- Q2 / Q3 / Q4 / Q5 / Q7 mmae 자율 default — round 17 결정 유지.
 
 ## 14) References
 
@@ -653,7 +667,7 @@ sequenceDiagram
 - `tools/discord-daemon/bot.py` `cycle_thread_complete_on_merge_loop` (line 4476), `rev_post_merge_audit_loop` (line 4545) — 본 spec 의 단계 2 directive 가 trigger 하는 기존 loop.
 - `tools/agent/tools_cycle.py:73-108` `register_directive_pending` — 시그니처 확장 대상 (PR 2-b).
 - `tools/agent-launch-wrapper.sh` — sub-agent launch 직전 `.claude/settings.json` PostToolUse hook 등록 검증 + auto-patch (강제 메커니즘 1차).
-- `.claude/settings.json` (본진 + 4 sub-agent worktree + NCP 5개 경로) — PostToolUse Bash matcher 추가 대상 (PR 2-a).
+- `.claude/settings.json` (mac mmae + NCP nmae + 4 sub-agent 워크트리 — 6 actor 경로, round 20 정정) — PostToolUse Bash matcher 추가 대상 (PR 2-a).
 - `docs/ai-harness/06-domain-model.md §4` — 신규 용어 4종 등재 (`PrReviewThread` / `RevPrDirective` / `PostToolUseHookGuard` / `PrReviewForumCache`).
 - `docs/ai-harness/actors/sub-agent.md §2-rev` — rev sub-agent 룰 update (PR 4) — 새 `kind` 2종 큐 head 우선순위 박제.
 
@@ -666,10 +680,10 @@ sequenceDiagram
 
 - 2026-05-30 (round 16) — 초안 작성. status=draft.
 - 2026-05-30 (round 17) — 옵션 A (HTTP webhook) 채택 정정 (사용자 결정). §1 / §5 / §6 / §7 / §9 / §10 / §11 / §12 / §13 일괄 정정.
-- 2026-05-30 (round 18, 본진 + rev sub-agent 정정 의무 박제) — 이번 round 19 에 cleanup. 2건 블로커:
+- 2026-05-30 (round 18, mmae + rev sub-agent 정정 의무 박제) — round 19 에 cleanup. 2건 블로커:
   - `REV_FORUM_ID` env 이름 충돌 → `PR_REVIEW_FORUM_ID` 재명명.
   - `rev-post-merge-audit-loop.md` dead link → `rev-qa-protocol.md` 대체.
-- 2026-05-30 (round 19) — **옵션 D (actor trigger + PostToolUse hook) 채택 정정** (사용자 결정 + 본진 검토). 옵션 A / B 폐기. round 18 블로커 cleanup 동시 처리. §1 / §2 / §3-1 / §3-2 / §3-3 / §3 비기능 / §4 / §5 / §6 / §7 / §8 / §9 / §10 / §11 / §12 / §13 / §14 일괄 재작성:
+- 2026-05-30 (round 19) — **옵션 D (actor trigger + PostToolUse hook) 채택 정정** (사용자 결정 + mmae 검토). 옵션 A / B 폐기. round 18 블로커 cleanup 동시 처리. §1 / §2 / §3-1 / §3-2 / §3-3 / §3 비기능 / §4 / §5 / §6 / §7 / §8 / §9 / §10 / §11 / §12 / §13 / §14 일괄 재작성:
   - §5-1 옵션 A 폐기 표기 + 사유.
   - §5-2 옵션 B 폐기 표기 + 사유 (fallback safety net 도 폐기).
   - §5-3 옵션 C 폐기 유지 (기존 round 16 결정).
@@ -687,3 +701,20 @@ sequenceDiagram
   - §12 자율 결정 사유 옵션 D 기준 재정리.
   - §13 사용자 manual 4건 → 2건 축소 (옵션 A/B 폐기). 외부 PR capture 우회 인지 신규.
   - §14 References — round 18 dead link cleanup + round 19 폐기 references 명시. helper-tool-visibility.md / helper-tool-progress.sh 신규 cross-ref.
+- 2026-05-30 (round 20) — **actor list 정정** (사용자 결정 + PR #1372/#1373 evidence). round 19 까지 명기된 "helper / be / fe / nmae / rev / plan" 6 actor list 가 사고 (helper = Discord 중계 전담 PR 안 만듦, mmae = 누락). 정정된 6 actor = **mmae / nmae / be / fe / rev / plan** (PR 실제 만드는 6 actor). 동시 표현 룰 정정 — spec body 안 "본진" 0건 ([[feedback-mmae-not-bonjin]]). 정정 위치:
+  - §1 개요 — actor list 정정 + helper 제외 사유 박제.
+  - §3-3 (포함 라인) actor list 정정.
+  - §5-4 옵션 D 본문 actor list 정정.
+  - §5-4-1 actor marker 가드 본문 — helper 제외 명시 + 두 hook (PreToolUse helper-tool-progress.sh + PostToolUse pr-register-rev.sh) 의 발화 actor 가 의도적으로 disjoint 박제.
+  - §5-4-1 등록 대상 워크트리 — "본진 (... + helper)" → "mac mmae 워크트리 + helper 워크트리는 등록 제외" 로 분리 명시.
+  - §6-2 actor marker 가드 본문 + cwd suffix fallback (PR #1373 머지 결과 거울).
+  - §6-2 `pr-register-rev-deploy.sh` 배포 대상 — 6 actor 워크트리만 + helper 제외 명시.
+  - §6-2 `.claude/settings.json` 등록 대상 — mac mmae 워크트리 명시.
+  - §7 PR 2-a 작업 분할 — 5개 경로 → 6 actor 경로 (round 20 정정).
+  - §8 단위 테스트 actor marker 가드 — PR #1373 머지 결과 거울 (mmae/nmae/be/fe/rev/plan 처리 + helper skip + cwd fallback).
+  - §8 통합 테스트 6 actor 별 hook 발사 — mmae 추가 + helper case17 회귀 가드 명시.
+  - §9 위험 — 6 actor 정정.
+  - §10 Q10 / Q13 "본진 자율 default" → "mmae 자율 default" / "본진" → "mac mmae 워크트리".
+  - §11 round 20 결정 로그 박제.
+  - §12 자율 결정 — round 20 정정 사유 보강 (helper 학습 모호성 제거 + mmae 누락 risk 박제).
+  - 결정 로그 round 17 / round 19 의 과거 "본진 자율 default" / "본진 검토" 표현도 일괄 "mmae" 로 정정 (사고 학습 의존 회피).
