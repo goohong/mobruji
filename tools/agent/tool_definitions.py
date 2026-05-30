@@ -51,10 +51,10 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
         "선택지 묻는 케이스 (cycle 결정, 우선순위 등) 는 `choices` 인자에 "
         "최대 10 선택지 list 전달 — bot 가 keycap reaction (1️⃣–🔟) 미리 부착, "
         "사용자 tap 시 그 value 가 새 user_message 로 들어옴. "
-        "**directive 적재 dialogue 케이스 (📌 → 사용자에게 작업 큐 등록 확인)** "
+        "**directive 등록 dialogue 케이스 (📌 → 사용자에게 할 일 등록 확인)** "
         "는 `dialogue_style='register'` 명시 — bot 가 keycap 대신 "
         "⭕ 등록 / ✏️ 수정 / 🗑️ 제거 3 button 부착. choices 는 정확히 3개 "
-        "(`['등록','수정','제거']`) 로 보내고 body 는 '다음 지시를 작업 큐에 "
+        "(`['등록','수정','제거']`) 로 보내고 body 는 '이 지시를 할 일로 "
         "등록할까요?' 같이 자연 한국어. 단순 답이면 choices 생략."
     ),
     input_schema={

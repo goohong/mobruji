@@ -89,13 +89,43 @@ TOOL_EMOJI_MAP = {
 }
 
 
+# 기본 Claude tool (Bash / Read / Edit / Write / ...) noise skip 목록.
+# helper-tool-progress.sh 와 동일 정책 — 매 turn 다수 발생하는 read-only tool 은 thread 가시화에서 제외.
+_NOISY_BUILTIN_TOOLS = frozenset({"Read", "Glob", "Grep", "TaskList", "TaskGet", "TaskCreate", "TaskUpdate"})
+
+
 def _format_tool_progress(tool_name: str, tool_input: dict) -> str | None:
     """ToolUseBlock 의 tool_name + input 을 사용자 친화 1-line 으로.
 
     post_discord_message 는 답 자체이므로 progress 표시 X (중복 push 방지).
+    기본 Claude tool (Bash / Edit / Write / ...) 은 helper-tool-progress.sh 와
+    동일한 포맷 분기로 핵심 파라미터까지 노출 (#1356 — 사용자 가시 디테일).
     """
     if tool_name == "post_discord_message":
         return None  # 답은 _push_agent_reply 가 처리 — 중복 X
+
+    # 기본 Claude tool (mcp__nmae__ prefix 없음) — helper-tool-progress.sh 분기 거울.
+    if not tool_name.startswith("mcp__nmae__"):
+        if tool_name in _NOISY_BUILTIN_TOOLS:
+            return None
+        if tool_name == "Bash":
+            command = str(tool_input.get("command", "")).splitlines()[0][:100]
+            return f"💬 Bash: {command}"
+        if tool_name in ("Edit", "Write", "NotebookEdit"):
+            from os.path import basename
+            file_path = basename(str(tool_input.get("file_path", "?")))
+            return f"✏️ {tool_name}: {file_path}"
+        if tool_name in ("WebFetch", "WebSearch"):
+            target = str(tool_input.get("url") or tool_input.get("query") or "")[:100]
+            return f"🌐 {tool_name}: {target}"
+        if tool_name in ("Agent", "Task"):
+            desc = str(tool_input.get("description", ""))[:100]
+            return f"🤖 {tool_name}: {desc}"
+        if tool_name == "ToolSearch":
+            query_text = str(tool_input.get("query", ""))[:100]
+            return f"🔍 ToolSearch: {query_text}"
+        return f"🛠️ {tool_name}"
+
     base = tool_name.replace("mcp__nmae__", "")
     emoji = TOOL_EMOJI_MAP.get(base, "🔧")
 
@@ -190,7 +220,7 @@ def _load_nmae_system_prompt() -> str:
         except OSError:
             continue
     return (
-        "[STRICT] 너는 mobruji nmae. 사용자가 명시 적재 (events 'directive_approved') "
+        "[STRICT] 너는 mobruji nmae. 사용자가 명시 등록 (events 'directive_approved') "
         "한 directive 만 처리. 사용자 메시지 직접 처리 X — 단순 답 또는 '📌 누르세요' "
         "안내. launch_subagent 는 directive_approved event 만 trigger."
     )
@@ -278,7 +308,7 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         f"- channel_id='{channel_id}'\n"
         f"- {thread_directive}\n"
         f"- 답이 짧아도 (예: \"OK\", \"확인했습니다\") 반드시 tool 호출.\n"
-        f"- 작업 적재 의도면 \"📌 reaction 으로 적재해주세요\" 라고 답 (자율 등록 X)."
+        f"- 작업 등록 의도면 \"이 메시지를 할 일로 등록하시려면 📌 reaction 부탁드립니다\" 라고 답 (자율 등록 X)."
     )
 
     logger.info(
