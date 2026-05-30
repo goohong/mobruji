@@ -50,6 +50,10 @@ HOOK_NAMES=(
   # 2026-05-29: helper-tool-progress.sh — PreToolUse hook script.
   # spec: docs/features/helper-tool-visibility.md.
   helper-tool-progress.sh
+  # 2026-05-30 (#1360): pr-register-rev.sh — PostToolUse hook script.
+  # gh pr create / gh pr merge → rev directive 자동 등록.
+  # spec: docs/features/pr-webhook-rev-forum.md (옵션 D, PR 2-a).
+  pr-register-rev.sh
   # 2026-05-29: maestro-launch.sh — NCP 본체와 repo SoT 통합 (bootstrap watcher
   # + DISABLE_AUTOUPDATER export). spec: PR fix/maestro-launch-bootstrap-merge.
   maestro-launch.sh
