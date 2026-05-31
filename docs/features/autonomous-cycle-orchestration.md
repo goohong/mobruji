@@ -277,3 +277,4 @@ helper 는 다음만 직접 수정:
 ## 9) 결정 로그
 - 2026-05-23: 초안 작성 (status=implementing — 관련 PR 11건 이미 머지된 상태). 4 워크트리 동시 + cycle-status digest + worktree lock + helper boundary 4 축 정형화. release cut 자동화는 D12 사용자 결정 대기로 §7 오픈. 1 turn 1 launch + helper boundary 자동 enforce 도 후속 결정.
 - 2026-05-26: ADR-0019 머지 후 관련 spec 절 (§8) 추가 — 본 spec 의 메모리 학습 의존 패턴이 ADR-0019 event-driven 아키텍처의 promote 대상임을 cross-ref (PR #1077 머지 후속 audit).
+- 2026-05-31: directive 상태전이 본문 보존 fix (이슈 #1419 / PR #1420) — `--update-status` 가 forum starter 본문을 통째 PATCH 해 📌 제목·💬 요약·🔖 관련 내용을 매 전이마다 소멸시키던 문제를 `forum_get_starter` getter + 내용 보존형 수술 갱신으로 교정. rev-gate.yml 도 현재 라벨 재조회로 머지 deadlock 해소.
