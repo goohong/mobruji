@@ -270,7 +270,18 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
     bash tools/rev-queue/flock-fallback.sh exec tests/lock-dependent-test.sh   # 자동 fallback
   ```
 
-- 발견 사항은 PR 코멘트만. 이슈 등록은 nmae.
+- 발견 사항은 PR 코멘트만. 이슈 등록은 nmae (be/fe/rev 이슈 등록 금지 유지).
+- **findings 블록 emit 의무** (#1392, 2026-05-31 — 후속 이슈 자동 등록 코드 강제): 🔴/🟡 발견 사항이 1건 이상이면 PR 코멘트(또는 별도 코멘트) **마지막**에 아래 machine-readable 블록을 포함한다. `reviewed:claude` 라벨 부착 시 `.github/workflows/rev-findings-register.yml` 가 이 블록을 파싱해 후속 이슈를 **멱등 자동 등록**한다 (mmae 수작업 관례 폐지 — rev 는 여전히 이슈 등록 X, 보고만). 🟢 통과뿐이면 블록 생략 가능.
+  ```
+  <!-- rev-findings
+  [
+    {"severity":"🟡","title":"work-queue launch 재시도 cap 부재","scope":"infra","type":"fix","body":"… 한 줄 사유 + 보강안 …"},
+    {"severity":"🔴","title":"…","scope":"…","type":"…","body":"…"}
+  ]
+  -->
+  ```
+  - severity: `🔴`(시급) | `🟡`(권장) 만 등록 대상. title 필수. scope/type 는 §4 final 값 (미지정/오타 시 scope=infra, type=fix fallback). body = 한 줄 사유 + 보강안.
+  - 멱등 키 = `rev-finding:PR<n>:<title-slug>` (workflow 가 이슈 body 에 삽입) — 재라벨/재실행 시 중복 등록 안 됨.
 - **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. round 종료 보고 PATCH 시도 시도 양식 유지 의무 — 통째 덮어쓰기는 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-plan (mobruji-plan)
