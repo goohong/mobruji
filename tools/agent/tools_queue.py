@@ -29,6 +29,8 @@ IN_FLIGHT_STARTED_KEY = "in_flight_started"
 STALE_THRESHOLD = timedelta(hours=2)
 CYCLES = ("be", "fe", "rev", "plan")
 GH_TIMEOUT_SECONDS = 25
+# (#1390) launch 연속 실패 N회 초과 시 큐에서 제외 — 무한 재시도 + head-of-line block 차단.
+MAX_LAUNCH_ATTEMPTS = 3
 # (#1401) cycle forum thread 동기 생성 — discord-reply.sh 가 thread_id 를 stdout 으로
 # 즉시 반환 (forum_create_thread 는 비동기 event 라 id 즉시 미수신). 자율 경로가
 # 📌 dialogue thread 대신 전용 cycle forum thread 에 보고하게 하는 핵심.
@@ -262,19 +264,34 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
         except PausedError:
             break  # 전역 정지 — 이번 tick 중단
         except Exception as exc:  # noqa: BLE001
+            # (#1390) N회 연속 실패 → 큐에서 제외(격리) — 무한 재시도 + head-of-line block 차단.
+            attempts = int(directive.get("launch_attempts", 0)) + 1
+            directive["launch_attempts"] = attempts
+            ev.set_state(f"directive:{directive_id}", directive)
             logger.warning(
-                "work-queue launch 실패 cycle=%s directive=%s exc=%r — 큐 유지(재시도)",
-                cycle, directive_id, exc,
+                "work-queue launch 실패 cycle=%s directive=%s 시도=%d/%d exc=%r",
+                cycle, directive_id, attempts, MAX_LAUNCH_ATTEMPTS, exc,
             )
-            _comment(
-                report_thread,
-                f"❌ **{cycle}** launch 실패 — 큐에 유지하고 다음 tick 에 재시도합니다 "
-                f"(사유: {str(exc)[:120]}).",
-            )
+            if attempts >= MAX_LAUNCH_ATTEMPTS:
+                wq.dequeue(cycle, directive_id)
+                _comment(
+                    report_thread,
+                    f"❌ **{cycle}** launch {attempts}회 연속 실패 — 큐에서 제외했습니다 "
+                    f"(뒤 항목 진행). 수동 조치 필요. 사유: {str(exc)[:120]}.",
+                )
+            else:
+                _comment(
+                    report_thread,
+                    f"❌ **{cycle}** launch 실패 ({attempts}/{MAX_LAUNCH_ATTEMPTS}) — "
+                    f"큐 유지, 다음 tick 재시도. 사유: {str(exc)[:120]}.",
+                )
             continue
 
         # 성공 — 큐에서 제거 + 시작시각 기록 + board 갱신 + 댓글.
         wq.dequeue(cycle, directive_id)
+        if directive.get("launch_attempts"):  # 이전 실패 카운터 reset
+            directive["launch_attempts"] = 0
+            ev.set_state(f"directive:{directive_id}", directive)
         started[cycle] = _now_iso()
         ev.set_state(IN_FLIGHT_STARTED_KEY, started)
         ev.append_event(

@@ -52,7 +52,7 @@ stale 가드용: `in_flight_started` = `{ "<cycle>": "ISO8601" }` (launch 시각
 2. SDK query 프롬프트가 cycle 결정 + `enqueue_work` tool 호출 (launch_subagent **직접 호출 금지**). priority 는 description 의 🔴/시급 표현 보고 결정.
 3. `enqueue_work` (멱등 — 같은 directive_id 중복 적재 no-op):
    - `work_queue[cycle]` 에 item append.
-   - `update_directive_status(directive_id, "queued", assigned_cycle=cycle)` → board status `큐 대기`.
+   - `update_directive_status(directive_id, "assigned", assigned_cycle=cycle)` → board status `assigned` (DirectiveStatus enum 에 `queued` 값 없음 — #1391 정정).
    - 지시 thread 에 forum_comment: `📥 {cycle} 큐 {position}번째로 적재했습니다 (앞 대기 {N}건).`
 
 ### 4-2) dispatch — dispatcher 루프
@@ -62,8 +62,8 @@ stale 가드용: `in_flight_started` = `{ "<cycle>": "ISO8601" }` (launch 시각
   - cycle 이 `paused` 거나 `in_flight` 면 skip.
   - 큐 비었으면 skip.
   - `peek_next(cycle)` (priority desc → enqueued_at asc) → `launch_subagent(...)`:
-    - 성공: 큐에서 dequeue + `in_flight_started[cycle]=now` + `update_directive_status("진행 중")` + thread 댓글 `🚀 {cycle} 시작했습니다.`
-    - 실패(wrapper rc≠0 등): thread 댓글 `❌ launch 실패 — 큐에 유지, 재시도합니다 (사유: …).` (큐 유지 → 다음 tick 재시도, N회 초과 시 사용자 알림).
+    - 성공: 큐에서 dequeue + `in_flight_started[cycle]=now` + `update_directive_status("assigned")` + thread 댓글 `🚀 {cycle} 시작했습니다.`
+    - 실패(wrapper rc≠0 등): thread 댓글 `❌ launch 실패 (N/MAX) — 큐 유지, 재시도`. **N회(기본 3) 초과 시 큐에서 제외(격리) + 수동 조치 알림** (#1390 — 무한 재시도/head-of-line block 차단).
 
 ### 4-3) 완료
 `subagent_completed` (PR 머지 webhook 등) → `mark_subagent_completed(cycle)` → lock 해제 → 다음 tick 이 큐 다음 항목 launch.
