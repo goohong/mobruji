@@ -249,6 +249,25 @@
   --surface-cover-to: #d4d4d8; /* zinc-300 */
 
   /*
+   * Modal 의미 토큰 (ADR-0018 §4-2, PR #1263 매트릭스 sub-PR 1) —
+   * `recommend/components/SongDetailModal.tsx` backdrop + 모달 표면 swap.
+   *
+   * 기존 hardcode 매핑 (light → dark):
+   *   backdrop:
+   *     bg-zinc-900/60                          → --modal-backdrop
+   *     light/dark 동일 (zinc-900 @ 60% opacity) — backdrop 은 항상 어두운 톤.
+   *   모달 표면:
+   *     bg-white + dark:bg-zinc-900             → --surface-modal
+   *     `--bg-base` (white / zinc-950) 와 dark 가 한 단계 다름 (zinc-900 vs
+   *     zinc-950) — 모달 표면이 페이지 base 보다 한 단계 위로 떠 있는 의도라
+   *     별 토큰으로 분리 (Q1 (a) 채택, PR #1263 자율 결정).
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --modal-backdrop: rgba(24, 24, 27, 0.6); /* zinc-900 @ 60% */
+  --surface-modal: #ffffff; /* white */
+
+  /*
    * Chart bar + card surface 의미 토큰 (#1044 단계 4 PR 13) — history
    * `VoiceRangeProgressCard.tsx` SVG 차트 + section card surface 잔여 zinc 일괄
    * swap.
@@ -343,6 +362,10 @@ html.dark {
   --ring-soft-detail: #27272a; /* zinc-800 */
   --surface-cover-from: #27272a; /* zinc-800 */
   --surface-cover-to: #3f3f46; /* zinc-700 */
+
+  /* Modal 의미 토큰 dark swap (PR #1263 매트릭스 sub-PR 1) */
+  --modal-backdrop: rgba(24, 24, 27, 0.6); /* zinc-900 @ 60% — light/dark 동일 */
+  --surface-modal: #18181b; /* zinc-900 */
 
   /* Chart bar + card surface 의미 토큰 dark swap (PR 13) */
   --chart-bar-active-bg: #f4f4f5; /* zinc-100 */

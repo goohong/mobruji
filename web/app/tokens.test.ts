@@ -411,4 +411,23 @@ describe("design tokens (ADR-0018)", () => {
       expect(allDark).toMatch(new RegExp(`${token}:`));
     }
   });
+
+  /*
+   * ADR-0018 §4-2 (PR #1263 매트릭스 sub-PR 1) — `SongDetailModal.tsx` 의
+   * backdrop + 모달 표면 hardcode 의미 토큰화 회귀 가드.
+   *
+   * backdrop (zinc-900/60, light/dark 동일) + 모달 표면 (white / dark zinc-900).
+   * 다크 모드 swap 은 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  it("modal 의미 토큰 2종이 light + dark 모두 정의된다 (PR #1263 sub-PR 1)", () => {
+    const requiredTokens = ["--modal-backdrop", "--surface-modal"];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
 });
