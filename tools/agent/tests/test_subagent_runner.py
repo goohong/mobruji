@@ -121,6 +121,7 @@ def test_on_exec_success_no_pr_completes_and_notifies(monkeypatch):
 def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
     import subagent_runner as sr, tools_queue as tq
     monkeypatch.setattr(sr, "_find_pr_number", lambda wt: "9")
+    monkeypatch.setattr(sr, "_ensure_pr_directive_xref", lambda *a, **k: None)
     triggered, notes = [], []
     monkeypatch.setattr(tq, "enqueue_rev_for_pr_if_any",
                         lambda c, wt: triggered.append(c) or "9")
@@ -129,3 +130,13 @@ def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
     sr._on_exec_success("be", "d1", "제목", "T1", "/tmp/wt")
     assert triggered == ["be"]
     assert any("PR #9" in b for b in notes)
+
+
+def test_ensure_pr_directive_xref_skips_synthetic_rev_id(monkeypatch):
+    """rev-pr-* 합성 id / 빈 id 는 forum directive 가 아니므로 gh 호출 없이 즉시 반환."""
+    import subagent_runner as sr
+    called = []
+    monkeypatch.setattr(sr.subprocess, "run", lambda *a, **k: called.append(a) or None)
+    sr._ensure_pr_directive_xref("9", "rev-pr-1422", "/tmp/wt")
+    sr._ensure_pr_directive_xref("9", "", "/tmp/wt")
+    assert called == []  # gh 미호출

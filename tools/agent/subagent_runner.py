@@ -229,6 +229,34 @@ def _find_pr_number(worktree) -> str | None:  # noqa: ANN001
         return None
 
 
+def _ensure_pr_directive_xref(pr_num: str, directive_id: str, worktree) -> None:  # noqa: ANN001
+    """(#1427) PR 본문에 `directive: <id>` 크로스레프 멱등 보강.
+
+    bot.py 의 directive_complete_on_merge_loop 는 PR 본문의 `directive: <id>` 로
+    PR↔directive forum thread 를 연결해 머지 시 자동 완료(태그 ✅ + 본문 갱신)한다.
+    sub-agent 가 본문에 누락하면 머지해도 forum 태그·본문이 안 바뀌고 댓글만 남는다.
+    rev-pr-* 합성 id 는 forum directive 가 아니므로 제외.
+    """
+    if not directive_id or directive_id.startswith("rev-pr-"):
+        return
+    try:
+        cur = subprocess.run(
+            ["gh", "pr", "view", str(pr_num), "--json", "body", "-q", ".body"],
+            capture_output=True, text=True, timeout=15, check=False, cwd=str(worktree),
+        ).stdout
+        marker = f"directive: {directive_id}"
+        if marker in (cur or ""):
+            return
+        new_body = (cur.rstrip() + f"\n\n{marker}") if (cur and cur.strip()) else marker
+        subprocess.run(
+            ["gh", "pr", "edit", str(pr_num), "--body", new_body],
+            capture_output=True, text=True, timeout=15, check=False, cwd=str(worktree),
+        )
+        logger.info("PR #%s 본문에 directive xref 보강: %s", pr_num, directive_id)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("PR directive xref 보강 실패 pr=#%s exc=%r", pr_num, exc)
+
+
 def _notify_user_done(
     title: str,
     body: str,
@@ -270,6 +298,12 @@ def _on_exec_success(cycle: str, directive_id: str, title: str, thread_id: str, 
     import tools_cycle as tc
     pr_num = _find_pr_number(worktree)
     if pr_num:
+        # (#1427) PR 본문에 `directive: <id>` 크로스레프 보강. bot.py 의
+        # directive_complete_on_merge_loop 가 머지 시 이 크로스레프로 PR↔directive
+        # forum thread 를 연결해 자동 완료(태그 ✅ + 본문 갱신)한다. sub-agent 가
+        # 본문에 누락하면 머지해도 forum 태그·본문이 안 바뀌고 댓글만 남던 사고
+        # (사용자 정정 2026-05-31) → exec 후처리에서 멱등 보강.
+        _ensure_pr_directive_xref(pr_num, directive_id, worktree)
         try:
             tq.enqueue_rev_for_pr_if_any(cycle, worktree)
         except Exception as exc:  # noqa: BLE001
