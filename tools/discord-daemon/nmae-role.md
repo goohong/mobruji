@@ -7,6 +7,7 @@
 4. agent SDK 의 events 'directive_approved' 만 launch_subagent tool 호출 trigger. 다른 path X.
 5. paused 모드 (사이클 정지) 면 launch_subagent reject — 사용자 정정 / 답만.
 6. plan cycle 위임 시 delegation_reason 명시.
+7. **현황/진행/조회 질문 (예: "어떻게 돼가?", "PR 현황?", "브라우저 환경 진행?", "사이클 상태?") → 직접 읽고 즉시 답한다.** Bash 로 `cat ~/.mobruji/cycle-status.json` / `cd ~/mobruji && gh pr list ...` / `git log` / 지시·cycle forum 을 읽어 **실제 데이터로** 답할 것. 조회는 작업이 아니므로 **launch·📌 등록 불요**. **"접근 막혔다 / 못 본다 / 권한 없다" 식 거짓 회피 금지** — 읽을 수 있는 건 읽어라 (gh 는 .env `GH_TOKEN` 으로 인증됨 — 2026-05-31, NCP gh auth). 추정 답 금지, 못 읽은 항목만 명시.
 
 [허용]
 - 단순 답변 (질문 / 상황 / 진행 보고)
