@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import shlex
+import subprocess
 from pathlib import Path
 
 import events as ev
@@ -46,7 +47,7 @@ REPORT_TEMPLATE = """\
 **TO-BE** — 적용
 - <무엇을 어떻게 바꿨나 (진행·차단이면 바꿀 목표)>
 
-**남은 한 수** *(진행·차단 시만)*
+**다음** *(진행·차단 시만)*
 - <다음 액션 / 차단 사유>
 
 🔗 PR #<N>"""
@@ -165,17 +166,12 @@ async def run_subagent_execution(
                     f"⚠️ {cycle} sub-agent 비정상 종료 (rc={rc}). 로그 확인 필요.",
                 )
             if rc == 0:
-                # (#1403) 구현 sub-agent 가 만든 PR → rev 자동 감사 큐 적재 (자율 루프 완성).
-                # blocking git/gh → to_thread 로 event loop 비차단. rev 자신은 skip.
                 try:
-                    import tools_queue as tq
-                    pr_num = await asyncio.to_thread(
-                        tq.enqueue_rev_for_pr_if_any, cycle, wt,
+                    await asyncio.to_thread(
+                        _on_exec_success, cycle, directive_id, title, thread_id, wt,
                     )
-                    if pr_num:
-                        logger.info("rev auto-trigger: %s → PR #%s rev 큐 적재", cycle, pr_num)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("rev auto-trigger 호출 실패 cycle=%s exc=%r", cycle, exc)
+                    logger.warning("exec 완료 후처리 실패 cycle=%s exc=%r", cycle, exc)
         except asyncio.TimeoutError:
             proc.kill()
             logger.warning("subagent exec 타임아웃 kill: cycle=%s (%.0fs)", cycle, timeout)
@@ -201,3 +197,63 @@ def _safe_comment(thread_id: str, body: str) -> None:
         td.forum_comment(thread_id, body)
     except Exception as exc:  # noqa: BLE001
         logger.warning("subagent exec forum_comment 실패 thread=%s exc=%r", thread_id, exc)
+
+
+def _find_pr_number(worktree) -> str | None:  # noqa: ANN001
+    """워크트리 branch 의 열린 PR 번호 (read-only). 없으면 None."""
+    import json as _json
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        ).stdout.strip()
+        if not branch or branch in ("develop", "main", "HEAD"):
+            return None
+        out = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number"],
+            capture_output=True, text=True, timeout=25, check=False, cwd=str(worktree),
+        )
+        prs = _json.loads(out.stdout or "[]")
+        return str(prs[0]["number"]) if prs else None
+    except (OSError, subprocess.TimeoutExpired, _json.JSONDecodeError):
+        return None
+
+
+def _notify_user_done(title: str, body: str, thread_id: str = "") -> None:
+    """#모부르지 채널에 작업 완료 알림 (#1417) — discord-reply.sh 기본=메인 채널. graceful.
+
+    사용자 정정 2026-05-31: 사이클이 forum 에 결과 달면 모부르지 채널에도 '~작업이
+    끝났습니다 [링크] 확인 부탁' 이 와야 사용자가 forum 안 봐도 인지.
+    """
+    bin_ = "/home/mobruji/mobruji-bridge/tools/discord-daemon/discord-reply.sh"
+    guild = os.environ.get("DISCORD_GUILD_ID", "")
+    link = f"\nhttps://discord.com/channels/{guild}/{thread_id}" if (guild and thread_id) else ""
+    msg = f"✅ 요청하신 작업 — {title}\n{body}{link}\n확인 부탁드립니다."
+    try:
+        subprocess.run([bin_, msg], capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("완료 알림 push 실패 title=%s exc=%r", title[:40], exc)
+
+
+def _on_exec_success(cycle: str, directive_id: str, title: str, thread_id: str, worktree) -> None:  # noqa: ANN001
+    """sub-agent rc==0 후처리 (#1403 #1417):
+    - PR 있으면 → rev 자동 감사 (cycle != rev). directive 는 PR 머지 webhook 에서 완료.
+    - PR 없으면 (조회/분석 등) → 보고가 결과물 → directive 완료(🟢) 전이 + #모부르지 알림.
+    """
+    import tools_queue as tq
+    import tools_cycle as tc
+    pr_num = _find_pr_number(worktree)
+    if pr_num:
+        try:
+            tq.enqueue_rev_for_pr_if_any(cycle, worktree)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rev auto-trigger 실패 cycle=%s exc=%r", cycle, exc)
+        _notify_user_done(title, f"PR #{pr_num} 생성 — 감사 후 머지됩니다.", thread_id)
+        logger.info("exec 완료 cycle=%s → PR #%s", cycle, pr_num)
+    else:
+        try:
+            tc.set_directive_forum_status(directive_id, "completed")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("directive 완료 전이 실패 id=%s exc=%r", directive_id, exc)
+        _notify_user_done(title, "작업이 끝났습니다.", thread_id)
+        logger.info("exec 완료 cycle=%s directive=%s (PR 없음 → 완료)", cycle, directive_id)

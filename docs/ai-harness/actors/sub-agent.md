@@ -297,7 +297,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   **TO-BE** — 적용
   - <무엇을 어떻게 바꿨나>
 
-  **남은 한 수** *(진행·차단 시만)*
+  **다음** *(진행·차단 시만)*
   - <다음 / 차단 사유>
 
   🔗 PR #<N>

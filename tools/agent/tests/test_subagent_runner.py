@@ -92,3 +92,40 @@ def test_build_task_prompt_uses_asis_tobe_report_format(tmp_path):
     # thread 없을 때도 양식 포함
     p2 = sr.build_task_prompt("be", "d2", "t", "k", "")
     assert "AS-IS" in p2
+
+
+def test_find_pr_number(monkeypatch):
+    import subagent_runner as sr, types, json as _json
+    def fr(argv, **k):
+        if "rev-parse" in argv:
+            return types.SimpleNamespace(stdout="feat/x\n", returncode=0, stderr="")
+        return types.SimpleNamespace(stdout=_json.dumps([{"number": 7}]), returncode=0, stderr="")
+    monkeypatch.setattr(sr.subprocess, "run", fr)
+    assert sr._find_pr_number("/tmp/wt") == "7"
+
+
+def test_on_exec_success_no_pr_completes_and_notifies(monkeypatch):
+    """#1417: PR 없으면 directive 완료 전이 + #모부르지 알림."""
+    import subagent_runner as sr, tools_cycle as tc
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: None)
+    comp, notes = [], []
+    monkeypatch.setattr(tc, "set_directive_forum_status",
+                        lambda did, st, **k: comp.append((did, st)))
+    monkeypatch.setattr(sr, "_notify_user_done",
+                        lambda title, body, thread_id="": notes.append(body))
+    sr._on_exec_success("rev", "d1", "제목", "T1", "/tmp/wt")
+    assert comp == [("d1", "completed")]
+    assert notes and "끝났" in notes[0]
+
+
+def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
+    import subagent_runner as sr, tools_queue as tq
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: "9")
+    triggered, notes = [], []
+    monkeypatch.setattr(tq, "enqueue_rev_for_pr_if_any",
+                        lambda c, wt: triggered.append(c) or "9")
+    monkeypatch.setattr(sr, "_notify_user_done",
+                        lambda title, body, thread_id="": notes.append(body))
+    sr._on_exec_success("be", "d1", "제목", "T1", "/tmp/wt")
+    assert triggered == ["be"]
+    assert any("PR #9" in b for b in notes)
