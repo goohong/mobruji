@@ -287,6 +287,21 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   2. **사용자 채널(#모부르지)에 보고 push** — `discord-reply.sh "⚠️ PR #<n> rev 미통과 — <사유 1-2줄>. rework 필요."` (정중체, 2-4줄, 줄바꿈). 자율인데도 막힌 PR 을 사용자가 인지하게.
   3. 위 findings 블록(🔴/🟡)을 emit — `rev-blocked` 라벨 부착 시 `rev-findings-register.yml` 가 rework 이슈를 자동 등록 (통과·미통과 양쪽 트리거).
   - **rework 는 사용자 확인 후** (자동 재시도 X — 자율 산출물 오류는 사람이 한 번 본다, release gate 철학 일관). [[feedback-rev-release-gate]]
+- **작업 보고 양식 — AS-IS/TO-BE** (#1413, 2026-05-31, 모든 cycle 공통): cycle forum 진행/완료 보고는 **나열 금지**, 아래 Discord 마크다운 양식으로 (`build_task_prompt` 가 강제 — `REPORT_TEMPLATE`). AS-IS = **원래 어땠나**(변경 전/문제), TO-BE = **이렇게 바꿨다**(적용; 진행·차단이면 바꿀 목표). 코드펜스(```) 로 감싸지 말 것 (마크다운 렌더).
+  ```
+  ## <제목> · <✅ 완료 | 🟡 진행 | ⛔ 차단>
+
+  **AS-IS** — 원래
+  - <변경 전 / 문제였던 점>
+
+  **TO-BE** — 적용
+  - <무엇을 어떻게 바꿨나>
+
+  **남은 한 수** *(진행·차단 시만)*
+  - <다음 / 차단 사유>
+
+  🔗 PR #<N>
+  ```
 - **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. round 종료 보고 PATCH 시도 시도 양식 유지 의무 — 통째 덮어쓰기는 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-plan (mobruji-plan)
