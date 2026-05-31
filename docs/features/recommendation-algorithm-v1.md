@@ -212,7 +212,7 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **테스트**: tempoMatch 단위 7건(정확/거리감쇠/tolerance 초과/mood default/preferredBpm 우선/null song bpm/target 없음/fallback) + ScoreBreakdown 6번째 필드 단위 + SeedDeriver preferredBpm 회귀 2건 + 영속 라운드트립 2건 + E2E breakdown.tempoMatch 노출 + E2E 결정성 회귀 2건. 기존 23 테스트 시그니처 마이그레이션.
   - **DiversityPostProcessor / matchReason 무변경**: tempoMatch 는 가중 합산 score 에만 영향, top 신호 분기는 rangeFit/moodMatch 기반 유지.
 - 2026-05-22: **결정성 spec 정합화 — 로그 / 테스트 단정 / excludeSongIds seed 연계 명문화** (closes #59, 본 docs PR).
-  - **배경**: PR #48 결정성 복원 사후 감사(rev 사이클 3, https://github.com/goohong/mobruji/pull/48#issuecomment-4504980667)에서 발견된 🟡 3건을 spec에 영구히 박는다. PR #48 결정 로그 라인(§9, 2026-05-21)이 본 정합화에 의해 새로 추가됐다.
+  - **배경**: PR #48 결정성 복원 사후 코드 리뷰(rev 사이클 3, https://github.com/goohong/mobruji/pull/48#issuecomment-4504980667)에서 발견된 🟡 3건을 spec에 영구히 박는다. PR #48 결정 로그 라인(§9, 2026-05-21)이 본 정합화에 의해 새로 추가됐다.
   - **§3 비기능 결정성 절 신설**: (a) seed 계약(SeedDeriver 입력 시그니처가 결정성 단일 진실), (b) 비결정 호출 금지(컨벤션 §A-8 + ArchUnit #61), (c) 테스트 단정 레이어 분리, (d) 결정성 관측성 로그 1줄 — 4축으로 정리.
   - **§7 테스트 전략 정합**: "다른 입력 → 다른 순서" entropy 단정의 단일 진실을 단위 `SeedDeriverTest`로 옮기고 E2E는 안정 케이스(같은 입력 회귀)만 단정 — `RecommendationDeterminismTest.determinism_differentInput_yieldsDifferentOrder` 단정 약화 후보. 가중치/시드 데이터 미세 변경에 flaky한 단정을 회피한다.
   - **excludeSongIds seed 연계 (영구 명문화)**: §3 비기능 결정성 절에 "결정성에 영향을 주는 모든 요청 입력은 SeedDeriver 입력에 포함" 룰을 박았다. PR #74에서 이미 영속화·seed 연계 완료. 새 입력 필드 추가 시 동일 PR에서 SeedDeriver 시그니처도 확장.

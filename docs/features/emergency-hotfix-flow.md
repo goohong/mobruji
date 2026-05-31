@@ -13,7 +13,7 @@ last_reviewed: 2026-05-29
 
 ## 1) 개요 (What / Why)
 
-PR #1322 (`rev-gate-required-check-enforcement`) 가 `develop` `enforce_admins=true` + `main` branch protection 신설로 사전 머지 차단을 강화하면, P0 (production down / security 즉시 패치) 상황에서 rev 사이클 launch 대기 시간 (분~수십분) 이 user impact 를 키운다. 본 spec 은 **합법 우회 경로** 로 `type:emergency-hotfix` 라벨을 도입하여 즉시 머지 가능하게 하되, 사후 감사 + 회귀 검증 + 사용 빈도 추적 의무를 워크플로 + audit hook 로 강제한다.
+PR #1322 (`rev-gate-required-check-enforcement`) 가 `develop` `enforce_admins=true` + `main` branch protection 신설로 사전 머지 차단을 강화하면, P0 (production down / security 즉시 패치) 상황에서 rev 사이클 launch 대기 시간 (분~수십분) 이 user impact 를 키운다. 본 spec 은 **합법 우회 경로** 로 `type:emergency-hotfix` 라벨을 도입하여 즉시 머지 가능하게 하되, 사후 코드 리뷰 + 회귀 검증 + 사용 빈도 추적 의무를 워크플로 + audit hook 로 강제한다.
 
 핵심 원칙: **차단 우회를 금지하지 말고, 우회 경로를 합법화하고 사후 박제하라.** ([[feedback-evidence-based-root-cause]] §17 — 강제 메커니즘 우선, 메모리 학습 보조).
 

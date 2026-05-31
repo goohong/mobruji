@@ -12,7 +12,7 @@ last_reviewed: 2026-05-24
 # rev 세션 QA 실행 검증 프로토콜
 
 ## 1) 개요 (What / Why)
-- rev 세션은 머지된 PR(또는 머지 직전 PR)에 대해 **사후 코드 감사**와 **실 QA 실행 검증**을 모두 수행한다.
+- rev 세션은 머지된 PR(또는 머지 직전 PR)에 대해 **사후 코드 리뷰**와 **실 QA 실행 검증**을 모두 수행한다.
 - "에러를 막는 것이 1순위"라는 사용자 결정(2026-05-22)에 따라, 코드 리뷰만으로 잡히지 않는 다음 부류의 사고를 차단한다:
   - 런타임 에러 (NPE, 직렬화 실패, lazy init 등)
   - 환경 의존 실패 (Flyway baseline, 포트 충돌, env 변수 누락)
@@ -65,7 +65,7 @@ last_reviewed: 2026-05-24
 | **C. 코드 변경 (FE+BE 통합)** | A와 B 동시 또는 spec 상 contract 변경 | A + B + 통합 시나리오 (해당 도메인 smoke 시나리오 §5-3) | local 3-tier |
 | **D. auth & security** | `SessionAuthGuard`, `*AuthFilter`, `application*.yml` security 섹션, ADR 0011/0013 관련 | A 또는 B + 인증 우회 시도 (헤더 누락/위조 토큰) + 401/403 응답 검증 | local 3-tier |
 | **E. DB 마이그레이션** | `backend/src/main/resources/db/migration/**` 추가 | A + Flyway clean→migrate 재현 (`./gradlew flywayMigrate` 또는 docker compose 재기동) | local 3-tier (DB 재기동) |
-| **F. spec & docs only** | `docs/**`, `README.md`, `.md` 파일만 변경 | **QA 생략**. 코드 감사만 수행. | — |
+| **F. spec & docs only** | `docs/**`, `README.md`, `.md` 파일만 변경 | **QA 생략**. 코드 리뷰만 수행. | — |
 | **G. CI/infra only** | `.github/workflows/**`, `docker-compose*.yml` 변경 | dry-run으로 워크플로우 트리거(가능한 경우) 또는 변경 라인 사람 리뷰만 | — |
 | **H. 비기능 spec 위반 위험** | spec에 결정성/p95/관측성 요구가 있는 도메인(`recommendation`, `voice`) | A + spec §3 비기능 요구사항 한 줄씩 검증 | local 3-tier |
 
@@ -75,7 +75,7 @@ last_reviewed: 2026-05-24
 
 ```
 1. PR diff 확인 (gh pr diff <N> --name-only)
-   ├─ docs/**만 → 범주 F → QA 생략, 감사만
+   ├─ docs/**만 → 범주 F → QA 생략, 코드 리뷰만
    ├─ .github/workflows/** 또는 docker-compose → 범주 G → dry-run 또는 라인 리뷰
    └─ 코드 파일 포함 → 다음 단계
 2. 변경 영역 분류

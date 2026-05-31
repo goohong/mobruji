@@ -102,7 +102,7 @@ jobs:
               const labels = ['ai-generated', `scope:${scope}`, `type:${type}`];
 
               const body = [
-                `rev 감사 후속 자동 등록 — PR #${prNum} ${sev} finding.`,
+                `rev 코드 리뷰 후속 자동 등록 — PR #${prNum} ${sev} finding.`,
                 '',
                 (f.body || '').trim() || '(상세 본문 없음 — PR 코멘트 참조)',
                 '',

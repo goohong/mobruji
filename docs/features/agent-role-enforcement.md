@@ -65,7 +65,7 @@ Claude Code 가 `Agent` tool 호출 시 `subagent_type` 으로 매칭되는 정�
 |---|---|---|
 | be | `.claude/agents/be.md` | Spring Boot/Java 21 구현. 품질 게이트 `./gradlew checkstyleMain spotlessCheck test`. AskUserQuestion 금지. |
 | fe | `.claude/agents/fe.md` | Next.js/TypeScript 구현. `npm run lint && typecheck && test`. AskUserQuestion 금지. |
-| rev | `.claude/agents/rev.md` | 코드 감사 + QA. **구현 금지** — 발견은 후속 이슈/코멘트. release gate `reviewed:claude`. AskUserQuestion 금지. |
+| rev | `.claude/agents/rev.md` | 코드 리뷰 + 품질 검증(QA). **구현 금지** — 발견은 후속 이슈/코멘트. release gate `reviewed:claude`. AskUserQuestion 금지. |
 | plan | `.claude/agents/plan.md` | docs/ADR/Feature Spec. **프로덕션 코드 금지**. 06-domain-model §7 canonical. AskUserQuestion 금지. |
 
 각 파일 frontmatter `name` + `description` 으로 Claude Code 가 매칭. 본문이 system prompt 로 append.

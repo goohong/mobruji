@@ -530,10 +530,10 @@ hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mob
 | **maestro** | `mobruji` | 오케스트레이션·**기획·이슈 등록·백로그 우선순위**·공유 영역 관리·develop 점유 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
 | **be** | `mobruji-be` | 백엔드 **구현 전용** | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치, **기획/이슈 등록(maestro에 보고만)** |
 | **fe** | `mobruji-fe` | 프론트엔드 **구현 전용** | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치, **기획/이슈 등록(maestro에 보고만)** |
-| **rev** | `mobruji-rev` | 사후 감사 + **QA 실행 검증** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 maestro에 보고 |
+| **rev** | `mobruji-rev` | 사후 코드 리뷰 + **품질 검증(QA) 실행** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 maestro에 보고 |
 
 ### rev 세션의 QA 책임 (정형화)
-rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용자 결정 2026-05-22, "에러를 막는 것이 1순위"). 코드 리뷰만으로는 런타임 에러 / 환경 의존 / API 통합 실패가 잡히지 않기 때문.
+rev는 read-only 코드 리뷰 **외에 실 QA 실행 검증도 담당**한다 (사용자 결정 2026-05-22, "에러를 막는 것이 1순위"). 코드 리뷰만으로는 런타임 에러 / 환경 의존 / API 통합 실패가 잡히지 않기 때문.
 
 **정형 spec**: `docs/features/rev-qa-protocol.md` — QA 결정 트리, smoke 시나리오, 환경, 도구, 결과 형식이 모두 한 곳에 있다. rev sub-agent는 prompt 외 추가 질문 없이 이 spec만 보고 QA를 수행할 수 있어야 한다.
 
@@ -546,7 +546,7 @@ rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용�
 | **C. 통합 (FE+BE)** | A+B 동시 또는 contract 변경 | A + B + 도메인 smoke 시나리오 (음역/추천/좋아요/이력) |
 | **D. auth & security** | SessionAuthGuard / AuthFilter / security yml | A 또는 B + 헤더 누락/위조로 401/403 검증 |
 | **E. DB 마이그레이션** | `db/migration/**` 추가 | A + Flyway clean→migrate 재현 |
-| **F. spec & docs only** | `docs/**`만 변경 | **QA 생략**, 감사만 |
+| **F. spec & docs only** | `docs/**`만 변경 | **QA 생략**, 코드 리뷰만 |
 | **G. CI/infra only** | workflows / docker-compose만 변경 | dry-run 또는 라인 리뷰 |
 | **H. 비기능 spec 위반 위험** | 결정성/p95/관측성 도메인 (recommendation, voice) | A + spec §3 비기능 한 줄씩 검증 |
 

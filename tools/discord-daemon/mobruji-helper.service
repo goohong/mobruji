@@ -11,7 +11,7 @@
 #   `helper-launch.sh` 런처를 경유합니다.
 # - 런처와 역할 정의(`helper-role.md`)는 브랜치 전환에 흔들리지 않도록 `~/.mobruji`
 #   안에 두는 것이 SoT 입니다. 본 repo 안 사본(`tools/discord-daemon/helper-role.md`,
-#   `tools/discord-daemon/helper-launch.sh`)은 PR 리뷰/감사용 reference 입니다.
+#   `tools/discord-daemon/helper-launch.sh`)은 PR 리뷰/검증용 reference 입니다.
 # - 변경 절차: docs/features/helper-role-enforcement.md §운영 변경 절차 참조.
 
 [Unit]

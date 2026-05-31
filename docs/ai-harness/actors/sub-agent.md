@@ -254,7 +254,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   - diff > 0.1% + PR body `## visual baseline update` 섹션 의도 명시 (예: ADR-0018 swap 사유) → 🟢 사유 합리성 검토 후 통과, `rev단계1: 🟢 visual baseline 갱신 의도 확인` 코멘트
   - diff > 0.1% + PR body 섹션 부재 또는 "baseline 변경 없음" → 🔴 시각 회귀 의심, `reviewed:claude` 라벨 부착 차단 + fe sub-agent 에 root cause + PR body 보강 위임
   - 활성화 시점: visual-regression-ci.md §6 PR 3 (Playwright workflow + 최초 baseline 24 개) 머지 후. 본 룰 자체는 spec 박제 직후 사이클부터 학습 적용 — workflow 미배포 단계에선 매뉴얼 screenshot 매트릭스로 동등 판단.
-- **감사 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
+- **코드 리뷰 + 품질 검증 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
 - **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 🟡 Pre-merge review (단계 1) = cycle forum push / 🔵 Post-merge audit (단계 2) = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴). (단계 3 폐기 2026-05-30)
 - **round 종료 wrapper 호출 의무** (강제 메커니즘): rev 매 round 종료 직전 다음 명령 호출. 누락 = 사용자 가시화 X.
   ```bash

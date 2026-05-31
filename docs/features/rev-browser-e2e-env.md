@@ -222,7 +222,7 @@ export default defineConfig({
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
 - 2026-05-31: 초안 작성 (status=draft). directive `rev 브라우저 E2E 검증 환경 Feature Spec` 대응. 도구 = **Playwright** 결정 (web-e2e-playwright.md 와 단일 스위트 공유 + live URL `baseURL` env override + 무인 headless 적합 — §5-3). Cypress 명시 제외. 본 spec 경계 = rev 워크트리 **실행 환경 + 단계 2 live deploy 검증 레이어** (스위트 자체는 web-e2e-playwright, 시각 회귀는 visual-regression-ci 소관).
-- 2026-05-31: rev 감사(🔴) findings 반영 재작성 (PR #1400 / 이슈 #1405). (1) 폐기된 단계 3(production) 전면 제거 — `rev-e2e-2-stages.md §1-1` 2 단계 모델 정렬, production live(`mobruji.com`) 시나리오·시퀀스·역할분담 삭제. (2) 죽은 링크 `rev-e2e-3-stages.md` → 실재 `rev-e2e-2-stages.md` 전부 교체. (3) `web-e2e.yml` 현재형 단정 → "도입 예정"(web-e2e-playwright impl PR 3 산출물) 정정. (4) 죽은 메모리 링크 `[[feedback-spec-frontmatter-required]]` → frontmatter 강제 실체인 `.github/workflows/spec-status-check.yml` 인용으로 교체.
+- 2026-05-31: rev 코드 리뷰(🔴) findings 반영 재작성 (PR #1400 / 이슈 #1405). (1) 폐기된 단계 3(production) 전면 제거 — `rev-e2e-2-stages.md §1-1` 2 단계 모델 정렬, production live(`mobruji.com`) 시나리오·시퀀스·역할분담 삭제. (2) 죽은 링크 `rev-e2e-3-stages.md` → 실재 `rev-e2e-2-stages.md` 전부 교체. (3) `web-e2e.yml` 현재형 단정 → "도입 예정"(web-e2e-playwright impl PR 3 산출물) 정정. (4) 죽은 메모리 링크 `[[feedback-spec-frontmatter-required]]` → frontmatter 강제 실체인 `.github/workflows/spec-status-check.yml` 인용으로 교체.
 
 ## 10) 관련
 

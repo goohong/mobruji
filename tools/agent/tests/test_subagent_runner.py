@@ -21,11 +21,11 @@ def test_role_prompt_strips_frontmatter(tmp_path):
     d = tmp_path / ".claude" / "agents"
     d.mkdir(parents=True)
     (d / "rev.md").write_text(
-        "---\nname: rev\nmodel: x\n---\n너는 rev sub-agent다. 감사 전담.",
+        "---\nname: rev\nmodel: x\n---\n너는 rev sub-agent다. 코드 리뷰 + 품질 검증 전담.",
         encoding="utf-8",
     )
     body = sr.role_prompt("rev", tmp_path)
-    assert body == "너는 rev sub-agent다. 감사 전담."
+    assert body == "너는 rev sub-agent다. 코드 리뷰 + 품질 검증 전담."
     assert "name: rev" not in body
 
 
