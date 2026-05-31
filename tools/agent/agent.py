@@ -356,6 +356,8 @@ async def handle_pr_merged(payload: dict[str, Any]) -> None:
         logger.info("pr_merged → completed: %s", result)
     except Exception as exc:  # noqa: BLE001
         logger.warning("pr_merged handle 실패: %s exc=%r", payload, exc)
+    # (#1415) 지시 forum thread 태그 🔵 진행 중 → 🟢 완료 + board + body PATCH.
+    tc.set_directive_forum_status(str(directive_id), "completed", pr_url=pr_url or "")
 
 
 async def handle_subagent_completed(payload: dict[str, Any]) -> None:
@@ -461,12 +463,14 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
     )
 
     try:
-        # directive_approved 시 thread_id = directive 의 PinDialogueView thread
-        # (payload.get("thread_id") = bot.py 가 전달). 없으면 채널 push fallback.
-        dir_thread_id = payload.get("thread_id", "")
+        # (#1415) directive_approved 는 "cycle 판단 + enqueue_work" 내부 처리일 뿐 —
+        # raw tool progress (🔍 ToolSearch / 📥 enqueue_work) 를 지시 thread 로
+        # 스트리밍하면 "로그만 써놓고 감" 노이즈 (사용자 정정 2026-05-31). progress
+        # 억제(thread="") — 사용자 가시 보고는 enqueue_directive 의 "→ {cycle} 큐 적재"
+        # 댓글 + 지시 forum 태그 전이(🟡→🔵)가 담당.
         dir_channel_id = payload.get("channel_id", "")
         async for message in query(prompt=prompt, options=options):
-            await _emit_progress_from_sdk_message(message, dir_thread_id, dir_channel_id)
+            await _emit_progress_from_sdk_message(message, "", dir_channel_id)
             logger.debug("SDK directive_approved message: %r", message)
         logger.info("directive_approved handled: directive_id=%s", directive_id)
     except Exception as exc:  # noqa: BLE001
