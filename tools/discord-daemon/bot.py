@@ -364,7 +364,7 @@ REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
 REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
 # gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
 # 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
-REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "1h"
+REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "24h"
 # label 조회 시 사용할 label 이름 — rev sub-agent 가 Post-merge audit (단계 2)
 # 통과 시 부여.
 REV_POST_MERGE_PASS_LABEL: Final[str] = "rev-post-merge-pass"
@@ -4495,7 +4495,7 @@ def fetch_rev_post_merge_candidates(
     Returns:
         PR 번호 (int) 리스트. 호출 실패 시 빈 리스트.
     """
-    search_expr = f"merged:>{search_window} ago -label:{pass_label}"
+    search_expr = f"{_merged_since_qualifier(search_window)} -label:{pass_label}"
     cmd = [
         "gh",
         "pr",
@@ -4598,7 +4598,7 @@ DIRECTIVE_PR_BODY_RE: Final = re.compile(
     r"(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE
 )
 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT: Final[int] = 300  # 5분
-DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "1h"
+DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "24h"
 DIRECTIVE_COMPLETE_GH_TIMEOUT_SECONDS: Final[int] = 60
 
 # spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3)
@@ -4625,6 +4625,28 @@ def extract_directive_ids_from_body(body: str) -> list[str]:
     return result
 
 
+def _merged_since_qualifier(window: str) -> str:
+    """상대 윈도우('1h'/'24h'/'7d'/'30m')를 GitHub 검색용 절대 날짜 qualifier 로 변환.
+
+    (#1436) GitHub 검색은 `merged:>1h ago` 같은 상대 문법을 지원하지 않는다 — 항상
+    0건 매칭이라 directive 완료 전이·post-merge 감사 loop 가 한 번도 머지 PR 을 못
+    찾던 사고 (2026-05-31 E2E 테스트로 발견). `merged:>=YYYY-MM-DDTHH:MM:SS+00:00`
+    절대 시각으로 변환한다. 파싱 실패 시 1시간 fallback.
+    """
+    match = re.match(r"^\s*(\d+)\s*([mhd])\s*$", window or "")
+    if match:
+        amount, unit = int(match.group(1)), match.group(2)
+        delta = {
+            "m": timedelta(minutes=amount),
+            "h": timedelta(hours=amount),
+            "d": timedelta(days=amount),
+        }[unit]
+    else:
+        delta = timedelta(hours=1)
+    cutoff = datetime.now(timezone.utc) - delta
+    return f"merged:>={cutoff.strftime('%Y-%m-%dT%H:%M:%S+00:00')}"
+
+
 def fetch_recent_merged_prs_with_body(
     *,
     search_window: str = DIRECTIVE_COMPLETE_SEARCH_WINDOW,
@@ -4632,7 +4654,7 @@ def fetch_recent_merged_prs_with_body(
     runner=subprocess.run,
 ) -> list[dict]:
     """develop base 최근 머지 PR + body 포함 list 반환."""
-    search_expr = f"merged:>{search_window} ago"
+    search_expr = _merged_since_qualifier(search_window)
     cmd = [
         "gh", "pr", "list",
         "--state", "merged",
