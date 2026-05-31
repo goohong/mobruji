@@ -47,8 +47,18 @@ jobs:
               return;
             }
 
-            const labels = pr.labels.map(l => l.name);
-            core.info(`PR #${pr.number} labels: ${labels.join(', ') || '(none)'}`);
+            // (#1419) context.payload.pull_request.labels 는 event trigger 시점에
+            // 고정된 snapshot 이다. labeled event 는 라벨 1개가 추가되기 "직전"
+            // payload 를 담는 경우가 있고, re-run 은 원본 payload 를 그대로 재사용해
+            // reviewed:claude 부착 후에도 라벨을 인식하지 못한다 (auto-merge deadlock).
+            // 항상 현재 라벨을 API 로 재조회한다.
+            const { data: prData } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+            const labels = prData.labels.map(l => l.name);
+            core.info(`PR #${pr.number} labels (live): ${labels.join(', ') || '(none)'}`);
 
             // 1) Whitelist — rev 게이트 우회 허용 라벨 (2026-05-28: release 만 남김)
             const whitelist = ['type:release'];
