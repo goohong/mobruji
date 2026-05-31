@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,6 +27,7 @@ logger = logging.getLogger("agent.work_queue")
 IN_FLIGHT_STARTED_KEY = "in_flight_started"
 STALE_THRESHOLD = timedelta(hours=2)
 CYCLES = ("be", "fe", "rev", "plan")
+GH_TIMEOUT_SECONDS = 25
 
 
 def _now_iso() -> str:
@@ -92,6 +95,63 @@ def enqueue_directive(
         f"(앞 대기 {result['ahead']}건). 사이클이 비면 자동으로 시작합니다.",
     )
     return result
+
+
+def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
+    """sub-agent 완료 후 그 워크트리 branch 의 열린 PR 을 찾아 rev 큐에 자동 적재 (#1403).
+
+    자율 루프 완성: 구현 sub-agent → PR → **rev 자동 감사** → reviewed:claude → 자동 머지.
+
+    가드:
+      - source_cycle == 'rev' → skip (rev 는 PR 안 만들고 자기 감사 무한 루프 방지).
+      - PR 에 이미 reviewed:claude → skip.
+      - 멱등: directive_id = rev-pr-<N> (wq.enqueue 중복 차단).
+      - branch 가 develop/main/HEAD → skip.
+
+    blocking subprocess(git/gh) — 호출자(run_subagent_execution)가 asyncio.to_thread 로 감쌀 것.
+    Returns: 적재한 PR 번호(str) 또는 None.
+    """
+    if source_cycle == "rev":
+        return None
+    wt = str(worktree)
+    try:
+        branch = subprocess.run(
+            ["git", "-C", wt, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        ).stdout.strip()
+        if not branch or branch in ("develop", "main", "HEAD"):
+            return None
+        out = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--state", "open",
+             "--json", "number,labels"],
+            capture_output=True, text=True, timeout=GH_TIMEOUT_SECONDS,
+            check=False, cwd=wt,
+        )
+        prs = json.loads(out.stdout or "[]")
+        if not prs:
+            return None
+        pr = prs[0]
+        num = pr.get("number")
+        labels = [lbl.get("name") for lbl in pr.get("labels", [])]
+        if not num or "reviewed:claude" in labels:
+            return None
+        did = f"rev-pr-{num}"
+        if ev.get_state(f"directive:{did}") is None:
+            ev.set_state(f"directive:{did}", {
+                "directive_id": did, "summary": f"rev: PR #{num}",
+                "status": "polished", "thread_id": None, "assigned_cycle": "rev",
+                "delegation_reason": None, "pr_url": None, "closed_reason": None,
+            })
+        enqueue_directive(
+            "rev", did, f"rev 감사 — PR #{num}",
+            f"PR #{num} (branch {branch}) 3단계 e2e 감사 + reviewed:claude 판정/findings 블록. "
+            f"구현은 하지 말고 감사·보고만.",
+        )
+        logger.info("rev auto-trigger: PR #%s (source=%s) → rev 큐 적재", num, source_cycle)
+        return str(num)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        logger.warning("rev auto-trigger 실패 source=%s exc=%r", source_cycle, exc)
+        return None
 
 
 def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:

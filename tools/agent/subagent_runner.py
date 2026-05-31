@@ -139,6 +139,18 @@ async def run_subagent_execution(
                     thread_id,
                     f"⚠️ {cycle} sub-agent 비정상 종료 (rc={rc}). 로그 확인 필요.",
                 )
+            if rc == 0:
+                # (#1403) 구현 sub-agent 가 만든 PR → rev 자동 감사 큐 적재 (자율 루프 완성).
+                # blocking git/gh → to_thread 로 event loop 비차단. rev 자신은 skip.
+                try:
+                    import tools_queue as tq
+                    pr_num = await asyncio.to_thread(
+                        tq.enqueue_rev_for_pr_if_any, cycle, wt,
+                    )
+                    if pr_num:
+                        logger.info("rev auto-trigger: %s → PR #%s rev 큐 적재", cycle, pr_num)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("rev auto-trigger 호출 실패 cycle=%s exc=%r", cycle, exc)
         except asyncio.TimeoutError:
             proc.kill()
             logger.warning("subagent exec 타임아웃 kill: cycle=%s (%.0fs)", cycle, timeout)
