@@ -11,6 +11,11 @@ last_reviewed: 2026-05-28
 
 # Directive board — 📌 pushpin 명시 등록 (classify 자동 등록 폐지)
 
+> **갱신 (#1385, 2026-05-30)** — 빈 본문 사고 fix + 쓰레드 맥락 요약:
+> - **사고**: bot 답장 메시지에 (쓰레드 안에서) 📌 → `(빈 본문)` 으로 등록. root cause: `PinConfirmView._register` 가 확보한 summary 를 안 넘기고 `_do_register_directive` 의 fallback 재조회가 `text_channels` 만 훑어 쓰레드 안 메시지를 못 찾음.
+> - **fix (A)**: `_do_register_directive` fallback 이 active threads 도 조회 + `PinConfirmView._register` 가 즉시 raw 등록이 아니라 정리 → O/X → 수정 loop dialogue 경유 (매칭 없는 경로와 통일). `PinDialogueView._revise` 가드는 실제 thread 면 수정 loop 허용 (main 채널 fallback 만 차단). bot 자기 메시지에 📌 도 정상 등록.
+> - **요약 (B/C)**: 등록 직전 정리는 단건 메시지가 아니라 **핀 메시지가 속한 쓰레드 전체 맥락**(`_fetch_thread_context`)을 요약. `_run_claude_summarize` 가 `{짧은 제목, 정제 본문}` 동시 산출 — 제목은 forum thread name, 본문은 template `💬 요약` 섹션. 자세히: [[directive-board-template-and-tags]].
+
 ## 1) 개요 (What / Why)
 
 `bot.py` `on_message` 의 **classify 기반 자동 directive 등록** (PR #1173) 이 한국어 regex 한계로 false-positive 다발. 사용자 직접 정정 (2026-05-28): "무슨 말을 하면 바로 지시 포럼에 그말 그대로 추가되고 관리가 안되는 거 같은데 의도한바 맞아?".
