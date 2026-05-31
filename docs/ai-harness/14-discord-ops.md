@@ -497,9 +497,58 @@ bash /home/mobruji/.mobruji/discord-reply.sh \
 
 관련 룰: `actors/nmae.md §11-6` + 메모리 `[[feedback-nmae-forum-channel-enforce]]` `[[feedback-nmae-per-cycle-channel]]` `[[feedback-nmae-directive-board-update-flow]]`.
 
+### 8-7) Placeholder thread_id 가드 + `--digest` 단발 모드 fallback 종착점
+
+> **SoT**: `docs/features/cycle-forum-placeholder-guard.md §3` + §5-4 sequence. 본 sub-section 은 14-discord-ops 의 §8 forum mode 와 fallback chain 의 cross-ref 만 박제 — 가드 본문은 spec 우선.
+
+`~/.mobruji/last-launch-thread.txt` (그리고 친구 `helper-current-thread.txt`) 에 **Discord snowflake 가 아닌 짧은 placeholder 값** (예: `99999`) 이 박혀 fallback chain 이 줄줄이 fail 하는 사고 (2026-05-29 plan 사이클 evidence) 가 박제됨. 본 §8 forum mode 와의 관계:
+
+| 가드 | 위치 | 동작 | 본 §8 영향 |
+|---|---|---|---|
+| **F-1** (write guard) | `atomic_write_thread_file` (discord-reply.sh) | write 직전 `^[0-9]{17,20}$` snowflake 검증 — fail 시 write skip + stderr warning + exit 1 | `--forum-post` stdout (`thread_id`) 가 valid snowflake 일 때만 cache file 박힘. 호출자 sub-agent inherit chain 보호 |
+| **F-2** (`--auto-ack-thread` 추출 가드) | `jq -r '.id // empty'` 직후 | 추출 결과 재검증 — placeholder / 빈 값 / 너무 짧음 → write skip + stdout 빈 줄 (sub-agent inherit chain 끊김 명시) | helper / nmae 가 `--auto-ack-thread` 호출 시 Discord API 4xx 응답을 사일런스 발사 방지 |
+| **F-3** (reader quarantine) | `--auto-thread` mode reader (line 1800 부근) | file read 후 snowflake 검증 fail → file 자동 quarantine (`.txt.invalid-<ts>` rename) + 다음 fallback chain 진행 | `--auto-thread` → `--forum-comment` 등 forum mode 호출 직전의 마지막 가드. quarantine 후 fallback 종착점 = `--digest` 단발 모드 |
+| **F-4** (wrapper stale invalidate) | `agent-launch-wrapper.sh` pending-thread 부재 진입 | DIGEST fallback push 와 함께 stale `last-launch-thread.txt` invalidate (rename or truncate) | 다음 sub-agent launch 시점에 옛 placeholder 값 read 사고 차단 |
+
+#### `--digest` 단발 모드 fallback chain 종착점
+
+`--auto-thread` → `--forum-comment <thread_id>` → forum mode 가 모두 fail (placeholder quarantine + helper-current-thread 미가용) 일 때 sub-agent 의 룰 우선순위:
+
+1. `sub-agent.md §1-11` STRICT — **별 forum thread 생성 금지** (`--forum-post`, `--forum-post-auto-tag`, `forum_create_thread` 호출 금지). 즉 forum mode 로 새 thread 신설 fallback X.
+2. fallback 종착 = **`discord-reply.sh --digest` 단발 모드** 1회 push. cron digest (`§6` 본문) 와 별개의 즉시 단발 호출.
+3. 동반 의무: nmae 보고 (사이클 종결) + `[CYCLE-FORUM-GUARD]` stderr warning prefix.
+
+```bash
+# F-3 quarantine 후 --auto-thread reader 의 fallback 종착 예시 (sub-agent)
+LAUNCH_RAW=$(cat ~/.mobruji/last-launch-thread.txt 2>/dev/null || echo "")
+if ! validate_snowflake "$LAUNCH_RAW"; then
+  # F-3 quarantine 발사 (별 process)
+  bash /home/mobruji/.mobruji/discord-reply.sh --digest \
+    "⚠️ <sub-agent> 사이클 사일런스 — placeholder thread_id quarantined, forum mode fallback 종착. nmae 보고."
+  # nmae 알림 + 사이클 종결 (별 thread 신설 금지 룰 준수)
+fi
+```
+
+#### Cron digest 보고 의무 (`cycle-forum-placeholder-guard.md §3-비기능` 관측성)
+
+24h 누적 quarantine 카운트 → cron digest signature 에 추가:
+
+```
+🛡️ cycle-forum guard quarantine: 3건 (last-launch-thread placeholder) — 직전 24h
+```
+
+`tools/discord-daemon/check_env_drift.py` 류 cron 또는 bot.py `[CYCLE-FORUM-GUARD]` prefix journal grep → DIGEST 채널 push.
+
+관련 spec / 메모리:
+- `docs/features/cycle-forum-placeholder-guard.md` (F-1 ~ F-6 + 5-4 sequence + 8-Q1~Q4 오픈 질문)
+- `docs/features/cycle-forum-operation.md §5-6` fallback chain 본문 SoT
+- `06-domain-model.md §4` (등재 후보 — `placeholder thread id` / `launch thread cache file` / `cycle launch thread id`)
+- 메모리: `[[feedback-cycle-forum-placeholder-guard]]` (사고 박제 누적 시 등재)
+
 ## §7 변경 이력
 
 | 일자 | 변경 | PR |
 |---|---|---|
 | 2026-05-21 | 최초 작성 (카테고리 3종 + 명령 syntax 정의) | #175 |
-| 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | _본 PR_ |
+| 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | #1155 |
+| 2026-05-29 | §8-7 placeholder thread_id 가드 F-1~F-4 cross-ref + `--digest` 단발 모드 fallback 종착점 박제 (plan round 16) | #1336 |
