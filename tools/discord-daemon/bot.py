@@ -1409,8 +1409,11 @@ class PinConfirmView(discord.ui.View):
     ) -> None:
         if not await self._verify_user(interaction):
             return
+        # (#1423) '정리 중' 문구는 _start_pin_dialogue (thread 송신) 가 단독으로
+        # 담당한다. 여기서도 '정리 중' 으로 edit 하면 핀이 thread 안일 때 같은
+        # 채널에 2번 표시되는 중복 사고 → 여기는 distinct ack 만.
         await interaction.response.edit_message(
-            content="📝 정리 중… (쓰레드 맥락 요약, 5-15초)", view=None,
+            content="✅ 새 지시로 등록합니다 — 아래에서 확인해 주세요.", view=None,
         )
         # (#1385) 즉시 raw 등록 X — 정리 → O/X → 수정 loop dialogue 경유로 통일.
         # 핀 메시지 + 그 쓰레드 전체 맥락을 요약해 제목/본문 산출.
@@ -1699,7 +1702,7 @@ class PinDialogueView(discord.ui.View):
             logger.warning("📌 pin dialogue thread archive 실패: %r", exc)
         self.stop()
 
-    @discord.ui.button(label="수정", style=discord.ButtonStyle.secondary, emoji="❌")
+    @discord.ui.button(label="수정", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def _revise(
         self, interaction: discord.Interaction, _btn: discord.ui.Button,
     ) -> None:
@@ -1738,12 +1741,16 @@ class PinDialogueView(discord.ui.View):
             self.stop()
             return
 
-        await interaction.response.edit_message(
+        # (#1423) 계획을 덮어쓰지 않는다 — 사용자가 위 계획 본문을 보며 수정점을
+        # 짚을 수 있어야 한다. 기존 dialogue 메시지는 본문 유지 + 버튼만 제거하고,
+        # 수정 안내는 별도 메시지로 보낸다 (과거엔 edit_message 로 계획을 안내문으로
+        # 대체해 사용자가 원본 계획을 못 보던 사고).
+        await interaction.response.edit_message(view=None)
+        await interaction.followup.send(
             content=(
-                f"❓ 어떤 점을 수정할까요? 이 thread 안에 메시지로 입력하세요. "
+                f"❓ 위 계획에서 어떤 점을 수정할까요? 이 thread 에 메시지로 입력해 주세요. "
                 f"(현재 시도 {self._revision_count + 1}/{PIN_DIALOGUE_MAX_REVISIONS})"
             ),
-            view=None,
         )
 
         # 사용자 다음 메시지 wait (thread 안)
@@ -1790,6 +1797,25 @@ class PinDialogueView(discord.ui.View):
             ),
             view=new_view,
         )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def _cancel(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        # (#1423) 등록(⭕)/수정(✏️)/취소(🗑️) 3버튼 중 취소 — 과거엔 취소 버튼이
+        # 없어 timeout 외엔 등록을 멈출 방법이 없었다.
+        if not await self._verify_user(interaction):
+            return
+        await interaction.response.edit_message(
+            content="🗑️ 등록을 취소했습니다. 다시 등록하려면 메시지에 📌 reaction 해주세요.",
+            view=None,
+        )
+        try:
+            if isinstance(self._thread, discord.Thread):
+                await self._thread.edit(archived=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin dialogue 취소 thread archive 실패: %r", exc)
         self.stop()
 
     async def on_timeout(self) -> None:
