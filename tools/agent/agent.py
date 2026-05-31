@@ -80,6 +80,7 @@ TOOL_EMOJI_MAP = {
     "forum_retag": "🏷️",
     "forum_edit_starter": "✏️",
     "launch_subagent": "🚀",
+    "enqueue_work": "📥",
     "register_directive_pending": "📌",
     "update_directive_status": "🔄",
     "get_cycle_state": "🔍",
@@ -371,13 +372,16 @@ cycle 결정 규칙:
 - user_cycle_hint 가 "auto" 가 아니면 (사용자 명시 위임) → **그 cycle 강제 사용, 판단 X**.
 - "auto" 이면 summary + description 보고 적절한 cycle (be / fe / rev / plan) 판단.
 
-처리:
+처리 (#1388 — 즉시 launch 폐지, 큐 적재):
 1. 위 규칙으로 cycle 결정.
-2. plan 위임 시 delegation_reason 명시 (신규 도메인, 다중 PR, 사용자 의도 분석 필요 등).
-3. launch_subagent tool 호출 — directive_id, cycle, title, task 인자.
-4. paused 모드면 launch_subagent 가 PausedError raise — 사용자에게 알림 (post_discord_message).
+2. **enqueue_work tool 호출** — directive_id, cycle, title, task, priority 인자.
+   - **launch_subagent 직접 호출 금지**. 사이클이 busy 여도 큐에 쌓이고 dispatcher 가
+     사이클 idle 시 자동 launch 한다 (사용자 정정 2026-05-31: "큐에 쌓아 동시·효율 처리").
+   - priority: description 에 🔴 / 시급 / 긴급 표현이 있으면 10, 아니면 0.
+3. enqueue_work 가 directive-board status 갱신 + 지시 thread 에 "큐 N번째 적재" 댓글을
+   자동으로 남긴다 (사용자 가시 지표). 별도 post_discord_message 불필요.
 
-사용자 메시지 직접 처리 X (메시지는 이미 적재 완료 — 단순 launch 만).
+사용자 메시지 직접 처리 X (메시지는 이미 적재 완료 — 큐 적재만).
 """
 
 
@@ -402,6 +406,26 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
     summary = payload.get("summary", "")
     description = payload.get("description", "")
     cycle_hint = payload.get("cycle_hint", "")
+
+    # (#1388) directive 를 agent state 에 mirror — bot.py 📌 flow 로 등록된 directive
+    # 는 agent state 에 없어, enqueue_work / launch_subagent 의 directive 조회가
+    # 실패(ValueError "directive not found")하던 사고 동시 fix. 이미 있으면 thread_id 만 보강.
+    dir_key = f"directive:{directive_id}"
+    existing = ev.get_state(dir_key)
+    if existing is None:
+        ev.set_state(dir_key, {
+            "directive_id": directive_id,
+            "summary": summary,
+            "status": "polished",
+            "thread_id": payload.get("thread_id") or None,
+            "assigned_cycle": cycle_hint or None,
+            "delegation_reason": None,
+            "pr_url": None,
+            "closed_reason": None,
+        })
+    elif not existing.get("thread_id") and payload.get("thread_id"):
+        existing["thread_id"] = payload.get("thread_id")
+        ev.set_state(dir_key, existing)
 
     logger.info(
         "directive_approved: directive_id=%s cycle_hint=%s — SDK query 시작",
@@ -491,6 +515,16 @@ async def agent_loop(stop_event: asyncio.Event) -> None:
                     kind, event_id, exc,
                 )
             ev.mark_consumed(event_id, "agent")
+
+        # (#1388) work-queue dispatcher — 매 tick 사이클 idle 체크 후 큐 다음 항목 launch
+        # + stale in_flight 회복. graceful — 실패해도 loop 차단 X.
+        try:
+            import tools_queue as tq
+            launched = tq.dispatch_once()
+            if launched:
+                logger.info("work-queue dispatched: %s", launched)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("work-queue dispatch_once 실패: %r", exc)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_SECONDS)

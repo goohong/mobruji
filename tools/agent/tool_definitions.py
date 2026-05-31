@@ -22,6 +22,7 @@ except ImportError:  # CI / 개발 환경에서 SDK 미설치 시 graceful
             return fn
         return decorator
 
+import events as ev
 import tools_cycle as tc
 import tools_discord as td
 import tools_pause as tp
@@ -190,6 +191,39 @@ async def launch_subagent(args: dict[str, Any]) -> dict[str, Any]:
         return _wrap_error(exc)
 
 
+# ─── 6-b. enqueue_work (#1388) ────────────────────────────────────────────────
+
+
+@tool(
+    name="enqueue_work",
+    description=(
+        "directive 를 cycle 작업 큐에 적재 (즉시 launch 폐지 — dispatcher 가 사이클 "
+        "idle 시 자동 시작). 사이클이 busy 여도 ERROR 아님 — 대기열에 쌓인다. "
+        "priority: 🔴 시급은 10, 기본 0. cycle: be/fe/rev/plan. "
+        "directive_approved 처리는 launch_subagent 직접 호출 금지 — 본 tool 사용."
+    ),
+    input_schema={
+        "cycle": str,
+        "directive_id": str,
+        "title": str,
+        "task": str,
+        "priority": int,  # optional — 🔴 시급=10, 기본 0
+    },
+)
+async def enqueue_work(args: dict[str, Any]) -> dict[str, Any]:
+    import tools_queue as tq
+    try:
+        directive = ev.get_state(f"directive:{args['directive_id']}") or {}
+        result = tq.enqueue_directive(
+            args["cycle"], args["directive_id"], args["title"], args["task"],
+            thread_id=directive.get("thread_id") or "",
+            priority=int(args.get("priority") or 0),
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
 # ─── 7. register_directive_pending ───────────────────────────────────────────
 
 
@@ -326,6 +360,7 @@ ALL_TOOLS = [
     forum_retag,
     forum_edit_starter,
     launch_subagent,
+    enqueue_work,
     register_directive_pending,
     update_directive_status,
     get_cycle_state,

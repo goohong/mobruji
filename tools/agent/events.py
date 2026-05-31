@@ -32,6 +32,9 @@ EventKind = Literal[
     # agent ↔ subagent
     "subagent_launched",   # agent: be/fe/rev/plan 사이클 시작
     "subagent_completed",  # agent: sub-agent 종료
+    # work-queue (#1388) — directive 즉시 launch 폐지 → 사이클별 큐 적재 + dispatch
+    "work_enqueued",       # agent: directive 를 cycle 큐에 적재
+    "work_dispatched",     # agent: dispatcher 가 큐 항목 launch
     # cycle / directive transitions (state 변경 audit)
     "cycle_state_changed",
     "directive_registered",
