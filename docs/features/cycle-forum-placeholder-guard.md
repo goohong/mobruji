@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: [1247, 1248, 1336]
+related_prs: [1247, 1248, 1306, 1336]
 last_reviewed: 2026-05-29
 ---
 
@@ -31,6 +31,8 @@ last_reviewed: 2026-05-29
 - [ ] **F-2**: `--auto-ack-thread` mode 의 `jq -r '.id // empty'` 추출 결과를 `validate_snowflake` 한 번 더 통과한 뒤에만 atomic write. 추출 실패 / placeholder / 너무 짧은 값 → file write skip + stderr warning + stdout 빈 줄 (sub-agent inherit chain 끊기 명시).
 - [ ] **F-3**: `--auto-thread` mode 의 reader (line 1800 부근) 가 file 에서 read 한 값이 snowflake 가 아닐 경우 — **file 자동 quarantine** (rename to `.txt.invalid-<ts>`) + 다음 fallback chain 으로 진행. quarantine 이력은 stderr warning 으로 표시.
 - [ ] **F-4**: `agent-launch-wrapper.sh` 가 pending-thread-id 부재 + `AGENT_LAUNCH_CREATE_FORUM_THREAD!=1` 조건 진입 시 — DIGEST fallback push 와 함께 **현재 stale `last-launch-thread.txt` 가 있으면 invalidate (rename 또는 truncate)**. 다음 sub-agent 가 옛 값 read 사고 차단.
+
+  **F-4 보강 (plan round 15 — `--digest` 단발 모드 신설 spec)**: 본 wrapper fallback 진입 시점에 `discord-reply.sh` 는 단발 DIGEST mode (`--digest "<msg>"`) 로 1회 push + **forum thread 신설 / forum-edit / forum-comment / auto-thread / cycle-channel 호출 절대 금지**. 사유 = plan round 14 발견 — `--cycle-channel <role>` 가 launch 보고 push 시 wrapper 가 자동으로 cycle forum thread 생성 (sub-agent.md §1-11 STRICT 위반 — sub-agent 의 별 thread 생성 금지 룰을 wrapper 자체가 우회). placeholder fallback 시점은 정확히 "launch thread 신설 실패 + DIGEST 채널만 가용" 상태이므로 `--digest` 단발 모드가 적정 — thread 신설 시도는 placeholder 사고 재발 + STRICT 룰 위반의 이중 risk. 본 단발 모드 spec 은 §5-4-1 (단발 DIGEST 모드 시퀀스) + §6 PR F (`discord-reply.sh --digest` mode 단발 보장 가드) SoT.
 - [ ] **F-5**: unit test (`tests/test_helper_ux.py` 등 fake curl mock 사용 테스트) 는 setUp 에서 `LAUNCH_THREAD_FILE`, `HELPER_THREAD_FILE` env 를 tmpdir 경로로 override 의무. test 폴더에 `conftest.py` 또는 helper fixture 추가 — production `~/.mobruji/` 오염 차단.
 - [ ] **F-6**: pre-commit / pre-push hook 에 `LAUNCH_THREAD_FILE` env override 누락된 fake curl mock 테스트 grep 가드 — 신규 test 가 isolation 안 한 채 머지 차단.
 
@@ -102,6 +104,53 @@ discord-reply.sh --auto-thread "<milestone>"
 사용자 가시
 ```
 
+### 5-4-1) `--digest` 단발 모드 시퀀스 (F-4 보강, plan round 15)
+
+`agent-launch-wrapper.sh` 가 placeholder fallback 진입 시 (pending-thread-id 부재 + `AGENT_LAUNCH_CREATE_FORUM_THREAD!=1` 또는 `last-launch-thread.txt` invalid snowflake 박힘) **유일하게 허용된 push 채널 = `discord-reply.sh --digest` 단발 1회**.
+
+```
+[wrapper entry — placeholder fallback 조건 detect]
+    ↓
+1. last-launch-thread.txt invalidate (F-4 본문 — rename .invalid-<ts>)
+    ↓
+2. DIGEST 단발 push (forum thread 미생성, cycle-channel 미호출):
+   bash discord-reply.sh --digest "🚧 cycle launch — placeholder fallback (role=<be|fe|rev|plan>, reason=<no-pending-thread|invalid-snowflake>)"
+    ↓
+3. sub-agent launch prompt emit (LAUNCH_THREAD_ID 미설정 — sub-agent 가 inherit 안 함)
+    ↓
+4. sub-agent first turn = sub-agent.md §1-11 STRICT — 별 thread 생성 금지 유지 ↓
+   sub-agent 자기 보고 채널 = DIGEST 채널 단발 push 만 (--reply 또는 --digest)
+    ↓
+5. 사용자 가시화 = DIGEST 채널 fallback 안내 1건 — nmae watchdog idle 분류 정상 진행
+```
+
+**금지 호출 매트릭스** (wrapper fallback 진입 후):
+
+| 호출 | 허용 여부 | 사유 |
+|---|---|---|
+| `discord-reply.sh --digest "<msg>"` | ✅ 허용 | 단발 1회, forum thread 미생성 |
+| `discord-reply.sh --reply "<msg>"` | ✅ 허용 (옵션) | DIGEST 채널 외 사용자 reply 단발 |
+| `discord-reply.sh --forum-post ...` | ❌ 금지 | sub-agent.md §1-11 STRICT 위반 (별 thread 생성) |
+| `discord-reply.sh --forum-post-auto-tag ...` | ❌ 금지 | 동상 |
+| `discord-reply.sh --auto-thread ...` | ❌ 금지 | placeholder file invalidate 직후 — 다음 fallback chain 무한 루프 risk |
+| `discord-reply.sh --auto-ack-thread ...` | ❌ 금지 | 동상 |
+| `discord-reply.sh --cycle-channel <role>` | ❌ 금지 (단, 본 spec §5-4-2 예외) | wrapper 가 자동 forum thread 생성 시도 (round 14 발견 사고 root cause) |
+| `forum_create_thread` 직접 호출 | ❌ 금지 | sub-agent.md §1-11 STRICT 위반 + placeholder 사고 재발 risk |
+
+### 5-4-2) `--cycle-channel` 옵션의 thread 자동 생성 사고 분석 (plan round 14 발견)
+
+plan round 14 자체 cycle 진행 중 발견 — `agent-launch-wrapper.sh` 가 `--cycle-channel plan` 옵션으로 launch 보고를 push 할 때 (정상 fallback chain 의 일부) wrapper 가 `discord-reply.sh` 내부적으로 `forum_create_thread_if_missing` 분기를 호출 → **placeholder fallback 진입 직후에도 별 forum thread 가 신설되는 사고**. 이는:
+
+1. sub-agent.md §1-11 STRICT 위반 (sub-agent 가 별 thread 생성 금지 — wrapper 자체도 fallback path 에서 동일 룰 적용 의무)
+2. placeholder fallback 의 의도 (DIGEST 단발 = "사일런스 회피 최소 푸시") 와 충돌
+3. round 14 evidence: fallback 진입 → wrapper 자동 thread 생성 → 새 thread_id 가 atomic_write → 다음 sub-agent 가 본 thread 에 inherit → 1 task = 1 thread 룰 위반 risk (이미 helper 가 별 thread 신설한 경우)
+
+**fix 방향** (PR F SoT):
+
+- `discord-reply.sh --digest` 단발 모드 = `--cycle-channel` 분기 진입 X 강제. `--digest` flag 만 단독 사용 시 wrapper 가 thread 신설 시도 안 함 — DIGEST 채널 webhook push 만 수행 후 exit.
+- `agent-launch-wrapper.sh` 의 placeholder fallback 분기에서 `--cycle-channel` 옵션 호출 제거 — `--digest` 단발만 사용.
+- `--cycle-channel <role>` 옵션 자체는 정상 launch path (pending-thread-id 유효 + snowflake 검증 통과) 에서만 유효 — placeholder fallback 진입 시 이미 thread 신설 의도 X 가 보장된 상태이므로 이 옵션 호출 자체가 의미 불일치.
+
 ### 5-5) DB 마이그레이션
 
 해당 없음.
@@ -119,6 +168,10 @@ discord-reply.sh --auto-thread "<milestone>"
 - [ ] **PR C**: `agent-launch-wrapper.sh` F-4 — pending-thread-id 부재 진입 시 `last-launch-thread.txt` stale invalidate.
 - [ ] **PR D**: test fixture / conftest 작성 (F-5) + 기존 `test_helper_ux.py` 류 setUp 에 env override 추가 일괄 리팩터.
 - [ ] **PR E**: pre-push hook (F-6) — `printf '{"id":` mock 사용 테스트 grep + `LAUNCH_THREAD_FILE` env override 부재 시 차단. `06-domain-model.md §4` 용어 등재 함께.
+- [ ] **PR F (plan round 15 박제)**: `discord-reply.sh --digest` 단발 모드 보장 가드 + `agent-launch-wrapper.sh` placeholder fallback 분기 호출 정정. F-4 보강 (`--digest` 단발 spec) 구현 분기:
+  - **PR F-1** (`discord-reply.sh`): `--digest` flag 단독 호출 시 (다른 mode flag 부재) `forum_create_thread_if_missing` / `start_thread_from_message` / `atomic_write_thread_file` 분기 진입 차단 — DIGEST webhook push 만 수행 후 exit 0. unit test 추가 (`tests/test_digest_single_shot.bats` 후보) — fake curl mock 으로 thread 신설 시도 0회 검증.
+  - **PR F-2** (`agent-launch-wrapper.sh`): placeholder fallback 분기 (`pending-thread-id` 부재 + `AGENT_LAUNCH_CREATE_FORUM_THREAD!=1`) 에서 `--cycle-channel <role>` 호출 제거 → `--digest "<fallback msg>"` 단발 호출로 대체. 정상 launch path (pending-thread-id 유효 + snowflake 검증 통과) 의 `--cycle-channel` 호출은 그대로 유지 (회귀 0).
+  - **PR F-3** (`tools/discord-daemon/README.md` 또는 `docs/ai-harness/14-discord-ops.md` cross-ref): `--digest` 단발 모드의 의도 + 금지 호출 매트릭스 (§5-4-1) 박제. sub-agent / helper / nmae 모두 본 cross-ref 1회 read 로 단발 모드 의미 학습.
 
 ### 보호 영역 변경 여부 (필수 명시)
 
@@ -129,7 +182,7 @@ discord-reply.sh --auto-thread "<milestone>"
 - **단위**: discord-reply.sh bash unit test (`tests/test_atomic_write_thread_file.bats` 후보) — `validate_snowflake` 호출 분기, atomic_write skip 검증, quarantine rename 검증.
 - **통합**: `tests/test_helper_ux.py` 류 fake curl mock + `LAUNCH_THREAD_FILE` tmp override 로 production 오염 없는지 검증.
 - **회귀 가드**: 기존 `99999` mock 응답 케이스에서 production `~/.mobruji/last-launch-thread.txt` mtime 변경 안 됨을 명시 검증.
-- **e2e**: 본 spec 은 인프라 스크립트라 rev 단계 1 (코드 review) + 단계 2 (dev 환경 helper turn 1회 검증) 통과로 충분. 단계 3 production 검증은 release PR 단계에서.
+- **e2e**: 본 spec 은 인프라 스크립트라 rev 🟡 Pre-merge review (단계 1, 코드 review) + 🔵 Post-merge audit (단계 2, dev 환경 helper turn 1회 검증) 통과로 충분. 단계 3 (production 검증) 폐기 — `rev-e2e-2-stages.md §1-1` (production 환경 부재).
 
 ## 8) 오픈 질문
 
@@ -143,4 +196,5 @@ discord-reply.sh --auto-thread "<milestone>"
 ## 9) 결정 로그
 
 - 2026-05-29: 초안 작성 (status=draft). 직전 plan 사이클 §5-1 evidence (`~/.mobruji/last-launch-thread.txt` = "99999") + root cause 추적 (`test_helper_ux.py` fake curl mock `{"id": "99999"}` 가 isolation 부재로 production file 오염) + discord-reply.sh atomic_write_thread_file 검증 없음 + `validate_snowflake` 이미 17-20자 강제이긴 하나 read 시점만 catch (write 시점은 무방어).
+- **2026-05-29 (plan round 15)**: **F-4 보강 + §5-4-1 단발 DIGEST 모드 시퀀스 + §5-4-2 `--cycle-channel` 사고 분석 + §6 PR F 신설**. 사유: plan round 14 자체 cycle 진행 중 발견 — `agent-launch-wrapper.sh` 가 placeholder fallback 진입 시 `--cycle-channel <role>` 옵션으로 launch 보고 push 하면 wrapper 가 자동으로 cycle forum thread 신설 (sub-agent.md §1-11 STRICT 위반 — sub-agent 의 별 thread 생성 금지 룰을 wrapper 자체가 우회). evidence = round 14 placeholder fallback 사이클의 wrapper 동작 추적. fix 방향: (a) `discord-reply.sh --digest` 단발 모드 보장 (PR F-1) — `--digest` flag 단독 호출 시 forum thread 신설 분기 차단 + DIGEST webhook push 만 / (b) `agent-launch-wrapper.sh` placeholder fallback 분기에서 `--cycle-channel` 호출 제거 → `--digest` 단발 호출 대체 (PR F-2) — 정상 launch path 의 `--cycle-channel` 은 회귀 0 유지 / (c) `tools/discord-daemon/README.md` 또는 `14-discord-ops.md` cross-ref 박제 (PR F-3) — 단발 모드 의도 + 금지 호출 매트릭스 학습. 채택 = F-4 본문 prose 보강 + §5-4-1 (단발 DIGEST 모드 시퀀스 8 행 금지 호출 매트릭스) + §5-4-2 (round 14 사고 root cause 분석) + §6 PR F 3 sub-PR (F-1 / F-2 / F-3) 박제. 본 보강의 직접 trigger = sub-agent.md §1-11 STRICT 위반 risk 차단 + placeholder fallback "사일런스 회피 최소 푸시" 의도 보존 + thread 생성 사고 root cause 100% catch. 본 PR (plan round 15) 머지 후 rev 단계 1 audit grep — `cycle-forum-placeholder-guard.md §5-4-1·§5-4-2` 가 정합 학습 자료 인지 확인.
 - **2026-05-29 (plan round 16)**: §6 PR B (F-3 quarantine) 의 fallback chain 종착점 박제 — `--digest` 단발 모드 1회 push + nmae 보고. `sub-agent.md §1-11` STRICT 룰 (별 forum thread 신설 금지) 의 fallback 종착이 사일런스가 아니라 "DIGEST 단발 + nmae 알림" 임을 명시. `docs/ai-harness/14-discord-ops.md §8-7` 신설 sub-section 에 F-1~F-4 매트릭스 + `--digest` 종착점 + cron digest signature (`🛡️ cycle-forum guard quarantine: N건`) cross-ref 박제 완료. 본 spec §6 PR B 항목에 14-discord-ops cross-ref 마커 추가 + frontmatter `related_prs` 에 #1336 추가. plan round 16 trigger.

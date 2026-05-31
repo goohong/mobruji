@@ -61,7 +61,7 @@
  * 기존 `@media (prefers-color-scheme: dark)` 자동 분기는 제거 — system 모드는
  * THEME_INIT_SCRIPT 가 런타임에 `<html.dark>` 를 토글해 동일한 효과를 낸다.
  */
-:where(html.dark) {
+html.dark {
   --background: #0a0a0a;
   --foreground: #ededed;
 }

@@ -92,3 +92,4 @@ tools/discord-daemon/inbox.jsonl
 **/htmlcov/
 **/.mypy_cache/
 **/.ruff_cache/
+.claude/worktrees/

@@ -13,7 +13,7 @@ last_reviewed: 2026-05-29
 
 ## 1) 개요 (What / Why)
 
-`rev-gate.yml` workflow 는 `reviewed:claude` 라벨 + rev 단계 1 통과 코멘트 부재 시 PR 머지를 차단하는 게이트로 설계되어 있다 (`docs/features/rev-e2e-3-stages.md §3-1`, [[feedback-rev-e2e-always]]). `develop` branch 의 `required_status_checks` 에 `rev-gate` 가 등록되어 있어 비-admin merge 는 정상 차단된다.
+`rev-gate.yml` workflow 는 `reviewed:claude` 라벨 + rev 🟡 Pre-merge review (단계 1) 통과 코멘트 부재 시 PR 머지를 차단하는 게이트로 설계되어 있다 (`docs/features/rev-e2e-2-stages.md §3-1`, [[feedback-rev-e2e-always]]). `develop` branch 의 `required_status_checks` 에 `rev-gate` 가 등록되어 있어 비-admin merge 는 정상 차단된다.
 
 그러나 2026-05-29 PR #1318 사고로 다음 우회 경로가 노출되었다:
 

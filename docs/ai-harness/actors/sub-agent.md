@@ -229,6 +229,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 품질 게이트 (push 전): `cd backend && ./gradlew checkstyleMain spotlessCheck test` — 포맷 위반 시 `./gradlew spotlessApply`
 - **새 엔드포인트 = 성공 케이스 E2E (RestAssured) 필수** (`07-testing-guide.md`)
 - DDD 계층 침범 금지 (Controller → Repository 직접 호출 등)
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-fe (mobruji-fe)
 
@@ -238,23 +239,23 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - API 호출 = `web/src/lib/api/` 집중. `NEXT_PUBLIC_*` / 서버 전용 구분.
 - **의존성 설치 / `node_modules` 조작 절대 금지** ([[feedback-npm-install-symlink-swap]]) — `npm install` / `npm ci` / `pnpm install` / `yarn` / `rm` / `mv` / `ln` 모두 금지. symlink 보존이 필수. 누락 (`Cannot find module …`) 시 nmae 보고 + 사이클 일시 정지.
 - `web/package.json` / lockfile 변경 = 정보성 보호 영역 (라벨 의무 폐지 2026-05-28, rev 가 review 대행).
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-rev (mobruji-rev)
 
 - **파일 수정 절대 금지** (`pre-push` hook 으로 push 차단). PR 코멘트만.
-- **매 사이클 첫 액션**: `bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all` — 3 stage 큐 discovery ([[feedback-rev-queue-script]]). 큐 출력 → §E-2 절차 → 라벨 → 다음 호출 자동 제외 (멱등성).
-- **3단계 e2e** ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]):
-  - 단계 1 (PR 머지 전) — `reviewed:claude` 라벨 + ✅/📝/❌ 코멘트 의무 (없으면 `rev-gate.yml` fail → 머지 차단)
-  - 단계 2 (develop 머지 후 dev 환경) — `rev-post-merge-pass` / `regression:dev` 라벨
-  - 단계 3 (release 후 production) — `rev-prod-pass` / `regression:prod` 라벨
-  - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-3-stages.md` SoT**
+- **매 사이클 첫 액션**: `bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all` — 2 stage 큐 discovery ([[feedback-rev-queue-script]]). 큐 출력 → §E-2 절차 → 라벨 → 다음 호출 자동 제외 (멱등성). (단계 3 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`; `rev-queue.sh stage3` 정리는 별 PR rev2s-4)
+- **2단계 e2e** ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]):
+  - 🟡 Pre-merge review (단계 1, PR 머지 전) — `reviewed:claude` 라벨 + ✅/📝/❌ 코멘트 의무 (없으면 `rev-gate.yml` fail → 머지 차단)
+  - 🔵 Post-merge audit (단계 2, develop 머지 후 dev 환경) — `rev-post-merge-pass` / `regression:dev` 라벨
+  - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-2-stages.md` SoT**
 - **단계 1 visual diff 판단 (사전 박제, `scope:web` PR — Playwright workflow 활성화 후 자동 가드)**: `docs/features/visual-regression-ci.md §3-4` SoT — workflow 배포 전이라도 룰 우선 학습 (ADR-0019 망각 가드 정신). 3-row 판단 매트릭스 요약:
   - diff = 0 (no change) → 🟢 통과, 코멘트 생략 가능
   - diff > 0.1% + PR body `## visual baseline update` 섹션 의도 명시 (예: ADR-0018 swap 사유) → 🟢 사유 합리성 검토 후 통과, `rev단계1: 🟢 visual baseline 갱신 의도 확인` 코멘트
   - diff > 0.1% + PR body 섹션 부재 또는 "baseline 변경 없음" → 🔴 시각 회귀 의심, `reviewed:claude` 라벨 부착 차단 + fe sub-agent 에 root cause + PR body 보강 위임
   - 활성화 시점: visual-regression-ci.md §6 PR 3 (Playwright workflow + 최초 baseline 24 개) 머지 후. 본 룰 자체는 spec 박제 직후 사이클부터 학습 적용 — workflow 미배포 단계에선 매뉴얼 screenshot 매트릭스로 동등 판단.
 - **감사 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
-- **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 단계 1 = cycle forum push / 단계 2,3 = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴).
+- **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 🟡 Pre-merge review (단계 1) = cycle forum push / 🔵 Post-merge audit (단계 2) = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴). (단계 3 폐기 2026-05-30)
 - **round 종료 wrapper 호출 의무** (강제 메커니즘): rev 매 round 종료 직전 다음 명령 호출. 누락 = 사용자 가시화 X.
   ```bash
   bash tools/rev-queue/round-summary.sh <round_id>
@@ -269,7 +270,39 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
     bash tools/rev-queue/flock-fallback.sh exec tests/lock-dependent-test.sh   # 자동 fallback
   ```
 
-- 발견 사항은 PR 코멘트만. 이슈 등록은 nmae.
+- 발견 사항은 PR 코멘트만. 이슈 등록은 nmae (be/fe/rev 이슈 등록 금지 유지).
+- **findings 블록 emit 의무** (#1392, 2026-05-31 — 후속 이슈 자동 등록 코드 강제): 🔴/🟡 발견 사항이 1건 이상이면 PR 코멘트(또는 별도 코멘트) **마지막**에 아래 machine-readable 블록을 포함한다. `reviewed:claude` 라벨 부착 시 `.github/workflows/rev-findings-register.yml` 가 이 블록을 파싱해 후속 이슈를 **멱등 자동 등록**한다 (mmae 수작업 관례 폐지 — rev 는 여전히 이슈 등록 X, 보고만). 🟢 통과뿐이면 블록 생략 가능.
+  ```
+  <!-- rev-findings
+  [
+    {"severity":"🟡","title":"work-queue launch 재시도 cap 부재","scope":"infra","type":"fix","body":"… 한 줄 사유 + 보강안 …"},
+    {"severity":"🔴","title":"…","scope":"…","type":"…","body":"…"}
+  ]
+  -->
+  ```
+  - severity: `🔴`(시급) | `🟡`(권장) 만 등록 대상. title 필수. scope/type 는 §4 final 값 (미지정/오타 시 scope=infra, type=fix fallback). body = 한 줄 사유 + 보강안.
+  - 멱등 키 = `rev-finding:PR<n>:<title-slug>` (workflow 가 이슈 body 에 삽입) — 재라벨/재실행 시 중복 등록 안 됨.
+- **미통과(차단) 시 사용자 보고 + 추적 의무** (#1406, 2026-05-31 — 실패 경로 비대칭 해소): 🔴 로 `reviewed:claude` 를 **부착하지 않을 때**(머지 차단), rev 는 다음을 한다 (통과 경로는 자동인데 실패 경로가 막다른 길+무보고였던 갭):
+  1. PR 에 **`rev-blocked` 라벨 부착** (`gh pr edit <n> --add-label rev-blocked`).
+  2. **사용자 채널(#모부르지)에 보고 push** — `discord-reply.sh "⚠️ PR #<n> rev 미통과 — <사유 1-2줄>. rework 필요."` (정중체, 2-4줄, 줄바꿈). 자율인데도 막힌 PR 을 사용자가 인지하게.
+  3. 위 findings 블록(🔴/🟡)을 emit — `rev-blocked` 라벨 부착 시 `rev-findings-register.yml` 가 rework 이슈를 자동 등록 (통과·미통과 양쪽 트리거).
+  - **rework 는 사용자 확인 후** (자동 재시도 X — 자율 산출물 오류는 사람이 한 번 본다, release gate 철학 일관). [[feedback-rev-release-gate]]
+- **작업 보고 양식 — AS-IS/TO-BE** (#1413, 2026-05-31, 모든 cycle 공통): cycle forum 진행/완료 보고는 **나열 금지**, 아래 Discord 마크다운 양식으로 (`build_task_prompt` 가 강제 — `REPORT_TEMPLATE`). AS-IS = **원래 어땠나**(변경 전/문제), TO-BE = **이렇게 바꿨다**(적용; 진행·차단이면 바꿀 목표). 코드펜스(```) 로 감싸지 말 것 (마크다운 렌더).
+  ```
+  ## <제목> · <✅ 완료 | 🟡 진행 | ⛔ 차단>
+
+  **AS-IS** — 원래
+  - <변경 전 / 문제였던 점>
+
+  **TO-BE** — 적용
+  - <무엇을 어떻게 바꿨나>
+
+  **다음** *(진행·차단 시만)*
+  - <다음 / 차단 사유>
+
+  🔗 PR #<N>
+  ```
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. round 종료 보고 PATCH 시도 시도 양식 유지 의무 — 통째 덮어쓰기는 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-plan (mobruji-plan)
 
@@ -277,6 +310,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 금지: `backend/**` / `web/**` 구현 코드
 - ADR/spec 규약: `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md`
 - **신규 spec frontmatter 의무** ([[feedback-spec-frontmatter-required]]) — `_template.md` 의 `---` ~ `---` 블록 복제 + 8 필드 (feature/slug/status/owner/scope/related_issues/related_prs/last_reviewed). push 전 `head -1 docs/features/<slug>.md` 가 `---` 인지 확인. `.github/workflows/spec-status-check.yml` 가 누락 시 fail → 머지 차단.
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-helper (sub-agent, helper 본체가 `Agent` 도구로 launch)
 

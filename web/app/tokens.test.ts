@@ -68,7 +68,7 @@ describe("design tokens (ADR-0018)", () => {
     // tokens.css 의 dark mode block 은 2개 (color + shadow) 이상 — `--danger-bg`
     // / `--danger-border` / `--danger-fg-*` 가 그 중 color block 안에 있어야 함.
     const allDarkBlocks = [
-      ...tokens.matchAll(/:where\(html\.dark\)\s*{([\s\S]*?)}/g),
+      ...tokens.matchAll(/html\.dark\s*{([\s\S]*?)}/g),
     ].map((m) => m[1]);
     expect(allDarkBlocks.length).toBeGreaterThanOrEqual(1);
     const allDarkContent = allDarkBlocks.join("\n");
@@ -92,7 +92,7 @@ describe("design tokens (ADR-0018)", () => {
     }
     // dark mode swap block 안에 같은 토큰들이 재정의됨.
     const darkBlockMatch = tokens.match(
-      /:where\(html\.dark\)\s*{([\s\S]*?)}/m,
+      /html\.dark\s*{([\s\S]*?)}/m,
     );
     expect(darkBlockMatch).not.toBeNull();
     const darkBlock = darkBlockMatch?.[1] ?? "";
@@ -141,7 +141,7 @@ describe("design tokens (ADR-0018)", () => {
     expect(tokens).toMatch(/--shadow-brand:\s*0 8px 32px/);
     // dark mode 가 shadow 도 강도 swap.
     const darkBlockOccurrences =
-      tokens.match(/:where\(html\.dark\)/g)?.length ?? 0;
+      tokens.match(/html\.dark/g)?.length ?? 0;
     expect(darkBlockOccurrences).toBeGreaterThanOrEqual(2);
   });
 
@@ -240,7 +240,7 @@ describe("design tokens (ADR-0018)", () => {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
     // dark swap block 안에 같은 토큰들이 재정의됨.
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -257,7 +257,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -275,7 +275,7 @@ describe("design tokens (ADR-0018)", () => {
    */
   it("disclaimer 텍스트 토큰이 light + dark 모두 정의된다 (PR 11)", () => {
     expect(tokens).toMatch(/--text-disclaimer:/);
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     expect(allDark).toMatch(/--text-disclaimer:/);
   });
@@ -291,7 +291,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -307,7 +307,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -319,7 +319,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -346,7 +346,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -376,7 +376,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));
@@ -405,7 +405,7 @@ describe("design tokens (ADR-0018)", () => {
     for (const token of requiredTokens) {
       expect(tokens).toMatch(new RegExp(`${token}:`));
     }
-    const darkBlocks = tokens.match(/:where\(html\.dark\)\s*{([\s\S]*?)}/g) ?? [];
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
     const allDark = darkBlocks.join("\n");
     for (const token of requiredTokens) {
       expect(allDark).toMatch(new RegExp(`${token}:`));

@@ -271,7 +271,7 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 | #모부르지-지시 (forum) | `DIRECTIVE_BOARD_FORUM_ID` | 1507992370044600442 | 사용자 지시 directive-board. event-driven (PR #1129) — `directive_append.sh` / `directive_status.sh` 호출 |
 | #모부르지-be (forum) | `BE_CHANNEL_ID` / `BE_FORUM_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
 | #모부르지-fe (forum) | `FE_CHANNEL_ID` / `FE_FORUM_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
-| #모부르지-rev (forum) | `REV_CHANNEL_ID` / `REV_FORUM_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 3단계 e2e 진행 |
+| #모부르지-rev (forum) | `REV_CHANNEL_ID` / `REV_FORUM_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 2단계 e2e 진행 (🟡 Pre-merge review / 🔵 Post-merge audit) |
 | #모부르지-plan (forum) | `PLAN_CHANNEL_ID` / `PLAN_FORUM_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
 | #모부르지-digest | `DIGEST_CHANNEL_ID` | 1507617571384328312 | cron digest 본체 (5분 주기 4 사이클 aggregate) + cross-cycle decision |
 | #모부르지-알림 / -alert | `ALERT_CHANNEL_ID` | (별도) | cycle idle / future-ts ERROR / Claude usage 임계 |

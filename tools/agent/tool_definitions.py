@@ -22,6 +22,7 @@ except ImportError:  # CI / 개발 환경에서 SDK 미설치 시 graceful
             return fn
         return decorator
 
+import events as ev
 import tools_cycle as tc
 import tools_discord as td
 import tools_pause as tp
@@ -48,9 +49,14 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
     name="post_discord_message",
     description=(
         "Discord 채널 또는 thread 에 message push. "
-        "선택지 묻는 케이스 (cycle 결정, O/X, 우선순위 등) 는 `choices` 인자에 "
-        "최대 10 선택지 list 전달 — bot 가 keycap reaction (1️⃣-🔟) 미리 부착, "
-        "사용자 tap 시 그 선택지 value 가 새 user_message 로 들어옴. 단순 답이면 choices 생략."
+        "선택지 묻는 케이스 (cycle 결정, 우선순위 등) 는 `choices` 인자에 "
+        "최대 10 선택지 list 전달 — bot 가 keycap reaction (1️⃣–🔟) 미리 부착, "
+        "사용자 tap 시 그 value 가 새 user_message 로 들어옴. "
+        "**directive 등록 dialogue 케이스 (📌 → 사용자에게 할 일 등록 확인)** "
+        "는 `dialogue_style='register'` 명시 — bot 가 keycap 대신 "
+        "⭕ 등록 / ✏️ 수정 / 🗑️ 제거 3 button 부착. choices 는 정확히 3개 "
+        "(`['등록','수정','제거']`) 로 보내고 body 는 '이 지시를 할 일로 "
+        "등록할까요?' 같이 자연 한국어. 단순 답이면 choices 생략."
     ),
     input_schema={
         "channel_id": str,
@@ -58,12 +64,13 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
         "reply_to_msg_id": str,
         "thread_id": str,
         "choices": list,  # optional — 선택지 list (str). 최대 10.
+        "dialogue_style": str,  # optional — "register" 또는 "default".
     },
 )
 async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
     try:
         # B안 가시화 + 선택지 UI (2026-05-29) — choices payload 에 포함.
-        # bot.py _push_agent_reply 가 choices 보고 keycap reaction 부착.
+        # bot.py _push_agent_reply 가 choices + dialogue_style 보고 emoji 부착.
         choices_raw = args.get("choices")
         choices = (
             [str(c)[:80] for c in choices_raw[:10]]
@@ -76,6 +83,7 @@ async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
             reply_to_msg_id=args.get("reply_to_msg_id") or None,
             thread_id=args.get("thread_id") or None,
             choices=choices,
+            dialogue_style=args.get("dialogue_style") or None,
         )
         return _wrap_result(result)
     except Exception as exc:  # noqa: BLE001
@@ -137,7 +145,16 @@ async def forum_retag(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     name="forum_edit_starter",
-    description="Forum thread starter body PATCH. 진행 / 완료 footer update.",
+    description=(
+        "Forum thread starter body PATCH. "
+        "**template 양식 의무** (PR F, docs/features/forum-starter-template-guard.md §5-2 SoT) — "
+        "기존 starter body 를 read 한 뒤 6 marker 유지한 채 update. "
+        "marker = 📌 또는 🛠️ title / 💬 본문(원본) / 🆔 id / 📋 진행 / 🔖 관련 / footer (---/_갱신:). "
+        "PASS_THRESHOLD = 5/6 — 1 marker 누락 허용 (graceful), 2개+ 누락 시 bot.py 가 graceful reject + DIGEST alert + cycle thread 댓글 + violation jsonl 박제. "
+        "정상 예 (5/6 또는 6/6): cat <<EOF 안 6 marker 모두 유지한 milestone PATCH "
+        "(📌 **title** / 💬 원본 / 🆔 id / 📋 진행 [x] / 🔖 관련 PR #1234 / --- _갱신: ts_). "
+        "위배 예 (0/6): 'PR #1234 작업 끝' (모든 marker 없음 — 즉시 reject)."
+    ),
     input_schema={"thread_id": str, "body": str},
 )
 async def forum_edit_starter(args: dict[str, Any]) -> dict[str, Any]:
@@ -168,6 +185,39 @@ async def launch_subagent(args: dict[str, Any]) -> dict[str, Any]:
     try:
         result = ts.launch_subagent(
             args["cycle"], args["directive_id"], args["title"], args["task"],
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
+# ─── 6-b. enqueue_work (#1388) ────────────────────────────────────────────────
+
+
+@tool(
+    name="enqueue_work",
+    description=(
+        "directive 를 cycle 작업 큐에 적재 (즉시 launch 폐지 — dispatcher 가 사이클 "
+        "idle 시 자동 시작). 사이클이 busy 여도 ERROR 아님 — 대기열에 쌓인다. "
+        "priority: 🔴 시급은 10, 기본 0. cycle: be/fe/rev/plan. "
+        "directive_approved 처리는 launch_subagent 직접 호출 금지 — 본 tool 사용."
+    ),
+    input_schema={
+        "cycle": str,
+        "directive_id": str,
+        "title": str,
+        "task": str,
+        "priority": int,  # optional — 🔴 시급=10, 기본 0
+    },
+)
+async def enqueue_work(args: dict[str, Any]) -> dict[str, Any]:
+    import tools_queue as tq
+    try:
+        directive = ev.get_state(f"directive:{args['directive_id']}") or {}
+        result = tq.enqueue_directive(
+            args["cycle"], args["directive_id"], args["title"], args["task"],
+            thread_id=directive.get("thread_id") or "",
+            priority=int(args.get("priority") or 0),
         )
         return _wrap_result(result)
     except Exception as exc:  # noqa: BLE001
@@ -243,6 +293,28 @@ async def get_cycle_state(args: dict[str, Any]) -> dict[str, Any]:
         return _wrap_error(exc)
 
 
+# ─── 9-b. get_pr_status (#1414) ───────────────────────────────────────────────
+
+
+@tool(
+    name="get_pr_status",
+    description=(
+        "열린 PR 목록 조회 (읽기 전용 gh pr list). 사용자의 'PR 현황 / 진행 어떻게 "
+        "돼가?' 류 질문에 실제 데이터로 답할 때 사용. search 로 키워드 필터 가능. "
+        "(raw Bash 대신 본 스코프 도구 — write 명령 불가.)"
+    ),
+    input_schema={"search": str, "limit": int},
+)
+async def get_pr_status(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tc.get_pr_status(
+            search=args.get("search") or "", limit=int(args.get("limit") or 15),
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
 # ─── 10. set_cycle_state ─────────────────────────────────────────────────────
 
 
@@ -310,9 +382,11 @@ ALL_TOOLS = [
     forum_retag,
     forum_edit_starter,
     launch_subagent,
+    enqueue_work,
     register_directive_pending,
     update_directive_status,
     get_cycle_state,
+    get_pr_status,
     set_cycle_state,
     pause_global,
     resume_global,

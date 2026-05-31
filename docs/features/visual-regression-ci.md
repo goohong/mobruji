@@ -87,7 +87,7 @@ baseline drift 발견 시 rev sub-agent 의 판단:
 |---|---|---|---|
 | **PR (`scope:web` 만)** | PR push / synchronize | `.github/workflows/visual-regression.yml` (신설) | 단계 1 — 머지 차단 게이트 |
 | **dev 서버 nightly** | cron `0 18 * * *` (KST 03:00) | `.github/workflows/visual-regression-nightly.yml` (신설) | 단계 2 — 머지 후 회귀 감시 |
-| **production smoke** | release 직후 manual trigger | 단계 3 — production 환경 구축 후 (deployment-infrastructure.md 의존) | 단계 3 — `rev-direct-qa-extension §3 후보 C` 후속 |
+| ~~**production smoke**~~ (폐기 2026-05-30) | ~~release 직후 manual trigger~~ | ~~단계 3 — production 환경 구축 후~~ | ~~단계 3~~ 폐기 — `rev-e2e-2-stages.md §1-1` (production 환경 부재). 향후 production 환경 신설 시 부활 (`[[project_rev_stage_3_prod_revival]]`) |
 
 ### 비기능 요구사항
 
@@ -110,7 +110,7 @@ baseline drift 발견 시 rev sub-agent 의 판단:
 
 - **Playwright e2e infra 신설**: PR #1200 (Playwright headless e2e infra) 머지 의존 — 본 spec 은 visual regression workflow 만, e2e 시나리오는 `rev-direct-qa-extension.md` 후보 B 별 spec.
 - **baseline LFS 전환**: 초기 도입은 git 직접 commit. 누적 100 MB 도달 시 별 마이그레이션 ADR (`baseline-lfs-migration`).
-- **production 환경 visual smoke**: production 환경 구축 (deployment-infrastructure.md Hetzner CX22) 머지 의존 — 단계 3 별 cycle.
+- ~~**production 환경 visual smoke**~~: ~~production 환경 구축 머지 의존~~ — **2026-05-30 폐기** (단계 3 폐기, `rev-e2e-2-stages.md §1-1`). 향후 production 환경 신설 시 부활 — `[[project_rev_stage_3_prod_revival]]`.
 - **SSIM 전환**: 1차 pixelmatch 도입 후 false-positive 5% 초과 시 별 ADR.
 - **percy / Chromatic SaaS**: ADR-0026 Alternatives (A) 에서 보안 정책 위반 risk 로 채택 X.
 - **모바일 디바이스 매트릭스 확장**: viewport 2 종 (1280, 375) 만. iPad / 4K 등은 false-positive ↑ + runtime ↑ — 별 spec.
@@ -468,7 +468,7 @@ ADR-0026 §8 Q1~Q4 인용 (proposed 단계 — 본 spec 머지 후 ADR 갱신 �
 - **2026-05-29**: 초안 작성 (status=draft). 트리거 — ADR-0026 (`docs/decisions/0026-visual-regression-ci.md`, proposed) + plan round 4 작업 지시 + rev-direct-qa-extension §3 후보 E + §8 Q4 (baseline drift 룰 미정).
 - **2026-05-29**: §3-2 baseline 관리 — ADR-0026 §Decision 2 후보 (a) `--update-snapshots` 명시 PR 의무 채택. 사유: rev 자율 판단 (위험) 회피 + 의도 명시 강제 = ADR-0019 (event-driven, agent 망각 의존 폐기) 정신 일치.
 - **2026-05-29**: §3-3 drift threshold proposed 0.1% — first baseline 확보 후 1 주 운영 결과 조정 (§8 Q2). SSIM 은 false-positive 5% 초과 시 별 ADR.
-- **2026-05-29**: §3-5 CI 실행 위치 — 단계 1 (PR 차단 게이트) 의무 / 단계 2 (nightly) 옵션 / 단계 3 (production smoke) 별 cycle. ADR-0026 §Decision 3 와 일치.
+- **2026-05-29**: §3-5 CI 실행 위치 — 🟡 Pre-merge review (단계 1, PR 차단 게이트) 의무 / 🔵 Post-merge audit (단계 2, nightly) 옵션 / ~~단계 3 (production smoke)~~ 폐기 (2026-05-30 — `rev-e2e-2-stages.md §1-1`). ADR-0026 §Decision 3 와 일치.
 - **2026-05-29**: §4 제외 — Playwright e2e infra (PR #1200) 머지 의존 명시 + baseline LFS 전환 별 ADR + percy/Chromatic SaaS 보안 정책 위반 risk 채택 X (ADR-0026 Alternatives A).
 - **2026-05-29**: §6 PR 6 (ADR-0026 accepted 격상) 트리거 = PR 3 머지 + 첫 baseline 확보 완료 시점 — ADR 본문 §Decision 의 격상 조건과 일치.
 - **2026-05-29**: **§8 Q5 closure** — (c) 양쪽 동일 갱신 채택. 사유: ADR-0026 §8 (PR #1319, OPEN) 신설 후에는 ADR 본문 §8 Q1~Q4 가 본 spec §8 Q1~Q4 의 super-set 이 아니라 동일 매트릭스의 1:1 mirror — 한쪽 결정 누락 시 sync drift 사고 risk ↑. 결정 로그도 양쪽 같은 일자 / 사유 / PR 번호로 동시 박제. 운영 룰: ADR-0026 §Decision 갱신 PR 은 본 spec §9 같이 갱신 의무 (rev 단계 1 audit grep — `0026-visual-regression-ci.md` 와 `visual-regression-ci.md` 동시 diff 확인). 본 closure 의 머지 가능 시기 = PR #1319 머지 후 (PR body self-link 의무 박제). 본 PR 머지 후 ADR-0026 §8 작성 PR (#1319) 본문에 본 closure 참조 link 의무.

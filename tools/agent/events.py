@@ -32,6 +32,9 @@ EventKind = Literal[
     # agent ↔ subagent
     "subagent_launched",   # agent: be/fe/rev/plan 사이클 시작
     "subagent_completed",  # agent: sub-agent 종료
+    # work-queue (#1388) — directive 즉시 launch 폐지 → 사이클별 큐 적재 + dispatch
+    "work_enqueued",       # agent: directive 를 cycle 큐에 적재
+    "work_dispatched",     # agent: dispatcher 가 큐 항목 launch
     # cycle / directive transitions (state 변경 audit)
     "cycle_state_changed",
     "directive_registered",
@@ -41,6 +44,13 @@ EventKind = Literal[
     # 사용자가 PinDialogueView 의 ⭕ button click → bot.py 가 events INSERT.
     # agent.py 의 handle_directive_approved 가 consume → cycle 위임 결정 → launch_subagent.
     "directive_approved",
+    # PR webhook rev forum (2026-05-30 PR 2-b, #1364) — actor `gh pr create` /
+    # `gh pr merge` → PostToolUse hook (`pr-register-rev.sh`) → register_directive_pending
+    # 의 kind=pr_review / kind=pr_audit 분기 시 emit. directive_registered 와 별도 —
+    # nmae / sub-agent / digest 가 PR 단위 흐름을 분리 추적.
+    # spec: docs/features/pr-webhook-rev-forum.md §6-4.
+    "pr_review_registered",
+    "pr_audit_registered",
     # webhook (PR 머지)
     "pr_merged",
 ]

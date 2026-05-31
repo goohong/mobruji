@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: infra
 related_issues: []
-related_prs: [1329, 1332, 1333, 1334]
+related_prs: [1329, 1332, 1333, 1334, 1335, 1340, 1341]
 last_reviewed: 2026-05-29
 ---
 
@@ -13,7 +13,7 @@ last_reviewed: 2026-05-29
 
 ## 1) 개요 (What / Why)
 
-`rev-e2e-3-stages.md §3-1` 가 모든 type:* PR 에 rev 단계 1 통과 (`reviewed:claude` 라벨 + ✅/📝/❌ 코멘트) 의무를 박제했으나 **응답 시간 SLA** 가 부재하다. 현 상태:
+`rev-e2e-2-stages.md §3-1` 가 모든 type:* PR 에 rev `Pre-merge review` (단계 1) 통과 (`reviewed:claude` 라벨 + ✅/📝/❌ 코멘트) 의무를 박제했으나 **응답 시간 SLA** 가 부재하다. 현 상태:
 
 - rev sub-agent launch 후 단계 1 코멘트가 nmae watchdog idle 분기 (10분 무활동) 전까지는 idle 분류 X
 - launch → reasoning chunk 5분 (`sub-agent.md §1-4`) → 도중 PR rev 큐 race / 다른 PR 끼어들기 → 한 PR 의 단계 1 코멘트 지연 10~30분 사례 존재
@@ -68,26 +68,26 @@ last_reviewed: 2026-05-29
 
 #### 3-1) SLA 목표값 매트릭스
 
-| PR 분류 | 단계 1 SLA | 단계 2 SLA | 단계 3 SLA | 미달성 시 분기 |
-|---|---|---|---|---|
-| 정규 type:* | 30분 | 24시간 | 7일 | DIGEST push + nmae 별 rev launch |
-| `type:release` | 면제 (사용자 명시 확인) | 24시간 | 7일 | 단계 1 면제, 단계 2/3 동일 |
-| `type:emergency-hotfix` (정규) | 면제 (whitelist 머지) | 30분 | 24시간 | 단계 1 면제, 단계 2 강화 (정규 단계 1 등급) |
-| `type:emergency-hotfix` + body `security` (🔴 critical-public) | 면제 | 15분 | 24시간 | DIGEST + Discord 본 채널 + 사용자 reply 3 채널 |
-| `type:docs` (no-op pass) | 5분 (📝 no-op 즉시) | 면제 (코드 변경 X) | 면제 | DIGEST push |
+| PR 분류 | 🟡 Pre-merge SLA (단계 1) | 🔵 Post-merge SLA (단계 2) | 미달성 시 분기 |
+|---|---|---|---|
+| 정규 type:* | 30분 | 24시간 | DIGEST push + nmae 별 rev launch |
+| `type:release` | 면제 (사용자 명시 확인) | 24시간 | 단계 1 면제, 단계 2 동일 |
+| `type:emergency-hotfix` (정규) | 면제 (whitelist 머지) | 30분 | 단계 1 면제, 단계 2 강화 (정규 단계 1 등급) |
+| `type:emergency-hotfix` + body `security` (🔴 critical-public) | 면제 | 15분 | DIGEST + Discord 본 채널 + 사용자 reply 3 채널 |
+| `type:docs` (no-op pass) | 5분 (📝 no-op 즉시) | 면제 (코드 변경 X) | DIGEST push |
+
+> **단계 3 (production 검증) 폐기**: `docs/features/rev-e2e-2-stages.md §1-1` (2026-05-30 결정) — production 환경 부재 사유. 향후 production 환경 신설 시 부활 가능. 메모리 후보 `[[project_rev_stage_3_prod_revival]]` cross-ref.
 
 본 매트릭스 출처: 정규 = 본 spec 박제 / hotfix = `emergency-hotfix-flow.md §3-1` / security = `security-disclosure-flow.md §3-2` 🔴 critical-public 분류.
 
 #### 3-2) 측정 시작 / 종료 시점 정의
 
 - **측정 시작 (T0)**:
-  - 단계 1: nmae 가 rev sub-agent launch 큐 등록 시점 (`rev-queue.sh register <PR>` 호출 또는 wrapper launch 시점)
-  - 단계 2: PR 머지 완료 시점 (mergedAt, GitHub API)
-  - 단계 3: release PR 머지 시점 (`type:release` 라벨 PR mergedAt)
+  - 🟡 Pre-merge review (단계 1): nmae 가 rev sub-agent launch 큐 등록 시점 (`rev-queue.sh register <PR>` 호출 또는 wrapper launch 시점)
+  - 🔵 Post-merge audit (단계 2): PR 머지 완료 시점 (mergedAt, GitHub API)
 - **측정 종료**:
-  - 단계 1: `reviewed:claude` 라벨 부착 시각 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽 (둘 다 만족해야 통과)
-  - 단계 2: `rev-post-merge-pass` 또는 `regression:dev` 라벨 부착 시각
-  - 단계 3: `rev-prod-pass` 또는 `regression:prod` 라벨 부착 시각
+  - 🟡 Pre-merge review (단계 1): `reviewed:claude` 라벨 부착 시각 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽 (둘 다 만족해야 통과)
+  - 🔵 Post-merge audit (단계 2): `rev-post-merge-pass` 또는 `regression:dev` 라벨 부착 시각
 
 #### 3-3) `watchdog_rev_sla_loop` 신설 (`nmae-cycle-watchdog.md` 확장)
 
@@ -104,11 +104,10 @@ last_reviewed: 2026-05-29
 
 | 미달성 분류 | DIGEST | Discord 본 채널 | 사용자 reply | nmae 추가 rev launch |
 |---|---|---|---|---|
-| 정규 단계 1 | 🟢 (의무) | X | X | 🟢 (parallel) |
-| 정규 단계 2 | 🟢 | X | X | 🟢 |
-| 정규 단계 3 | 🟢 | X | X | 🟢 |
-| `type:docs` 단계 1 | 🟢 | X | X | 🟢 |
-| security (🔴) 단계 2 | 🟢 | 🟢 | 🟢 (reply) | 🟢 (최우선 큐 head) |
+| 정규 🟡 Pre-merge review (단계 1) | 🟢 (의무) | X | X | 🟢 (parallel) |
+| 정규 🔵 Post-merge audit (단계 2) | 🟢 | X | X | 🟢 |
+| `type:docs` 🟡 Pre-merge review (단계 1) | 🟢 | X | X | 🟢 |
+| security (🔴) 🔵 Post-merge audit (단계 2) | 🟢 | 🟢 | 🟢 (reply) | 🟢 (최우선 큐 head) |
 
 #### 3-5) `rev-sla-metrics.jsonl` 박제
 
@@ -143,7 +142,7 @@ last_reviewed: 2026-05-29
 - **신뢰성**: `watchdog_rev_sla_loop` 1분 polling — escalation 지연 최대 1분
 - **회복성**: jsonl 손상 시 graceful skip (다음 polling 에서 재계산) — daemon 죽지 않음
 - **남용 방지**: escalation 이 큐 race 만 해소 — 강제 머지 / 강제 통과 X (sub-agent 자율 평가 유지)
-- **호환성**: 기존 `rev-e2e-3-stages.md` / `rev-qa-protocol.md` / `nmae-cycle-watchdog.md` 본문 수정 없이 enhancement 만 — `watchdog_rev_sla_loop` 는 5중 안전망 추가
+- **호환성**: 기존 `rev-e2e-2-stages.md` / `rev-qa-protocol.md` / `nmae-cycle-watchdog.md` 본문 수정 없이 enhancement 만 — `watchdog_rev_sla_loop` 는 5중 안전망 추가
 
 ## 4) 범위 / 비범위
 
@@ -156,7 +155,7 @@ last_reviewed: 2026-05-29
 - §3-5 `rev-sla-metrics.jsonl` 박제 schema
 - §3-6 sub-agent self-query 도구 spec
 - `nmae-cycle-watchdog.md §5-7` 4중 안전망 cross-ref 보강 (5중으로 확장)
-- `rev-e2e-3-stages.md §3` cross-ref 보강 — SLA 박제
+- `rev-e2e-2-stages.md §3` cross-ref 보강 — SLA 박제
 
 ### 제외 (Out of Scope)
 
@@ -186,7 +185,7 @@ last_reviewed: 2026-05-29
 - `discord-reply.sh --reply` (security 분류 사용자 reply)
 - `tools/cycle-status/update.sh` (escalation 시 cycle-status.json 갱신 — 선택)
 - `nmae-cycle-watchdog.md` 4중 안전망 (5중으로 확장)
-- `rev-e2e-3-stages.md` 단계별 통과 시점 정의
+- `rev-e2e-2-stages.md` 단계별 통과 시점 정의
 
 ### 5-3) 데이터 흐름 / 시퀀스
 
@@ -243,7 +242,7 @@ last_reviewed: 2026-05-29
       {
         "pr_number": 1234,
         "pr_category": "regular|release|hotfix|security|docs",
-        "stage": "1|2|3",
+        "stage": "1|2",
         "t0_iso": "2026-05-29T10:00:00Z",
         "sla_target_seconds": 1800,
         "elapsed_seconds": 900,
@@ -275,7 +274,7 @@ last_reviewed: 2026-05-29
 ```
 
 근거:
-- append-only — 1 PR 1 stage 당 1 entry (PR 라이프타임 동안 최대 3 entry: 단계 1/2/3). escalation 발생 시 같은 entry 의 escalated=true 로 단계별 1줄 박제.
+- append-only — 1 PR 1 stage 당 1 entry (PR 라이프타임 동안 최대 2 entry: 🟡 Pre-merge review / 🔵 Post-merge audit). escalation 발생 시 같은 entry 의 escalated=true 로 단계별 1줄 박제.
 - `escalation_channels` array — `["digest", "main_channel", "user_reply"]` (security 분기) / `["digest"]` (정규 분기) / `[]` (escalation 없음).
 - `recorded_iso` — file write 시점 (clock skew evidence).
 - `watchdog_version` — schema migration 가드 (v1 default, v2 신설 시 별 키 추가).
@@ -294,20 +293,20 @@ function classify_pr(pr) {
 
   // 우선순위 1: type:release (최강 우선)
   if "type:release" in labels:
-    return ("release", "1": "exempt", "2": "24h", "3": "7d")
+    return ("release", "1": "exempt", "2": "24h")
 
   // 우선순위 2: type:emergency-hotfix + security
   if "type:emergency-hotfix" in labels:
     if pr.body contains keyword in ["security", "보안", "CVE", "vulnerability"]:
-      return ("security", "1": "exempt", "2": "15m", "3": "24h")
-    return ("hotfix", "1": "exempt", "2": "30m", "3": "24h")
+      return ("security", "1": "exempt", "2": "15m")
+    return ("hotfix", "1": "exempt", "2": "30m")
 
   // 우선순위 3: type:docs
   if "type:docs" in labels:
-    return ("docs", "1": "5m", "2": "exempt", "3": "exempt")
+    return ("docs", "1": "5m", "2": "exempt")
 
   // default: 정규
-  return ("regular", "1": "30m", "2": "24h", "3": "7d")
+  return ("regular", "1": "30m", "2": "24h")
 }
 ```
 
@@ -328,7 +327,7 @@ function classify_pr(pr) {
 | **2순위** | `cycle-status.json` 의 `rev.in_progress.started_at` 또는 nmae cycle event log `rev_launch_iso` | 분 단위 | 누락 시 3순위 |
 | **3순위** | PR `createdAt` (GitHub API) | 분 단위 | watchdog warning + jsonl `t0_source="pr_created"` 박제 (정밀도 ↓ evidence) |
 
-단계 2 T0 = PR `mergedAt` (1차 정확) / 단계 3 T0 = release PR `mergedAt` (`type:release` 라벨).
+🔵 Post-merge audit (단계 2) T0 = PR `mergedAt` (1차 정확).
 
 `elapsed_seconds` = `now() - t0_iso` (epoch second 차). watchdog polling 마다 재계산.
 
@@ -367,7 +366,7 @@ jq -s --arg month "2026-05" \
 
 - [ ] PR 4 (`tools/rev-queue/rev-sla.sh` self-query script): 본 spec status=approved 후. 상세 spec **§6-PR4** 박제.
 - [ ] PR 5 (`06-domain-model.md §4` 보강 — `RevSlaTarget` / `RevSlaMetricEntry` / `RevSlaEscalation` / `WatchdogRevSlaLoop` 4건 등재): 본 spec status=approved 후. **부분 완료** — `RevSlaTarget` / `RevSlaEscalation` / `RevSlaWatchdog` 3건은 PR #1330 (2026-05-29 develop 머지) 으로 박제 완료. `RevSlaMetricEntry` 1건은 잔여 — `rev-sla-metrics.jsonl` schema 등재 시점 박제 (PR 3 머지 시 동시 박제 권고).
-- [ ] PR 6 (`rev-e2e-3-stages.md §3` SLA cross-ref 보강): 본 spec status=shipped 후. 상세 spec **§6-PR6** 박제.
+- [ ] PR 6 (`rev-e2e-2-stages.md §3` SLA cross-ref 보강): 본 spec status=shipped 후. 상세 spec **§6-PR6** 박제.
 - [ ] PR 7 (월간 SLA 회고 spec 신설): SLA 적용 1개월 후
 
 ### §6-PR4) `tools/rev-queue/rev-sla.sh` self-query script 상세 spec (사전 박제)
@@ -473,13 +472,15 @@ PR #1234 (type:emergency-hotfix + body security)
 
 검증 evidence 는 PR 4 본문 `## 검증` 섹션에 6 항목 체크박스 박제 의무 (rev 단계 1 통과 조건).
 
-### §6-PR6) `rev-e2e-3-stages.md §3` SLA cross-ref 보강 상세 spec (사전 박제)
+### §6-PR6) `rev-e2e-2-stages.md §3` SLA cross-ref 보강 상세 spec (사전 박제)
 
-> **목표**: PR 6 구현 시점에 plan sub-agent 가 학습 의존 없이 본 sub-section 만 보고 docs 갱신 가능. `rev-e2e-3-stages.md` 의 어느 §3 sub-section 에 어떤 SLA cross-ref 를 박제할지 미리 결정.
+> **목표**: PR 6 구현 시점에 plan sub-agent 가 학습 의존 없이 본 sub-section 만 보고 docs 갱신 가능. `rev-e2e-2-stages.md` 의 어느 §3 sub-section 에 어떤 SLA cross-ref 를 박제할지 미리 결정.
+>
+> **2026-05-30 propagation cleanup (PR rev2s-2)**: `rev-e2e-3-stages.md` → `rev-e2e-2-stages.md` rename + 단계 3 폐기. (C) sub-section (단계 3 release 후) 폐기 marker 처리 — 향후 production 환경 신설 시 부활 가능.
 
-#### A) `rev-e2e-3-stages.md §3-1` (PR 머지 전, 단계 1) 추가 박제
+#### A) `rev-e2e-2-stages.md §3-1` (🟡 Pre-merge review, 단계 1) 추가 박제
 
-본 spec `§3-1 SLA 매트릭스` cross-ref 박제 위치 = `rev-e2e-3-stages.md §3-1` 끝 줄 (현재 `머지 게이트: 모든 PR reviewed:claude 라벨 없으면 nmae 자율 머지 안 함`) 직전.
+본 spec `§3-1 SLA 매트릭스` cross-ref 박제 위치 = `rev-e2e-2-stages.md §3-1` 끝 줄 (현재 `머지 게이트: 모든 PR reviewed:claude 라벨 없으면 nmae 자율 머지 안 함`) 직전.
 
 추가할 내용 (예상 5-7 줄):
 ```markdown
@@ -491,9 +492,9 @@ PR #1234 (type:emergency-hotfix + body security)
   - 강제 메커니즘: bot.py `watchdog_rev_sla_loop` (1분 polling, `docs/features/rev-sla.md §3-3`, `nmae-cycle-watchdog.md §5-7` 5중 안전망의 5번째 layer)
 ```
 
-#### B) `rev-e2e-3-stages.md §3-2` (develop 머지 후, 단계 2) 추가 박제
+#### B) `rev-e2e-2-stages.md §3-2` (🔵 Post-merge audit, 단계 2) 추가 박제
 
-본 spec `§3-1 SLA 매트릭스` 단계 2 row cross-ref 박제 위치 = `rev-e2e-3-stages.md §3-2` 끝 줄 (현재 `실패 → 즉시 revert 이슈 등록 + regression:dev 라벨 + Discord push`) 직후.
+본 spec `§3-1 SLA 매트릭스` 🔵 Post-merge audit row cross-ref 박제 위치 = `rev-e2e-2-stages.md §3-2` 끝 줄 (현재 `실패 → 즉시 revert 이슈 등록 + regression:dev 라벨 + Discord push`) 직후.
 
 추가할 내용 (예상 3-5 줄):
 ```markdown
@@ -504,21 +505,13 @@ PR #1234 (type:emergency-hotfix + body security)
   - security 🔴 미달성 분기 = DIGEST + Discord 본 채널 + 사용자 reply 3 채널 동시 push (정규 PR 은 DIGEST 1 채널만)
 ```
 
-#### C) `rev-e2e-3-stages.md §3-3` (release 후, 단계 3) 추가 박제
+#### C) (폐기) `rev-e2e-3-stages.md §3-3` (release 후, 단계 3) — 2026-05-30 폐기
 
-본 spec `§3-1 SLA 매트릭스` 단계 3 row cross-ref 박제 위치 = `rev-e2e-3-stages.md §3-3` 끝 줄 (현재 `실패 → hotfix 이슈 등록 + regression:prod 라벨 + 즉시 Discord push`) 직후.
+> **2026-05-30 폐기** (PR rev2s-2): `rev-e2e-2-stages.md §1-1` evidence (production 환경 부재 — `.github/workflows/cd-prod.yml` / `cd-release.yml` 부재) 사유로 단계 3 자체가 폐기되어 본 sub-section 의 cross-ref 박제 의무도 무효. 향후 production 환경 신설 시 본 sub-section 부활 가능 (`docs/features/deployment-infrastructure.md` Hetzner CX22 머지 의존). 메모리 후보 `[[project_rev_stage_3_prod_revival]]` cross-ref.
 
-추가할 내용 (예상 2-4 줄):
-```markdown
-- **응답 시간 SLA** (`docs/features/rev-sla.md §3-1` SoT):
-  - 정규 type:* = 7일 (단계 1 / 단계 2 보다 길게 — production 검증은 사용자 실제 사용 패턴 누적 후 의미)
-  - 측정 시작 (T0) = release PR (`type:release` 라벨) 머지 시점 (mergedAt)
-  - 측정 종료 = `rev-prod-pass` 또는 `regression:prod` 라벨 부착 시각
-```
+#### D) `rev-e2e-2-stages.md §7 관련` cross-ref 추가
 
-#### D) `rev-e2e-3-stages.md §7 관련` cross-ref 추가
-
-본 spec link 박제 위치 = `rev-e2e-3-stages.md §7 관련` 의 이슈 list 끝.
+본 spec link 박제 위치 = `rev-e2e-2-stages.md §7 관련` 의 이슈 list 끝.
 
 추가할 내용:
 ```markdown
@@ -528,14 +521,14 @@ PR #1234 (type:emergency-hotfix + body security)
 
 #### E) 머지 가능 시기 (PR 6 trigger)
 
-본 spec status=shipped 시점 = PR 5 머지 (06-domain-model §4 `RevSlaMetricEntry` 마지막 1건 박제) + PR 3 머지 (`watchdog_rev_sla_loop` 본문 배포) 둘 다 완료 시점. PR 6 가 docs only 이므로 본 spec status=approved 만 만족해도 머지 가능 — 단, `docs/features/rev-sla.md` 의 §3-1·§3-3·§3-4 가 PR 1 박제로 이미 존재하므로 PR 6 는 `rev-e2e-3-stages.md` 단 1 파일 변경.
+본 spec status=shipped 시점 = PR 5 머지 (06-domain-model §4 `RevSlaMetricEntry` 마지막 1건 박제) + PR 3 머지 (`watchdog_rev_sla_loop` 본문 배포) 둘 다 완료 시점. PR 6 가 docs only 이므로 본 spec status=approved 만 만족해도 머지 가능 — 단, `docs/features/rev-sla.md` 의 §3-1·§3-3·§3-4 가 PR 1 박제로 이미 존재하므로 PR 6 는 `rev-e2e-2-stages.md` 단 1 파일 변경. (C) 단계 3 박제 의무는 2026-05-30 폐기 — 본 spec §6-PR6 (C) 참조.
 
 #### F) plan sub-agent 검증 절차 (PR 6 머지 후 의무)
 
-- [ ] `rev-e2e-3-stages.md §3-1·§3-2·§3-3` 끝 줄에 SLA cross-ref 5-7 줄 / 3-5 줄 / 2-4 줄 박제 확인
-- [ ] `rev-e2e-3-stages.md §7 관련` 의 spec / 메모리 후보 cross-ref 박제 확인
-- [ ] `rev-e2e-3-stages.md` frontmatter `last_reviewed` 갱신 + `related_prs` 에 PR 6 번호 추가
-- [ ] grep 검증: `grep -nE "docs/features/rev-sla.md" docs/features/rev-e2e-3-stages.md` 출력 ≥ 4 건 (§3-1·§3-2·§3-3·§7)
+- [ ] `rev-e2e-2-stages.md §3-1·§3-2` 끝 줄에 SLA cross-ref 5-7 줄 / 3-5 줄 박제 확인 (§3-3 단계 3 폐기 — 박제 불요)
+- [ ] `rev-e2e-2-stages.md §12 관련` 의 spec / 메모리 후보 cross-ref 박제 확인
+- [ ] `rev-e2e-2-stages.md` frontmatter `last_reviewed` 갱신 + `related_prs` 에 PR 6 번호 추가
+- [ ] grep 검증: `grep -nE "docs/features/rev-sla.md" docs/features/rev-e2e-2-stages.md` 출력 ≥ 3 건 (§3-1·§3-2·§12)
 
 검증 evidence 는 PR 6 본문 `## 검증` 섹션에 4 항목 체크박스 박제 의무 (rev 단계 1 통과 조건).
 
@@ -570,15 +563,117 @@ PR #1234 (type:emergency-hotfix + body security)
 
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | 정규 단계 1 SLA 30분 — 실제 평균 응답 시간 측정 후 조정 가능. 첫 박제값 (a) 30분 / (b) 15분 / (c) 1시간 | (a) / (b) / (c) | @goohong / spec approved 전 |
-| Q2 | security 🔴 단계 2 SLA 15분 — `watchdog_rev_sla_loop` 1분 polling 으로 충분 vs 30초 polling 필요 | (a) 1분 / (b) 30초 | @goohong / security 사고 발생 후 |
-| Q3 | escalation 시 nmae 별 rev sub-agent 추가 launch — 워크트리 lock 충돌 가능 (`sub-agent.md §1-1`). (a) 같은 워크트리 다른 cycle 재사용 / (b) launch 차단 + DIGEST 만 | (a) / (b) | @goohong / spec approved 전 |
+| ~~Q1~~ ✅ | ~~정규 단계 1 SLA 30분 — 실제 평균 응답 시간 측정 후 조정 가능. 첫 박제값 (a) 30분 / (b) 15분 / (c) 1시간~~ — **(a) 30분 채택 (1차 박제값)** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §A. 운영 1개월 누적 jsonl 결과 P95 < 1200s (20m) 시 (b) 15분 조정 trigger, P95 > 2400s (40m) 시 (c) 1시간 조정 trigger — 본 조정은 §6 PR 7 (월간 회고 spec) SoT. | — | @goohong / **closed 2026-05-29 (1차 박제값, 운영 후 조정 trigger 박제)** |
+| ~~Q2~~ ✅ | ~~security 🔴 단계 2 SLA 15분 — `watchdog_rev_sla_loop` 1분 polling 으로 충분 vs 30초 polling 필요~~ — **(a) 1분 polling 유지 (security 분류에도 동일)** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §B. 1분 polling = 평균 30초 / 최악 60초 lag 보장 — security 15분 SLA 의 1/15 = 회귀 detect 정밀도 충분. 30초 polling 은 bot.py loop overhead 2배 + 사고 사례 누적 0건 (가설 단계) — over-engineering 회피. 실제 사고 사례 발생 시 §8-closure-candidates §B 의 trigger 매트릭스 따라 별 ADR 트리거. | — | @goohong / **closed 2026-05-29 (1분 polling 유지, 사고 사례 trigger 박제)** |
+| ~~Q3~~ ✅ | ~~escalation 시 nmae 별 rev sub-agent 추가 launch — 워크트리 lock 충돌 가능 (`sub-agent.md §1-1`). (a) 같은 워크트리 다른 cycle 재사용 / (b) launch 차단 + DIGEST 만~~ — **(c) 둘 다 채택 — 우선순위 분기 (`docs/features/rev-sla.md §8-closure-candidates §C` 박제)** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §C. (a) 워크트리 idle (rev 사이클 종료 / 매 cycle 끝 status=idle 박제) 시 즉시 재사용 launch / (a) 불가 시 (b) DIGEST + nmae 큐 head retag — 두 분기 모두 sub-agent.md §1-1 워크트리 lock 위반 0. parallel launch 는 별 워크트리 신설 의존 (별 spec — `rev-worktree-pool.md` 후보) 으로 위임, 본 spec 범위 X. | — | @goohong / **closed 2026-05-29 (둘 다 분기 채택, 워크트리 lock 정합)** |
 | Q4 | `rev-sla-metrics.jsonl` 의 retention — 무한 누적 vs 30일 rotate | (a) 무한 / (b) 30일 rotate / (c) 월간 회고 spec 가 흡수 | @goohong / SLA 적용 1개월 후 |
-| Q5 | `type:docs` 단계 1 SLA 5분 — no-op pass (📝) 자동 부착이 가능한 경우 자동화 후보 (`rev-qa-protocol.md` cross-ref 필요) | (a) 자동화 별 spec / (b) 본 spec 5분 SLA 유지 | @goohong / spec approved 전 |
-| Q6 | release PR 단계 1 면제 — `type:release` 라벨 PR 은 사용자 명시 확인 강제로 단계 1 면제. 본 룰 prose 가 아니라 코드 강제 위치 (rev-gate.yml whitelist + watchdog skip) | (a) `nmae-cycle-watchdog.md §5-8` SoT / (b) 본 spec §3-1 매트릭스 SoT | @goohong / spec approved 전 |
+| ~~Q5~~ ✅ | ~~`type:docs` 단계 1 SLA 5분 — no-op pass (📝) 자동 부착이 가능한 경우 자동화 후보 (`rev-qa-protocol.md` cross-ref 필요)~~ — **(a) 자동화 별 spec 분리 권고 + (b) 본 spec 5분 SLA 유지 병행** (closure 2026-05-29 plan round 15). 사유 §9 결정 로그 + §8-closure-candidates §D. 자동화 별 spec (`rev-docs-noop-auto.md` 후보) trigger 조건 = (1) `type:docs` 라벨 + `scope:infra` only / (2) 코드 변경 0 line (frontmatter / markdown 만) / (3) 보호 영역 파일 변경 0 — 3 조건 AND 매칭 시 bot.py 가 `📝 no-op pass` 코멘트 + `reviewed:claude` 라벨 자동 부착. 본 자동화는 별 spec 신설 후 ADR 트리거 — 본 spec §3-1 매트릭스의 5분 SLA 는 fallback 으로 유지 (자동화 실패 시 manual rev sub-agent 가 5분 안 처리). | — | @goohong / **closed 2026-05-29 (자동화 별 spec trigger 박제 + 5분 SLA fallback 유지)** |
+| ~~Q6~~ ✅ | release PR 단계 1 면제 — `type:release` 라벨 PR 은 사용자 명시 확인 강제로 단계 1 면제. 본 룰 prose 가 아니라 코드 강제 위치 (rev-gate.yml whitelist + watchdog skip) | **(b) 본 spec §3-1 매트릭스 SoT — 2026-05-29 plan round 16 closure (§9 결정 로그 참조)** | @goohong / **closed 2026-05-29 (release 면제 SoT = §3-1 매트릭스)** |
+
+### §8-closure-candidates — Q1/Q2/Q3/Q5 closure 후보 평가 매트릭스 (plan round 15)
+
+> 본 sub-section 은 plan round 15 closure 결정의 trade-off / 채택 / 미채택 사유 + 운영 후 재검토 trigger 박제. closure 자체는 §8 표 row 의 ~~closed~~ 표기 + §9 결정 로그가 SoT — 본 sub-section 은 미래 cycle (운영 후 조정 / security 사고 / docs 자동화 별 spec) 의 first-class reference.
+
+#### A) Q1 closure — 정규 단계 1 SLA 30분 적정성
+
+**채택**: (a) 30분 (1차 박제값).
+
+**3 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| **(a) 30분 (proposed, 채택)** | nmae watchdog idle 10분 (`actors/nmae.md §11-2`) 의 3배 — race condition margin 안전 / rev 큐 race 4건 동시 처리 평균 5-15분 + escalation 분기 15-25분 = 30분 안 자연 통과 / 사용자 가시화 적정 (PR push 후 30분 = 한 turn cycle 안) | 첫 박제값 — 실제 운영 evidence 부재. 큐 race 사고 frequency 높을 시 미달성률 ↑ risk | 1차 도입은 sub-agent.md §1-4 reasoning chunk 5분 + nmae cycle 평균 10-15분 (jsonl evidence: plan round 1-15 평균) 의 합리 추정. ADR-0019 정신 — agent 망각 의존 회피, jsonl evidence 누적 후 조정 |
+| (b) 15분 | 사용자 가시화 정밀도 ↑ — race 미발생 시 즉시 통과 → 머지 lag ↓ | rev 큐 race 4건 동시 (head 부터 처리 평균 5-15분 × 4 = 20-60분) 시 미달성률 60%+ → escalation polling 부담 ↑ / nmae 가 큐 race 해소용 별 rev launch 빈도 ↑ → 워크트리 lock 충돌 risk ↑ (§C 분기 의존) | 운영 evidence 부재 단계 — 미달성률 60% 박제 시 jsonl noise ↑, 회고 spec 의미 ↓ |
+| (c) 1시간 | 큐 race 4건 동시 처리도 자연 통과 → escalation 발생률 ≤ 5% | 사용자 가시화 정밀도 ↓ — PR push 후 1시간 = 사용자 turn cycle 2-3회 = "왜 머지 안 됨" 사고 risk ↑ / 단계 1 게이트 의미 약화 (1시간 = rev 사이클 평균 lag 와 동급) | "차단이 아니라 가시화" 정신 위반 — 본 spec §1 핵심 원칙 1 미달 |
+
+**운영 후 조정 trigger** (§6 PR 7 월간 회고 spec SoT):
+
+| trigger | 조정 후보 |
+|---|---|
+| P95 elapsed < 1200s (20m) 가 1개월 누적 | (b) 15분 으로 조정 (별 PR + ADR) |
+| P95 elapsed > 2400s (40m) 가 1개월 누적 | (c) 1시간 으로 조정 또는 큐 race 해소 별 spec trigger |
+| 미달성률 > 20% 가 1개월 누적 | escalation 분기 강화 (nmae 큐 race 해소 별 spec trigger) — SLA 자체 조정 X |
+
+#### B) Q2 closure — security 🔴 단계 2 SLA 15분 polling 주기
+
+**채택**: (a) 1분 polling 유지 (security 분류에도 동일).
+
+**2 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| **(a) 1분 polling (proposed, 채택)** | bot.py loop overhead 적정 (`actors/nmae.md §11-1` 3중 watchdog 동일 패턴) / security 15분 SLA 의 1/15 = lag 평균 30초 / 최악 60초 = SLA 4% 초과 margin / 4중 안전망 (`nmae-cycle-watchdog.md §5-7`) loop 와 동일 주기 = bot.py 부담 균일 | 30초 단위 사고 (예: critical-public 발견 후 1분 안 머지 strictly 필요) 미보호 | security 사고 사례 0건 (가설 단계) — over-engineering 회피. 1분 polling 으로 1차 도입 후 사고 사례 누적 시 별 ADR 트리거 |
+| (b) 30초 polling | security 분류만 30초 = lag 평균 15초 / 최악 30초 = SLA 2% 초과 margin | bot.py loop overhead 2배 (security 분기 별 loop 필요) / security 분류 분기 추가 = 코드 복잡도 ↑ / 본 spec §3-3 watchdog_rev_sla_loop 단일 loop 정신 위반 (4중 안전망 일관성 ↓) | security 사고 사례 0건 단계에서 over-engineering risk — 1분 polling 의 lag 60초가 critical 한 사례 박제 없음 |
+
+**사고 사례 발생 시 trigger 매트릭스** (별 ADR 트리거 조건):
+
+| trigger | 조정 후보 |
+|---|---|
+| security 분류 SLA 미달성 사고 발생 (jsonl `sla_met=false where pr_category="security"`) | 1건 = 회고 / 2건 = (b) 30초 polling 별 ADR 트리거 |
+| security 분류 사고 + 사용자 reply 지연 60초 이상 ↑ noise | (b) 30초 polling 또는 별 web socket 기반 즉시 detect 별 spec |
+
+#### C) Q3 closure — escalation 시 워크트리 lock 충돌 해소
+
+**채택**: (c) 둘 다 채택 — 우선순위 분기.
+
+**3 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| (a) 같은 워크트리 다른 cycle 재사용 만 | rev 워크트리 idle 시 즉시 launch = race 해소 정밀 / sub-agent.md §1-1 워크트리 lock 위반 0 (한 워크트리 = 동시 1 sub-agent) | rev 워크트리 busy 시 (현재 rev 사이클 진행 중) escalation 무동작 = 미달성 PR 머지 lag 지속 / SLA 의미 ↓ | 단독 채택 시 busy 분기 fallback 부재 — 본 spec §1 핵심 원칙 4 (강제 메커니즘) 의미 약화 |
+| (b) launch 차단 + DIGEST 만 | sub-agent.md §1-1 워크트리 lock 100% 보존 / nmae 가 다음 사이클 우선순위 자율 조정 (사용자 가시화 우선) | rev 워크트리 idle 시에도 launch 안 함 = race 해소 실패 / 미달성 PR 머지 lag 지속 | 단독 채택 시 idle 워크트리 활용 0 = §1 핵심 원칙 4 의미 약화 |
+| **(c) 둘 다 채택 (분기, 채택)** | rev 워크트리 status = idle (cycle-status.json 의 `rev.in_progress` null) 시 즉시 (a) launch / busy 시 (b) DIGEST + nmae 큐 head retag — 두 분기 모두 sub-agent.md §1-1 워크트리 lock 위반 0 = 코드 강제 가능 | watchdog_rev_sla_loop 의 분기 로직 추가 (cycle-status.json read 1회 추가) = bot.py 복잡도 ↑ | 단독 (a)/(b) 의 단점 모두 해소 — race 해소 정밀 + 워크트리 lock 보존 = §1 핵심 원칙 4 강제 메커니즘 정신 일치. ADR-0019 정신 (망각 가드, 코드 강제) 일치 |
+
+**분기 로직** (PR 3 `watchdog_rev_sla_loop` 본문 박제 의무):
+
+```text
+function escalation_branch(pr):
+  rev_status = read_cycle_status_json().rev.in_progress
+  if rev_status == null:  # rev 워크트리 idle
+    nmae_launch_rev_subagent(pr)            # (a) 분기
+    log_escalation_channel(pr, "rev_relaunch")
+  else:                    # rev 워크트리 busy
+    discord_reply_digest("⏰ PR #{pr} rev 단계 1 SLA 미달성 ({elapsed}m elapsed) — rev 워크트리 busy, 다음 사이클 head 큐 등록")
+    rev_queue_retag_head(pr)                # (b) 분기
+    log_escalation_channel(pr, "digest_queue_head")
+```
+
+**parallel launch 별 spec 위임**: 별 워크트리 신설 의존 (예: `mobruji-rev-2` 워크트리 추가) 은 본 spec 범위 X — `rev-worktree-pool.md` (후보 신설 spec) 으로 위임. 본 spec 은 단일 rev 워크트리 전제 + busy 분기 가드만 책임.
+
+#### D) Q5 closure — `type:docs` 단계 1 SLA 5분 자동화
+
+**채택**: (a) 자동화 별 spec 분리 + (b) 본 spec 5분 SLA fallback 유지 병행.
+
+**2 후보 평가**:
+
+| 후보 | trade-off (장점) | trade-off (단점) | 채택 / 미채택 사유 |
+|---|---|---|---|
+| (a) 자동화 별 spec 만 | rev sub-agent 부담 ↓ / docs only PR 의 머지 lag 0 (자동 통과) / ADR-0019 정신 (코드 강제, 망각 가드) 일치 | 자동화 실패 시 (예: bot.py loop 죽음 / 인증 만료) docs PR 사이런스 risk — fallback 부재 | 단독 채택 시 fallback 부재 risk — 본 spec §1 핵심 원칙 4 강제 메커니즘 정신 일부 위반 |
+| (b) 본 spec 5분 SLA 만 | rev sub-agent 의 manual 처리 보장 = fallback 정밀 | rev sub-agent 부담 ↑ (docs PR 빈도 ↑ 시 큐 race 가중) / 학습 의존 risk (rev 가 docs 라벨 정확히 분류 / 📝 no-op 자동 처리 의존) | 단독 채택 시 rev 큐 race 가중 risk — Q1 정규 SLA 30분 미달성률 ↑ |
+| **(a) + (b) 둘 다 채택 (병행, 채택)** | 자동화 정상 시 docs PR 머지 lag 0 + rev 부담 ↓ / 자동화 실패 시 manual rev 가 5분 안 fallback 처리 = 사이런스 risk 0 | 자동화 별 spec 신설 의무 (`rev-docs-noop-auto.md` 후보) = 별 cycle 부담 / SLA 매트릭스 §3-1 row 의 5분 의미 = fallback 으로 재해석 (docs 매핑 알고리즘 §6-PR3 §3 와 정합 확인 필요) | 단독 후보의 단점 모두 해소 — 자동화 정상 + fallback 정밀 = §1 핵심 원칙 1 (목표값) + 4 (강제 메커니즘) 둘 다 만족 |
+
+**자동화 별 spec trigger 조건** (별 spec `rev-docs-noop-auto.md` 후보 박제 시):
+
+| 조건 (AND) | 검증 방법 |
+|---|---|
+| `type:docs` 라벨 부착 | `gh pr view --json labels` grep |
+| `scope:*` 라벨 = `scope:infra` only (docs + 다른 scope 는 다른 매핑) | `gh pr view --json labels` grep |
+| 코드 변경 0 line (frontmatter / markdown 만) | `gh pr diff --json files` 파일 path = `docs/**` 또는 `.md` 또는 `.yaml` (frontmatter) only |
+| 보호 영역 파일 변경 0 | `.github/workflows/auto-label.yml` 의 정보성 분류 path 매칭 = 0 |
+
+3 조건 AND 매칭 시 bot.py 가 자동 부착:
+- `📝 no-op pass — type:docs scope:infra 자동 통과 (rev-docs-noop-auto §3-1)` 코멘트
+- `reviewed:claude` 라벨
+
+자동화 실패 시 (bot.py loop 죽음 / 인증 만료 / 매칭 분류 fail) → manual rev sub-agent fallback (5분 SLA 안 처리). watchdog_rev_sla_loop 가 5분 SLA 초과 시 escalation 분기 = §A row 4 (`type:docs` 단계 1 DIGEST).
+
+**자동화 별 spec 신설 trigger**: 본 spec status=approved 후 별 cycle (plan / be sub-agent 협업). 본 closure 자체는 자동화 의존 X — 5분 SLA fallback 만으로 본 spec 진행 가능.
 
 ## 9) 결정 로그
 
-- 2026-05-29: 초안 작성 (status=draft). `nmae-cycle-watchdog.md §5-7` 4중 안전망 + `rev-e2e-3-stages.md §3-1` 응답 SLA 부재 사례 박제. plan round 9 trigger.
+- 2026-05-29: 초안 작성 (status=draft). `nmae-cycle-watchdog.md §5-7` 4중 안전망 + `rev-e2e-3-stages.md §3-1` (당시 명, 2026-05-30 rename 후 `rev-e2e-2-stages.md`) 응답 SLA 부재 사례 박제. plan round 9 trigger.
 - **2026-05-29 (plan round 12)**: **§6 PR 3 detailed design 사전 박제** — bot.py `watchdog_rev_sla_loop` 구현 launch 시 first-class reference. 5 sub-section: (1) `cycle-status.json` schema 확장 (별 sibling `rev_sla` key 추가, 기존 4 actor 영역 무영향), (2) `rev-sla-metrics.jsonl` schema 확정 (`recorded_iso` + `watchdog_version` 추가, append-only 룰), (3) PR 분류 lookup 알고리즘 (release > hotfix > docs > regular 우선순위, security = type:emergency-hotfix AND body keyword), (4) 30분 SLA timer T0 정의 (3 fallback 우선순위, `t0_source` evidence 박제), (5) 통계 집계 매트릭 6 지표 (단계 1 달성률 / 평균 elapsed / P95 / escalation 발생률 / security 100% / 분류 분포). 트리거 — plan round 12 작업 지시 + watchdog 본문 PR launch 직전 사전 spec 확정 의무. 실제 Python 코드 본문은 PR 3 본 사이클, 본 spec 은 schema / 알고리즘 / 룰만.
-- 2026-05-29 (plan round 13): **§6-PR4 + §6-PR6 사전 spec 박제**. PR 4 (`rev-sla.sh` self-query script) 의 CLI 인터페이스 (4 모드) / 출력 양식 (텍스트 + JSON) / exit code 매트릭스 (9 시나리오) / graceful skip 분기 (4 케이스) / 검증 의무 (6 항목). PR 6 (`rev-e2e-3-stages.md §3` cross-ref) 의 §3-1·§3-2·§3-3·§7 박제 위치별 정확한 텍스트 prototype (5-7 / 3-5 / 2-4 / 2 줄) + 머지 가능 시기 (본 spec status=approved 만으로 가능) + 검증 의무 (4 항목). PR 5 항목 부분 완료 표기 — `RevSlaTarget` / `RevSlaEscalation` / `RevSlaWatchdog` 3건은 PR #1330 머지 완료, `RevSlaMetricEntry` 1건 잔여. 사유: PR 4 / PR 6 가 본 spec 머지 후 옵션 cycle 로 빠지면 학습 의존 risk — 사전 spec 박제로 plan sub-agent 가 본 sub-section 만 읽고 작성 가능. plan round 13 trigger.
+- 2026-05-29 (plan round 13): **§6-PR4 + §6-PR6 사전 spec 박제**. PR 4 (`rev-sla.sh` self-query script) 의 CLI 인터페이스 (4 모드) / 출력 양식 (텍스트 + JSON) / exit code 매트릭스 (9 시나리오) / graceful skip 분기 (4 케이스) / 검증 의무 (6 항목). PR 6 (`rev-e2e-3-stages.md §3` cross-ref, 2026-05-30 rename 후 `rev-e2e-2-stages.md`) 의 §3-1·§3-2·§3-3·§7 박제 위치별 정확한 텍스트 prototype (5-7 / 3-5 / 2-4 / 2 줄) + 머지 가능 시기 (본 spec status=approved 만으로 가능) + 검증 의무 (4 항목). PR 5 항목 부분 완료 표기 — `RevSlaTarget` / `RevSlaEscalation` / `RevSlaWatchdog` 3건은 PR #1330 머지 완료, `RevSlaMetricEntry` 1건 잔여. 사유: PR 4 / PR 6 가 본 spec 머지 후 옵션 cycle 로 빠지면 학습 의존 risk — 사전 spec 박제로 plan sub-agent 가 본 sub-section 만 읽고 작성 가능. plan round 13 trigger.
+- **2026-05-29 (plan round 16)**: **§8 Q6 closure** — release PR 단계 1 면제의 SoT = **본 spec §3-1 매트릭스** (선택지 b). 사유: `nmae-cycle-watchdog.md §5-8` 은 **STRICT mode + reason 의무** SoT (idle reason 명시 / STRICT relaunch 분기) — `cycle-status.json` 의 idle worktree note 필드 차원만 책임. 분류별 SLA 매트릭스 / 면제 룰은 §5-8 본문에 부재하며, §5-7 5중 안전망의 5번째 layer (`watchdog_rev_sla_loop`) cross-ref 만 `rev-sla.md` 본문 SoT 위임으로 박혀 있음. 즉 `nmae-cycle-watchdog.md` 는 watchdog 자체의 행동 룰 SoT 이고, **PR 분류별 SLA / 면제 / escalation 분기는 본 spec `rev-sla.md`** SoT. 두 spec 간 역할 분리: (1) `rev-sla.md §3-1` = release/hotfix/security/regular/docs 분류 매트릭스 + 면제 룰, (2) `nmae-cycle-watchdog.md §5-7/5-8` = watchdog loop 자체 (5중 안전망 + STRICT idle reason). 강제 위치는 두 채널: (a) `rev-gate.yml` whitelist (`type:release` PR 단계 1 게이트 면제 — `rev-e2e-2-stages.md §3-1` 참조), (b) `watchdog_rev_sla_loop` 의 `classify_pr` 함수 (`type:release` 매칭 시 stage=1 SLA `exempt` 반환 — 본 spec §6-PR3 (3) 알고리즘 박제). 두 코드 강제 위치 모두 본 spec §3-1 매트릭스를 출처로 참조. 메모리 후보: `[[feedback-rev-sla-release-exempt-sot]]` (release 면제 SoT 분쟁 박제). plan round 16 trigger.
+- **2026-05-30 (PR rev2s-2 propagation cleanup)**: `rev-e2e-3-stages.md` → `rev-e2e-2-stages.md` rename 반영 + 단계 3 폐기. 본 spec §3-1 매트릭스에서 단계 3 SLA column 제거 / §3-2 단계 3 T0 / §3-4 정규 단계 3 row 제거 / §6-PR3 cycle-status schema 의 stage enum `1|2|3` → `1|2` / §6-PR3 분류 알고리즘에서 단계 3 SLA 제거 / §6-PR6 (C) sub-section 폐기 marker / 모든 `rev-e2e-3-stages.md` reference → `rev-e2e-2-stages.md` 정정. 명명 통일 (🟡 Pre-merge review / 🔵 Post-merge audit). evidence: `rev-e2e-2-stages.md §1-1` (production 환경 부재). 향후 production 환경 신설 시 단계 3 SLA 부활 가능 — `[[project_rev_stage_3_prod_revival]]` 메모리 후보.
+- **2026-05-29 (plan round 15)**: **§8 Q1 / Q2 / Q3 / Q5 closure 후보 평가 사전 박제** — 4 closure 결정의 trade-off 매트릭스 / 채택 / 미채택 사유 / 운영 후 재검토 trigger 를 `§8-closure-candidates §A·B·C·D` 4 sub-section 으로 박제. 채택 요약: **Q1** = (a) 30분 (1차 박제값, P95 jsonl evidence 누적 후 조정 trigger 박제) / **Q2** = (a) 1분 polling 유지 (security 분류 사고 사례 0건 단계 over-engineering 회피, 사고 trigger 매트릭스 박제) / **Q3** = (c) 둘 다 분기 (rev 워크트리 idle → 즉시 재사용 launch / busy → DIGEST + 큐 head retag, sub-agent.md §1-1 워크트리 lock 보존, 분기 로직 prose 박제로 PR 3 watchdog_rev_sla_loop 본문 구현 의무) / **Q5** = (a) 자동화 별 spec 분리 + (b) 5분 SLA fallback 병행 (자동화 trigger 4 조건 AND 매칭 박제, 자동화 실패 시 fallback 정밀). 트리거 — plan round 15 작업 지시 + spec approved 전 4 closure 결정 의무 (§1 핵심 원칙 4 강제 메커니즘 정신). closure 매트릭스는 §8 표 row 의 ~~closed~~ 표기 + 본 항목이 SoT — `§8-closure-candidates` sub-section 은 미래 cycle (운영 후 조정 / security 사고 / docs 자동화 별 spec) 의 first-class reference. 본 closure 의 후속 spec = (Q3 의존) `rev-worktree-pool.md` (parallel launch 별 spec 신설 후보) + (Q5 의존) `rev-docs-noop-auto.md` (docs 자동화 별 spec 신설 후보) — 둘 다 별 cycle 트리거.

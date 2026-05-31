@@ -35,6 +35,10 @@ import tools_subagent as ts
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
+
+# (#1398 rev 🟡-2) fire-and-forget sub-agent exec task 참조 보관 — event loop 가
+# task 를 weak ref 로만 유지해 고부하 시 중도 GC 취소되는 사고 차단. done 시 자동 제거.
+_EXEC_TASKS: set = set()
 EVENTS_BATCH_SIZE = 10
 
 
@@ -80,22 +84,54 @@ TOOL_EMOJI_MAP = {
     "forum_retag": "🏷️",
     "forum_edit_starter": "✏️",
     "launch_subagent": "🚀",
+    "enqueue_work": "📥",
     "register_directive_pending": "📌",
     "update_directive_status": "🔄",
     "get_cycle_state": "🔍",
+    "get_pr_status": "📋",
     "set_cycle_state": "🎛️",
     "pause_global": "⏸️",
     "resume_global": "▶️",
 }
 
 
+# 기본 Claude tool (Bash / Read / Edit / Write / ...) noise skip 목록.
+# helper-tool-progress.sh 와 동일 정책 — 매 turn 다수 발생하는 read-only tool 은 thread 가시화에서 제외.
+_NOISY_BUILTIN_TOOLS = frozenset({"Read", "Glob", "Grep", "TaskList", "TaskGet", "TaskCreate", "TaskUpdate"})
+
+
 def _format_tool_progress(tool_name: str, tool_input: dict) -> str | None:
     """ToolUseBlock 의 tool_name + input 을 사용자 친화 1-line 으로.
 
     post_discord_message 는 답 자체이므로 progress 표시 X (중복 push 방지).
+    기본 Claude tool (Bash / Edit / Write / ...) 은 helper-tool-progress.sh 와
+    동일한 포맷 분기로 핵심 파라미터까지 노출 (#1356 — 사용자 가시 디테일).
     """
     if tool_name == "post_discord_message":
         return None  # 답은 _push_agent_reply 가 처리 — 중복 X
+
+    # 기본 Claude tool (mcp__nmae__ prefix 없음) — helper-tool-progress.sh 분기 거울.
+    if not tool_name.startswith("mcp__nmae__"):
+        if tool_name in _NOISY_BUILTIN_TOOLS:
+            return None
+        if tool_name == "Bash":
+            command = str(tool_input.get("command", "")).splitlines()[0][:100]
+            return f"💬 Bash: {command}"
+        if tool_name in ("Edit", "Write", "NotebookEdit"):
+            from os.path import basename
+            file_path = basename(str(tool_input.get("file_path", "?")))
+            return f"✏️ {tool_name}: {file_path}"
+        if tool_name in ("WebFetch", "WebSearch"):
+            target = str(tool_input.get("url") or tool_input.get("query") or "")[:100]
+            return f"🌐 {tool_name}: {target}"
+        if tool_name in ("Agent", "Task"):
+            desc = str(tool_input.get("description", ""))[:100]
+            return f"🤖 {tool_name}: {desc}"
+        if tool_name == "ToolSearch":
+            query_text = str(tool_input.get("query", ""))[:100]
+            return f"🔍 ToolSearch: {query_text}"
+        return f"🛠️ {tool_name}"
+
     base = tool_name.replace("mcp__nmae__", "")
     emoji = TOOL_EMOJI_MAP.get(base, "🔧")
 
@@ -190,7 +226,7 @@ def _load_nmae_system_prompt() -> str:
         except OSError:
             continue
     return (
-        "[STRICT] 너는 mobruji nmae. 사용자가 명시 적재 (events 'directive_approved') "
+        "[STRICT] 너는 mobruji nmae. 사용자가 명시 등록 (events 'directive_approved') "
         "한 directive 만 처리. 사용자 메시지 직접 처리 X — 단순 답 또는 '📌 누르세요' "
         "안내. launch_subagent 는 directive_approved event 만 trigger."
     )
@@ -241,6 +277,7 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         return
 
     options = ClaudeAgentOptions(
+        model="claude-opus-4-8",
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
         mcp_servers={"nmae": _get_mcp_server()},
@@ -251,11 +288,34 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         f"답 push 시 thread_id='{thread_id}' 사용." if thread_id
         else f"답 push 시 reply_to_msg_id='{message_id}' 사용 (thread 미생성)."
     )
+    # E2 (2026-05-29) — forum thread 안 메시지면 context 명시.
+    forum_kind = payload.get("forum_kind", "main")
+    directive_id_ctx = payload.get("directive_id", "")
+    forum_context = ""
+    if forum_kind and forum_kind != "main":
+        ctx_lines = [f"\n[forum context] 이 메시지는 **{forum_kind}** forum 의 thread 안 사용자 코멘트입니다."]
+        if directive_id_ctx:
+            ctx_lines.append(f"  - 매핑된 directive_id: {directive_id_ctx}")
+            ctx_lines.append(
+                "  - 사용자가 이 directive 의 진행 / sub-agent 작업에 대한 코멘트 / 정정 / 질문 가능."
+            )
+        else:
+            ctx_lines.append(
+                f"  - directive 매핑 미존재. 단순 {forum_kind} 사이클 thread 안 사용자 코멘트."
+            )
+        ctx_lines.append("  - 답은 같은 thread 안에서 (thread_id 명시 유지).")
+        forum_context = "\n".join(ctx_lines)
+
     user_prompt = (
         f"[사용자 메시지] (message_id={message_id}, channel_id={channel_id}, user_id={user_id})\n\n"
-        f"{body}\n\n"
-        f"위 메시지를 처리. 답이 필요하면 mcp__nmae__post_discord_message 호출 "
-        f"(channel_id='{channel_id}'). {thread_directive}"
+        f"{body}\n{forum_context}\n\n"
+        f"**STRICT 의무 (2026-05-29)**: 위 메시지에 **반드시** "
+        f"mcp__nmae__post_discord_message tool 호출로 답하세요. "
+        f"답 텍스트만 생성하고 tool 호출 안 하면 사용자에게 안 보임 = 사고.\n\n"
+        f"- channel_id='{channel_id}'\n"
+        f"- {thread_directive}\n"
+        f"- 답이 짧아도 (예: \"OK\", \"확인했습니다\") 반드시 tool 호출.\n"
+        f"- 작업 등록 의도면 \"이 메시지를 할 일로 등록하시려면 📌 reaction 부탁드립니다\" 라고 답 (자율 등록 X)."
     )
 
     logger.info(
@@ -296,6 +356,8 @@ async def handle_pr_merged(payload: dict[str, Any]) -> None:
         logger.info("pr_merged → completed: %s", result)
     except Exception as exc:  # noqa: BLE001
         logger.warning("pr_merged handle 실패: %s exc=%r", payload, exc)
+    # (#1415) 지시 forum thread 태그 🔵 진행 중 → 🟢 완료 + board + body PATCH.
+    tc.set_directive_forum_status(str(directive_id), "completed", pr_url=pr_url or "")
 
 
 async def handle_subagent_completed(payload: dict[str, Any]) -> None:
@@ -317,13 +379,16 @@ cycle 결정 규칙:
 - user_cycle_hint 가 "auto" 가 아니면 (사용자 명시 위임) → **그 cycle 강제 사용, 판단 X**.
 - "auto" 이면 summary + description 보고 적절한 cycle (be / fe / rev / plan) 판단.
 
-처리:
+처리 (#1388 — 즉시 launch 폐지, 큐 적재):
 1. 위 규칙으로 cycle 결정.
-2. plan 위임 시 delegation_reason 명시 (신규 도메인, 다중 PR, 사용자 의도 분석 필요 등).
-3. launch_subagent tool 호출 — directive_id, cycle, title, task 인자.
-4. paused 모드면 launch_subagent 가 PausedError raise — 사용자에게 알림 (post_discord_message).
+2. **enqueue_work tool 호출** — directive_id, cycle, title, task, priority 인자.
+   - **launch_subagent 직접 호출 금지**. 사이클이 busy 여도 큐에 쌓이고 dispatcher 가
+     사이클 idle 시 자동 launch 한다 (사용자 정정 2026-05-31: "큐에 쌓아 동시·효율 처리").
+   - priority: description 에 🔴 / 시급 / 긴급 표현이 있으면 10, 아니면 0.
+3. enqueue_work 가 directive-board status 갱신 + 지시 thread 에 "큐 N번째 적재" 댓글을
+   자동으로 남긴다 (사용자 가시 지표). 별도 post_discord_message 불필요.
 
-사용자 메시지 직접 처리 X (메시지는 이미 적재 완료 — 단순 launch 만).
+사용자 메시지 직접 처리 X (메시지는 이미 적재 완료 — 큐 적재만).
 """
 
 
@@ -349,6 +414,26 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
     description = payload.get("description", "")
     cycle_hint = payload.get("cycle_hint", "")
 
+    # (#1388) directive 를 agent state 에 mirror — bot.py 📌 flow 로 등록된 directive
+    # 는 agent state 에 없어, enqueue_work / launch_subagent 의 directive 조회가
+    # 실패(ValueError "directive not found")하던 사고 동시 fix. 이미 있으면 thread_id 만 보강.
+    dir_key = f"directive:{directive_id}"
+    existing = ev.get_state(dir_key)
+    if existing is None:
+        ev.set_state(dir_key, {
+            "directive_id": directive_id,
+            "summary": summary,
+            "status": "polished",
+            "thread_id": payload.get("thread_id") or None,
+            "assigned_cycle": cycle_hint or None,
+            "delegation_reason": None,
+            "pr_url": None,
+            "closed_reason": None,
+        })
+    elif not existing.get("thread_id") and payload.get("thread_id"):
+        existing["thread_id"] = payload.get("thread_id")
+        ev.set_state(dir_key, existing)
+
     logger.info(
         "directive_approved: directive_id=%s cycle_hint=%s — SDK query 시작",
         directive_id, cycle_hint,
@@ -363,6 +448,7 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
         return
 
     options = ClaudeAgentOptions(
+        model="claude-opus-4-8",
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
         mcp_servers={"nmae": _get_mcp_server()},
@@ -377,12 +463,14 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
     )
 
     try:
-        # directive_approved 시 thread_id = directive 의 PinDialogueView thread
-        # (payload.get("thread_id") = bot.py 가 전달). 없으면 채널 push fallback.
-        dir_thread_id = payload.get("thread_id", "")
+        # (#1415) directive_approved 는 "cycle 판단 + enqueue_work" 내부 처리일 뿐 —
+        # raw tool progress (🔍 ToolSearch / 📥 enqueue_work) 를 지시 thread 로
+        # 스트리밍하면 "로그만 써놓고 감" 노이즈 (사용자 정정 2026-05-31). progress
+        # 억제(thread="") — 사용자 가시 보고는 enqueue_directive 의 "→ {cycle} 큐 적재"
+        # 댓글 + 지시 forum 태그 전이(🟡→🔵)가 담당.
         dir_channel_id = payload.get("channel_id", "")
         async for message in query(prompt=prompt, options=options):
-            await _emit_progress_from_sdk_message(message, dir_thread_id, dir_channel_id)
+            await _emit_progress_from_sdk_message(message, "", dir_channel_id)
             logger.debug("SDK directive_approved message: %r", message)
         logger.info("directive_approved handled: directive_id=%s", directive_id)
     except Exception as exc:  # noqa: BLE001
@@ -436,6 +524,28 @@ async def agent_loop(stop_event: asyncio.Event) -> None:
                     kind, event_id, exc,
                 )
             ev.mark_consumed(event_id, "agent")
+
+        # (#1388) work-queue dispatcher — 매 tick 사이클 idle 체크 후 큐 다음 항목 launch
+        # + stale in_flight 회복. graceful — 실패해도 loop 차단 X.
+        try:
+            import tools_queue as tq
+            launched = tq.dispatch_once()
+            if launched:
+                logger.info("work-queue dispatched: %s",
+                            [{"cycle": x["cycle"], "directive_id": x["directive_id"]} for x in launched])
+                # (#1396) 실제 sub-agent 실행 — flag on 일 때만 (기본 off = 부기-only).
+                import subagent_runner as sr
+                if sr.exec_enabled():
+                    for item in launched:
+                        _t = asyncio.create_task(sr.run_subagent_execution(
+                            item["cycle"], item["directive_id"],
+                            item.get("title", ""), item.get("task", ""),
+                            item.get("thread_id", ""),
+                        ))
+                        _EXEC_TASKS.add(_t)
+                        _t.add_done_callback(_EXEC_TASKS.discard)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("work-queue dispatch_once 실패: %r", exc)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_SECONDS)

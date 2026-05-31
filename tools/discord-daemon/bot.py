@@ -58,6 +58,17 @@ from directive_detect import (
     format_mismatch_push as directive_format_mismatch_push,
     make_detect_entry,
 )
+from lib.forum_template_validator import (  # noqa: E402 — sibling package
+    TOTAL_MARKERS as _FORUM_TEMPLATE_TOTAL_MARKERS,
+    ValidationResult as ForumTemplateValidationResult,
+    format_alert as forum_template_format_alert,
+    validate as forum_template_validate,
+)
+
+
+def forum_template_total_markers() -> int:
+    """forum template marker total count — log / alert 양식 격리."""
+    return _FORUM_TEMPLATE_TOTAL_MARKERS
 
 LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s :: %(message)s"
 INBOX_PATH: Final[Path] = Path(__file__).resolve().parent / "inbox.jsonl"
@@ -80,6 +91,15 @@ PIN_REGISTERED_EMOJI: Final[str] = "✅"
 # 추천: minimal 2개 (자율 default 룰 보존, [[feedback-autonomous-default]]).
 CONTROL_STOP_EMOJI: Final[str] = "⏹"  # SIGINT — helper claude tmux pane Ctrl-C
 CONTROL_WHY_EMOJI: Final[str] = "❓"  # 다음 turn 에 helper 가 직전 작업/결정 사유 설명
+
+# directive 적재 dialogue (dialogue_style="register") 의 3 button — 사용자
+# 의제: 1️⃣/2️⃣ keycap 의 OX 가 모호 → ⭕ 등록 / ✏️ 수정 / 🗑️ 제거 로 swap.
+# ✏️ click → agent 가 "어떤 점 수정?" 묻고 summary 정정 loop (max 3회).
+# 🗑️ click → directive 폐기 (agent path).
+REGISTER_DIALOGUE_EMOJIS: Final[list[str]] = ["⭕", "✏️", "🗑️"]
+REGISTER_DIALOGUE_EMOJI_TO_IDX: Final[dict[str, int]] = {
+    e: i for i, e in enumerate(REGISTER_DIALOGUE_EMOJIS)
+}
 
 # Discord keycap number emoji → 0-based index (1️⃣ = 0, 🔟 = 9).
 # 1-9 = digit + VS16 + keycap (U+FE0F U+20E3). 🔟 = U+1F51F.
@@ -321,33 +341,43 @@ CYCLE_STALE_ACTIVE_INJECT_TEMPLATE: Final[str] = (
     "즉시 sub-agent 상태 확인 후 set-idle (완료 시) 또는 재 launch 결정."
 )
 
-# rev e2e 단계 2 (post-merge) 자동 trigger (#1008, spec: docs/features/rev-e2e-3-stages.md §3-2).
+# rev e2e Post-merge audit (단계 2) 자동 trigger (#1008,
+# spec: docs/features/rev-e2e-2-stages.md §3-2).
 # 5분 polling — develop 머지된 PR 중 `rev-post-merge-pass` 라벨 없는 항목을
 # gh CLI 로 발굴해 nmae tmux pane 에 audit launch 알림 inject + Discord push.
 # 동일 PR 반복 inject 방지를 위해 in-process debounce (기본 15분).
+#
+# 명명 (2026-05-30 rev2s-1 / PR #1367 머지 후 통일):
+#   - 단계 1 = 🟡 Pre-merge review (PR 머지 전)
+#   - 단계 2 = 🔵 Post-merge audit (develop 머지 후 dev 환경 회귀 검증) ← 본 loop 대상
+#   - 단계 3 (release 후 production 검증) = 폐기. 사유: production 환경 부재
+#     (cd-prod.yml / cd-release.yml 워크플로우 없음). 향후 production 환경
+#     신설 시 부활 가능 — `[[project_rev_stage_3_prod_revival]]` 메모리 절차.
 REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED: Final[str] = "1"
 REV_POST_MERGE_AUDIT_DEFAULT_INTERVAL_SECONDS: Final[int] = 300  # 5분
 REV_POST_MERGE_AUDIT_DEFAULT_INITIAL_DELAY_SECONDS: Final[int] = 90  # boot warmup
 REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET: Final[str] = "mobruji:0.0"
 # 동일 PR 재 inject 차단 — nmae 가 라벨 부여하기까지 polling 사이클 사이의
-# 중복 방지. 15분이면 단계 2 audit 시작/완료를 기다리기엔 충분.
+# 중복 방지. 15분이면 Post-merge audit (단계 2) 시작/완료를 기다리기엔 충분.
 REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
 # debounce cache 사이즈 cap — 메모리 누수 방지 (LRU 비슷한 단순 cap).
 REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
 # gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
 # 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
 REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "1h"
-# label 조회 시 사용할 label 이름 — rev sub-agent 가 단계 2 통과 시 부여.
+# label 조회 시 사용할 label 이름 — rev sub-agent 가 Post-merge audit (단계 2)
+# 통과 시 부여.
 REV_POST_MERGE_PASS_LABEL: Final[str] = "rev-post-merge-pass"
 # inject prompt template — {pr_numbers} 콤마 join.
 REV_POST_MERGE_AUDIT_INJECT_TEMPLATE: Final[str] = (
-    "[rev e2e post-merge] PR {pr_numbers} 단계 2 audit launch — "
-    "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-3-stages.md §3-2). "
-    "rev 단계 2 pass 시 라벨 `rev-post-merge-pass` 부여."
+    "[rev e2e post-merge] PR {pr_numbers} Post-merge audit (단계 2) launch — "
+    "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-2-stages.md §3-2). "
+    "Post-merge audit pass 시 라벨 `rev-post-merge-pass` 부여."
 )
 # Discord push template.
 REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE: Final[str] = (
-    "🔍 rev post-merge audit trigger — PR {pr_numbers} (단계 2 nmae inject)"
+    "🔍 rev post-merge audit trigger — PR {pr_numbers} "
+    "(Post-merge audit (단계 2) nmae inject)"
 )
 # gh CLI 실행 timeout (#1008). 네트워크 hang 시 loop block 방어.
 REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS: Final[int] = 30
@@ -853,7 +883,7 @@ def load_env() -> dict[str, str]:
     env["STALE_ACTIVE_THRESHOLD_MIN"] = os.environ.get(
         "STALE_ACTIVE_THRESHOLD_MIN", str(STALE_ACTIVE_THRESHOLD_DEFAULT_MIN)
     )
-    # rev e2e 단계 2 post-merge audit loop (#1008)
+    # rev e2e Post-merge audit (단계 2) loop (#1008)
     env["REV_POST_MERGE_AUDIT_LOOP"] = os.environ.get(
         "REV_POST_MERGE_AUDIT_LOOP", REV_POST_MERGE_AUDIT_LOOP_DEFAULT_ENABLED
     )
@@ -1335,7 +1365,7 @@ def _build_pin_match_followup(
     for m in matches[:PIN_MATCH_LIMIT]:
         if m["kind"] == "directive":
             status = m.get("status", "")
-            lines.append(f"• directive ({status}): `{m['summary']}`")
+            lines.append(f"• 지시 ({status}): `{m['summary']}`")
         else:
             forum_name = m.get("forum_name", "")
             lines.append(f"• {forum_name} forum: `{m['summary']}`")
@@ -1379,14 +1409,44 @@ class PinConfirmView(discord.ui.View):
     ) -> None:
         if not await self._verify_user(interaction):
             return
+        # (#1423) '정리 중' 문구는 _start_pin_dialogue (thread 송신) 가 단독으로
+        # 담당한다. 여기서도 '정리 중' 으로 edit 하면 핀이 thread 안일 때 같은
+        # 채널에 2번 표시되는 중복 사고 → 여기는 distinct ack 만.
         await interaction.response.edit_message(
-            content="📌 새 directive 로 등록합니다…", view=None,
+            content="✅ 새 지시로 등록합니다 — 아래에서 확인해 주세요.", view=None,
         )
+        # (#1385) 즉시 raw 등록 X — 정리 → O/X → 수정 loop dialogue 경유로 통일.
+        # 핀 메시지 + 그 쓰레드 전체 맥락을 요약해 제목/본문 산출.
+        channel = interaction.channel
+        message = None
+        try:
+            message = await channel.fetch_message(int(self._target_message_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "📌 새로 등록: fetch_message 실패 msg_id=%s exc=%r",
+                self._target_message_id, exc,
+            )
+        if message is not None:
+            try:
+                thread_context = await _fetch_thread_context(channel, message)
+                await _start_pin_dialogue(
+                    message, self._target_user_id,
+                    self._original_summary or "(빈 본문)", channel,
+                    thread_context=thread_context,
+                )
+                self.stop()
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "📌 새로 등록: dialogue 시작 실패 — 즉시 등록 fallback: %r", exc,
+                )
+        # fallback — 이미 확보한 요약으로 직접 등록 (본문 유실 방지).
         await _do_register_directive(
             interaction.client, self._target_message_id, self._target_user_id,
+            channel=channel, summary=self._original_summary,
         )
         await interaction.edit_original_response(
-            content="✅ 새 directive 등록 완료.",
+            content="✅ 새 지시 등록 완료.",
         )
         self.stop()
 
@@ -1464,6 +1524,65 @@ async def _generate_directive_description(
     return polished or raw_summary
 
 
+# 쓰레드 맥락 수집 cap (#1385 (C)).
+DIRECTIVE_THREAD_CONTEXT_MAX_MESSAGES: Final[int] = 40
+DIRECTIVE_THREAD_CONTEXT_MAX_CHARS: Final[int] = 6000
+
+
+async def _fetch_thread_context(channel, message) -> str | None:  # noqa: ANN001
+    """핀 메시지가 속한 쓰레드 전체 대화록 (작성자 라벨 + 시간순) 문자열.
+
+    channel 이 thread 가 아니면 None 반환 (단건 메시지만 사용). (#1385 (C))
+    핀 메시지에는 📌 마커를 달아 요약기가 "어디에 핀이 찍혔는지" 인지하게 함.
+    """
+    if not isinstance(channel, discord.Thread):
+        return None
+    lines: list[str] = []
+    try:
+        async for msg in channel.history(
+            limit=DIRECTIVE_THREAD_CONTEXT_MAX_MESSAGES, oldest_first=True,
+        ):
+            content = (getattr(msg, "content", "") or "").strip()
+            if not content:
+                continue
+            author = getattr(getattr(msg, "author", None), "name", "?")
+            is_bot = getattr(getattr(msg, "author", None), "bot", False)
+            role = "키키(nmae)" if is_bot else f"사용자({author})"
+            marker = " 📌(핀)" if str(msg.id) == str(message.id) else ""
+            lines.append(f"- {role}{marker}: {content}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "📌 thread context fetch 실패 thread=%s exc=%r",
+            getattr(channel, "id", "?"), exc,
+        )
+        return None
+    if not lines:
+        return None
+    transcript = "\n".join(lines)
+    if len(transcript) > DIRECTIVE_THREAD_CONTEXT_MAX_CHARS:
+        transcript = transcript[-DIRECTIVE_THREAD_CONTEXT_MAX_CHARS:]
+    return transcript
+
+
+async def _generate_directive_summary(
+    raw_summary: str,
+    directive_id: str,
+    *,
+    thread_context: str | None = None,
+    user_feedback: str | None = None,
+) -> tuple[str, str]:
+    """(#1385 B+C) 쓰레드 맥락 → (짧은 제목, 정제 본문). 실패 시 raw fallback."""
+    title, body = await asyncio.to_thread(
+        _run_claude_summarize, raw_summary, directive_id,
+        thread_context=thread_context, user_feedback=user_feedback,
+    )
+    if not body:
+        body = raw_summary
+    if not title:
+        title = _fallback_title(raw_summary if not thread_context else body)
+    return title, body
+
+
 class PinDialogueView(discord.ui.View):
     """O/X dialogue — 정리된 description 확인 + cycle 명시 + 수정 loop.
 
@@ -1488,6 +1607,8 @@ class PinDialogueView(discord.ui.View):
         revision_count: int,
         thread,  # noqa: ANN001 — discord thread duck-typed
         register_channel,  # noqa: ANN001
+        polished_title: str = "",
+        thread_context: str | None = None,
         initial_cycle_hint: str = "auto",
     ) -> None:
         super().__init__(timeout=PIN_DIALOGUE_TIMEOUT)
@@ -1495,6 +1616,8 @@ class PinDialogueView(discord.ui.View):
         self._target_user_id = target_user_id
         self._raw_summary = raw_summary
         self._polished = polished_description
+        self._polished_title = polished_title  # (#1385) forum thread 제목
+        self._thread_context = thread_context  # (#1385) 수정 loop 재요약용
         self._revision_count = revision_count
         self._thread = thread
         self._register_channel = register_channel
@@ -1538,14 +1661,17 @@ class PinDialogueView(discord.ui.View):
         if not await self._verify_user(interaction):
             return
         await interaction.response.edit_message(
-            content=f"✅ 등록 진행 중…\n\n{self._polished}", view=None,
+            content=f"✅ 등록 진행 중…\n\n**제목:** {self._polished_title}\n\n{self._polished}",
+            view=None,
         )
         await _do_register_directive(
             interaction.client,
             self._target_message_id,
             self._target_user_id,
             channel=self._register_channel,
-            summary=self._polished[:80],
+            summary=self._polished_title or self._polished[:80],
+            title=self._polished_title,
+            body=self._polished,
         )
         # Phase F (2026-05-29) — events 'directive_approved' INSERT → agent.py
         # handle_directive_approved 가 consume → cycle 위임 결정 → launch_subagent.
@@ -1576,7 +1702,7 @@ class PinDialogueView(discord.ui.View):
             logger.warning("📌 pin dialogue thread archive 실패: %r", exc)
         self.stop()
 
-    @discord.ui.button(label="수정", style=discord.ButtonStyle.secondary, emoji="❌")
+    @discord.ui.button(label="수정", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def _revise(
         self, interaction: discord.Interaction, _btn: discord.ui.Button,
     ) -> None:
@@ -1593,12 +1719,38 @@ class PinDialogueView(discord.ui.View):
             self.stop()
             return
 
-        await interaction.response.edit_message(
+        # main 채널 fallback mode — revise loop 차단.
+        # main 채널에서 wait_for 하면 다른 사용자 메시지 모두 false-positive 잡힘.
+        # 단 register_channel 이 실제 thread 면 (#1385 — 핀 메시지가 이미 thread
+        # 안이라 nested thread 불가 → thread 자신에 fallback) wait_for 가 thread
+        # scope 라 안전 → revise 허용.
+        is_real_thread = isinstance(self._thread, discord.Thread)
+        if (
+            not is_real_thread
+            and getattr(self._thread, "id", None) is not None
+            and getattr(self._register_channel, "id", None) is not None
+            and self._thread.id == self._register_channel.id
+        ):
+            await interaction.response.edit_message(
+                content=(
+                    "🚫 main 채널 fallback 모드 — 수정 loop 불가 (revise 채널 비식별).\n"
+                    "등록 취소. 다시 시도하려면 새 메시지 + 📌 reaction."
+                ),
+                view=None,
+            )
+            self.stop()
+            return
+
+        # (#1423) 계획을 덮어쓰지 않는다 — 사용자가 위 계획 본문을 보며 수정점을
+        # 짚을 수 있어야 한다. 기존 dialogue 메시지는 본문 유지 + 버튼만 제거하고,
+        # 수정 안내는 별도 메시지로 보낸다 (과거엔 edit_message 로 계획을 안내문으로
+        # 대체해 사용자가 원본 계획을 못 보던 사고).
+        await interaction.response.edit_message(view=None)
+        await interaction.followup.send(
             content=(
-                f"❓ 어떤 점을 수정할까요? 이 thread 안에 메시지로 입력하세요. "
+                f"❓ 위 계획에서 어떤 점을 수정할까요? 이 thread 에 메시지로 입력해 주세요. "
                 f"(현재 시도 {self._revision_count + 1}/{PIN_DIALOGUE_MAX_REVISIONS})"
             ),
-            view=None,
         )
 
         # 사용자 다음 메시지 wait (thread 안)
@@ -1617,10 +1769,11 @@ class PinDialogueView(discord.ui.View):
             self.stop()
             return
 
-        # 재정리
+        # 재정리 (#1385 — 쓰레드 맥락 + 제목 동시 재산출)
         await self._thread.send(f"🔄 재정리 중 (시도 {self._revision_count + 1})…")
-        new_polished = await _generate_directive_description(
+        new_title, new_polished = await _generate_directive_summary(
             self._raw_summary, self._target_message_id,
+            thread_context=self._thread_context,
             user_feedback=user_msg.content,
         )
 
@@ -1629,19 +1782,40 @@ class PinDialogueView(discord.ui.View):
             target_message_id=self._target_message_id,
             target_user_id=self._target_user_id,
             raw_summary=self._raw_summary,
+            polished_title=new_title,
             polished_description=new_polished,
             revision_count=self._revision_count + 1,
             thread=self._thread,
             register_channel=self._register_channel,
+            thread_context=self._thread_context,
         )
         await self._thread.send(
             content=(
                 f"📝 재정리 (시도 {self._revision_count + 1}):\n\n"
-                f"{new_polished}\n\n"
+                f"**제목:** {new_title}\n\n{new_polished}\n\n"
                 f"등록할까요?"
             ),
             view=new_view,
         )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def _cancel(
+        self, interaction: discord.Interaction, _btn: discord.ui.Button,
+    ) -> None:
+        # (#1423) 등록(⭕)/수정(✏️)/취소(🗑️) 3버튼 중 취소 — 과거엔 취소 버튼이
+        # 없어 timeout 외엔 등록을 멈출 방법이 없었다.
+        if not await self._verify_user(interaction):
+            return
+        await interaction.response.edit_message(
+            content="🗑️ 등록을 취소했습니다. 다시 등록하려면 메시지에 📌 reaction 해주세요.",
+            view=None,
+        )
+        try:
+            if isinstance(self._thread, discord.Thread):
+                await self._thread.edit(archived=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("📌 pin dialogue 취소 thread archive 실패: %r", exc)
         self.stop()
 
     async def on_timeout(self) -> None:
@@ -1661,37 +1835,59 @@ async def _start_pin_dialogue(
     target_user_id: int,
     raw_summary: str,
     register_channel,  # noqa: ANN001
+    *,
+    thread_context: str | None = None,
 ) -> None:
     """Phase B+C — message 아래 Discord thread 생성 + 정리 + O/X.
 
-    message.create_thread → claude -p 정리 → PinDialogueView 게시.
-    실패 시 _do_register_directive fallback (graceful).
+    message.create_thread → claude -p 정리 (#1385: 쓰레드 맥락 → 제목+본문) →
+    PinDialogueView 게시.
+    thread 생성 실패 (50024 — channel type 미지원, 또는 핀 메시지가 이미 thread 안
+    이라 nested thread 불가) 시 register_channel 에 PinDialogueView 직접 송신
+    (사용자 가시화 유지). register_channel 이 실제 thread 면 revise loop 동작,
+    main 채널 fallback 이면 revise 자동 차단 (PinDialogueView._revise).
     """
+    fallback_to_channel = False
     try:
         thread = await message.create_thread(name=f"📌 등록 확인 — {raw_summary[:50]}")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("📌 pin dialogue thread 생성 실패 — 즉시 등록 fallback: %r", exc)
-        await _do_register_directive(
-            message.guild.me._state._get_client(), str(message.id), target_user_id,
-            channel=register_channel, summary=raw_summary,
+        logger.warning(
+            "📌 pin dialogue thread 생성 실패 — register_channel 직접 송신 fallback: %r", exc,
         )
-        return
+        thread = register_channel  # duck-typed — channel 도 .send 가능
+        fallback_to_channel = True
 
-    await thread.send("📝 정리 중… (claude -p 호출, 5-10초)")
+    if fallback_to_channel:
+        in_thread = isinstance(register_channel, discord.Thread)
+        note = (
+            "_📌 이 쓰레드에서 바로 확인합니다._"
+            if in_thread
+            else "_📌 main 채널 직접 표시 (thread 생성 불가 — 수정 loop 비활성)_"
+        )
+        await register_channel.send(f"📝 정리 중… (쓰레드 맥락 요약, 5-15초)\n{note}")
+    else:
+        await thread.send("📝 정리 중… (쓰레드 맥락 요약, 5-15초)")
 
-    polished = await _generate_directive_description(raw_summary, str(message.id))
+    polished_title, polished = await _generate_directive_summary(
+        raw_summary, str(message.id), thread_context=thread_context,
+    )
 
     view = PinDialogueView(
         target_message_id=str(message.id),
         target_user_id=target_user_id,
         raw_summary=raw_summary,
+        polished_title=polished_title,
         polished_description=polished,
         revision_count=0,
         thread=thread,
         register_channel=register_channel,
+        thread_context=thread_context,
     )
     await thread.send(
-        content=f"📝 다음 내용으로 정리해서 추가할까요?\n\n{polished}",
+        content=(
+            f"📝 다음 내용으로 정리해서 추가할까요?\n\n"
+            f"**제목:** {polished_title}\n\n{polished}"
+        ),
         view=view,
     )
 
@@ -1703,11 +1899,16 @@ async def _do_register_directive(
     *,
     channel=None,  # noqa: ANN001 — discord channel duck-typed
     summary: str | None = None,
+    title: str | None = None,
+    body: str | None = None,
 ) -> None:
     """실제 directive 등록 — directive_append.sh + helper-queue + ✅ reaction.
 
     caller 가 channel + summary 알면 인자로 전달 (cost 0). 미전달 시 client.guilds
     scan fallback (cold start 등 edge case).
+
+    title / body (#1385): 정제된 forum thread 제목 + 본문. 전달 시 thread name 은
+    title, 본문은 body 로 등록 (raw 대신 LLM 요약). 미전달 시 summary 로 fallback.
     """
     append_script = Path(__file__).resolve().parent / "directive_append.sh"
     if not append_script.exists():
@@ -1715,11 +1916,16 @@ async def _do_register_directive(
         return
 
     # 인자 미전달 시 client.guilds fallback fetch.
+    # (#1385) text_channels 뿐 아니라 active threads 도 훑어 thread 안 메시지
+    # (핀이 thread 안 메시지에 찍힌 경우) 가 "(빈 본문)" 으로 떨어지는 사고 차단.
     if channel is None or summary is None:
         try:
             msg = None
             for guild in getattr(client, "guilds", []):
-                for ch in getattr(guild, "text_channels", []):
+                candidates = list(getattr(guild, "text_channels", [])) + list(
+                    getattr(guild, "threads", [])
+                )
+                for ch in candidates:
                     try:
                         msg = await ch.fetch_message(int(message_id))
                         if msg is not None:
@@ -1737,10 +1943,20 @@ async def _do_register_directive(
     if summary is None or not summary:
         summary = "(빈 본문)"
 
+    # directive_append.sh <msg_id> <title> — title 은 forum thread name.
+    # (#1385) 정제 본문은 DIRECTIVE_SUMMARY_BODY env 로 전달 → template 의 💬 요약
+    # 섹션에 삽입 (6 marker 양식 보존 + LLM 정제 가독성). verbatim body override 가
+    # 아니라 env 경유라 진행 체크박스 / 🆔 / footer 등 추적 마커가 유지됨.
+    thread_title = (title or summary or "(빈 본문)")[:90]
+    append_argv = ["bash", str(append_script), message_id, thread_title]
+    append_env = dict(os.environ)
+    if body:
+        append_env["DIRECTIVE_SUMMARY_BODY"] = body
+
     try:
         result = subprocess.run(  # noqa: S603 — script path hardcoded sibling
-            ["bash", str(append_script), message_id, summary],
-            check=False, timeout=10.0, capture_output=True,
+            append_argv,
+            check=False, timeout=10.0, capture_output=True, env=append_env,
         )
         if result.returncode != 0:
             logger.warning(
@@ -1843,14 +2059,18 @@ async def _handle_pin_reaction(
             )
 
     # 매칭 없음 — Phase B+C: 등록 직전 정리 + 사용자 O/X dialogue.
-    # raw summary 가 빈 본문이면 dialogue 의미 없음 → 즉시 등록 (graceful).
-    if not summary or summary == "(빈 본문)":
+    # (#1385 C) 핀 메시지가 thread 안이면 thread 전체 맥락을 요약 대상으로 수집.
+    thread_context = await _fetch_thread_context(channel, message)
+    # raw summary 가 빈 본문 + 맥락도 없으면 dialogue 의미 없음 → 즉시 등록 (graceful).
+    if (not summary or summary == "(빈 본문)") and not thread_context:
         await _do_register_directive(
             client, message_id, user_id, channel=channel, summary=summary,
         )
         return
     try:
-        await _start_pin_dialogue(message, user_id, summary, channel)
+        await _start_pin_dialogue(
+            message, user_id, summary, channel, thread_context=thread_context,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "📌 pin dialogue 시작 실패 — 즉시 등록 fallback: %r", exc,
@@ -1952,9 +2172,14 @@ async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
     """
     channel_id = int(payload.get("channel_id", 0))
     body = payload.get("body", "")
-    reply_to_msg_id = payload.get("reply_to_msg_id")
     thread_id = payload.get("thread_id")
     choices = payload.get("choices")
+    dialogue_style = payload.get("dialogue_style")
+
+    # 2026-05-30 — reply_to_msg_id path 폐기. 사용자 정정: "엉뚱한 메세지에 답글
+    # 걸어서 답한다 — 제대로 못할 거 같으면 제거". 옛 last-user-msg-id.txt +
+    # helper path 의 race + 사고. thread 안 메시지 자체가 컨텍스트 가시화 충분.
+    # payload.reply_to_msg_id 는 받아도 무시 (backwards compat).
 
     target_id = int(thread_id) if thread_id else channel_id
     channel = client.get_channel(target_id)
@@ -1963,36 +2188,37 @@ async def _push_agent_reply(client: discord.Client, payload: dict) -> None:
         return
 
     reference = None
-    if reply_to_msg_id and not thread_id:
-        try:
-            reference = discord.MessageReference(
-                message_id=int(reply_to_msg_id),
-                channel_id=channel_id,
-                fail_if_not_exists=False,
-            )
-        except (ValueError, TypeError):
-            logger.warning("agent_reply: 잘못된 reply_to_msg_id=%r — ignore", reply_to_msg_id)
 
-    # choices 있으면 본문에 선택지 numbered list append
+    # choices 있으면 본문에 선택지 numbered list append.
+    # dialogue_style="register" (directive 적재 dialogue) 면 ⭕/✏️/🗑️ 3 button,
+    # 그 외 일반 N-choice 케이스 (사이클 결정 등) 는 keycap 1️⃣–🔟.
+    if isinstance(choices, list) and choices:
+        if dialogue_style == "register" and len(choices) <= len(REGISTER_DIALOGUE_EMOJIS):
+            choice_emojis = REGISTER_DIALOGUE_EMOJIS[:len(choices)]
+        else:
+            choice_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+                             "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"][:len(choices[:10])]
+    else:
+        choice_emojis = []
+
     final_body = body
     if isinstance(choices, list) and choices:
-        choice_keycaps = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
-                          "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         choice_lines = "\n".join(
-            f"{choice_keycaps[i]} {c}" for i, c in enumerate(choices[:10])
+            f"{choice_emojis[i]} {c}" for i, c in enumerate(choices[:10])
         )
         final_body = f"{body}\n\n{choice_lines}"
 
     msg = await channel.send(content=final_body, reference=reference)
-    logger.info("agent_reply pushed: channel=%s len=%d", target_id, len(final_body))
+    logger.info(
+        "agent_reply pushed: channel=%s len=%d style=%s",
+        target_id, len(final_body), dialogue_style or "default",
+    )
 
-    # choices keycap reaction 부착 + ledger
+    # choices reaction 부착 + ledger
     if isinstance(choices, list) and choices:
-        choice_keycaps = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
-                          "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         for i in range(min(len(choices), 10)):
             try:
-                await msg.add_reaction(choice_keycaps[i])
+                await msg.add_reaction(choice_emojis[i])
             except Exception as exc:  # noqa: BLE001
                 logger.warning("agent_reply choice reaction 부착 실패 i=%d exc=%r", i, exc)
         # ledger — message_id → choices list 저장 (on_raw_reaction_add 가 lookup)
@@ -2067,19 +2293,228 @@ async def _forum_retag(client: discord.Client, payload: dict) -> None:
 
 
 async def _forum_edit_starter(client: discord.Client, payload: dict) -> None:
-    """forum thread starter message body PATCH (starter message_id = thread_id)."""
+    """forum thread starter message body PATCH (starter message_id = thread_id).
+
+    PR F (forum-starter-template-guard, #1362) — `lib.forum_template_validator`
+    의 `validate(body)` 6 marker 가드 적용. matched < PASS_THRESHOLD (5/6) 시
+    graceful reject — starter 보존 + warning log + violation jsonl append +
+    DIGEST 채널 alert + cycle forum thread 안 댓글 (sub-agent 자기 사고 인지).
+    같은 thread 위배 1h debounce — `~/.mobruji/forum-template-violation-debounce.jsonl`.
+    """
     thread_id = int(payload.get("thread_id", 0))
     body = payload.get("body", "")
     thread = client.get_channel(thread_id)
     if thread is None:
         logger.warning("forum_edit_starter: thread %s 미발견 — drop", thread_id)
         return
+
+    # ─── PR F (forum-starter-template-guard) — validation 가드 ────────────
+    validation = forum_template_validate(body)
+    if not validation.passed:
+        logger.warning(
+            "forum_edit_starter REJECT: thread=%s matched=%d/%d missing=%s body_head=%r",
+            thread_id,
+            validation.matched,
+            forum_template_total_markers(),
+            validation.missing,
+            body[:80],
+        )
+        _append_forum_template_violation(thread_id, payload, validation)
+        await _alert_forum_template_violation(client, thread_id, validation)
+        return
+    # ──────────────────────────────────────────────────────────────────────
+
     try:
         starter = await thread.fetch_message(thread_id)
         await starter.edit(content=body)
         logger.info("forum_edit_starter: thread=%s len=%d", thread_id, len(body))
     except Exception as exc:  # noqa: BLE001
         logger.warning("forum_edit_starter 실패 thread=%s exc=%r", thread_id, exc)
+
+
+# ─── PR F — forum template violation 박제 + alert 헬퍼 ────────────────────
+
+
+FORUM_TEMPLATE_VIOLATION_LOG_PATH: Final[Path] = (
+    Path.home() / ".mobruji" / "forum-template-violations.jsonl"
+)
+FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH: Final[Path] = (
+    Path.home() / ".mobruji" / "forum-template-violation-debounce.jsonl"
+)
+# 같은 thread 위배 1h debounce — heartbeat_watch_loop 패턴 거울.
+FORUM_TEMPLATE_VIOLATION_DEBOUNCE_SECONDS: Final[int] = 60 * 60
+
+
+def _append_forum_template_violation(
+    thread_id: int,
+    payload: dict,
+    validation: "ForumTemplateValidationResult",
+) -> None:
+    """forum-template-violations.jsonl append — 회고 / 통계 용도.
+
+    graceful — OSError 발생 시 warning 만, daemon 중단 X.
+    """
+    try:
+        FORUM_TEMPLATE_VIOLATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "thread_id": str(thread_id),
+            "actor": payload.get("actor") or "",
+            "cycle": payload.get("cycle") or "",
+            "attempted_body_head": str(payload.get("body", ""))[:80],
+            "matched": validation.matched,
+            "missing": validation.missing,
+            "ts": datetime.now(CYCLE_DIGEST_TZ).isoformat(),
+        }
+        with FORUM_TEMPLATE_VIOLATION_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning(
+            "forum-template-violations.jsonl append 실패 thread=%s: %r", thread_id, exc,
+        )
+
+
+def _should_debounce_forum_template_violation(thread_id: int) -> bool:
+    """같은 thread 위배 1h 안 두 번째 alert skip 여부 판단.
+
+    Returns
+    -------
+    bool
+        True = 1h 안 이미 push 된 적 있음 (skip). False = push 가능.
+    """
+    now_ts = time.time()
+    cutoff = now_ts - FORUM_TEMPLATE_VIOLATION_DEBOUNCE_SECONDS
+    try:
+        if not FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.exists():
+            return False
+        for line in FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.read_text(
+            encoding="utf-8",
+        ).splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(entry.get("thread_id") or "") != str(thread_id):
+                continue
+            try:
+                ts_epoch = float(entry.get("ts_epoch") or 0)
+            except (TypeError, ValueError):
+                continue
+            if ts_epoch >= cutoff:
+                return True
+    except OSError as exc:
+        logger.warning(
+            "forum-template-violation-debounce read 실패 thread=%s: %r", thread_id, exc,
+        )
+    return False
+
+
+def _record_forum_template_violation_debounce(thread_id: int) -> None:
+    """debounce jsonl append — 다음 1h alert skip 표식."""
+    try:
+        FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.parent.mkdir(
+            parents=True, exist_ok=True,
+        )
+        entry = {
+            "thread_id": str(thread_id),
+            "ts_epoch": time.time(),
+            "ts_iso": datetime.now(CYCLE_DIGEST_TZ).isoformat(),
+        }
+        with FORUM_TEMPLATE_VIOLATION_DEBOUNCE_PATH.open(
+            "a", encoding="utf-8",
+        ) as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning(
+            "forum-template-violation-debounce append 실패 thread=%s: %r",
+            thread_id, exc,
+        )
+
+
+async def _alert_forum_template_violation(
+    client: discord.Client,
+    thread_id: int,
+    validation: "ForumTemplateValidationResult",
+) -> None:
+    """DIGEST 채널 + cycle forum thread 댓글 alert 발사 (1h debounce 적용).
+
+    DIGEST = 사용자 가시. thread 댓글 = sub-agent 가 다음 turn 안 자기 thread
+    보고 사고 인지 (학습 path). graceful — push 실패 시 warning 만.
+    """
+    if _should_debounce_forum_template_violation(thread_id):
+        logger.info(
+            "forum_template_violation alert debounced thread=%s (1h 이내 중복)",
+            thread_id,
+        )
+        return
+
+    alert_body = forum_template_format_alert(
+        thread_id, validation.matched, validation.missing,
+    )
+
+    digest_raw = os.environ.get("DIGEST_CHANNEL_ID")
+    digest_channel_id = 0
+    if digest_raw:
+        try:
+            digest_channel_id = int(digest_raw)
+        except ValueError:
+            logger.warning(
+                "DIGEST_CHANNEL_ID 가 정수 아님(%r) — forum template alert skip",
+                digest_raw,
+            )
+
+    if digest_channel_id:
+        digest_channel = client.get_channel(digest_channel_id)
+        if digest_channel is None:
+            logger.warning(
+                "forum_template_violation DIGEST 채널 미발견 — skip channel_id=%s",
+                digest_channel_id,
+            )
+        else:
+            try:
+                await digest_channel.send(content=alert_body)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "forum_template_violation DIGEST push 실패 thread=%s: %r",
+                    thread_id, exc,
+                )
+
+    thread = client.get_channel(thread_id)
+    if thread is not None and hasattr(thread, "send"):
+        try:
+            await thread.send(content=alert_body)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "forum_template_violation thread 댓글 push 실패 thread=%s: %r",
+                thread_id, exc,
+            )
+
+    _record_forum_template_violation_debounce(thread_id)
+
+
+def _lookup_directive_by_thread_id(thread_id: str) -> str | None:
+    """directive-board.jsonl 에서 thread_id 매칭 → directive_id 반환.
+
+    E2 옵션 (2026-05-29) — forum thread 안 사용자 메시지 시 어떤 directive 의
+    thread 인지 매핑. 미매칭 시 None — agent 가 forum_kind 만으로 답.
+    """
+    board_path = Path.home() / ".mobruji" / "directive-board.jsonl"
+    if not board_path.exists():
+        return None
+    try:
+        for line in board_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(entry.get("thread_id") or "") == thread_id:
+                return str(entry.get("message_id") or entry.get("directive_id") or "")
+    except OSError:
+        return None
+    return None
 
 
 def append_agent_event(kind: str, payload: dict) -> int:
@@ -2448,7 +2883,7 @@ def tmux_send_payload(target_pane: str, text: str) -> bool:
 def read_cycle_status(path: str = DEFAULT_CYCLE_STATUS_PATH) -> dict | None:
     """`~/.mobruji/cycle-status.json` 을 읽어 dict 로 반환합니다.
 
-    nmae(maestro 본진) 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는
+    nmae(NCP maestro 본 세션) 가 매 sub-agent launch/완료/머지 시 실시간 갱신하는
     상태 파일입니다. 파일이 없거나 JSON 파싱이 실패하면 None 을 반환하고,
     호출부 (`format_cycle_digest`) 가 graceful fallback 합니다.
 
@@ -2683,7 +3118,7 @@ def format_cycle_digest(
 
     if status is None or not isinstance(status, dict):
         embed.description = (
-            f"{timestamp_text}\n(cycle-status.json 읽기 실패 — 본진 갱신 대기)"
+            f"{timestamp_text}\n(cycle-status.json 읽기 실패 — nmae 갱신 대기)"
         )
         embed.color = CYCLE_DIGEST_COLOR_IDLE
         _maybe_add_cycle_counts_field(embed, cycle_counts)
@@ -4025,8 +4460,12 @@ async def cycle_idle_watch_loop(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# rev e2e 단계 2 (post-merge) 자동 trigger (#1008)
-# spec: docs/features/rev-e2e-3-stages.md §3-2
+# rev e2e Post-merge audit (단계 2) 자동 trigger (#1008)
+# spec: docs/features/rev-e2e-2-stages.md §3-2
+#
+# 단계 3 (release 후 production 검증) 은 2026-05-30 폐기 — production 환경
+# 부재 (cd-prod.yml / cd-release.yml 워크플로우 없음). 부활 절차는
+# `[[project_rev_stage_3_prod_revival]]` 메모리.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -4037,18 +4476,19 @@ def fetch_rev_post_merge_candidates(
     timeout_seconds: int = REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS,
     runner=subprocess.run,
 ) -> list[int]:
-    """develop 머지된 PR 중 단계 2 audit 필요한 PR 번호 리스트를 반환합니다.
+    """develop 머지된 PR 중 Post-merge audit (단계 2) 필요한 PR 번호 리스트를
+    반환합니다.
 
     `gh pr list --state merged --base develop --search 'merged:>{window} ago -label:{pass_label}'`
     을 호출해 JSON 으로 결과를 받습니다. 호출 실패 / parse fail 은 빈 리스트로
     graceful fallback (호출부 loop 가 다음 iter 에서 재시도).
 
     Args:
-        pass_label: 단계 2 통과 라벨 (rev sub-agent 가 부여). 이 라벨이 부재한
-            PR 만 후보로 잡힙니다.
+        pass_label: Post-merge audit (단계 2) 통과 라벨 (rev sub-agent 가 부여).
+            이 라벨이 부재한 PR 만 후보로 잡힙니다.
         search_window: gh CLI `merged:>${X} ago` 윈도우 — 너무 오래된 머지는
-            polling 부담만 누적되므로 1시간만 본다 (단계 2 deploy 후 audit 끝났을
-            시각). 외부 override 가능.
+            polling 부담만 누적되므로 1시간만 본다 (Post-merge audit (단계 2)
+            deploy 후 audit 끝났을 시각). 외부 override 가능.
         timeout_seconds: gh CLI 호출 timeout. 네트워크 hang 시 loop block 방어.
         runner: ``subprocess.run`` 호환 콜러블. 테스트 stub 용.
 
@@ -4344,7 +4784,7 @@ def _polish_prompt(raw_body: str, directive_id: str) -> str:
         "다음 4 항목 한국어 markdown 으로 정제 (각 항목 짧게):\n"
         "- **요약**: 1-2 줄 (사용자가 무엇을 원하는지)\n"
         "- **유형**: 신규 기능 / 버그 fix / 운영 개선 / 의견 / 질문 중 하나\n"
-        "- **위임 권장**: be / fe / rev / plan / nmae 본진 중 하나 + 한 줄 사유\n"
+        "- **위임 권장**: be / fe / rev / plan / nmae 중 하나 + 한 줄 사유\n"
         "- **상태**: 대기\n\n"
         "출력은 위 4 항목 markdown 만. 코드 펜스 / 부가 설명 / 메타코멘트 금지."
     )
@@ -4363,6 +4803,112 @@ def _run_claude_polish(raw_body: str, directive_id: str) -> str:
         logger.warning("directive_polish: claude -p 실패 id=%s exc=%r",
                        directive_id, exc)
         return ""
+
+
+# ── 쓰레드 맥락 기반 요약 (#1385) ──────────────────────────────────────────────
+# 사용자 요구 (2026-05-30):
+#  (B) forum thread 제목도 LLM 짧은 요약 (raw 본문 그대로면 가독성 ↓).
+#  (C) 핀(📌) 메시지 단건이 아니라 그 메시지가 속한 쓰레드 전체 맥락을 요약해
+#      사용자 실제 의도를 파악 (예: "브라우저 QA 못해?" → "도입하려면 📌" 흐름
+#      전체에서 "브라우저 자동 QA 환경 도입" directive 추론).
+# 단일 claude -p 호출로 {짧은 제목, 정제 본문} 동시 산출.
+_DIRECTIVE_TITLE_MAX_LEN: Final[int] = 40
+_DIRECTIVE_SUMMARY_BODY_MARKER: Final[str] = "===본문==="
+
+
+def _fallback_title(raw_summary: str) -> str:
+    """LLM 제목 산출 실패 시 raw 요약 앞부분으로 fallback."""
+    cleaned = re.sub(r"\s+", " ", (raw_summary or "").strip())
+    if not cleaned or cleaned == "(빈 본문)":
+        return "(제목 미정)"
+    return cleaned[:_DIRECTIVE_TITLE_MAX_LEN]
+
+
+def _summary_prompt(
+    raw_body: str,
+    directive_id: str,
+    *,
+    thread_context: str | None = None,
+    user_feedback: str | None = None,
+) -> str:
+    if thread_context:
+        context_block = (
+            "아래는 핀(📌)이 찍힌 메시지가 속한 대화 쓰레드 전체입니다 (시간순). "
+            "단건 메시지가 아니라 이 대화 흐름 전체에서 사용자가 실제로 원하는 "
+            "작업이 무엇인지 추론하세요:\n\n"
+            f"{thread_context}\n\n"
+        )
+    else:
+        context_block = f"원본 사용자 메시지: {raw_body}\n"
+    feedback_block = (
+        f"\n[사용자 수정 요청] 아래 지적을 반영해 다시 정리:\n{user_feedback}\n"
+        if user_feedback
+        else ""
+    )
+    return (
+        "mobruji 프로젝트의 directive forum thread 제목과 본문을 정제해 주세요.\n\n"
+        f"{context_block}"
+        f"directive_id: {directive_id}\n"
+        f"{feedback_block}\n"
+        "다음 형식으로 정확히 출력 (그 외 텍스트 / 코드펜스 / 메타코멘트 금지):\n"
+        f"제목: <작업을 한눈에 식별하는 짧은 한국어 명사구, {_DIRECTIVE_TITLE_MAX_LEN}자 "
+        "이내, 이모지 없이>\n"
+        f"{_DIRECTIVE_SUMMARY_BODY_MARKER}\n"
+        "- **요약**: 1-2 줄 (대화 맥락 기준 사용자가 무엇을 원하는지)\n"
+        "- **유형**: 신규 기능 / 버그 fix / 운영 개선 / 의견 / 질문 중 하나\n"
+        "- **위임 권장**: be / fe / rev / plan / nmae 중 하나 + 한 줄 사유\n"
+        "- **상태**: 대기"
+    )
+
+
+def _parse_summary_output(text: str) -> tuple[str, str]:
+    """claude -p 출력 → (제목, 본문). 형식 파싱 실패 시 ('', text) graceful."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return "", ""
+    title = ""
+    body = stripped
+    marker = _DIRECTIVE_SUMMARY_BODY_MARKER
+    head, sep, tail = stripped.partition(marker)
+    if sep:
+        body = tail.strip() or stripped
+        head = head.strip()
+    else:
+        head = ""
+    # 제목 라인 추출 — head 블록 또는 첫 줄에서 "제목:" 탐색.
+    search_zone = head if head else stripped.splitlines()[0] if stripped else ""
+    for line in search_zone.splitlines():
+        line = line.strip()
+        if line.startswith("제목:"):
+            title = line.split("제목:", 1)[1].strip()
+            break
+    title = title[:_DIRECTIVE_TITLE_MAX_LEN].strip()
+    return title, body
+
+
+def _run_claude_summarize(
+    raw_body: str,
+    directive_id: str,
+    *,
+    thread_context: str | None = None,
+    user_feedback: str | None = None,
+) -> tuple[str, str]:
+    """claude -p → (제목, 본문). 실패 시 ('', '')."""
+    prompt = _summary_prompt(
+        raw_body, directive_id,
+        thread_context=thread_context, user_feedback=user_feedback,
+    )
+    try:
+        result = subprocess.run(  # noqa: S603 — explicit argv from env
+            [*CLAUDE_CLI_ARGV, "-p", prompt],
+            timeout=DIRECTIVE_POLISH_CLAUDE_TIMEOUT,
+            capture_output=True, text=True, check=False,
+        )
+        return _parse_summary_output((result.stdout or "").strip())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("directive_summarize: claude -p 실패 id=%s exc=%r",
+                       directive_id, exc)
+        return "", ""
 
 
 def _directive_board_status_for(
@@ -4516,16 +5062,18 @@ async def rev_post_merge_audit_loop(
     candidate_fetcher=None,
     time_source=time.monotonic,
 ) -> None:
-    """5분 polling — develop 머지된 PR 단계 2 audit 자동 trigger (#1008).
+    """5분 polling — develop 머지된 PR Post-merge audit (단계 2) 자동 trigger
+    (#1008).
 
-    spec: docs/features/rev-e2e-3-stages.md §3-2.
+    spec: docs/features/rev-e2e-2-stages.md §3-2.
 
     동작:
       1. ``initial_delay`` 초 warmup 후 polling 시작.
       2. ``poll_interval`` 초마다 `gh pr list ... -label:rev-post-merge-pass` 호출.
       3. 후보 PR ≥ 1 → debounce 적용 후 fresh PR 만 추출.
       4. fresh ≥ 1:
-         - nmae tmux pane (``inject_target``) 에 inject (단계 2 audit launch 알림).
+         - nmae tmux pane (``inject_target``) 에 inject
+           (Post-merge audit (단계 2) launch 알림).
          - Discord ``digest_channel_id`` 에 push (cycle digest 채널 공유).
          - 각 fresh PR `last_inject_at` 갱신.
       5. graceful skip — gh CLI 실패 / fresh 없음 / tmux 부재 / Discord channel 부재 시
@@ -5749,6 +6297,43 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             forum_channel_ids["rev"] or "unset",
             forum_channel_ids["plan"] or "unset",
         )
+        # 2026-05-29 — forum 채널 5개 의 bot 권한 probe. 사용자 보고
+        # "forum 채널 자체에 단 댓글 답 0" root cause 추적: on_message event 자체
+        # 미수신 → bot 권한 부재 가설. View Channel + Read Message History 가
+        # forum thread message_create event 수신의 필요조건.
+        for forum_kind, forum_id in forum_channel_ids.items():
+            if not forum_id:
+                continue
+            forum_channel = None
+            forum_guild = None
+            for guild in client.guilds:
+                candidate = guild.get_channel(forum_id)
+                if candidate is not None:
+                    forum_channel = candidate
+                    forum_guild = guild
+                    break
+            if forum_channel is None:
+                logger.warning(
+                    "forum permission probe: kind=%s id=%s NOT VISIBLE — bot 가 "
+                    "채널 보지 못함 (Role 미부여 또는 권한 부재). 사용자 Discord "
+                    "UI 에서 채널별 권한 부여 필요.",
+                    forum_kind,
+                    forum_id,
+                )
+                continue
+            bot_member = forum_guild.me  # type: ignore[union-attr]
+            perms = forum_channel.permissions_for(bot_member)
+            logger.info(
+                "forum permission probe: kind=%s id=%s name=%r view=%s "
+                "read_history=%s send_in_threads=%s create_public_threads=%s",
+                forum_kind,
+                forum_id,
+                forum_channel.name,
+                perms.view_channel,
+                perms.read_message_history,
+                perms.send_messages_in_threads,
+                perms.create_public_threads,
+            )
         if digest_enabled and not hasattr(client, "_digest_task_started"):
             # on_ready 는 reconnect 시 재호출 — task 중복 시작 방지.
             client._digest_task_started = True  # type: ignore[attr-defined]
@@ -5813,8 +6398,12 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             logger.info("context auto-clear disabled (CONTEXT_AUTO_CLEAR_ENABLED=0)")
 
         # nmae cycle watchdog (#941, spec: docs/features/nmae-cycle-watchdog.md).
-        # 5분 polling cycle-status.json — idle 워크트리 자동 nmae 알림 + Discord push.
-        if cycle_idle_watch_enabled and not hasattr(
+        # 2026-05-29 폐기 — agent SDK design 에서 nmae 자동 위임 path 폐기됨
+        # (STRICT 룰 — directive_approved event 통해서만 launch). idle alert /
+        # escalation push 가 nmae 에 자동 trigger 보내는 path 가 새 design 위반.
+        # cycle_idle_watch_loop disabled (env 토글 무관). 함수 자체는 dead code 로
+        # 유지 — 후속 PR 에서 함수 정의 + escalation 헬퍼 정리.
+        if False and cycle_idle_watch_enabled and not hasattr(
             client, "_cycle_idle_watch_task_started"
         ):
             client._cycle_idle_watch_task_started = True  # type: ignore[attr-defined]
@@ -5852,9 +6441,9 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         elif not cycle_idle_watch_enabled:
             logger.info("cycle_idle_watch disabled (CYCLE_IDLE_WATCH=0)")
 
-        # rev e2e 단계 2 (post-merge) 자동 trigger (#1008).
-        # 5분 polling — develop 머지된 PR 단계 2 audit 자동 launch.
-        # spec: docs/features/rev-e2e-3-stages.md §3-2.
+        # rev e2e Post-merge audit (단계 2) 자동 trigger (#1008).
+        # 5분 polling — develop 머지된 PR Post-merge audit (단계 2) 자동 launch.
+        # spec: docs/features/rev-e2e-2-stages.md §3-2.
         if rev_post_merge_audit_enabled and not hasattr(
             client, "_rev_post_merge_audit_task_started"
         ):
@@ -6016,8 +6605,26 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
+        # 2026-05-29 (B+E2 옵션) — main 채널 thread + 4 cycle forum + directive forum 의
+        # thread 안 사용자 메시지 모두 agent 처리. E2: forum_kind / directive_id 매핑으로
+        # context 명시 → agent 가 어느 cycle / directive 의 thread 안 코멘트인지 인식.
+        is_thread_of_target = False
+        forum_kind: str | None = None  # be/fe/rev/plan/directive/main
         if message.channel.id != target_channel_id:
-            return
+            parent = getattr(message.channel, "parent", None)
+            parent_id = getattr(parent, "id", None)
+            if parent_id == target_channel_id:
+                is_thread_of_target = True
+                forum_kind = "main"
+            else:
+                # forum thread 분기 — parent.id 가 4 cycle / directive forum 매칭.
+                for kind, fid in forum_channel_ids.items():
+                    if fid and parent_id == fid:
+                        forum_kind = kind
+                        is_thread_of_target = True
+                        break
+                if forum_kind is None:
+                    return
         if message.author.id not in allowed_user_ids:
             logger.info("허용되지 않은 사용자 무시: user_id=%s", message.author.id)
             return
@@ -6075,27 +6682,48 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # 2026-05-29 B안 가시화 — 사용자 메시지마다 thread 자동 생성.
         # agent 의 도구 호출 / 답 모두 그 thread 안 stream. 채널 noise 0.
         # graceful: thread 생성 실패 시 thread_id="" — agent 가 채널 push fallback.
+        # B 옵션 (2026-05-29) — thread 안 사용자 메시지면 새 thread 생성 X, 기존
+        # thread 안에서 계속 처리. agent 는 같은 thread 안 stream 유지 (대화 흐름).
         thread_id_str = ""
-        try:
-            thread_name = (original_body[:50] or "대화") + " 진행"
-            agent_thread = await message.create_thread(name=thread_name[:99])
-            thread_id_str = str(agent_thread.id)
+        channel_id_str = str(message.channel.id)
+        directive_id_str: str | None = None
+        if is_thread_of_target:
+            # 사용자가 기존 thread 안 메시지 (B+E2 옵션) — 그 thread 안 처리.
+            thread_id_str = channel_id_str
+            # forum thread 면 channel_id = forum, main thread 면 channel_id = main.
+            parent_id = getattr(getattr(message.channel, "parent", None), "id", None)
+            channel_id_str = str(parent_id or target_channel_id)
+            # E2 — forum thread → directive_id 매핑 (directive-board.jsonl scan).
+            if forum_kind and forum_kind != "main":
+                directive_id_str = _lookup_directive_by_thread_id(thread_id_str)
             logger.info(
-                "user_message thread 생성: id=%s name=%r",
-                thread_id_str, thread_name[:30],
+                "user_message in thread: forum_kind=%s thread=%s directive=%s body=%r",
+                forum_kind, thread_id_str, directive_id_str, original_body[:60],
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("user_message thread 생성 실패 — fallback 채널: %r", exc)
+        else:
+            try:
+                thread_name = (original_body[:50] or "대화") + " 진행"
+                agent_thread = await message.create_thread(name=thread_name[:99])
+                thread_id_str = str(agent_thread.id)
+                logger.info(
+                    "user_message thread 생성: id=%s name=%r",
+                    thread_id_str, thread_name[:30],
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("user_message thread 생성 실패 — fallback 채널: %r", exc)
 
         append_agent_event("user_message", {
             "message_id": message_id,
-            "channel_id": str(message.channel.id),
+            "channel_id": channel_id_str,
             "thread_id": thread_id_str,  # B안 — agent 가 답/진행 thread 안 push
             "user_id": str(message.author.id),
             "user_name": message.author.name,
             "body": original_body,
             "referenced_content": referenced_content,
             "ts_iso": ts_iso,
+            # E2 — forum context. agent 가 어디서 / 어떤 directive 의 코멘트인지 인식.
+            "forum_kind": forum_kind or "main",
+            "directive_id": directive_id_str or "",
         })
 
         # #1071 / PR #1140: directive classify + jsonl 로그 (자동 등록 path 폐지).
@@ -6150,38 +6778,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     exc_info=True,
                 )
 
-        # secondary reaction (#1080) — primary auto-ack 직후 nmae 점유 상태를
-        # emoji 로 시각화. cycle-status.json 부재 / parse 실패 시 silent skip.
-        # auto-ack 와 독립적인 try/except — primary 가 실패해도 secondary 시도.
-        if bot_secondary_reaction_enabled:
-            try:
-                secondary_emoji = classify_nmae_status(
-                    cycle_status_path,
-                    emoji_idle=bot_secondary_reaction_emoji_idle,
-                    emoji_partial=bot_secondary_reaction_emoji_partial,
-                    emoji_full=bot_secondary_reaction_emoji_full,
-                )
-                if secondary_emoji is not None:
-                    await message.add_reaction(secondary_emoji)
-                    logger.info(
-                        "bot secondary reaction OK: message_id=%s emoji=%s",
-                        message_id,
-                        secondary_emoji,
-                    )
-                else:
-                    logger.info(
-                        "bot secondary reaction skip (cycle-status 없음/깨짐): "
-                        "message_id=%s",
-                        message_id,
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "bot secondary reaction 실패: message_id=%s exc=%r",
-                    message_id,
-                    exc,
-                    exc_info=True,
-                )
-
         # 📌 directive 등록 후보 marker (spec: directive-pushpin-registration.md).
         # 매 사용자 메시지에 📌 자동 부착 (passive). 사용자가 추적 원하는 메시지에서
         # 📌 tap 시 `on_raw_reaction_add` 의 📌 분기가 directive_append.sh 호출.
@@ -6196,26 +6792,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "📌 pin marker 부착 실패: message_id=%s exc=%r",
-                message_id,
-                exc,
-                exc_info=True,
-            )
-
-        # ⏹ control emoji 자동 부착 (2026-05-29).
-        # 사용자 정정: "stop button은 내가 보낸 메세지에 붙는게 맞는거같은데".
-        # ⏹ 의 의미 = 이 명령으로 시작된 helper 작업 중단 → 사용자 자기 메시지에 부착.
-        # tap 시 on_raw_reaction_add 의 ⏹ branch 가 helper claude 에 Ctrl-C send.
-        # (❓ 는 helper 답 메시지에 부착 — discord-reply.sh 가 처리.)
-        try:
-            await message.add_reaction(CONTROL_STOP_EMOJI)
-            logger.info(
-                "⏹ control marker OK: message_id=%s emoji=%s",
-                message_id,
-                CONTROL_STOP_EMOJI,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "⏹ control marker 부착 실패: message_id=%s exc=%r",
                 message_id,
                 exc,
                 exc_info=True,
@@ -6250,10 +6826,17 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         # 생성. 사용자가 thread 안에서 📌 reaction 누르면 raw_payload.channel_id =
         # thread id ≠ target_channel_id → 옛 코드 가 즉시 return → 사고.
         # thread parent 가 target_channel_id 면 통과.
+        # 2026-05-29 추가 fix — main 채널 thread + 4 cycle forum + directive forum 의
+        # thread 안 reaction 도 처리. 사용자 정정: "directive forum 승인하는 OX 질문도
+        # 누락" → forum thread 안 📌 / 키캡 reaction 처리 필요.
         if raw_payload.channel_id != target_channel_id:
             ch = client.get_channel(raw_payload.channel_id)
             parent_id = getattr(getattr(ch, "parent", None), "id", None)
-            if parent_id != target_channel_id:
+            allowed_parents = {target_channel_id}
+            for _fid in forum_channel_ids.values():
+                if _fid:
+                    allowed_parents.add(_fid)
+            if parent_id not in allowed_parents:
                 return
         if raw_payload.user_id not in allowed_user_ids:
             return
@@ -6362,77 +6945,92 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             )
             return
 
-        # keycap (1️⃣–🔟) 선택지 응답 분기.
+        # 선택지 응답 분기 — keycap (1️⃣–🔟) 또는 register dialogue 3 button
+        # (⭕ 등록 / ✏️ 수정 / 🗑️ 제거). 둘 중 매칭 못 하면 ignore.
         choice_idx = parse_choice_emoji(emoji_str)
+        if choice_idx is None:
+            choice_idx = REGISTER_DIALOGUE_EMOJI_TO_IDX.get(emoji_str)
         if choice_idx is None:
             return
 
         bot_msg_id = str(raw_payload.message_id)
         register = lookup_choice_prompt(bot_msg_id)
-        if register is None:
-            return  # not a registered choice prompt or already consumed
+        # 2026-05-30 — agent SDK choice_prompt fallback. legacy ledger 미등록 +
+        # agent path (events.choice_prompt) 만 등록된 케이스 (사용자 보고
+        # "O 눌렀는데 무반응") 해소. 어느 한 path 라도 등록돼 있으면 처리.
+        agent_choice_value: str | None = None
+        try:
+            agent_choice_value = _lookup_agent_choice(bot_msg_id, choice_idx)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent choice lookup 실패: %r", exc)
 
-        choices = register.get("choices") or []
-        if not isinstance(choices, list) or choice_idx >= len(choices):
-            return
-        label = str(choices[choice_idx])
+        if register is None and agent_choice_value is None:
+            return  # 미등록 message — silent skip
+
+        if register is not None:
+            choices = register.get("choices") or []
+            if not isinstance(choices, list) or choice_idx >= len(choices):
+                return
+            label = str(choices[choice_idx])
+        else:
+            # agent path 만 — label 은 agent value 그대로.
+            label = agent_choice_value or ""
 
         # dedup — Gateway reconnect / 사용자 toggle reaction race 가드.
         dedup_key = f"choice:{bot_msg_id}:{choice_idx}"
         if ledger is not None and not ledger.claim(dedup_key):
             return
 
-        mark_choice_consumed(
-            message_id=bot_msg_id,
-            choice_idx=choice_idx,
-            user_id=str(raw_payload.user_id),
-        )
+        if register is not None:
+            mark_choice_consumed(
+                message_id=bot_msg_id,
+                choice_idx=choice_idx,
+                user_id=str(raw_payload.user_id),
+            )
 
-        synthetic_text = f"[choice {choice_idx + 1}/{len(choices)}] {label}"
+        synthetic_text = f"[choice {choice_idx + 1}] {label}"
         ts_iso = datetime.now(timezone.utc).isoformat()
-        payload: dict[str, str] = {
-            "text": synthetic_text,
-            "author": str(raw_payload.user_id),
-            "author_name": "<reaction-choice>",
-            "ts": ts_iso,
-            "message_id": dedup_key,
-            "channel_id": str(raw_payload.channel_id),
-        }
 
         logger.info(
-            "choice reaction received: bot_msg=%s idx=%d label=%r user=%s",
+            "choice reaction received: bot_msg=%s idx=%d label=%r user=%s "
+            "register=%s agent=%s",
             bot_msg_id,
             choice_idx,
             label,
             raw_payload.user_id,
+            register is not None,
+            agent_choice_value is not None,
         )
 
-        append_inbox(payload)
         # helper 답 push 시 reply target = choice prompt message (시각적 연결).
         write_last_user_msg_id(bot_msg_id)
 
-        if not ensure_tmux_session(session_name, claude_bin):
-            logger.warning(
-                "choice reaction tmux 세션 확보 실패 — dropped: bot_msg=%s",
-                bot_msg_id,
-            )
-            return
-        if not tmux_send_payload(target_pane, synthetic_text):
-            logger.warning(
-                "choice reaction tmux send 실패 — dropped: bot_msg=%s",
-                bot_msg_id,
-            )
-            return
+        # legacy path — register OK 시만 helper tmux send. agent SDK only path
+        # (register None) 는 tmux send skip 후 agent INSERT 만.
+        if register is not None:
+            legacy_payload: dict[str, str] = {
+                "text": synthetic_text,
+                "author": str(raw_payload.user_id),
+                "author_name": "<reaction-choice>",
+                "ts": ts_iso,
+                "message_id": dedup_key,
+                "channel_id": str(raw_payload.channel_id),
+            }
+            append_inbox(legacy_payload)
+            if not ensure_tmux_session(session_name, claude_bin):
+                logger.warning(
+                    "choice reaction tmux 세션 확보 실패 — legacy path skip: "
+                    "bot_msg=%s",
+                    bot_msg_id,
+                )
+            elif not tmux_send_payload(target_pane, synthetic_text):
+                logger.warning(
+                    "choice reaction tmux send 실패 — legacy path skip: "
+                    "bot_msg=%s",
+                    bot_msg_id,
+                )
 
-        # 2026-05-29 — agent SDK path 도 choice 처리. events.choice_prompt lookup
-        # → 선택 value 추출 → user_message INSERT (body = 선택 value, thread_id
-        # 동일). agent_loop 가 next polling 시 그것을 SDK query 호출.
-        try:
-            choice_value = _lookup_agent_choice(bot_msg_id, choice_idx)
-        except Exception as exc:  # noqa: BLE001
-            choice_value = None
-            logger.warning("agent choice lookup 실패: %r", exc)
-        if choice_value is not None:
+        if agent_choice_value is not None:
             # 사용자 thread (사용자 reaction 채널) — agent_reply 가 push 한 thread
             user_thread_id = str(raw_payload.channel_id)
             append_agent_event("user_message", {
@@ -6441,12 +7039,12 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                 "thread_id": user_thread_id if user_thread_id != str(target_channel_id) else "",
                 "user_id": str(raw_payload.user_id),
                 "user_name": "<reaction-choice>",
-                "body": choice_value,
+                "body": agent_choice_value,
                 "ts_iso": datetime.now(timezone.utc).isoformat(),
             })
             logger.info(
                 "agent choice → user_message INSERT: bot_msg=%s idx=%d value=%r",
-                bot_msg_id, choice_idx, choice_value[:40],
+                bot_msg_id, choice_idx, agent_choice_value[:40],
             )
 
     return client

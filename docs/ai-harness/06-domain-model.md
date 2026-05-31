@@ -1,6 +1,6 @@
 # Domain Model
 
-> ⚠️ 현재 **스켈레톤**입니다. 도메인이 확정되면 §4 유비쿼터스 랭귀지부터 채워 넣고, 엔티티·ERD는 첫 구현 PR과 함께 같이 갱신합니다.
+> §4 유비쿼터스 랭귀지가 도메인 용어 single source of truth — §4-1 제품 도메인은 코드 패키지(`user`/`voice`/`song`/`recommendation`/`feedback`)와 1:1, §4-2 하네스/운영 용어, §4-3 사용자 표현↔내부 식별자 매핑표로 나뉜다. 신규 용어는 §4 에 먼저 등재한 뒤 코드 도입. 엔티티(§5)·ERD(§6)는 엔티티 도입 PR과 같은 PR에서 갱신한다.
 
 ## 1) 목적
 - mobruji 도메인의 **공통 어휘**와 **불변식**을 한 곳에 정의해 코드·문서·UX 사이의 용어 불일치를 줄인다.
@@ -28,22 +28,46 @@
 
 ## 4) 유비쿼터스 랭귀지 (Ubiquitous Language)
 
+> 본 절은 세 하위 표로 나뉜다. **§4-1 제품 도메인** = 곡 추천 서비스의 코드 패키지(`user`/`voice`/`song`/`recommendation`/`feedback`)와 1:1 정렬되는 비즈니스 어휘 — 이 절이 도메인 용어 single source of truth. **§4-2 하네스 / 운영 용어** = 사이클 오케스트레이션·rev 게이트·보안 운영 등 *제품 도메인이 아닌* 운영 인프라 어휘 (코드·spec 에서 식별자로 사용). **§4-3 사용자 표현 ↔ 내부 식별자** = Discord 응답·문서에서 쓰는 한국어 표현과 내부 코드 식별자의 대응. (이전에는 §4 단일 표에 제품 도메인 + 운영 어휘가 뒤섞여 드리프트가 있었다 — 2026-05-31 plan 라운드에서 분리. 모든 `06-domain-model.md §4` cross-ref 는 본 절 전체를 가리키므로 유효.)
+
+### 4-1) 제품 도메인 유비쿼터스 랭귀지
+
+> 곡 추천 서비스 비즈니스 어휘. 코드 패키지와 1:1. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입한다.
+
+| 한국어 | 영어 (코드) | 패키지 | 정의 |
+|---|---|---|---|
+| 음역대 | VoiceRange | `voice` | 사용자가 부를 수 있는 음의 최저~최고 범위 (현재 값). 엔티티 §5-1 |
+| 음역 스냅샷 | VoiceRangeSnapshot | `voice` | 음역 측정 시계열 행 (insert-only). voice-range-progress spec — "발전 인지" 위해 변경 이력 누적. 결정성 영향 없음 (추천 입력 미사용). 엔티티 §5-5 |
+| 음역 MIDI 범위 | MidiRange | `voice` | MIDI note number 허용 닫힌 구간 [12(C0), 119(B8)] 상수 VO. `VoiceRange`/`VoiceRangeSnapshot`/DTO 가 중복 보유하던 `@Min`/`@Max` 리터럴을 단일 출처로 모아 drift 제거 |
+| 음역 측정 출처 | VoiceRangeSourceMethod | `voice` | 음역 값의 측정 방법 enum — `SELF_REPORT` / `OCTAVE_PICK` / `MIC_MEASURE`. `VoiceRange` 와 `VoiceRangeSnapshot` 이 동일 enum 재사용 |
+| 곡 | Song | `song` | 추천 대상 단위. 메타데이터(제목/아티스트/키/음역/장르/BPM/분위기/출시연도/노래방 곡번호 등). 엔티티 §5-2 |
+| 키 | MusicalKey | `song` | 곡의 원곡 조성 enum — 메이저 12 + 마이너 12 + `UNKNOWN`. (기존 표현 "Key" 를 코드 enum 명 `MusicalKey` 로 정렬 — 2026-05-31) |
+| 곡 음역 | (Song.lowMidi/highMidi) | `song` | 곡 자체의 보컬 멜로디 음역 범위. 별도 `SongRange` VO 없이 `Song` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전). §5-2 |
+| 분위기 | Mood | `song` | 추천 입력 중 정성적 요소 (예: 신남, 잔잔함) enum |
+| 가창 난이도 | Difficulty | `song` | 곡을 부르기 어려운 정도 (EASY/NORMAL/HARD). 곡 음역(`lowMidi`/`highMidi`)으로 자동 분류 (PR #96, 이슈 #77) |
+| 음표명 | NoteName | `song` | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
+| 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
+| 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
+| 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡). 영속 단위. 엔티티 §5-3 |
+| 추천 | Recommendation | `recommendation` | 사용자 컨텍스트 기반 곡 매칭 결과 (영속 행). 요청 1 : N 행. 엔티티 §5-3 |
+| 추천 결과 | RecommendationResult | `recommendation` | 추천 요청 1건의 최종 결과 컨테이너 (요청 ID + 정렬·다양성 후처리 마친 `ScoredRecommendation` 리스트). application 이 `api.dto` 에 의존하지 않도록 domain 레이어에 둔 결과 표현 (ADR-0005 §A-7) |
+| 채점된 추천 | ScoredRecommendation | `recommendation` | 추천 결과 1건 값 객체 (곡 + 점수 + 매칭 사유 + 랭킹 + `ScoreBreakdown`). 영속 엔티티 `Recommendation` 와 응답 DTO 를 잇는 중간 표현. 과거 추천 재조회 경로에서는 `breakdown` 이 null |
+| 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 6종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`). "Why this song?" 설명 가능성 확보용 (P2). 점수 산식 비변경 — 결정성 영향 없음 |
+| 좋아요 | Like | `feedback` | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR). 엔티티 §5-4 |
+| 북마크 | Bookmark | `feedback` | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정). 엔티티 §5-4 |
+| 익명 세션 | AnonymousSession | `user` | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md. 엔티티 §5-6 |
+| 세션 회수 | SessionRevocation (enum `RevokedReason`) | `user` | sessionId 를 revoke 처리한 사실(시점 + 사유). 사유 enum `RevokedReason`: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` (Micrometer 라벨은 lowercase) |
+| 세션 회전 | SessionRotation | `user` | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
+| 계정 머지 | AccountMerge | `user` | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
+
+> 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
+
+### 4-2) 하네스 / 운영 용어
+
+> 제품 도메인이 아닌 운영 인프라 어휘 — 사이클 오케스트레이션, rev 게이트, 보안 disclosure, forum 운영 등. 코드·spec·jsonl 에서 식별자로 쓰이며, 사용자 가시 표현은 §4-3 매핑표를 따른다.
+
 | 한국어 | 영어 (코드) | 정의 |
 |---|---|---|
-| 음역대 | VoiceRange | 사용자가 부를 수 있는 음의 최저~최고 범위 (현재 값) |
-| 음역 스냅샷 | VoiceRangeSnapshot | 음역 측정 시계열 행 (insert-only). voice-range-progress spec — "발전 인지" 위해 변경 이력 누적. 결정성 영향 없음 (추천 입력 미사용) |
-| 키 | Key | 곡의 조성 (예: C, G, Am) |
-| 곡 음역 | SongRange | 곡 자체의 음역 범위 |
-| 추천 | Recommendation | 사용자 컨텍스트 기반 곡 매칭 결과 |
-| 분위기 | Mood | 추천 입력 중 정성적 요소 (예: 신남, 잔잔함) |
-| 가창 난이도 | Difficulty | 곡을 부르기 어려운 정도 (EASY/NORMAL/HARD). 곡 음역(`lowMidi`/`highMidi`)으로 자동 분류 (PR #96, 이슈 #77) |
-| 음표명 | NoteName | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
-| 좋아요 | Like | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR) |
-| 북마크 | Bookmark | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정) |
-| 익명 세션 | AnonymousSession | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md |
-| 세션 회수 | SessionRevocation | sessionId 를 revoke 처리한 사실(시점 + 사유). reason enum: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` |
-| 세션 회전 | SessionRotation | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
-| 계정 머지 | AccountMerge | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
 | 사이클 launch thread id | CycleLaunchThreadId | sub-agent launch 시 `tools/agent-launch-wrapper.sh` 가 cycle forum 채널 (be/fe/rev/plan) 에 신설 또는 재사용하는 thread 의 Discord snowflake (18-20자리 정수 문자열). sub-agent 의 모든 진행 / 결과 push 의 단일 대상 (별 thread 생성 금지 — `actors/sub-agent.md §1-11` STRICT). 출처: cycle-forum-operation.md §5-3·§5-4 |
 | launch thread 캐시 파일 | LaunchThreadCacheFile | wrapper ↔ nmae ↔ sub-agent 간 `CycleLaunchThreadId` 인계 채널. 파일 경로 = `~/.mobruji/last-launch-thread.txt`. wrapper 가 atomic write, sub-agent (`--auto-thread`) 가 read. 출처: cycle-forum-placeholder-guard.md (PR #1306) |
 | placeholder thread id | PlaceholderThreadId | 정상 snowflake 가 아닌 임시값 (예: `99999`). 주로 테스트 fixture 가 fake curl mock 으로 박은 값이 production 파일에 오염되어 발생. `validate_snowflake` reject 대상 — `LaunchThreadCacheFile` 에 진입 시 sub-agent push 사일런스 사고 (4 갈래 가드 spec: cycle-forum-placeholder-guard.md F-1~F-6). 출처: PR #1306 |
@@ -58,14 +82,39 @@
 | emergency-hotfix 심각도 | EmergencyHotfixSeverity | `EmergencyHotfixLabel` 부착 PR body `## emergency-hotfix 사유` 섹션 의 사고 분류 enum — `production-down` / `security` / `data-integrity` / `ci-down` 4 값. 사후 audit issue body grep 대상 + 월간 사용 빈도 메트릭 분류 차원. `security` 분류는 추가 절차 (별 disclosure spec 후보) cross-ref. **본 spec scope 안 표현이 P0/P1/P2 가 아닌 4 분류 enum 임을 명시** — 사용자 명시 (P0/P1/P2 분류) 와 spec 본문 (`production-down` / `security` / `data-integrity` / `ci-down`) 차이는 `emergency-hotfix-flow.md §8 오픈 질문` 으로 추가 박제 후보 (severity 차원과 분류 차원 분리 필요 여부). 출처: `docs/features/emergency-hotfix-flow.md §3-4` PR body 섹션 enum |
 | security advisory | SecurityAdvisory | GitHub Security Advisory (private repo report) entity — `gh api repos/<owner>/<repo>/security-advisories` 또는 GitHub UI (Security tab) 로 draft 생성. security 사고 발견 즉시 비공개 draft 작성 의무, public publish 는 패치 머지 후 `RevGateAuditCheck` whitelist pass + 사후 rev 단계 2 통과 시점에. 박제 항목 = `SecurityDisclosureCategory` / 영향 받은 데이터 종류 / 패치 commit SHA / 사용자 통보 시각 / CVE 신청 여부 (🔴 분류 한정). public 가시화 전까지 `type:emergency-hotfix` + body `security` 키워드 PR / `EmergencyHotfixFollowupIssue` 와 cross-ref 만 유지. **2026-05-29 (plan round 12)**: `SecurityDisclosureCategory` cross-ref 정렬 (이전 표현 `DisclosureSeverity` → SoT 통일). 출처: `docs/features/security-disclosure-flow.md §3-1` 절차 1~7 단계 + §3-2 분류 매트릭스 + §5-1 도메인 모델 |
 | disclosure 카테고리 | SecurityDisclosureCategory | security 사고 disclosure 분류 enum — `critical-public` / `high-internal` / `medium-poc` / `low-theoretical` 4 값. PR body `## emergency-hotfix 사유` 섹션 `사용자 impact 범위` 한 줄에 🔴/🟠/🟡/🟢 prefix 강제 표기. 사용자 통보 의무 / CVE 신청 의무 / `SecurityAdvisory` publish 시점 / rev 단계 2 SLA 등급 분기 결정 기준. `EmergencyHotfixSeverity = security` 4 분류 enum 과 다른 차원 (전자 = 사고 카테고리, 후자 = 외부 노출 위험). 🔴 critical-public = production 가시 endpoint 가 사용자 데이터 / 시크릿 노출 중, 🟠 high-internal = production 시크릿이 git history / log 에 노출 (외부 미가시), 🟡 medium-poc = 비-production 환경 시크릿 노출 또는 PoC 단계 취약점, 🟢 low-theoretical = 이론적 취약점 / 미악용 가능. **2026-05-29 (plan round 12)**: 이름 정렬 — 기존 `DisclosureSeverity` (#1330 등재) 을 spec SoT (`security-disclosure-flow.md §5-1` / §6 PR 4 후보 list) 의 `SecurityDisclosureCategory` 로 rename. 한국어 표현 "심각도" → "카테고리" 로 동시 정렬 (의미 = severity 가 아닌 외부 노출 카테고리, `EmergencyHotfixSeverity` severity 차원과 분리). `SecurityAdvisory` / `RevSlaTarget` / `SecretScanningHook` 본문 cross-ref 도 같은 commit 안에서 일괄 정렬. 출처: `docs/features/security-disclosure-flow.md §3-2·§5-1·§6 PR 4` |
-| rev SLA 목표값 | RevSlaTarget | rev sub-agent 단계 1/2/3 응답 시간의 PR 분류별 목표값. 정규 type:* 단계 1 = 30분 / 단계 2 = 24시간 / 단계 3 = 7일. `type:release` 단계 1 = 면제. `type:emergency-hotfix` (정규) 단계 1 = 면제, 단계 2 = 30분. `type:emergency-hotfix` + body `security` (🔴 `SecurityDisclosureCategory = critical-public`) 단계 2 = 15분. `type:docs` (no-op pass) 단계 1 = 5분. **차단이 아니라 목표값** — 미달성 ≠ fail. 미달성 시 `RevSlaEscalation` 분기 trigger. 측정 시작 (T0) = nmae 가 rev sub-agent launch 큐 등록 시점 (`rev-queue.sh register <PR>` 호출 또는 wrapper launch 시점), 측정 종료 = `reviewed:claude` 라벨 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽. 출처: `docs/features/rev-sla.md §3-1·§3-2` |
-| rev SLA escalation | RevSlaEscalation | `RevSlaTarget` 미달성 PR 에 대한 nmae 강제 escalation 분기 매트릭스. 정규 단계 1/2/3 + `type:docs` 단계 1 = DIGEST push + nmae 별 rev sub-agent parallel launch. security 🔴 단계 2 = DIGEST + Discord 본 채널 (`MOBRUJI_CHANNEL_ID`) + 사용자 reply 3 채널 동시 push + nmae 최우선 큐 head 재배치. 멱등성 가드 — `~/.mobruji/rev-sla-metrics.jsonl` 의 `escalated=true` flag 로 1회만 발사 (같은 PR / 같은 단계). 강제 머지 / 강제 회수 X (sub-agent 자율 평가 유지). 출처: `docs/features/rev-sla.md §3-4·§3-5` |
+| rev SLA 목표값 | RevSlaTarget | rev sub-agent 🟡 Pre-merge review (단계 1) / 🔵 Post-merge audit (단계 2) 응답 시간의 PR 분류별 목표값. 정규 type:* 단계 1 = 30분 / 단계 2 = 24시간. `type:release` 단계 1 = 면제. `type:emergency-hotfix` (정규) 단계 1 = 면제, 단계 2 = 30분. `type:emergency-hotfix` + body `security` (🔴 `SecurityDisclosureCategory = critical-public`) 단계 2 = 15분. `type:docs` (no-op pass) 단계 1 = 5분. **차단이 아니라 목표값** — 미달성 ≠ fail. 미달성 시 `RevSlaEscalation` 분기 trigger. 측정 시작 (T0) = nmae 가 rev sub-agent launch 큐 등록 시점 (`rev-queue.sh register <PR>` 호출 또는 wrapper launch 시점), 측정 종료 = `reviewed:claude` 라벨 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽. (단계 3 SLA 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`, 향후 production 환경 신설 시 부활 — `[[project_rev_stage_3_prod_revival]]`). 출처: `docs/features/rev-sla.md §3-1·§3-2` |
+| rev SLA escalation | RevSlaEscalation | `RevSlaTarget` 미달성 PR 에 대한 nmae 강제 escalation 분기 매트릭스. 정규 단계 1/2 + `type:docs` 단계 1 = DIGEST push + nmae 별 rev sub-agent parallel launch. security 🔴 단계 2 = DIGEST + Discord 본 채널 (`MOBRUJI_CHANNEL_ID`) + 사용자 reply 3 채널 동시 push + nmae 최우선 큐 head 재배치. 멱등성 가드 — `~/.mobruji/rev-sla-metrics.jsonl` 의 `escalated=true` flag 로 1회만 발사 (같은 PR / 같은 단계). 강제 머지 / 강제 회수 X (sub-agent 자율 평가 유지). (단계 3 escalation 폐기 2026-05-30). 출처: `docs/features/rev-sla.md §3-4·§3-5` |
 | rev SLA watchdog | RevSlaWatchdog | bot.py 신설 loop `watchdog_rev_sla_loop` (1분 polling) — `RevSlaTarget` 매트릭스 자동 적용 + 미달성 detect + `RevSlaEscalation` trigger. `nmae-cycle-watchdog.md §5-7` 4중 안전망의 **5번째 layer** (확장). 매 polling: (1) `gh pr list --base develop --state open --label "type:*" --json number,labels,createdAt,comments` read, (2) 각 PR 분류 → §3-1 매트릭스 SLA 적용, (3) T0 부터 elapsed 계산 → SLA 초과 PR 추출, (4) `rev-sla-metrics.jsonl` 의 `escalated=true` flag 있으면 skip (멱등), (5) 미달성 PR 발견 → §3-4 escalation 분기. 학습 의존 ↓ — sub-agent 가 자기 PR 의 SLA 시각을 계산하지 않아도 자동 escalation. 출처: `docs/features/rev-sla.md §3-3` + `docs/features/nmae-cycle-watchdog.md §5-7` (5중으로 확장) |
 | secret scanning hook | SecretScanningHook | 시크릿 commit / push 방지 강제 메커니즘 2 layer. layer 1 = pre-commit hook (`.git/hooks/pre-commit` 또는 `pre-commit` framework) — 로컬 commit 직전 시크릿 패턴 (AWS access key / GitHub PAT / OAuth client secret / DB password / 사내 API key 정규식) 감지 시 commit reject. layer 2 = CI secret scanning workflow (`.github/workflows/secret-scan.yml`) — push / PR 시 truffleHog 또는 gitleaks 로 diff + git history 스캔, `SecretScanFinding` ≥ 1 시 fail + PR 머지 차단. layer 1 우회 (`--no-verify`) 가능성 가드 = layer 2 가 server-side 강제. security 사고 (`SecurityAdvisory` 🟠 high-internal `SecurityDisclosureCategory`) 회귀 방지 가드 (`security-disclosure-flow.md §3-3` 4 항목 중 4번째). 출처: `docs/features/secret-scanning-hook.md §3-1·§3-2` + `docs/features/security-disclosure-flow.md §3-3` |
 | secret scan finding | SecretScanFinding | `SecretScanningHook` layer 1 / layer 2 가 감지한 시크릿 1건 entry. 박제 항목 = 매칭 패턴명 (`aws-access-key-id` / `github-pat` / `oauth-client-secret` / 등) / 파일 경로 / 라인 번호 / commit SHA / 감지 시각 / layer (1 = pre-commit, 2 = CI). layer 1 감지 시 commit reject + stderr 출력 (file 박제 X). layer 2 감지 시 `~/.mobruji/secret-scan-findings.jsonl` append + PR check fail + 자동 issue 신설 (`audit:secret-scan-finding` 라벨, body 에 commit SHA + 파일 + 라인 + 회전 권고 cross-ref). false positive 는 `.gitleaksignore` 또는 `.trufflehog-ignore` 패턴 추가로 해소 — 본 spec scope. 출처: `docs/features/secret-scanning-hook.md §3-3·§3-4` |
 | security 사용자 통보 | SecurityUserNotification | 🔴 critical-public 분류 (`SecurityDisclosureCategory` enum 4 값 중 1) 의 security 사고 패치 머지 후 영향 받은 사용자 수 (sessionId 단위) ≥ 1 인 경우 동시 박제하는 4 채널 통보 evidence — (1) Discord 본 채널 (`#모부르지`) (2) DIGEST 채널 (`discord-reply.sh --digest`) (3) GitHub Release notes 의 `## Security` 섹션 (4) GitHub Security Advisory publish (`SecurityAdvisory` Security tab 가시화). 통보 본문 박제 항목 = 사고 발생 시각 (T0) / 패치 머지 시각 / 사용자 통보 시각 / 영향 받은 데이터 종류 (음역대 / Like / Bookmark / sessionId / 시크릿) / 영향 받은 사용자 수 / 사용자가 해야 할 action (예: sessionId rotation 권고 `POST /api/v1/sessions/rotate`). evidence 가 4 채널 중 1 곳에만 있는 사고 0건 (비기능 관측성 요구). `EmergencyHotfixFollowupIssue` 의 영향 받은 sessionId 수 박제 값이 본 통보의 발동 조건 — 0건이면 통보 생략 가능. `RevSlaTarget` security 🔴 (`SecurityDisclosureCategory = critical-public`) 단계 2 SLA (15분) 와 cross-ref — SLA 초과 시 `RevSlaEscalation` 의 3 채널 push 가 본 통보의 1·2·5 채널과 partial overlap (Discord 본 채널 + DIGEST + 사용자 reply). 출처: `docs/features/security-disclosure-flow.md §3-4` |
+| forum starter template marker | ForumStarterTemplateMarker | `forum_edit_starter` 호출 body 가 directive / cycle forum 양식 임을 식별하는 markup 패턴 집합. 정규 marker = 📌 또는 🛠️ (title prefix), 💬 (본문 / 원본 섹션), 🆔 (id line), 📋 진행 (체크박스 섹션), 🔖 관련 (관련 섹션), `---` + `_갱신:` (footer). 총 6 marker. validation = N=6 중 ≥5 매칭 시 pass (graceful — 1 marker 누락 허용, backward compat). PR F (#1362) 의 `lib/forum_template_validator.py` SoT. 출처: `docs/features/forum-starter-template-guard.md §5-2` + `docs/features/directive-board-template-and-tags.md §5-2·§5-3` + `tools/agent-launch-wrapper.sh:_build_cycle_template_body` |
+| 양식 위배 시도 | ForumTemplateViolationAttempt | `forum_edit_starter` 호출 body 가 `ForumStarterTemplateMarker` 매칭 실패한 PATCH 시도 1건. 박제 항목 = thread_id / cycle / actor / attempted_body_head (첫 80자) / matched count / missing marker list / ts. `~/.mobruji/forum-template-violations.jsonl` append. validation reject 후에도 sub-agent 가 재시도 가능 (학습 후 정상 PATCH 적용 기대). 같은 thread 1h 1회 alert debounce (`~/.mobruji/forum-template-violation-debounce.jsonl`). 출처: `docs/features/forum-starter-template-guard.md §5-3·§5-7` |
+| template validation 모듈 | ForumTemplateValidator | `tools/discord-daemon/lib/forum_template_validator.py` 모듈. regex / marker count / pass-fail 판단 SoT. bot.py `_forum_edit_starter` + 단위 테스트 / 향후 nmae digest hook 공유. marker 집합 변경 시 모든 consumer 영향 분석 의무. 출처: `docs/features/forum-starter-template-guard.md §5-2·§5-8` |
 
-> 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
+> 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 운영 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
+
+### 4-3) 사용자 표현 ↔ 내부 식별자 매핑표
+
+> Discord 사용자 응답·문서 본문에서 쓰는 **한국어 표현**과 코드·jsonl·spec 의 **내부 식별자**의 대응. 원칙 (CLAUDE.md §4 "공통 행동 룰" / [[feedback-discord-tone-formal]] / `internal-label-scrub.md`): **사용자 가시 텍스트는 한국어 표현**(왼쪽 열), **코드·jsonl·로그·spec 의 식별자는 영어**(가운데 열) 를 쓴다. 예 — 사용자에게는 "지시를 받았습니다", jsonl 에는 `directive_id`. 내부 ID(`directive_id` snowflake, `[A1]`/`[D4]` 류 작업 분류 코드)는 사용자 가시 본문에 노출하지 않는다 (`internal-label-scrub.md` — paraphrase 만 노출). 영어 동사 push/post/send 도 사용자 응답에서 금지 — "메시지/알려 드리겠습니다" 로 표현.
+
+| 사용자 표현 (한국어, 가시) | 내부 식별자 (코드/jsonl/spec) | 비고 |
+|---|---|---|
+| 지시 | directive / `directive_id` | 사용자가 #모부르지-지시 forum 에서 채택한 작업 단위. jsonl SoT `~/.mobruji/directive-board.jsonl` (필드 `directive_id`/`title`/`task`/`status`/`thread_id`/`priority`). 사용자 답엔 "지시", 코드/jsonl 엔 `directive` 유지 |
+| 작업 분류 / 우선순위 | `[A1]`~`[D4]` 작업 ID · `priority` | 운영자(nmae) 전용 내부 tracking 코드. **사용자 가시 본문에서 제거** — `summary` paraphrase 만 노출 (`internal-label-scrub.md`) |
+| 사이클 | cycle (`be` / `fe` / `rev` / `plan`) | 작업 트랙. 각 cycle = 1 sub-agent 역할 + 1 워크트리 + 1 forum 채널 매핑 (`(BE\|FE\|REV\|PLAN)_CHANNEL_ID`) |
+| 워크트리 | worktree (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan` / `mobruji-bridge`) | git worktree 경로. 한 워크트리 = 동시 sub-agent 1 ([[feedback-worktree-lock]]) |
+| (지시) 포럼 thread / 글타래 | directive thread / forum thread (`thread_id`) | #모부르지-지시 forum 의 directive 별 thread. jsonl `thread_id` 필드. 사용자 가시 = "지시 글" / "thread" |
+| 사이클 포럼 thread | CycleLaunchThreadId (§4-2) | sub-agent launch 별 cycle forum thread. 사용자 가시 표현 불요 (운영 내부). `~/.mobruji/last-launch-thread.txt` passthrough |
+| 검토 / 코드 검토 | rev / review (`reviewed:claude` 라벨) | rev 사이클의 3단계(현 2단계) e2e 검사. 사용자 답엔 "검토", 코드/라벨 엔 `rev`/`reviewed:claude` |
+| (작업) 완료 | merge / `status=completed` | PR squash merge + directive `status` `completed` 전이. 사용자 답엔 "완료", jsonl 엔 `completed` |
+| (작업) 진행 중 | `status=in_progress` / dispatched | sub-agent launch 후. 사용자 답엔 "진행 중" |
+| (작업) 대기 | `status=queued` | 큐 적재 후 launch 전 (`work_queue`). 사용자 답엔 "대기" |
+| 알림 / 메시지 (보내다) | Discord push (`discord-reply.sh`) | **사용자 응답에서 영어 동사 push/post/send 금지** — "메시지를 보내 드리겠습니다 / 알려 드리겠습니다" 로 표현 ([[feedback-discord-tone-formal]]) |
+| 다음 / 다음 한 수 | next action (cycle digest) | 사이클 보고의 후속 액션. 사용자 가시 = "다음" (영어 "next" 노출 금지) |
+| mmae / nmae | mmae (mac maestro) / nmae (NCP maestro) | "maestro" 표현 사용 금지 — 약어만 ([[feedback-maestro-aliases]]) |
+
+> 신규 사용자 표현 ↔ 식별자 쌍이 생기면 이 표에 추가한다. CLAUDE.md §4 공통 행동 룰 (정중체 / Maestro 약어) 과 모순 시 본 표를 CLAUDE.md 기준으로 정렬.
 
 ## 5) 엔티티
 

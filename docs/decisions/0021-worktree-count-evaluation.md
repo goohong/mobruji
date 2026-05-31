@@ -36,7 +36,7 @@ ADR-0014 (multi-agent worktree orchestration, 2026-05-23) 가 5 워크트리 (ma
 
 - rev sub-agent 를 be/fe 사이클의 후속 단계로 흡수 (rev 워크트리 폐기).
 - 거부 사유:
-  - rev 3단계 e2e 는 LLM reasoning + LGTM drift self-guard 가 본질 (`docs/features/rev-e2e-3-stages.md`, `[[feedback-rev-e2e-always]]`). 같은 워크트리에서 self-review 시 작업자 편향 → drift 박제.
+  - rev 2단계 e2e (🟡 Pre-merge review / 🔵 Post-merge audit, 단계 3 폐기 2026-05-30) 는 LLM reasoning + LGTM drift self-guard 가 본질 (`docs/features/rev-e2e-2-stages.md`, `[[feedback-rev-e2e-always]]`). 같은 워크트리에서 self-review 시 작업자 편향 → drift 박제.
   - ADR-0020 (예약, work-cycle-refactor 회고) §5-5 측정값 (후속/회귀/drift 32% → < 15%) **미달성**. rev 흡수는 측정값 달성 후에만 재평가 가능.
   - rev 큐 (`tools/rev-queue/`) 가 매 사이클 첫 액션을 강제 — rev 워크트리 폐기 시 큐 의무화도 사라져 audit 누락 risk.
 - **거부 (재평가 의무)**.

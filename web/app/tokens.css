@@ -13,7 +13,7 @@
  *   5) Shadow       — elevation + brand accent
  *   6) Motion       — duration + easing + reduced-motion 가드
  *
- * 다크 모드: `:where(html.dark)` selector 로 light → dark 토큰 swap.
+ * 다크 모드: `html.dark` selector 로 light → dark 토큰 swap.
  * globals.css 의 `@custom-variant dark (&:where(.dark, .dark *))` 와 함께 동작.
  *
  * 명명 규칙:
@@ -281,7 +281,7 @@
 }
 
 /* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
-:where(html.dark) {
+html.dark {
   --bg-base: #09090b; /* zinc-950 */
   --bg-subtle: #18181b; /* zinc-900 */
   --bg-muted: #27272a; /* zinc-800 */
@@ -447,7 +447,7 @@
 }
 
 /* 다크 모드는 opacity 1.5배 — 같은 ratio 유지하면서 가시성 ↑ */
-:where(html.dark) {
+html.dark {
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.06);
   --shadow-md:
     0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 1px 2px 0 rgba(0, 0, 0, 0.06);

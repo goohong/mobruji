@@ -117,5 +117,5 @@ bash ~/.mobruji/directive_status.sh <id> in_progress "" plan "<사유>"
 | **plan** | `/home/mobruji/mobruji-plan` | `docs/**` `.github/**` (보호 영역 라벨) | 없음 |
 
 - 공통 비협상: 워크트리 격리 + 동시 1 ([[feedback-worktree-lock]]) / 메모리 직접 수정 금지(nmae 만 갱신) / 사용자 wait state 금지 — 자율 결정 default ([[feedback-sub-agent-no-user-wait]]) / hook 우회(`--no-verify`) 금지 / `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) / 보호 영역 = 정보성 분류 (라벨 의무 폐지 2026-05-28, rev 대행) / session 라벨 (be→backend, fe→frontend, rev→review, plan→plan).
-- **be**: 새 엔드포인트 성공 케이스 E2E(RestAssured) 필수, DDD 계층 침범 금지. **rev**: 3단계 e2e — 단계 1 머지 전 / 2 develop 후 / 3 release 후 ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]). **plan**: docs/ADR/spec 만, 구현 코드 금지.
+- **be**: 새 엔드포인트 성공 케이스 E2E(RestAssured) 필수, DDD 계층 침범 금지. **rev**: 2단계 e2e — 🟡 Pre-merge review (단계 1) 머지 전 / 🔵 Post-merge audit (단계 2) develop 후 ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]). 단계 3 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`. **plan**: docs/ADR/spec 만, 구현 코드 금지.
 - git 가드: stash pop conflict 후 working tree 마커 잔존 → service crash, 별도 restore 필수 ([[feedback-stash-drop-unmerged-file]]).
