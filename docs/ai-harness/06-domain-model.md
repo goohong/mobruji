@@ -1,6 +1,6 @@
 # Domain Model
 
-> ⚠️ 현재 **스켈레톤**입니다. 도메인이 확정되면 §4 유비쿼터스 랭귀지부터 채워 넣고, 엔티티·ERD는 첫 구현 PR과 함께 같이 갱신합니다.
+> §4 유비쿼터스 랭귀지가 도메인 용어 single source of truth — §4-1 제품 도메인은 코드 패키지(`user`/`voice`/`song`/`recommendation`/`feedback`)와 1:1, §4-2 하네스/운영 용어, §4-3 사용자 표현↔내부 식별자 매핑표로 나뉜다. 신규 용어는 §4 에 먼저 등재한 뒤 코드 도입. 엔티티(§5)·ERD(§6)는 엔티티 도입 PR과 같은 PR에서 갱신한다.
 
 ## 1) 목적
 - mobruji 도메인의 **공통 어휘**와 **불변식**을 한 곳에 정의해 코드·문서·UX 사이의 용어 불일치를 줄인다.
@@ -28,22 +28,46 @@
 
 ## 4) 유비쿼터스 랭귀지 (Ubiquitous Language)
 
+> 본 절은 세 하위 표로 나뉜다. **§4-1 제품 도메인** = 곡 추천 서비스의 코드 패키지(`user`/`voice`/`song`/`recommendation`/`feedback`)와 1:1 정렬되는 비즈니스 어휘 — 이 절이 도메인 용어 single source of truth. **§4-2 하네스 / 운영 용어** = 사이클 오케스트레이션·rev 게이트·보안 운영 등 *제품 도메인이 아닌* 운영 인프라 어휘 (코드·spec 에서 식별자로 사용). **§4-3 사용자 표현 ↔ 내부 식별자** = Discord 응답·문서에서 쓰는 한국어 표현과 내부 코드 식별자의 대응. (이전에는 §4 단일 표에 제품 도메인 + 운영 어휘가 뒤섞여 드리프트가 있었다 — 2026-05-31 plan 라운드에서 분리. 모든 `06-domain-model.md §4` cross-ref 는 본 절 전체를 가리키므로 유효.)
+
+### 4-1) 제품 도메인 유비쿼터스 랭귀지
+
+> 곡 추천 서비스 비즈니스 어휘. 코드 패키지와 1:1. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입한다.
+
+| 한국어 | 영어 (코드) | 패키지 | 정의 |
+|---|---|---|---|
+| 음역대 | VoiceRange | `voice` | 사용자가 부를 수 있는 음의 최저~최고 범위 (현재 값). 엔티티 §5-1 |
+| 음역 스냅샷 | VoiceRangeSnapshot | `voice` | 음역 측정 시계열 행 (insert-only). voice-range-progress spec — "발전 인지" 위해 변경 이력 누적. 결정성 영향 없음 (추천 입력 미사용). 엔티티 §5-5 |
+| 음역 MIDI 범위 | MidiRange | `voice` | MIDI note number 허용 닫힌 구간 [12(C0), 119(B8)] 상수 VO. `VoiceRange`/`VoiceRangeSnapshot`/DTO 가 중복 보유하던 `@Min`/`@Max` 리터럴을 단일 출처로 모아 drift 제거 |
+| 음역 측정 출처 | VoiceRangeSourceMethod | `voice` | 음역 값의 측정 방법 enum — `SELF_REPORT` / `OCTAVE_PICK` / `MIC_MEASURE`. `VoiceRange` 와 `VoiceRangeSnapshot` 이 동일 enum 재사용 |
+| 곡 | Song | `song` | 추천 대상 단위. 메타데이터(제목/아티스트/키/음역/장르/BPM/분위기/출시연도/노래방 곡번호 등). 엔티티 §5-2 |
+| 키 | MusicalKey | `song` | 곡의 원곡 조성 enum — 메이저 12 + 마이너 12 + `UNKNOWN`. (기존 표현 "Key" 를 코드 enum 명 `MusicalKey` 로 정렬 — 2026-05-31) |
+| 곡 음역 | (Song.lowMidi/highMidi) | `song` | 곡 자체의 보컬 멜로디 음역 범위. 별도 `SongRange` VO 없이 `Song` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전). §5-2 |
+| 분위기 | Mood | `song` | 추천 입력 중 정성적 요소 (예: 신남, 잔잔함) enum |
+| 가창 난이도 | Difficulty | `song` | 곡을 부르기 어려운 정도 (EASY/NORMAL/HARD). 곡 음역(`lowMidi`/`highMidi`)으로 자동 분류 (PR #96, 이슈 #77) |
+| 음표명 | NoteName | `song` | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
+| 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
+| 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
+| 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡). 영속 단위. 엔티티 §5-3 |
+| 추천 | Recommendation | `recommendation` | 사용자 컨텍스트 기반 곡 매칭 결과 (영속 행). 요청 1 : N 행. 엔티티 §5-3 |
+| 추천 결과 | RecommendationResult | `recommendation` | 추천 요청 1건의 최종 결과 컨테이너 (요청 ID + 정렬·다양성 후처리 마친 `ScoredRecommendation` 리스트). application 이 `api.dto` 에 의존하지 않도록 domain 레이어에 둔 결과 표현 (ADR-0005 §A-7) |
+| 채점된 추천 | ScoredRecommendation | `recommendation` | 추천 결과 1건 값 객체 (곡 + 점수 + 매칭 사유 + 랭킹 + `ScoreBreakdown`). 영속 엔티티 `Recommendation` 와 응답 DTO 를 잇는 중간 표현. 과거 추천 재조회 경로에서는 `breakdown` 이 null |
+| 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 6종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`). "Why this song?" 설명 가능성 확보용 (P2). 점수 산식 비변경 — 결정성 영향 없음 |
+| 좋아요 | Like | `feedback` | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR). 엔티티 §5-4 |
+| 북마크 | Bookmark | `feedback` | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정). 엔티티 §5-4 |
+| 익명 세션 | AnonymousSession | `user` | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md. 엔티티 §5-6 |
+| 세션 회수 | SessionRevocation (enum `RevokedReason`) | `user` | sessionId 를 revoke 처리한 사실(시점 + 사유). 사유 enum `RevokedReason`: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` (Micrometer 라벨은 lowercase) |
+| 세션 회전 | SessionRotation | `user` | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
+| 계정 머지 | AccountMerge | `user` | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
+
+> 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
+
+### 4-2) 하네스 / 운영 용어
+
+> 제품 도메인이 아닌 운영 인프라 어휘 — 사이클 오케스트레이션, rev 게이트, 보안 disclosure, forum 운영 등. 코드·spec·jsonl 에서 식별자로 쓰이며, 사용자 가시 표현은 §4-3 매핑표를 따른다.
+
 | 한국어 | 영어 (코드) | 정의 |
 |---|---|---|
-| 음역대 | VoiceRange | 사용자가 부를 수 있는 음의 최저~최고 범위 (현재 값) |
-| 음역 스냅샷 | VoiceRangeSnapshot | 음역 측정 시계열 행 (insert-only). voice-range-progress spec — "발전 인지" 위해 변경 이력 누적. 결정성 영향 없음 (추천 입력 미사용) |
-| 키 | Key | 곡의 조성 (예: C, G, Am) |
-| 곡 음역 | SongRange | 곡 자체의 음역 범위 |
-| 추천 | Recommendation | 사용자 컨텍스트 기반 곡 매칭 결과 |
-| 분위기 | Mood | 추천 입력 중 정성적 요소 (예: 신남, 잔잔함) |
-| 가창 난이도 | Difficulty | 곡을 부르기 어려운 정도 (EASY/NORMAL/HARD). 곡 음역(`lowMidi`/`highMidi`)으로 자동 분류 (PR #96, 이슈 #77) |
-| 음표명 | NoteName | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
-| 좋아요 | Like | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR) |
-| 북마크 | Bookmark | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정) |
-| 익명 세션 | AnonymousSession | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md |
-| 세션 회수 | SessionRevocation | sessionId 를 revoke 처리한 사실(시점 + 사유). reason enum: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` |
-| 세션 회전 | SessionRotation | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
-| 계정 머지 | AccountMerge | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
 | 사이클 launch thread id | CycleLaunchThreadId | sub-agent launch 시 `tools/agent-launch-wrapper.sh` 가 cycle forum 채널 (be/fe/rev/plan) 에 신설 또는 재사용하는 thread 의 Discord snowflake (18-20자리 정수 문자열). sub-agent 의 모든 진행 / 결과 push 의 단일 대상 (별 thread 생성 금지 — `actors/sub-agent.md §1-11` STRICT). 출처: cycle-forum-operation.md §5-3·§5-4 |
 | launch thread 캐시 파일 | LaunchThreadCacheFile | wrapper ↔ nmae ↔ sub-agent 간 `CycleLaunchThreadId` 인계 채널. 파일 경로 = `~/.mobruji/last-launch-thread.txt`. wrapper 가 atomic write, sub-agent (`--auto-thread`) 가 read. 출처: cycle-forum-placeholder-guard.md (PR #1306) |
 | placeholder thread id | PlaceholderThreadId | 정상 snowflake 가 아닌 임시값 (예: `99999`). 주로 테스트 fixture 가 fake curl mock 으로 박은 값이 production 파일에 오염되어 발생. `validate_snowflake` reject 대상 — `LaunchThreadCacheFile` 에 진입 시 sub-agent push 사일런스 사고 (4 갈래 가드 spec: cycle-forum-placeholder-guard.md F-1~F-6). 출처: PR #1306 |
@@ -68,7 +92,29 @@
 | 양식 위배 시도 | ForumTemplateViolationAttempt | `forum_edit_starter` 호출 body 가 `ForumStarterTemplateMarker` 매칭 실패한 PATCH 시도 1건. 박제 항목 = thread_id / cycle / actor / attempted_body_head (첫 80자) / matched count / missing marker list / ts. `~/.mobruji/forum-template-violations.jsonl` append. validation reject 후에도 sub-agent 가 재시도 가능 (학습 후 정상 PATCH 적용 기대). 같은 thread 1h 1회 alert debounce (`~/.mobruji/forum-template-violation-debounce.jsonl`). 출처: `docs/features/forum-starter-template-guard.md §5-3·§5-7` |
 | template validation 모듈 | ForumTemplateValidator | `tools/discord-daemon/lib/forum_template_validator.py` 모듈. regex / marker count / pass-fail 판단 SoT. bot.py `_forum_edit_starter` + 단위 테스트 / 향후 nmae digest hook 공유. marker 집합 변경 시 모든 consumer 영향 분석 의무. 출처: `docs/features/forum-starter-template-guard.md §5-2·§5-8` |
 
-> 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
+> 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 운영 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
+
+### 4-3) 사용자 표현 ↔ 내부 식별자 매핑표
+
+> Discord 사용자 응답·문서 본문에서 쓰는 **한국어 표현**과 코드·jsonl·spec 의 **내부 식별자**의 대응. 원칙 (CLAUDE.md §4 "공통 행동 룰" / [[feedback-discord-tone-formal]] / `internal-label-scrub.md`): **사용자 가시 텍스트는 한국어 표현**(왼쪽 열), **코드·jsonl·로그·spec 의 식별자는 영어**(가운데 열) 를 쓴다. 예 — 사용자에게는 "지시를 받았습니다", jsonl 에는 `directive_id`. 내부 ID(`directive_id` snowflake, `[A1]`/`[D4]` 류 작업 분류 코드)는 사용자 가시 본문에 노출하지 않는다 (`internal-label-scrub.md` — paraphrase 만 노출). 영어 동사 push/post/send 도 사용자 응답에서 금지 — "메시지/알려 드리겠습니다" 로 표현.
+
+| 사용자 표현 (한국어, 가시) | 내부 식별자 (코드/jsonl/spec) | 비고 |
+|---|---|---|
+| 지시 | directive / `directive_id` | 사용자가 #모부르지-지시 forum 에서 채택한 작업 단위. jsonl SoT `~/.mobruji/directive-board.jsonl` (필드 `directive_id`/`title`/`task`/`status`/`thread_id`/`priority`). 사용자 답엔 "지시", 코드/jsonl 엔 `directive` 유지 |
+| 작업 분류 / 우선순위 | `[A1]`~`[D4]` 작업 ID · `priority` | 운영자(nmae) 전용 내부 tracking 코드. **사용자 가시 본문에서 제거** — `summary` paraphrase 만 노출 (`internal-label-scrub.md`) |
+| 사이클 | cycle (`be` / `fe` / `rev` / `plan`) | 작업 트랙. 각 cycle = 1 sub-agent 역할 + 1 워크트리 + 1 forum 채널 매핑 (`(BE\|FE\|REV\|PLAN)_CHANNEL_ID`) |
+| 워크트리 | worktree (`mobruji-be` / `mobruji-fe` / `mobruji-rev` / `mobruji-plan` / `mobruji-bridge`) | git worktree 경로. 한 워크트리 = 동시 sub-agent 1 ([[feedback-worktree-lock]]) |
+| (지시) 포럼 thread / 글타래 | directive thread / forum thread (`thread_id`) | #모부르지-지시 forum 의 directive 별 thread. jsonl `thread_id` 필드. 사용자 가시 = "지시 글" / "thread" |
+| 사이클 포럼 thread | CycleLaunchThreadId (§4-2) | sub-agent launch 별 cycle forum thread. 사용자 가시 표현 불요 (운영 내부). `~/.mobruji/last-launch-thread.txt` passthrough |
+| 검토 / 코드 검토 | rev / review (`reviewed:claude` 라벨) | rev 사이클의 3단계(현 2단계) e2e 검사. 사용자 답엔 "검토", 코드/라벨 엔 `rev`/`reviewed:claude` |
+| (작업) 완료 | merge / `status=completed` | PR squash merge + directive `status` `completed` 전이. 사용자 답엔 "완료", jsonl 엔 `completed` |
+| (작업) 진행 중 | `status=in_progress` / dispatched | sub-agent launch 후. 사용자 답엔 "진행 중" |
+| (작업) 대기 | `status=queued` | 큐 적재 후 launch 전 (`work_queue`). 사용자 답엔 "대기" |
+| 알림 / 메시지 (보내다) | Discord push (`discord-reply.sh`) | **사용자 응답에서 영어 동사 push/post/send 금지** — "메시지를 보내 드리겠습니다 / 알려 드리겠습니다" 로 표현 ([[feedback-discord-tone-formal]]) |
+| 다음 / 다음 한 수 | next action (cycle digest) | 사이클 보고의 후속 액션. 사용자 가시 = "다음" (영어 "next" 노출 금지) |
+| mmae / nmae | mmae (mac maestro) / nmae (NCP maestro) | "maestro" 표현 사용 금지 — 약어만 ([[feedback-maestro-aliases]]) |
+
+> 신규 사용자 표현 ↔ 식별자 쌍이 생기면 이 표에 추가한다. CLAUDE.md §4 공통 행동 룰 (정중체 / Maestro 약어) 과 모순 시 본 표를 CLAUDE.md 기준으로 정렬.
 
 ## 5) 엔티티
 
