@@ -204,3 +204,22 @@ def test_dispatch_passes_cycle_thread_to_launch_and_exec(isolated_db, monkeypatc
     launched = tq.dispatch_once()
     assert launch_kw.get("cycle_thread_id") == "555"  # wrapper 가 cycle thread 재사용
     assert launched[0]["thread_id"] == "555"  # exec 도 cycle thread 로 보고
+
+
+def test_dispatch_launch_retry_cap_dequeues(isolated_db, monkeypatch):
+    """#1390: launch 연속 실패 MAX 초과 시 큐에서 제외 (head-of-line block 차단)."""
+    import tools_queue as tq, tools_subagent as ts, tools_discord as td, work_queue as wq
+
+    monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
+
+    def boom(*a, **k):
+        raise RuntimeError("wrapper fail")
+    monkeypatch.setattr(ts, "launch_subagent", boom)
+    _seed_directive("d1")
+    tq.enqueue_directive("be", "d1", "t", "task", thread_id="T1")
+
+    for _ in range(tq.MAX_LAUNCH_ATTEMPTS - 1):
+        tq.dispatch_once()
+        assert wq.peek_next("be") is not None  # MAX 전엔 큐 유지
+    tq.dispatch_once()  # MAX 번째 → 제외
+    assert wq.peek_next("be") is None
