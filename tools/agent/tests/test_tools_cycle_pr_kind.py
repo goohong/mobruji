@@ -465,3 +465,26 @@ def test_pr_audit_missing_pr_url_raises(isolated_db, isolated_mobruji_dir):
         tc.register_directive_pending(
             "rev-Z-merge", "z", kind="pr_audit",
         )
+
+
+def test_get_pr_status_parses_open_prs(monkeypatch):
+    """#1414: get_pr_status — gh pr list 결과 파싱 (읽기 전용)."""
+    import tools_cycle as tc, types, json as _json
+    def fake_run(argv, **kw):
+        assert "list" in argv and "-R" in argv  # 읽기 전용 list + repo 명시
+        return types.SimpleNamespace(returncode=0, stderr="", stdout=_json.dumps([
+            {"number": 1, "title": "feat: x", "labels": [{"name": "type:feat"}],
+             "isDraft": False, "headRefName": "feat/x"},
+        ]))
+    monkeypatch.setattr(tc.subprocess, "run", fake_run)
+    r = tc.get_pr_status()
+    assert r["count"] == 1
+    assert r["prs"][0]["number"] == 1 and r["prs"][0]["labels"] == ["type:feat"]
+
+
+def test_get_pr_status_error_graceful(monkeypatch):
+    import tools_cycle as tc, types
+    monkeypatch.setattr(tc.subprocess, "run",
+                        lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="gh auth fail"))
+    r = tc.get_pr_status()
+    assert r["prs"] == [] and "gh auth fail" in r["error"]

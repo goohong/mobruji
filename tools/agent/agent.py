@@ -88,6 +88,7 @@ TOOL_EMOJI_MAP = {
     "register_directive_pending": "📌",
     "update_directive_status": "🔄",
     "get_cycle_state": "🔍",
+    "get_pr_status": "📋",
     "set_cycle_state": "🎛️",
     "pause_global": "⏸️",
     "resume_global": "▶️",

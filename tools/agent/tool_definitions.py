@@ -293,6 +293,28 @@ async def get_cycle_state(args: dict[str, Any]) -> dict[str, Any]:
         return _wrap_error(exc)
 
 
+# ─── 9-b. get_pr_status (#1414) ───────────────────────────────────────────────
+
+
+@tool(
+    name="get_pr_status",
+    description=(
+        "열린 PR 목록 조회 (읽기 전용 gh pr list). 사용자의 'PR 현황 / 진행 어떻게 "
+        "돼가?' 류 질문에 실제 데이터로 답할 때 사용. search 로 키워드 필터 가능. "
+        "(raw Bash 대신 본 스코프 도구 — write 명령 불가.)"
+    ),
+    input_schema={"search": str, "limit": int},
+)
+async def get_pr_status(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = tc.get_pr_status(
+            search=args.get("search") or "", limit=int(args.get("limit") or 15),
+        )
+        return _wrap_result(result)
+    except Exception as exc:  # noqa: BLE001
+        return _wrap_error(exc)
+
+
 # ─── 10. set_cycle_state ─────────────────────────────────────────────────────
 
 
@@ -364,6 +386,7 @@ ALL_TOOLS = [
     register_directive_pending,
     update_directive_status,
     get_cycle_state,
+    get_pr_status,
     set_cycle_state,
     pause_global,
     resume_global,

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -31,6 +32,48 @@ from state import CycleName, CycleStatus, DirectiveStatus
 def get_cycle_state(cycle: CycleName) -> dict[str, Any] | None:
     """단일 cycle 의 current state."""
     return ev.get_state(f"cycle:{cycle}")
+
+
+# ─── 9-b. get_pr_status (#1414 — 읽기 전용 PR/현황 조회) ──────────────────────
+
+PR_STATUS_REPO = "goohong/mobruji"
+PR_STATUS_TIMEOUT = 25
+
+
+def get_pr_status(search: str = "", limit: int = 15) -> dict[str, Any]:
+    """열린 PR 목록 조회 (읽기 전용 `gh pr list`). nmae 가 현황 질문 답변에 사용.
+
+    raw Bash 대신 본 스코프 도구만 노출해 write 명령(git push/checkout 등) 사고 표면
+    제거 (#1414 rev 🟡-1). `gh` 는 GH_TOKEN(.env) 인증. -R 로 repo 명시 — cwd 무관.
+    실패 시 {"error": ..., "prs": []} graceful.
+    """
+    argv = [
+        "gh", "pr", "list", "-R", PR_STATUS_REPO, "--state", "open",
+        "--limit", str(max(1, min(int(limit), 50))),
+        "--json", "number,title,labels,isDraft,headRefName",
+    ]
+    if search:
+        argv += ["--search", search]
+    try:
+        result = subprocess.run(  # noqa: S603 — argv list, gh 고정
+            argv, capture_output=True, text=True, timeout=PR_STATUS_TIMEOUT, check=False,
+        )
+        if result.returncode != 0:
+            return {"error": (result.stderr or "").strip()[:200], "prs": []}
+        raw = json.loads(result.stdout or "[]")
+        prs = [
+            {
+                "number": p.get("number"),
+                "title": p.get("title", ""),
+                "labels": [lbl.get("name") for lbl in p.get("labels", [])],
+                "draft": bool(p.get("isDraft")),
+                "branch": p.get("headRefName", ""),
+            }
+            for p in raw
+        ]
+        return {"prs": prs, "count": len(prs)}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        return {"error": str(exc)[:200], "prs": []}
 
 
 # ─── 10. set_cycle_state ─────────────────────────────────────────────────────
