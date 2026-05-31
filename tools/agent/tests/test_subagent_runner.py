@@ -112,7 +112,7 @@ def test_on_exec_success_no_pr_completes_and_notifies(monkeypatch):
     monkeypatch.setattr(tc, "set_directive_forum_status",
                         lambda did, st, **k: comp.append((did, st)))
     monkeypatch.setattr(sr, "_notify_user_done",
-                        lambda title, body, thread_id="": notes.append(body))
+                        lambda title, body, thread_id="", **k: notes.append(body))
     sr._on_exec_success("rev", "d1", "제목", "T1", "/tmp/wt")
     assert comp == [("d1", "completed")]
     assert notes and "끝났" in notes[0]
@@ -125,7 +125,7 @@ def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
     monkeypatch.setattr(tq, "enqueue_rev_for_pr_if_any",
                         lambda c, wt: triggered.append(c) or "9")
     monkeypatch.setattr(sr, "_notify_user_done",
-                        lambda title, body, thread_id="": notes.append(body))
+                        lambda title, body, thread_id="", **k: notes.append(body))
     sr._on_exec_success("be", "d1", "제목", "T1", "/tmp/wt")
     assert triggered == ["be"]
     assert any("PR #9" in b for b in notes)
