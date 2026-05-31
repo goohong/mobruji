@@ -88,6 +88,7 @@ TOOL_EMOJI_MAP = {
     "register_directive_pending": "📌",
     "update_directive_status": "🔄",
     "get_cycle_state": "🔍",
+    "get_pr_status": "📋",
     "set_cycle_state": "🎛️",
     "pause_global": "⏸️",
     "resume_global": "▶️",
@@ -280,12 +281,7 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
         mcp_servers={"nmae": _get_mcp_server()},
-        # (#1414) status 조회용 Bash 허용 + cwd=repo + ~/.mobruji 읽기 — nmae 가
-        # gh pr list / git log / cat cycle-status 로 PR·작업 현황을 직접 답하게.
-        # 기존엔 allowed_tools 가 mcp__nmae__* 만이라 Bash 가 SDK 차단 → 현황 질문 무력.
-        allowed_tools=_get_allowed_tools() + ["Bash"],
-        cwd="/home/mobruji/mobruji",
-        add_dirs=["/home/mobruji/.mobruji"],
+        allowed_tools=_get_allowed_tools(),
     )
 
     thread_directive = (
@@ -454,12 +450,7 @@ async def handle_directive_approved(payload: dict[str, Any]) -> None:
         system_prompt=NMAE_SYSTEM_PROMPT,
         permission_mode="acceptEdits",
         mcp_servers={"nmae": _get_mcp_server()},
-        # (#1414) status 조회용 Bash 허용 + cwd=repo + ~/.mobruji 읽기 — nmae 가
-        # gh pr list / git log / cat cycle-status 로 PR·작업 현황을 직접 답하게.
-        # 기존엔 allowed_tools 가 mcp__nmae__* 만이라 Bash 가 SDK 차단 → 현황 질문 무력.
-        allowed_tools=_get_allowed_tools() + ["Bash"],
-        cwd="/home/mobruji/mobruji",
-        add_dirs=["/home/mobruji/.mobruji"],
+        allowed_tools=_get_allowed_tools(),
     )
 
     prompt = DIRECTIVE_APPROVED_PROMPT.format(
