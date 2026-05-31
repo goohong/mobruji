@@ -364,7 +364,7 @@ REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
 REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
 # gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
 # 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
-REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "1h"
+REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "24h"
 # label 조회 시 사용할 label 이름 — rev sub-agent 가 Post-merge audit (단계 2)
 # 통과 시 부여.
 REV_POST_MERGE_PASS_LABEL: Final[str] = "rev-post-merge-pass"
@@ -4598,7 +4598,7 @@ DIRECTIVE_PR_BODY_RE: Final = re.compile(
     r"(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE
 )
 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT: Final[int] = 300  # 5분
-DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "1h"
+DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "24h"
 DIRECTIVE_COMPLETE_GH_TIMEOUT_SECONDS: Final[int] = 60
 
 # spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3)
