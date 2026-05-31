@@ -298,6 +298,12 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
             "work_dispatched", {"cycle": cycle, "directive_id": directive_id},
         )
         _set_board_assigned(directive_id, cycle, nxt.get("task", ""))
+        # (#1415) 지시 forum thread 태그 🟡 대기 → 🔵 진행 중 + board status + body PATCH.
+        # work-queue 가 agent state 만 갱신하고 지시 forum 은 안 건드려 🟡 박제됐던 갭.
+        tc.set_directive_forum_status(
+            directive_id, "in_progress",
+            cycle=cycle, reason=nxt.get("task", "")[:200],
+        )
         _comment(
             report_thread,
             f"🚀 **{cycle}** 사이클이 시작했습니다 — {nxt.get('title', '')}",
