@@ -118,11 +118,13 @@ async def run_subagent_execution(
     어떤 경우에도 `mark_subagent_completed` 로 lock 해제 (영구 점유 방지).
     """
     wt = worktree_path(cycle)
-    prompt = build_task_prompt(cycle, directive_id, title, task, thread_id)
-    role = role_prompt(cycle, wt)
-    argv = _claude_argv(prompt, role)
     logger.info("subagent exec 시작: cycle=%s directive=%s wt=%s", cycle, directive_id, wt)
     try:
+        # (#1398 rev 🟡-1) argv 빌드(shlex.split CLAUDE_BIN)도 try 안에서 — unbalanced
+        # quote 등 ValueError 가 finally 밖으로 탈출해 lock 미해제되는 사고 차단.
+        prompt = build_task_prompt(cycle, directive_id, title, task, thread_id)
+        role = role_prompt(cycle, wt)
+        argv = _claude_argv(prompt, role)
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=str(wt),
             stdout=asyncio.subprocess.DEVNULL,

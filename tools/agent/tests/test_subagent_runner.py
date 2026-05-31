@@ -63,3 +63,20 @@ def test_claude_argv(monkeypatch):
 def test_worktree_path():
     import subagent_runner as sr
     assert str(sr.worktree_path("rev")).endswith("mobruji-rev")
+
+
+def test_exec_releases_lock_on_argv_error(isolated_db, monkeypatch):
+    """#1398 rev 🟡-1: argv 빌드(shlex.split) ValueError 여도 lock 해제 보장."""
+    import asyncio
+    import subagent_runner as sr
+    import events as ev
+
+    monkeypatch.setenv("CLAUDE_BIN", 'claude "unbalanced')  # shlex.split → ValueError
+    ev.set_state("in_flight_agents", ["rev"])
+    ev.set_state("in_flight_started", {"rev": "2026-01-01T00:00:00+00:00"})
+
+    # thread_id="" → forum_comment 호출 안 함 (Discord 토큰 불필요). 예외 전파 없어야.
+    asyncio.run(sr.run_subagent_execution("rev", "d1", "t", "k", ""))
+
+    assert "rev" not in (ev.get_state("in_flight_agents") or [])
+    assert "rev" not in (ev.get_state("in_flight_started") or {})
