@@ -174,10 +174,10 @@ def enqueue_directive(
 def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
     """sub-agent 완료 후 그 워크트리 branch 의 열린 PR 을 찾아 rev 큐에 자동 적재 (#1403).
 
-    자율 루프 완성: 구현 sub-agent → PR → **rev 자동 감사** → reviewed:claude → 자동 머지.
+    자율 루프 완성: 구현 sub-agent → PR → **rev 자동 코드 리뷰** → reviewed:claude → 자동 머지.
 
     가드:
-      - source_cycle == 'rev' → skip (rev 는 PR 안 만들고 자기 감사 무한 루프 방지).
+      - source_cycle == 'rev' → skip (rev 는 PR 안 만들고 자기 코드 리뷰 무한 루프 방지).
       - PR 에 이미 reviewed:claude → skip.
       - 멱등: directive_id = rev-pr-<N> (wq.enqueue 중복 차단).
       - branch 가 develop/main/HEAD → skip.
@@ -217,9 +217,9 @@ def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
                 "delegation_reason": None, "pr_url": None, "closed_reason": None,
             })
         enqueue_directive(
-            "rev", did, f"rev 감사 — PR #{num}",
-            f"PR #{num} (branch {branch}) 3단계 e2e 감사 + reviewed:claude 판정/findings 블록. "
-            f"구현은 하지 말고 감사·보고만.",
+            "rev", did, f"rev 코드 리뷰 — PR #{num}",
+            f"PR #{num} (branch {branch}) 3단계 e2e 코드 리뷰 + 품질 검증 + reviewed:claude 판정/findings 블록. "
+            f"구현은 하지 말고 코드 리뷰·보고만.",
         )
         logger.info("rev auto-trigger: PR #%s (source=%s) → rev 큐 적재", num, source_cycle)
         return str(num)

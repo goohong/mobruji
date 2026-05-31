@@ -87,7 +87,7 @@ ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; th
   repo 밖에 둔다.
 - **repo reference 사본** = `tools/discord-daemon/helper-role.md`,
   `tools/discord-daemon/helper-launch.sh`, `tools/discord-daemon/mobruji-helper.service`.
-  PR 리뷰·감사·복구용. 변경 시 SoT 와 동시 갱신해야 한다.
+  PR 리뷰·검증·복구용. 변경 시 SoT 와 동시 갱신해야 한다.
 - 두 채널이 **mutual mirror** — 어느 한쪽만 변경되면 본 spec 위반.
 
 ### 운영 변경 절차

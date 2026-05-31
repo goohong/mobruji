@@ -4629,7 +4629,7 @@ def _merged_since_qualifier(window: str) -> str:
     """상대 윈도우('1h'/'24h'/'7d'/'30m')를 GitHub 검색용 절대 날짜 qualifier 로 변환.
 
     (#1436) GitHub 검색은 `merged:>1h ago` 같은 상대 문법을 지원하지 않는다 — 항상
-    0건 매칭이라 directive 완료 전이·post-merge 감사 loop 가 한 번도 머지 PR 을 못
+    0건 매칭이라 directive 완료 전이·post-merge 코드 리뷰 loop 가 한 번도 머지 PR 을 못
     찾던 사고 (2026-05-31 E2E 테스트로 발견). `merged:>=YYYY-MM-DDTHH:MM:SS+00:00`
     절대 시각으로 변환한다. 파싱 실패 시 1시간 fallback.
     """

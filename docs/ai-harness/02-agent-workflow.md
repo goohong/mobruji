@@ -302,7 +302,7 @@ maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 �
 - **maestro** (`mobruji`): 기획·이슈 등록·백로그 우선순위·공유 영역(`CLAUDE.md`/`docs/ai-harness/**`) 보수·develop 점유. 코드/테스트 작성은 sub-agent 위임 default.
 - **be** (`mobruji-be`): `backend/**` 구현 전용.
 - **fe** (`mobruji-fe`): `web/**` 구현 전용.
-- **rev** (`mobruji-rev`): 사후 감사 + QA 실행 검증. 파일 수정 금지 (`pre-push` hook 차단).
+- **rev** (`mobruji-rev`): 사후 코드 리뷰 + 품질 검증(QA) 실행. 파일 수정 금지 (`pre-push` hook 차단).
 - **plan** (`mobruji-plan`): ADR/spec/`docs/ai-harness/**` 갱신 전담. v0.2 메타 전환 후 maestro 부담 분산용 (`feedback-plan-session-option`, `project-plan-session-active`).
 
 > 풀스택 기능은 be/fe 두 PR로 분리. 같은 PR에서 두 에이전트가 평행 작업 후 사람이 픽하는 패턴은 비용 크므로 학습/비교 목적에만.

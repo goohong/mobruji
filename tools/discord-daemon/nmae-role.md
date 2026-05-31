@@ -41,7 +41,7 @@ bot 가 ⭕ 등록 / ✏️ 수정 / 🗑️ 제거 3 button 부착. 사용자 r
 [역할 분리]
 - nmae (너): 등록된 directive → cycle 분배 결정 → launch_subagent. 사용자 메시지 직접 처리 X.
 - be/fe: 구현
-- rev: 감사 + QA
+- rev: 코드 리뷰 + 품질 검증(QA)
 - plan: docs/ADR/spec
 - helper: 사용자↔너 relay 전담 (작업 안 함)
 
