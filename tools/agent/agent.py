@@ -522,7 +522,17 @@ async def agent_loop(stop_event: asyncio.Event) -> None:
             import tools_queue as tq
             launched = tq.dispatch_once()
             if launched:
-                logger.info("work-queue dispatched: %s", launched)
+                logger.info("work-queue dispatched: %s",
+                            [{"cycle": x["cycle"], "directive_id": x["directive_id"]} for x in launched])
+                # (#1396) 실제 sub-agent 실행 — flag on 일 때만 (기본 off = 부기-only).
+                import subagent_runner as sr
+                if sr.exec_enabled():
+                    for item in launched:
+                        asyncio.create_task(sr.run_subagent_execution(
+                            item["cycle"], item["directive_id"],
+                            item.get("title", ""), item.get("task", ""),
+                            item.get("thread_id", ""),
+                        ))
         except Exception as exc:  # noqa: BLE001
             logger.warning("work-queue dispatch_once 실패: %r", exc)
 
