@@ -74,11 +74,13 @@ def build_task_prompt(
 ) -> str:
     """sub-agent claude -p 에 줄 작업 prompt. 진행/완료 forum 보고 강제 지시 포함."""
     forum_line = (
-        f"- 진행/결과는 forum thread `{thread_id}` 에 보고하라: "
-        f"`{discord_reply_bin} --forum-comment {thread_id} \"<메시지>\"` "
-        f"(milestone: 시작 / 핵심 발견 / PR 링크 / 완료). 정중체."
+        f"- **진행 보고는 cycle forum thread `{thread_id}` 에** (우선): "
+        f"`{discord_reply_bin} --forum-comment {thread_id} \"<메시지>\"`.\n"
+        f"  - milestone 만 (시작 / 핵심 발견 / PR 링크 / 완료) — 매 step 중계 금지.\n"
+        f"  - **각 보고 2-4줄 이내, 줄바꿈으로 구조화, wall-of-text 금지.** "
+        f"긴 설명·근거는 PR 본문에 적고 forum 엔 요약 1-2줄 + 링크. 정중체."
         if thread_id
-        else "- forum thread id 미지정 — PR/이슈 링크로 결과 보고."
+        else "- forum thread id 미지정 — PR/이슈 링크로 결과 보고 (짧게, 줄바꿈)."
     )
     return (
         f"[자율 사이클 작업 — {cycle}]\n"
