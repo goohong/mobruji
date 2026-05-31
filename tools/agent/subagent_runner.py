@@ -34,6 +34,23 @@ WORKTREE_PREFIX = "mobruji-"
 EXEC_TIMEOUT_SECONDS = 45 * 60
 DEFAULT_MODEL = "claude-opus-4-8"
 
+# (#1413) sub-agent 작업 보고 양식 — Discord 마크다운, AS-IS/TO-BE (나열 금지,
+# 제목/내용 구분, 줄바꿈). 사용자 정정 2026-05-31: "정리라기보다 나열 — AS-IS/TO-BE
+# 같은 가독성 양식 필요 + Discord 마크다운으로 제목·내용 구분".
+REPORT_TEMPLATE = """\
+## <제목> · <✅ 완료 | 🟡 진행 | ⛔ 차단>
+
+**AS-IS** — 원래
+- <변경 전 상태 / 무엇이 문제였나>
+
+**TO-BE** — 적용
+- <무엇을 어떻게 바꿨나 (진행·차단이면 바꿀 목표)>
+
+**남은 한 수** *(진행·차단 시만)*
+- <다음 액션 / 차단 사유>
+
+🔗 PR #<N>"""
+
 
 def exec_enabled() -> bool:
     """실제 sub-agent spawn 활성 여부 (기본 off — 안전 배포)."""
@@ -73,15 +90,21 @@ def build_task_prompt(
     discord_reply_bin: str = "/home/mobruji/mobruji-bridge/tools/discord-daemon/discord-reply.sh",
 ) -> str:
     """sub-agent claude -p 에 줄 작업 prompt. 진행/완료 forum 보고 강제 지시 포함."""
-    forum_line = (
-        f"- **진행 보고는 cycle forum thread `{thread_id}` 에** (우선): "
-        f"`{discord_reply_bin} --forum-comment {thread_id} \"<메시지>\"`.\n"
-        f"  - milestone 만 (시작 / 핵심 발견 / PR 링크 / 완료) — 매 step 중계 금지.\n"
-        f"  - **각 보고 2-4줄 이내, 줄바꿈으로 구조화, wall-of-text 금지.** "
-        f"긴 설명·근거는 PR 본문에 적고 forum 엔 요약 1-2줄 + 링크. 정중체."
-        if thread_id
-        else "- forum thread id 미지정 — PR/이슈 링크로 결과 보고 (짧게, 줄바꿈)."
-    )
+    if thread_id:
+        forum_line = (
+            f"- **진행/완료 보고는 cycle forum thread `{thread_id}` 에** "
+            f"`{discord_reply_bin} --forum-comment {thread_id} \"<메시지>\"`.\n"
+            f"  - milestone 마다만 (시작 / 핵심 발견 / PR / 완료) — 매 step 중계 금지.\n"
+            f"  - **아래 AS-IS/TO-BE 양식 그대로** (Discord 마크다운 — `##`/`**`/줄바꿈으로 "
+            f"제목·섹션 구분, 나열 금지). **코드펜스(```)로 감싸지 말 것** — 마크다운이 렌더되게:\n"
+            f"{REPORT_TEMPLATE}\n"
+            f"  - 긴 근거·전체 목록은 PR 본문에. forum 은 이 양식 압축본만. 정중체."
+        )
+    else:
+        forum_line = (
+            "- forum thread id 미지정 — PR/이슈 링크로 아래 AS-IS/TO-BE 양식 보고:\n"
+            f"{REPORT_TEMPLATE}"
+        )
     return (
         f"[자율 사이클 작업 — {cycle}]\n"
         f"directive_id: {directive_id}\n"

@@ -80,3 +80,15 @@ def test_exec_releases_lock_on_argv_error(isolated_db, monkeypatch):
 
     assert "rev" not in (ev.get_state("in_flight_agents") or [])
     assert "rev" not in (ev.get_state("in_flight_started") or {})
+
+
+def test_build_task_prompt_uses_asis_tobe_report_format(tmp_path):
+    """#1413: 보고 양식 = AS-IS/TO-BE 마크다운 (코드펜스 금지 지시 포함)."""
+    import subagent_runner as sr
+    p = sr.build_task_prompt("rev", "d1", "제목", "작업", "T9")
+    assert "AS-IS" in p and "TO-BE" in p
+    assert "## " in p  # Discord 마크다운 제목
+    assert "코드펜스" in p  # ``` 로 감싸지 말라는 지시
+    # thread 없을 때도 양식 포함
+    p2 = sr.build_task_prompt("be", "d2", "t", "k", "")
+    assert "AS-IS" in p2
