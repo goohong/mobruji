@@ -154,9 +154,20 @@ def enqueue_directive(
         f"📥 **{cycle}**{urgent} 큐 {result['position']}번째로 적재했습니다 "
         f"(앞 대기 {result['ahead']}건). 사이클이 비면 자동으로 시작합니다.",
     )
-    # 사용자가 보는 지시 thread 에도 cycle 배정 1줄 (cycle thread 와 다를 때만).
+    # 사용자가 보는 지시 thread 에도 위임 1줄 + cycle forum 링크 (cycle thread 와 다를 때만).
+    # (#1431) 사용자 정정: "누구에게 위임했으면 위임한다 + 이렇게 돌아간다 [링크] +
+    # 후속은 여기서 확인" — cycle forum thread 클릭 링크를 명시해야 사용자가 진행을 추적.
     if cycle_thread and thread_id and thread_id != cycle_thread:
-        _comment(thread_id, f"→ **{cycle}** 사이클 큐에 적재했습니다 (진행은 {cycle} forum thread 에서).")
+        guild = os.environ.get("DISCORD_GUILD_ID", "")
+        link = (
+            f"\n진행: https://discord.com/channels/{guild}/{cycle_thread}"
+            if guild else ""
+        )
+        _comment(
+            thread_id,
+            f"→ **{cycle}** 사이클에 위임했습니다. 후속은 {cycle} forum thread 에서 "
+            f"확인해 주세요.{link}",
+        )
     return result
 
 
