@@ -38,6 +38,7 @@ def launch_subagent(
     title: str,
     task: str,
     *,
+    cycle_thread_id: str | None = None,
     wrapper_timeout: float = 60.0,
 ) -> dict[str, Any]:
     """sub-agent (be/fe/rev/plan) 사이클 시작.
@@ -71,7 +72,10 @@ def launch_subagent(
     directive = ev.get_state(f"directive:{directive_id}")
     if directive is None:
         raise ValueError(f"directive not found: {directive_id}")
-    pending_thread_id = directive.get("thread_id")
+    # (#1401) cycle_thread_id 가 주어지면(자율 큐 경로 — 전용 cycle forum thread)
+    # 그걸 wrapper 의 pending-thread-id 로 사용 → 📌 dialogue thread 재사용 폐지.
+    # 미지정 시 기존대로 directive thread (register_directive_pending 경로 호환).
+    pending_thread_id = cycle_thread_id or directive.get("thread_id")
     if not pending_thread_id:
         raise ValueError(
             f"directive {directive_id} 의 pending thread 미등록 — "

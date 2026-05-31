@@ -19,6 +19,8 @@ last_reviewed: 2026-05-31
 
 → 위임을 **즉시 실행이 아니라 큐 적재 + dispatcher 처리** 로 전환. 큐 자체가 가시 지표가 되고, busy 사이클은 실패가 아니라 대기열에서 순서를 기다린다.
 
+> **갱신 (#1401, 2026-05-31)** — 자율 실행 가시성: enqueue 시 **전용 cycle forum thread** 를 동기 신설(`discord-reply.sh --forum-post-auto-tag <cycle>`)하고 directive state `cycle_thread_id` 에 저장. 적재(📥)·시작(🚀)·sub-agent 진행/완료 보고를 모두 이 thread 로 통일 (📌 dialogue thread 재사용 폐지 — be/fe/rev/plan forum 에서 1 task = 1 thread 가시). 지시 thread 엔 "→ {cycle} 큐 적재" pointer 1줄. `launch_subagent(cycle_thread_id=)` 로 wrapper 가 이 thread 재사용. 모든 cycle 공통.
+
 ## 2) 설계 결정 (사용자 확정)
 
 - **사이클별 우선순위 FIFO 큐 4개** (be / fe / rev / plan). 사이클 간 동시 실행 (워크트리 lock = 사이클당 1 sub-agent 유지).
