@@ -76,6 +76,45 @@ def get_pr_status(search: str = "", limit: int = 15) -> dict[str, Any]:
         return {"error": str(exc)[:200], "prs": []}
 
 
+# ─── 9-c. set_directive_forum_status (#1415 — 지시 forum 태그 전이) ────────────
+
+DIRECTIVE_STATUS_SH = os.environ.get(
+    "DIRECTIVE_STATUS_BIN",
+    "/home/mobruji/mobruji/tools/discord-daemon/directive_status.sh",
+)
+
+
+def set_directive_forum_status(
+    directive_id: str,
+    new_status: str,
+    *,
+    cycle: str = "",
+    reason: str = "",
+    pr_url: str = "",
+) -> None:
+    """지시 forum thread 태그 전이(🟡→🔵→🟢) + directive-board.jsonl status + starter
+    body PATCH 를 `directive_status.sh` 로 수행 (#1415).
+
+    work-queue 는 agent state(`directive:{id}`) 만 갱신했고 directive-board.jsonl /
+    Discord 태그는 안 건드려 지시 forum 이 🟡 대기 박제됐던 갭 fix. dispatch=in_progress,
+    PR 머지=completed. 합성(rev-pr-*) / board 부재 directive 는 no-op. graceful.
+    """
+    if not directive_id or str(directive_id).startswith("rev-pr-"):
+        return
+    if new_status not in ("in_progress", "completed"):
+        return
+    argv = [
+        DIRECTIVE_STATUS_SH, str(directive_id), new_status,
+        pr_url or "", cycle or "", reason or "",
+    ]
+    try:
+        subprocess.run(  # noqa: S603 — 고정 경로 + argv list
+            argv, capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 # ─── 10. set_cycle_state ─────────────────────────────────────────────────────
 
 

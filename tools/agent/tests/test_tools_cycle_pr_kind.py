@@ -488,3 +488,24 @@ def test_get_pr_status_error_graceful(monkeypatch):
                         lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr="gh auth fail"))
     r = tc.get_pr_status()
     assert r["prs"] == [] and "gh auth fail" in r["error"]
+
+
+def test_set_directive_forum_status_calls_script(monkeypatch):
+    """#1415: in_progress 시 directive_status.sh 호출 (id/status/cycle 전달)."""
+    import tools_cycle as tc, types
+    calls = []
+    monkeypatch.setattr(tc.subprocess, "run",
+                        lambda argv, **k: calls.append(argv) or types.SimpleNamespace(returncode=0, stdout="", stderr=""))
+    tc.set_directive_forum_status("d1", "in_progress", cycle="rev", reason="r")
+    assert calls and calls[0][1] == "d1" and calls[0][2] == "in_progress"
+    assert "rev" in calls[0]  # cycle 전달
+
+
+def test_set_directive_forum_status_skips_synthetic_and_invalid(monkeypatch):
+    import tools_cycle as tc
+    calls = []
+    monkeypatch.setattr(tc.subprocess, "run", lambda *a, **k: calls.append(a))
+    tc.set_directive_forum_status("rev-pr-9", "in_progress")  # 합성 — skip
+    tc.set_directive_forum_status("d1", "bogus")              # invalid status — skip
+    tc.set_directive_forum_status("", "completed")            # 빈 id — skip
+    assert calls == []
