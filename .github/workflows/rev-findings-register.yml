@@ -4,7 +4,7 @@ name: Rev Findings Auto-Register
 # 자동 등록 (멱등). 사용자 정정 2026-05-31: 🟡/🔴 → 후속 이슈 등록이 mmae 수작업
 # 관례였던 "가장 약한 고리" 를 CI 로 코드 강제 (mmae/nmae LLM in-the-loop 제거).
 #
-# trigger: PR 에 `reviewed:claude` 라벨 부착 시 (rev 통과 시점).
+# trigger: PR 에 `reviewed:claude`(통과) 또는 `rev-blocked`(미통과, #1406) 라벨 부착 시.
 #
 # findings 블록 포맷 (rev 가 PR 코멘트에 포함 — rev 는 이슈 등록 X, 보고만):
 #   <!-- rev-findings
@@ -31,7 +31,9 @@ permissions:
 
 jobs:
   register:
-    if: github.event.label.name == 'reviewed:claude'
+    # 통과(reviewed:claude) + 미통과(rev-blocked, #1406) 양쪽 트리거 — findings 블록
+    # 파싱 → 후속/rework 이슈 멱등 자동 등록. 실패 경로 무보고 갭 해소.
+    if: github.event.label.name == 'reviewed:claude' || github.event.label.name == 'rev-blocked'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/github-script@v7

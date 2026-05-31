@@ -282,6 +282,11 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
   ```
   - severity: `🔴`(시급) | `🟡`(권장) 만 등록 대상. title 필수. scope/type 는 §4 final 값 (미지정/오타 시 scope=infra, type=fix fallback). body = 한 줄 사유 + 보강안.
   - 멱등 키 = `rev-finding:PR<n>:<title-slug>` (workflow 가 이슈 body 에 삽입) — 재라벨/재실행 시 중복 등록 안 됨.
+- **미통과(차단) 시 사용자 보고 + 추적 의무** (#1406, 2026-05-31 — 실패 경로 비대칭 해소): 🔴 로 `reviewed:claude` 를 **부착하지 않을 때**(머지 차단), rev 는 다음을 한다 (통과 경로는 자동인데 실패 경로가 막다른 길+무보고였던 갭):
+  1. PR 에 **`rev-blocked` 라벨 부착** (`gh pr edit <n> --add-label rev-blocked`).
+  2. **사용자 채널(#모부르지)에 보고 push** — `discord-reply.sh "⚠️ PR #<n> rev 미통과 — <사유 1-2줄>. rework 필요."` (정중체, 2-4줄, 줄바꿈). 자율인데도 막힌 PR 을 사용자가 인지하게.
+  3. 위 findings 블록(🔴/🟡)을 emit — `rev-blocked` 라벨 부착 시 `rev-findings-register.yml` 가 rework 이슈를 자동 등록 (통과·미통과 양쪽 트리거).
+  - **rework 는 사용자 확인 후** (자동 재시도 X — 자율 산출물 오류는 사람이 한 번 본다, release gate 철학 일관). [[feedback-rev-release-gate]]
 - **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. round 종료 보고 PATCH 시도 시도 양식 유지 의무 — 통째 덮어쓰기는 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-plan (mobruji-plan)
