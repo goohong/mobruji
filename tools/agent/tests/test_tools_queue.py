@@ -117,6 +117,59 @@ def test_dispatch_noop_when_paused(isolated_db, monkeypatch):
     assert calls == []
 
 
+def test_rev_autotrigger_enqueues_for_pr(isolated_db, monkeypatch):
+    """#1403: 구현 sub-agent 완료 → 그 branch PR → rev 큐 자동 적재."""
+    import tools_queue as tq, tools_discord as td, work_queue as wq
+    import types
+    monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
+
+    def fake_run(argv, **kw):
+        if "rev-parse" in argv:
+            return types.SimpleNamespace(stdout="feat/x-1\n", returncode=0, stderr="")
+        return types.SimpleNamespace(
+            stdout='[{"number":1234,"labels":[]}]', returncode=0, stderr="")
+    monkeypatch.setattr(tq.subprocess, "run", fake_run)
+
+    pr = tq.enqueue_rev_for_pr_if_any("be", "/tmp/wt")
+    assert pr == "1234"
+    assert wq.peek_next("rev")["directive_id"] == "rev-pr-1234"
+
+
+def test_rev_autotrigger_skips_rev_source(isolated_db, monkeypatch):
+    import tools_queue as tq
+    called = []
+    monkeypatch.setattr(tq.subprocess, "run", lambda *a, **k: called.append(a))
+    assert tq.enqueue_rev_for_pr_if_any("rev", "/tmp/wt") is None
+    assert called == []  # subprocess 미호출 (rev 는 즉시 skip)
+
+
+def test_rev_autotrigger_skips_already_reviewed(isolated_db, monkeypatch):
+    import tools_queue as tq, work_queue as wq
+    import types
+
+    def fake_run(argv, **kw):
+        if "rev-parse" in argv:
+            return types.SimpleNamespace(stdout="feat/x-1\n", returncode=0, stderr="")
+        return types.SimpleNamespace(
+            stdout='[{"number":9,"labels":[{"name":"reviewed:claude"}]}]',
+            returncode=0, stderr="")
+    monkeypatch.setattr(tq.subprocess, "run", fake_run)
+    assert tq.enqueue_rev_for_pr_if_any("be", "/tmp/wt") is None
+    assert wq.peek_next("rev") is None
+
+
+def test_rev_autotrigger_no_pr(isolated_db, monkeypatch):
+    import tools_queue as tq
+    import types
+
+    def fake_run(argv, **kw):
+        if "rev-parse" in argv:
+            return types.SimpleNamespace(stdout="feat/x-1\n", returncode=0, stderr="")
+        return types.SimpleNamespace(stdout="[]", returncode=0, stderr="")
+    monkeypatch.setattr(tq.subprocess, "run", fake_run)
+    assert tq.enqueue_rev_for_pr_if_any("be", "/tmp/wt") is None
+
+
 def test_enqueue_creates_cycle_thread_and_reports_there(isolated_db, monkeypatch):
     """#1401: cycle forum thread 신설 → directive state 저장 + 거기로 📥 보고."""
     import tools_queue as tq, tools_discord as td, events as ev
