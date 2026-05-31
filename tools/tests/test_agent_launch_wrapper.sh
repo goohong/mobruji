@@ -231,6 +231,44 @@ fi
 rm -rf "$TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# #1385: --directive-id 가 있으면 directive-board.jsonl 의 정제 summary 를
+#   forum 제목으로 사용 (sub-agent forum 제목도 LLM 정제 제목 — 가독성).
+#   jq 있을 때만 검증 (graceful fallback 은 자명).
+# ─────────────────────────────────────────────────────────────────────────────
+if command -v jq >/dev/null 2>&1; then
+  TMP=$(make_tmp)
+  export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
+  DIR_JSONL="$TMP/directive-board.jsonl"
+  printf '%s\n' '{"message_id":"mid-999","summary":"브라우저 자동 QA 환경 도입","status":"대기","last_updated_kst":"2026-05-30 18:00 KST","thread_id":"t-999"}' > "$DIR_JSONL"
+  CAP="$TMP/cap.txt"
+  FAKE_REPLY="$TMP/discord-reply.sh"
+  cat > "$FAKE_REPLY" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$CAP"
+echo 555000111222333444
+EOF
+  chmod +x "$FAKE_REPLY"
+
+  AGENT_LAUNCH_NO_DISCORD=0 \
+  DIRECTIVE_BOARD_JSONL_PATH="$DIR_JSONL" \
+  DISCORD_REPLY_SH="$FAKE_REPLY" \
+    "$WRAPPER" --register-pending be \
+      --title "장황하고 raw 한 원본 메시지 그대로의 제목 — 가독성 떨어짐" \
+      --directive-id "mid-999" >/dev/null 2>&1
+  CAP_CONTENT="$(cat "$CAP" 2>/dev/null || true)"
+  assert_contains "#1385 정제 summary 가 forum 제목으로" "$CAP_CONTENT" "브라우저 자동 QA 환경 도입"
+  if [[ "$CAP_CONTENT" == *"장황하고 raw 한 원본"* ]]; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("#1385 raw 제목이 정제 제목으로 대체되지 않음")
+    echo "FAIL: #1385 raw 제목 미대체"
+  else
+    PASS=$((PASS + 1))
+    echo "PASS: #1385 raw 제목 → 정제 제목 대체"
+  fi
+  rm -rf "$TMP"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 결과
 # ─────────────────────────────────────────────────────────────────────────────
 echo

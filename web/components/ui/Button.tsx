@@ -70,8 +70,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const isDisabled = disabled || loading;
+  // ADR-0018 단계 4 fix #1310 — focus ring 토큰 swap.
+  // 기존 `focus-visible:ring-zinc-500` 는 light 전용 hardcode 로 다크 모드에서도
+  // light 회색 ring 이 그대로 렌더되어 시각적 일관성이 깨졌다. 다른 컴포넌트
+  // (ThemeToggle / BottomNav) 와 동일 패턴으로 `--cta-secondary-ring` 토큰으로
+  // 통일한다 (tokens.css 가 light=zinc-500 / dark=zinc-500 균일 outline 으로
+  // 정의해 OS 다크 환경에서도 가시성 유지).
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500";
+    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]";
   const widthClass = fullWidth ? "w-full" : "";
   const merged = [
     base,

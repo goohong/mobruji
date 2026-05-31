@@ -373,8 +373,9 @@ CHOICE_KEYCAPS_URLENC=(
 #      세부 부분만 disable (default 둘 다 ENABLED=1).
 #   B) bare body 자동 hook — bare body 본답 push 호출 시 자동으로 (a) ✍️ reaction +
 #      typing → push → (c) ✍️ remove 수행. helper 본체가 명시 호출을 까먹어도 강제
-#      가시화. 2026-05-29 PR #1252 §10-1 결정에 따라 default ON 전환 —
-#      `BOT_WRITING_AUTO_HOOK_ENABLED=0` 명시로 roll-back 가능.
+#      가시화. 2026-05-29 PR #1252 §10-1 결정에 따라 default ON 전환 →
+#      사용자 directive 2026-05-29 (#1294) 로 즉시 OFF 재전환. opt-in 시
+#      `BOT_WRITING_AUTO_HOOK_ENABLED=1` 명시 부여 (systemd / launchd unit env).
 #
 # default emoji: ✍️ (U+270D + U+FE0F variation selector) — URL-encoded
 # `%E2%9C%8D%EF%B8%8F`. Discord API 는 unicode emoji 를 URL-encoded 형태로 받음.
@@ -382,11 +383,12 @@ CHOICE_KEYCAPS_URLENC=(
 BOT_WRITING_REACTION_EMOJI="${BOT_WRITING_REACTION_EMOJI:-%E2%9C%8D%EF%B8%8F}"
 BOT_WRITING_REACTION_ENABLED="${BOT_WRITING_REACTION_ENABLED:-1}"
 BOT_TYPING_INDICATOR_ENABLED="${BOT_TYPING_INDICATOR_ENABLED:-1}"
-# bare body 자동 hook — default ON (2026-05-29 PR #1252 §10-1).
-# 명시 호출 (--writing-marker / --writing-done) 과 두 path 분리. helper 본체가 OFF
-# 호출을 까먹어도 fallback OFF 보장 → ✍️ 잔존 0건. 회귀 roll-back 시
-# `BOT_WRITING_AUTO_HOOK_ENABLED=0` 명시 (systemd/launchd unit env 또는 ad-hoc).
-BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-1}"
+# bare body 자동 hook — default OFF (사용자 directive 2026-05-29 #1294, PR #1252
+# default ON 결정 1일 만에 revert. 노이즈 판단).
+# 명시 호출 (--writing-marker / --writing-done) 은 본 env 와 무관하게 항상 동작.
+# helper 본체가 명시 호출을 까먹어도 fallback hook 으로 ✍️ 잔존 방지하던 경로 제거.
+# opt-in 시 `BOT_WRITING_AUTO_HOOK_ENABLED=1` 명시 (systemd/launchd unit env 또는 ad-hoc).
+BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-0}"
 
 # Discord API retry 설정 (#911 G-6).
 # 429 (Rate Limited) / 5xx (Server Error) 응답을 곧이곧대로 무시하지 않고
@@ -773,11 +775,12 @@ case "$1" in
     # completed 전이 시 호출.
     #
     # 형식: --update-status <thread_id> "<status>" [pr_url]
-    # 동작: forum_edit_starter 재사용 — PATCH /channels/{thread_id}/messages/{thread_id}.
-    #       본문 = "**상태**: <status>\n**갱신**: <KST timestamp>" + (pr_url 시 PR 줄 추가).
-    #       기존 starter content 를 완전히 대체 (Discord PATCH semantics).
-    # 한계: starter 본문에 사용자 작성 추가 정보가 있다면 본 갱신으로 덮어쓰임 —
-    #       directive_status.sh 호출자가 책임 (forum thread starter 는 시스템 message 가정).
+    # 동작 (#1419 내용 보존형): forum_get_starter 로 기존 본문을 읽어
+    #       directive_starter_status.py 로 📋 진행 상태줄 + 갱신 줄 + (pr_url 시)
+    #       🔖 관련 PR 줄만 수술 갱신 후 forum_edit_starter 로 PATCH.
+    #       → 📌 제목·💬 요약·🔖 관련 등 기존 내용 보존.
+    # 과거: 본문을 "상태/갱신" 2~3 줄로 통째 대체해 사용자/helper 작성 내용이
+    #       매 전이마다 소멸하는 사고가 있었음 (2026-05-31 사용자 정정).
     MODE="update-status"
     if [[ $# -lt 3 ]]; then
       echo "discord-reply.sh: --update-status <thread_id> \"<status>\" [pr_url] 형태로 입력해주세요" >&2
@@ -1575,6 +1578,25 @@ forum_edit_starter() {
     "$body"
 }
 
+# (#1419) forum thread starter message 의 현재 본문(content) 만 stdout 으로 반환.
+# forum thread 의 starter message id == thread id (Discord 사양).
+# update-status 가 본문을 통째로 덮어쓰지 않고 "내용 보존형"으로 갱신하려면
+# 먼저 기존 본문을 읽어야 한다 (과거엔 getter 부재로 통째 PATCH → 내용 소멸 사고).
+# 실패 (4xx/5xx / thread 삭제) 시 빈 문자열 — 호출자가 fallback.
+forum_get_starter() {
+  local thread_id="$1"
+  local resp status payload
+  resp=$(curl -sS -X GET \
+    "https://discord.com/api/v10/channels/${thread_id}/messages/${thread_id}" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+    printf '%s' "$payload" | jq -r '.content // ""'
+  fi
+}
+
 # forum thread applied_tags 만 PATCH — PATCH /channels/{thread_id}.
 # 다른 thread 속성 (name 등) 은 건드리지 않음.
 forum_retag_thread() {
@@ -2026,13 +2048,24 @@ case "$MODE" in
     PR_URL_OPT="$FORUM_TITLE"
     # KST timestamp (jsonl entry 의 last_updated_kst 와 동일 형식).
     UPDATE_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
-    # starter body 빌드 — markdown 2~3 줄.
-    if [[ -n "$PR_URL_OPT" ]]; then
-      NEW_STARTER_BODY=$(printf '**상태**: %s\n**갱신**: %s\n**PR**: %s' \
-        "$STATUS_TEXT" "$UPDATE_TS_KST" "$PR_URL_OPT")
-    else
-      NEW_STARTER_BODY=$(printf '**상태**: %s\n**갱신**: %s' \
-        "$STATUS_TEXT" "$UPDATE_TS_KST")
+    # (#1419) 내용 보존형 갱신 — 과거엔 본문을 "상태/갱신" 2~3 줄로 통째 PATCH 해
+    # 📌 제목·💬 요약·🔖 관련 등 사용자/helper 작성 내용이 소멸하는 사고가 있었음
+    # (2026-05-31 사용자 정정 "내용 다 죽이고 완료라고 하면 뭐해"). 이제 기존 starter
+    # 본문을 읽어 📋 진행 상태줄 + 갱신 줄만 수술 갱신 (directive_starter_status.py).
+    UPDATE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CUR_STARTER_CONTENT="$(forum_get_starter "$THREAD_ID")"
+    NEW_STARTER_BODY="$(STATUS="$STATUS_TEXT" TS="$UPDATE_TS_KST" PR="$PR_URL_OPT" \
+      python3 "${UPDATE_SELF_DIR}/directive_starter_status.py" <<<"$CUR_STARTER_CONTENT")"
+    if [[ -z "$NEW_STARTER_BODY" ]]; then
+      # transform 실패 (python 부재 등) 시 최소 안전 fallback — 단, 기존 본문이
+      # 있으면 보존(append), 없을 때만 상태 2~3 줄.
+      if [[ -n "$CUR_STARTER_CONTENT" ]]; then
+        NEW_STARTER_BODY="${CUR_STARTER_CONTENT}"$'\n\n'"**상태**: ${STATUS_TEXT} · ${UPDATE_TS_KST}"
+        [[ -n "$PR_URL_OPT" ]] && NEW_STARTER_BODY="${NEW_STARTER_BODY}"$'\n'"**PR**: ${PR_URL_OPT}"
+      else
+        NEW_STARTER_BODY="$(printf '**상태**: %s\n**갱신**: %s' "$STATUS_TEXT" "$UPDATE_TS_KST")"
+        [[ -n "$PR_URL_OPT" ]] && NEW_STARTER_BODY="${NEW_STARTER_BODY}"$'\n'"**PR**: ${PR_URL_OPT}"
+      fi
     fi
     forum_edit_starter "$THREAD_ID" "$NEW_STARTER_BODY"
     ;;

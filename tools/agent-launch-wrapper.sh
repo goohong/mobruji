@@ -188,6 +188,20 @@ if [[ -z "$TITLE" ]]; then
   exit 2
 fi
 
+# (#1385) sub-agent forum 제목도 LLM 정제 제목을 쓰도록 — DIRECTIVE_ID 가 있으면
+# directive-board.jsonl 의 정제된 summary 를 제목 권위 소스로 사용. nmae 가 verbose
+# 제목을 넘겨도 forum sidebar 가독성 보장 (지시 forum 과 동일 제목). jq 부재 / 미발견
+# / "(빈 본문)" 이면 넘어온 TITLE 유지 (graceful, 추가 latency·LLM 호출 없음).
+_DIRECTIVE_BOARD_JSONL="${DIRECTIVE_BOARD_JSONL_PATH:-${HOME:-/tmp}/.mobruji/directive-board.jsonl}"
+if [[ -n "$DIRECTIVE_ID" && -f "$_DIRECTIVE_BOARD_JSONL" ]] && command -v jq >/dev/null 2>&1; then
+  _CLEAN_SUMMARY="$(jq -r --arg id "$DIRECTIVE_ID" \
+    'select((.message_id == $id) or (.source_queue_msg_id == $id) or (.thread_id == $id)) | .summary // empty' \
+    "$_DIRECTIVE_BOARD_JSONL" 2>/dev/null | head -n1)"
+  if [[ -n "$_CLEAN_SUMMARY" && "$_CLEAN_SUMMARY" != "(빈 본문)" ]]; then
+    TITLE="$_CLEAN_SUMMARY"
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPDATE_SH="$SCRIPT_DIR/cycle-status/update.sh"
 
@@ -499,6 +513,16 @@ fi
 #
 # 단 명시적 opt-in (AGENT_LAUNCH_CREATE_FORUM_THREAD=1) 시 기존 path 유지 —
 # 운영 전환기 / 디버그 친화.
+#
+# 2026-05-29 (PR fix/digest-forum-push-leak-#1283 — 사용자 directive
+# "다이제스트에 보면 forum push 실패라는데 실제로 포럼에 푸시도 없고"):
+# 본 분기는 *정책상* skip 인데 이전 status-channel 본문 suffix 가
+# "DIGEST fallback (forum push 실패)" 로 박혀 사용자에게 "forum push 시도 →
+# 실패" 로 오해를 유발. 분기에 따라 정확한 suffix 사용하도록 정정:
+#   - 정책 skip (이 if/else 아래 분기): "[DIGEST 라우팅] cycle forum policy: pending 부재"
+#   - 실제 forum-post 시도 후 실패:    "[DIGEST 라우팅] forum-post 실패 (rc=N)"
+#   - 응답 thread_id 누락:             "[DIGEST 라우팅] forum-post 응답 thread_id 누락"
+DIGEST_FALLBACK_REASON=""
 if [[ "${AGENT_LAUNCH_CREATE_FORUM_THREAD:-0}" == "1" ]]; then
   FORUM_OUT=$("$DISCORD_REPLY_SH" \
     --forum-post-auto-tag "$WORKTREE" "$FORUM_TITLE" "$FORUM_BODY" 2>/dev/null) \
@@ -511,20 +535,23 @@ if [[ "${AGENT_LAUNCH_CREATE_FORUM_THREAD:-0}" == "1" ]]; then
       exit 0
     fi
     echo "agent-launch-wrapper.sh: forum-post 응답에 valid thread_id 가 없음 (raw=$FORUM_OUT) — DIGEST fallback 시도" >&2
+    DIGEST_FALLBACK_REASON="forum-post 응답 thread_id 누락"
   else
     echo "agent-launch-wrapper.sh: forum-post 실패 (rc=$FORUM_RC) — DIGEST status channel fallback 시도" >&2
+    DIGEST_FALLBACK_REASON="forum-post 실패 (rc=$FORUM_RC)"
   fi
 else
-  echo "agent-launch-wrapper.sh: pending-thread-id 부재 + AGENT_LAUNCH_CREATE_FORUM_THREAD!=1 → forum 신규 thread skip. DIGEST fallback 사용." >&2
+  echo "agent-launch-wrapper.sh: pending-thread-id 부재 + AGENT_LAUNCH_CREATE_FORUM_THREAD!=1 → forum 신규 thread skip. DIGEST 라우팅 사용." >&2
+  DIGEST_FALLBACK_REASON="cycle forum policy: pending 부재"
 fi
 
 # 2차 graceful fallback: --status-channel (DIGEST text channel) — 사용자 가시성
-# 최소 보장. forum_id 미설정 / forum push 실패 시에도 사이런스 사고 재발 방지.
-# DIGEST 채널은 text channel 이라 --auto-ack-thread (text-channel API) 정상 동작.
+# 최소 보장. forum push 실제 실패 / 정책 skip 양쪽 모두 본 분기로. DIGEST 는
+# text channel 이라 --auto-ack-thread (text-channel API) 정상 동작.
 STATUS_OUT=""
 STATUS_RC=0
 STATUS_OUT=$("$DISCORD_REPLY_SH" \
-  --status-channel "$FORUM_TITLE — DIGEST fallback (forum push 실패)" 2>/dev/null) \
+  --status-channel "$FORUM_TITLE — [DIGEST 라우팅] $DIGEST_FALLBACK_REASON" 2>/dev/null) \
   || STATUS_RC=$?
 
 if [[ "$STATUS_RC" -ne 0 ]]; then

@@ -42,6 +42,7 @@ import {
   type Difficulty,
 } from "@/lib/difficulty";
 import { midiToCombinedNoteName } from "@/lib/notes";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useLikesStore } from "@/store/likes";
 
 export default function SongDetailPage() {
@@ -123,6 +124,8 @@ function SongDetailView({ song }: SongDetailViewProps) {
       ? midiToCombinedNoteName(song.lowMidi)
       : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1284 — 한국 곡 한국어 표시 우선 (heading + 좋아요 aria-label 동일 표시).
+  const displayTitle = formatSongDisplayTitle(song);
 
   return (
     <Shell>
@@ -140,13 +143,13 @@ function SongDetailView({ song }: SongDetailViewProps) {
           Song detail
         </p>
         <h1 className="text-3xl font-semibold text-[var(--text-primary)]">
-          {song.title}
+          {displayTitle}
         </h1>
         <p className="text-base text-[var(--text-secondary)]">
           {song.artist}
         </p>
         <div className="pt-1">
-          <DetailLikeButton songId={song.id} songTitle={song.title} />
+          <DetailLikeButton songId={song.id} songTitle={displayTitle} />
         </div>
       </header>
 

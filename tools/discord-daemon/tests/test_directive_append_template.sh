@@ -87,8 +87,8 @@ DISCORD_REPLY_BIN="$TMP1/discord-reply.sh" \
 
 BODY1="$(cat "$TMP1/captured_body.txt")"
 _assert_contains "Case 1 📌 marker"     "📌"                       "$BODY1"
-_assert_contains "Case 1 💬 원본 헤더"   "💬 원본"                  "$BODY1"
-_assert_contains "Case 1 원본 quote"    "> release 머지 가도 될까요?" "$BODY1"
+_assert_contains "Case 1 💬 요약 헤더"   "💬 요약"                  "$BODY1"
+_assert_contains "Case 1 title quote fallback" "> release 머지 가도 될까요?" "$BODY1"
 _assert_contains "Case 1 🆔 directive_id" "🆔"                      "$BODY1"
 _assert_contains "Case 1 msg_id 포함"    "msg_t1"                  "$BODY1"
 _assert_contains "Case 1 🕐 timestamp"   "🕐"                      "$BODY1"
@@ -161,6 +161,34 @@ _assert_not_contains "Case 4 template 마커 미생성 (override)" "📌" "$BODY
 _assert_not_contains "Case 4 진행 체크박스 미생성 (override)" "- [ ] 분석" "$BODY4"
 
 rm -rf "$TMP4"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 5 (#1385): DIRECTIVE_SUMMARY_BODY env → template 💬 요약 섹션에 삽입.
+#   6 marker 양식 유지 + 정제 본문 가독성 동시 확보.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Case 5: DIRECTIVE_SUMMARY_BODY env (#1385)"
+TMP5="$(mktemp -d)"
+_make_fake_discord_reply "$TMP5" "T5"
+JSONL5="$TMP5/board.jsonl"
+
+SUMMARY="- **요약**: 브라우저 자동 QA 환경 도입
+- **유형**: 신규 기능
+- **상태**: 대기"
+DIRECTIVE_BOARD_JSONL_PATH="$JSONL5" \
+DISCORD_REPLY_BIN="$TMP5/discord-reply.sh" \
+DIRECTIVE_SUMMARY_BODY="$SUMMARY" \
+  bash "$SCRIPT_PATH" "msg_t5" "브라우저 자동 QA 환경 도입" \
+  > /dev/null 2>&1
+
+BODY5="$(cat "$TMP5/captured_body.txt")"
+_assert_contains "Case 5 💬 요약 헤더 유지"   "💬 요약"                       "$BODY5"
+_assert_contains "Case 5 정제 본문 삽입"     "- **요약**: 브라우저 자동 QA"   "$BODY5"
+_assert_contains "Case 5 📌 marker 유지"     "📌"                            "$BODY5"
+_assert_contains "Case 5 📋 진행 체크박스 유지" "- [ ] 분석 / 위임 결정"       "$BODY5"
+# 정제 본문이 들어가면 title quote fallback 은 없어야 함.
+_assert_not_contains "Case 5 title quote fallback 미생성" "> 브라우저 자동 QA 환경 도입" "$BODY5"
+
+rm -rf "$TMP5"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 결과

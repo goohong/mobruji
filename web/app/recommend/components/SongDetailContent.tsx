@@ -43,6 +43,7 @@ import {
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
 type SongDetailContentProps =
@@ -71,6 +72,9 @@ export function SongDetailContent(props: SongDetailContentProps) {
   const lowestNoteName =
     typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
+  // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
+  const displayTitle = formatSongDisplayTitle(song);
 
   return (
     <div className="flex flex-col gap-5">
@@ -135,10 +139,10 @@ export function SongDetailContent(props: SongDetailContentProps) {
         className="flex flex-col gap-3 border-t border-[var(--ring-soft-detail)] pt-4"
       >
         <div className="flex flex-wrap gap-2">
-          <DetailLikeButton songId={song.id} songTitle={song.title} />
-          <DetailBookmarkButton songId={song.id} songTitle={song.title} />
+          <DetailLikeButton songId={song.id} songTitle={displayTitle} />
+          <DetailBookmarkButton songId={song.id} songTitle={displayTitle} />
         </div>
-        <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
+        <YouTubeSearchLink songTitle={displayTitle} songArtist={song.artist} />
       </section>
     </div>
   );
@@ -166,8 +170,11 @@ function AlbumCover({ song }: AlbumCoverProps) {
   const url = song.albumCoverUrl ?? null;
   const [failed, setFailed] = useState(false);
 
+  // closes #1284 — placeholder / alt 텍스트도 한국 곡 한국어 우선.
+  const displayTitle = formatSongDisplayTitle(song);
+
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="large" songTitle={song.title} />;
+    return <AlbumCoverPlaceholder size="large" songTitle={displayTitle} />;
   }
 
   return (
@@ -180,7 +187,7 @@ function AlbumCover({ song }: AlbumCoverProps) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
-        alt={`${song.title} 앨범 커버`}
+        alt={`${displayTitle} 앨범 커버`}
         onError={() => setFailed(true)}
         className="h-48 w-48 rounded-2xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
       />
@@ -540,9 +547,11 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
   // 네트워크 비용 최소화. onError 시 placeholder 로 fallback.
   const url = song.albumCoverUrl ?? null;
   const [failed, setFailed] = useState(false);
+  // closes #1284 — thumbnail placeholder / alt 도 한국 곡 한국어 우선.
+  const displayTitle = formatSongDisplayTitle(song);
 
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="thumbnail" songTitle={song.title} />;
+    return <AlbumCoverPlaceholder size="thumbnail" songTitle={displayTitle} />;
   }
 
   return (
@@ -551,7 +560,7 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
     <img
       src={url}
       loading="lazy"
-      alt={`${song.title} 앨범 커버`}
+      alt={`${displayTitle} 앨범 커버`}
       onError={() => setFailed(true)}
       className="h-14 w-14 rounded-xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
     />

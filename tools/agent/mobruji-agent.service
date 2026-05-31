@@ -1,0 +1,35 @@
+# /etc/systemd/system/mobruji-agent.service
+#
+# mobruji agent systemd unit — Claude Agent SDK orchestration daemon.
+# legacy mobruji-helper.service + mobruji-maestro.service 의 책임 흡수 (Phase 4+).
+#
+# 본 파일은 reference 사본입니다. 운영 본체는 /etc/systemd/system/mobruji-agent.service
+# 에 있으며, 변경 시 두 파일 동시 갱신 + sudo systemctl daemon-reload + restart.
+#
+# spec: tools/agent/README.md, docs/architecture/2026-05-29-legacy-cli-tmux-snapshot.md
+
+[Unit]
+Description=mobruji agent (Claude Agent SDK orchestration)
+After=network-online.target mobruji-discord-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mobruji
+WorkingDirectory=/home/mobruji/mobruji/tools/agent
+EnvironmentFile=/home/mobruji/mobruji-bridge/tools/discord-daemon/.env
+# #1374: nmae actor marker — pr-register-rev.sh PostToolUse hook 가 actor 가드
+# (mmae/nmae/be/fe/rev/plan) 통과 후 자동 등록 흐름 발화 가능하도록 박제.
+# spec: docs/features/pr-webhook-rev-forum.md (#1372 follow-up).
+Environment=MOBRUJI_HOOK_ACTOR=nmae
+# claude-agent-sdk + python-dotenv + pydantic 가 venv 안에 설치돼 있어야 함.
+ExecStart=/home/mobruji/mobruji/tools/agent/venv/bin/python main.py
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

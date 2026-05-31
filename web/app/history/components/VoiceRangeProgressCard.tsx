@@ -109,10 +109,38 @@ export function VoiceRangeProgressCard({ summary }: Props) {
   // 내부에 있는 C-노트들. 좁은 음역(예: C4~G4)이면 1개만, 넓은 음역(C2~B5)이면 4개.
   const octaveAnchors = pickOctaveAnchors(yMin, yMax, innerHeight);
 
+  /*
+   * ADR-0018 단계 4 PR 13 — VoiceRangeProgressCard SVG + card surface 토큰 swap.
+   *
+   * swap 매핑 (12 라인):
+   *  1) section bg/ring : bg-white + dark:bg-zinc-900 + ring-zinc-200 + dark:ring-zinc-800
+   *                       → bg-[var(--surface-card-bg)] + ring-[var(--surface-card-ring)]
+   *  2) h2 (헤드라인)   : text-zinc-900 + dark:text-zinc-50 → text-[var(--text-primary)]
+   *  3) <svg> currentColor (grid line / baseline) :
+   *                       text-zinc-400 + dark:text-zinc-500 → text-[var(--text-tertiary)]
+   *  4) Y축 옥타브 라벨 : fill-zinc-400 + dark:fill-zinc-500 → fill-[var(--text-tertiary)]
+   *  5) bar (latest, 강조 fill) :
+   *                       fill-zinc-900 + dark:fill-zinc-100 → fill-[var(--chart-bar-active-bg)]
+   *  6) bar (비활성 fill) :
+   *                       fill-zinc-300 + dark:fill-zinc-700 → fill-[var(--chart-bar-inactive-bg)]
+   *  7) bar 상단 음표명 (latest) :
+   *                       fill-zinc-900 + dark:fill-zinc-100 → fill-[var(--chart-bar-active-bg)]
+   *  8) bar 상단 음표명 (비활성) :
+   *                       fill-zinc-500 + dark:fill-zinc-400 → fill-[var(--text-caption)]
+   *  9) bar 하단 음표명 (latest) :
+   *                       fill-zinc-700 + dark:fill-zinc-200 → fill-[var(--cta-secondary-fg)]
+   *                       (`--cta-secondary-fg` 가 zinc-700/zinc-200 동일 매핑이라 재사용)
+   * 10) bar 하단 음표명 (비활성) :
+   *                       fill-zinc-400 + dark:fill-zinc-500 → fill-[var(--text-tertiary)]
+   * 11) x축 라벨 (처음 측정 / 최근 측정) :
+   *                       fill-zinc-500 + dark:fill-zinc-400 → fill-[var(--text-caption)]
+   *
+   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → `dark:` prefix 제거.
+   */
   return (
     <section
       aria-labelledby="voice-range-progress-heading"
-      className="flex flex-col gap-4 rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+      className="flex flex-col gap-4 rounded-2xl bg-[var(--surface-card-bg)] p-4 ring-1 ring-[var(--surface-card-ring)]"
     >
       <header className="flex flex-col gap-1">
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
@@ -120,7 +148,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
         </p>
         <h2
           id="voice-range-progress-heading"
-          className="text-base font-semibold text-zinc-900 dark:text-zinc-50"
+          className="text-base font-semibold text-[var(--text-primary)]"
         >
           {headline}
         </h2>
@@ -157,7 +185,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
         role="img"
         aria-label={buildAriaLabel(points, spanDeltaSemitones)}
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className="w-full max-w-md text-zinc-400 dark:text-zinc-500"
+        className="w-full max-w-md text-[var(--text-tertiary)]"
       >
         {/* #249: Y축 옥타브 그리드 — 가로 점선 + 좌측 라벨. 막대 뒤로 가도록 먼저 렌더. */}
         {octaveAnchors.map((midi) => {
@@ -178,7 +206,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 x={PADDING_LEFT - 4}
                 y={y + 3}
                 textAnchor="end"
-                className="fill-zinc-400 text-[9px] dark:fill-zinc-500"
+                className="fill-[var(--text-tertiary)] text-[9px]"
               >
                 {midiToNoteName(midi)}
               </text>
@@ -235,8 +263,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 rx={3}
                 className={
                   isLatest
-                    ? "fill-zinc-900 dark:fill-zinc-100"
-                    : "fill-zinc-300 dark:fill-zinc-700"
+                    ? "fill-[var(--chart-bar-active-bg)]"
+                    : "fill-[var(--chart-bar-inactive-bg)]"
                 }
               >
                 <title>
@@ -254,8 +282,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 textAnchor="middle"
                 className={
                   isLatest
-                    ? "fill-zinc-900 text-[10px] font-semibold dark:fill-zinc-100"
-                    : "fill-zinc-500 text-[9px] dark:fill-zinc-400"
+                    ? "fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
+                    : "fill-[var(--text-caption)] text-[9px]"
                 }
               >
                 {highNoteShort}
@@ -266,8 +294,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 textAnchor="middle"
                 className={
                   isLatest
-                    ? "fill-zinc-700 text-[9px] font-medium dark:fill-zinc-200"
-                    : "fill-zinc-400 text-[9px] dark:fill-zinc-500"
+                    ? "fill-[var(--cta-secondary-fg)] text-[9px] font-medium"
+                    : "fill-[var(--text-tertiary)] text-[9px]"
                 }
               >
                 {lowNoteShort}
@@ -280,7 +308,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
         <text
           x={PADDING_LEFT}
           y={CHART_HEIGHT - 6}
-          className="fill-zinc-500 text-[10px] dark:fill-zinc-400"
+          className="fill-[var(--text-caption)] text-[10px]"
         >
           처음 측정
         </text>
@@ -288,7 +316,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
           x={CHART_WIDTH - PADDING_RIGHT}
           y={CHART_HEIGHT - 6}
           textAnchor="end"
-          className="fill-zinc-500 text-[10px] dark:fill-zinc-400"
+          className="fill-[var(--text-caption)] text-[10px]"
         >
           최근 측정
         </text>

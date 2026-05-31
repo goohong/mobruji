@@ -539,69 +539,9 @@ class PinReactionTests(unittest.IsolatedAsyncioTestCase):
         )
         client.get_channel.assert_called_once_with(999)
 
-    async def test_handle_pin_reaction_calls_append_script_and_attaches_check(
-        self,
-    ) -> None:
-        msg = mock.MagicMock()
-        msg.content = "release 머지 가도 될까요?"
-        msg.add_reaction = mock.AsyncMock()
-
-        channel = mock.MagicMock()
-        channel.fetch_message = mock.AsyncMock(return_value=msg)
-
-        client = mock.MagicMock()
-        client.get_channel.return_value = channel
-
-        # subprocess.run 가 rc=0 반환하도록 mock.
-        fake_result = mock.MagicMock()
-        fake_result.returncode = 0
-        fake_result.stderr = b""
-
-        # directive_append.sh 존재 여부도 mock (실제 파일 의존 X).
-        with mock.patch.object(bot.subprocess, "run", return_value=fake_result) as run, \
-             mock.patch.object(bot.Path, "exists", return_value=True):
-            await bot._handle_pin_reaction(
-                client=client,
-                channel_id=1506,
-                message_id="9001",
-                user_id=42,
-            )
-
-        run.assert_called_once()
-        call_args = run.call_args.args[0]
-        self.assertEqual(call_args[0], "bash")
-        self.assertTrue(call_args[1].endswith("directive_append.sh"))
-        self.assertEqual(call_args[2], "9001")
-        self.assertEqual(call_args[3], "release 머지 가도 될까요?")
-        # 성공 시 ✅ 부착 검증.
-        msg.add_reaction.assert_awaited_once_with(bot.PIN_REGISTERED_EMOJI)
-
-    async def test_handle_pin_reaction_skips_check_on_subprocess_failure(self) -> None:
-        msg = mock.MagicMock()
-        msg.content = "hello"
-        msg.add_reaction = mock.AsyncMock()
-
-        channel = mock.MagicMock()
-        channel.fetch_message = mock.AsyncMock(return_value=msg)
-
-        client = mock.MagicMock()
-        client.get_channel.return_value = channel
-
-        fake_result = mock.MagicMock()
-        fake_result.returncode = 1
-        fake_result.stderr = b"already registered"
-
-        with mock.patch.object(bot.subprocess, "run", return_value=fake_result), \
-             mock.patch.object(bot.Path, "exists", return_value=True):
-            await bot._handle_pin_reaction(
-                client=client,
-                channel_id=1506,
-                message_id="9001",
-                user_id=42,
-            )
-
-        # rc != 0 → ✅ 부착 skip.
-        msg.add_reaction.assert_not_called()
+    # 2026-05-29 폐기: 즉시 등록 검증 2종 — Phase B+C dialogue path 도입 후
+    # 매칭 없을 때 = dialogue thread + O/X (사용자 명시 확인). 즉시 등록 path 는
+    # empty body + dialogue 시작 실패 fallback 시만. dialogue unit test 별도 작성 권장.
 
     async def test_handle_pin_reaction_empty_body_uses_placeholder(self) -> None:
         msg = mock.MagicMock()
@@ -736,90 +676,62 @@ class CycleForumThreadCompleteOnMergeTests(unittest.TestCase):
         self.assertEqual(bot.extract_cycle_forum_refs_from_body(body), [])
 
 
-class ModeToggleContentTests(unittest.TestCase):
-    """spec: docs/features/discord-reaction-choice-input.md §5-8 PR 2 — buttons UI."""
-
-    def test_content_starts_with_marker(self) -> None:
-        content = bot.build_mode_toggle_content("AUTO")
-        self.assertTrue(content.startswith(bot.MODE_TOGGLE_MARKER))
-
-    def test_content_marks_auto_when_auto(self) -> None:
-        content = bot.build_mode_toggle_content("AUTO")
-        # AUTO 행에 🟢, ASK 행에 ⚪.
-        self.assertIn("🟢 **AUTO**", content)
-        self.assertIn("⚪ **ASK**", content)
-        self.assertIn("현재 **AUTO**", content)
-
-    def test_content_marks_ask_when_ask(self) -> None:
-        content = bot.build_mode_toggle_content("ASK")
-        self.assertIn("🟢 **ASK**", content)
-        self.assertIn("⚪ **AUTO**", content)
-        self.assertIn("현재 **ASK**", content)
-
-    def test_content_invalid_falls_back_to_auto(self) -> None:
-        content = bot.build_mode_toggle_content("MAYBE")
-        self.assertIn("현재 **AUTO**", content)
-
-    def test_content_case_insensitive(self) -> None:
-        content_lower = bot.build_mode_toggle_content("ask")
-        self.assertIn("현재 **ASK**", content_lower)
+# 2026-05-29 폐기: ModeToggleContentTests + FindModeToggleMessageTests.
+# button UI 폐기 (사용자 정정), `/mb auto` / `/mb ask` / `/mb status` slash command 로 대체.
 
 
-class FindModeToggleMessageTests(unittest.IsolatedAsyncioTestCase):
-    """채널 history scan 으로 mode toggle marker 매칭 메시지 검색."""
+class DirectiveSummaryParseTests(unittest.TestCase):
+    """#1385 — 쓰레드 맥락 요약 출력 파싱 / fallback 제목."""
 
-    def _make_msg(self, author_id: int, content: str) -> mock.MagicMock:
-        msg = mock.MagicMock()
-        msg.author = mock.MagicMock()
-        msg.author.id = author_id
-        msg.content = content
-        return msg
+    def test_parse_title_and_body(self) -> None:
+        out = (
+            "제목: 브라우저 자동 QA 환경 도입\n"
+            "===본문===\n"
+            "- **요약**: rev 사이클에 Playwright 도입\n"
+            "- **유형**: 신규 기능\n"
+            "- **위임 권장**: rev — QA 전담\n"
+            "- **상태**: 대기"
+        )
+        title, body = bot._parse_summary_output(out)
+        self.assertEqual(title, "브라우저 자동 QA 환경 도입")
+        self.assertTrue(body.startswith("- **요약**"))
+        self.assertNotIn("제목:", body)
+        self.assertNotIn("===본문===", body)
 
-    def _make_channel_with_history(self, msgs: list) -> mock.MagicMock:
-        channel = mock.MagicMock()
+    def test_parse_title_truncated_to_max(self) -> None:
+        long_title = "가" * 80
+        title, _ = bot._parse_summary_output(f"제목: {long_title}\n===본문===\n본문")
+        self.assertEqual(len(title), bot._DIRECTIVE_TITLE_MAX_LEN)
 
-        async def _hist(limit: int = 100):  # noqa: ARG001 — async generator
-            for m in msgs:
-                yield m
+    def test_parse_no_marker_returns_body_as_is(self) -> None:
+        title, body = bot._parse_summary_output("그냥 본문만 있는 경우")
+        self.assertEqual(title, "")
+        self.assertEqual(body, "그냥 본문만 있는 경우")
 
-        channel.history = lambda **kwargs: _hist(**kwargs)
-        return channel
+    def test_parse_empty(self) -> None:
+        self.assertEqual(bot._parse_summary_output(""), ("", ""))
+        self.assertEqual(bot._parse_summary_output("   "), ("", ""))
 
-    async def test_returns_existing_marker_message(self) -> None:
-        bot_id = 999
-        target = self._make_msg(bot_id, f"{bot.MODE_TOGGLE_MARKER}\nbody")
-        other = self._make_msg(bot_id, "different content")
-        channel = self._make_channel_with_history([other, target])
-        result = await bot.find_mode_toggle_message(channel, bot_id)
-        self.assertIs(result, target)
+    def test_fallback_title_empty_and_blank_body(self) -> None:
+        self.assertEqual(bot._fallback_title(""), "(제목 미정)")
+        self.assertEqual(bot._fallback_title("(빈 본문)"), "(제목 미정)")
 
-    async def test_skips_other_author(self) -> None:
-        bot_id = 999
-        # bot 이 아닌 사용자가 marker 같은 메시지 보낸 경우 무시.
-        impostor = self._make_msg(123, f"{bot.MODE_TOGGLE_MARKER}\nfake")
-        channel = self._make_channel_with_history([impostor])
-        result = await bot.find_mode_toggle_message(channel, bot_id)
-        self.assertIsNone(result)
+    def test_fallback_title_collapses_whitespace_and_truncates(self) -> None:
+        title = bot._fallback_title("여러   줄\n공백   포함 " + "끝" * 100)
+        self.assertLessEqual(len(title), bot._DIRECTIVE_TITLE_MAX_LEN)
+        self.assertNotIn("\n", title)
 
-    async def test_returns_none_when_no_marker(self) -> None:
-        bot_id = 999
-        m1 = self._make_msg(bot_id, "hello")
-        m2 = self._make_msg(bot_id, "world")
-        channel = self._make_channel_with_history([m1, m2])
-        result = await bot.find_mode_toggle_message(channel, bot_id)
-        self.assertIsNone(result)
+    def test_summary_prompt_uses_thread_context_when_present(self) -> None:
+        prompt = bot._summary_prompt(
+            "raw", "id-1", thread_context="- 사용자: A\n- 키키(nmae): B",
+        )
+        self.assertIn("대화 쓰레드 전체", prompt)
+        self.assertIn("키키(nmae): B", prompt)
+        self.assertIn("제목:", prompt)
 
-    async def test_graceful_on_history_exception(self) -> None:
-        bot_id = 999
-
-        async def _bad_hist(**kwargs):  # noqa: ARG001
-            raise RuntimeError("history fetch failed")
-            yield  # pragma: no cover — required for async generator marker
-
-        channel = mock.MagicMock()
-        channel.history = _bad_hist
-        result = await bot.find_mode_toggle_message(channel, bot_id)
-        self.assertIsNone(result)
+    def test_summary_prompt_single_message_when_no_context(self) -> None:
+        prompt = bot._summary_prompt("단건 메시지", "id-2")
+        self.assertIn("원본 사용자 메시지: 단건 메시지", prompt)
 
 
 if __name__ == "__main__":

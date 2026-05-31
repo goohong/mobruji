@@ -6,14 +6,14 @@ owner: @goohong
 scope: infra
 related_issues: [1074]
 related_prs: [1077]
-last_reviewed: 2026-05-26
+last_reviewed: 2026-05-29
 ---
 
 # Event ↔ Action Mapping (작업 체계 v2 — state machine + event hook)
 
 ## 1) 개요 (What / Why)
 
-ADR-0019 의 동반 spec. 작업 체계의 critical event 12개를 명시하고, 각 event 가 trigger 해야 할 action chain 을 코드 hook 으로 강제한다.
+ADR-0019 의 동반 spec. 작업 체계의 critical event 13개를 명시하고, 각 event 가 trigger 해야 할 action chain 을 코드 hook 으로 강제한다.
 
 - **What**: 사용자 메시지 / sub-agent launch / PR 머지 / cycle-status 변경 / clear 직전 / cron tick / watchdog detect / 사용자 정정 등 12 event 의 inventory + 각 event → action list + state machine + failure mode + recovery.
 - **Why**: 사용자 정정 (이슈 #1074) — "끝나면 ~하라했지를 기억에의존할게 아니라 체계가 잡혀있어야한다고 봐". agent reasoning state ephemeral. 외부 진실 (jsonl / cycle-status / GitHub) 만이 망각 무관 source-of-truth.
@@ -52,7 +52,7 @@ ADR-0019 의 동반 spec. 작업 체계의 critical event 12개를 명시하고,
 
 ## 5) 설계
 
-### 5-1) Event ↔ Action 매핑 (12 event, single source-of-truth)
+### 5-1) Event ↔ Action 매핑 (13 event, single source-of-truth)
 
 | # | event | trigger 지점 (코드) | actions (순서대로 code hook 호출) |
 |---|---|---|---|
@@ -68,13 +68,15 @@ ADR-0019 의 동반 spec. 작업 체계의 critical event 12개를 명시하고,
 | 10 | `watchdog_detect_idle` | `cycle_idle_watch_loop` (5분 polling, in_progress NULL + last_completed > 10분 전) | (a) tmux pane (mobruji:0.0) `[watchdog ...]` inject relaunch prompt (b) DIGEST push 가시화 (c) escalation counter `++` — 3회 연속 시 MOBRUJI_CHANNEL_ID 사용자 push |
 | 11 | `watchdog_detect_mismatch` | `directive_board_sync_loop` mismatch detector (jsonl `진행 중` 인데 관련 PR 머지된 entry 발견) | (a) `discord-reply.sh --forum-edit` 자동 PATCH (5분 race window 안에서) (b) #모부르지 alert push (debounce 1h) (c) manual catch-up trigger 옵션 — 사용자가 helper 에 inject 시 helper 가 즉시 sync |
 | 12 | `user_correction` | bot.py `on_message` 에서 helper queue 와 무관하게 inject 형식 detect (특정 prefix `nmae:` / `[정정]` / `재시작` 등) | (a) directive 분류 우회 (b) 사용자 의도 직접 처리 — helper LLM turn 으로 raw passthrough (c) 정정 본문은 메모리 갱신 후보 (nmae 가 다음 turn 에 메모리 promote 판단) |
+| 13 | `rev_stage1_sla_missed` | bot.py `watchdog_rev_sla_loop` (1분 polling, `rev-sla-metrics.jsonl` scan — `escalated=false` 인 PR 의 elapsed > SLA 목표값 detect) — 출처 spec `rev-sla.md §3-3` | (a) PR 분류 lookup (정규 / hotfix / security / docs) — 분류별 escalation 채널 결정 (정규=DIGEST 1ch, 🔴 critical-public security=DIGEST + 본 채널 + 사용자 reply 3ch, docs=DIGEST 1ch) (b) `discord-reply.sh --digest "⏰ PR #<N> rev 단계 1 SLA 미달성 (<elapsed>m elapsed)"` push (c) `rev-sla-metrics.jsonl` PATCH `escalated=true, escalated_at_iso, escalation_channels` (멱등성 — 동일 PR 중복 push 차단) (d) nmae tmux inject `[rev-sla] PR #<N> 별 rev sub-agent 추가 launch 검토` — 큐 race 해소 trigger (e) 단계 1 통과 시 `completed_iso` 박제 — escalation row preserve (회고 evidence) |
 
 > **참조 코드** (현 시점):
-> - bot.py: `on_message` (event 1, 2, 12), 6 loop (event 9, 10, 11)
+> - bot.py: `on_message` (event 1, 2, 12), 7 loop (event 9, 10, 11, 13)
 > - `tools/agent-launch-wrapper.sh`: event 3
 > - `tools/cycle-status/update.sh`: event 6, 7
 > - `tools/discord-daemon/directive_board_sync.py`: event 5 (polling fallback) + event 11
 > - `clear-pre-hook.sh` (PR #1066 spec, 미구현): event 8
+> - `watchdog_rev_sla_loop` (rev-sla.md §3-3 박제, bot.py 구현 별 PR): event 13 — nmae-cycle-watchdog.md §5-7 5중 안전망 layer 5
 
 ### 5-2) State Machine — directive entry lifecycle
 
@@ -111,6 +113,8 @@ stateDiagram-v2
 | event 10 `watchdog_detect_idle` 후 nmae 무응답 | inject 3회 연속 + in_progress NULL — escalation 임계 | bot.py 가 MOBRUJI_CHANNEL_ID 직접 push (debounce 1h). 사용자가 직접 nmae 정정 inject |
 | event 11 `watchdog_detect_mismatch` 자동 PATCH 실패 | `directive_board_sync_loop` log `mismatch detected but PATCH fail` | (a) jsonl 백업 + manual `jq` 정정 (마지막 수단) (b) #모부르지 사용자 알림 |
 | event 12 `user_correction` 분류 오인 | helper LLM 이 정정 메시지를 일반 directive 로 처리 | (a) heuristic 보강 (prefix list 확장) (b) 사용자 재정정 시 메모리 반영 |
+| event 13 `rev_stage1_sla_missed` 미감지 (loop crash) | systemd journal `WARNING` — `watchdog_rev_sla_loop launched` 후 log 없음 OR `rev-sla-metrics.jsonl` write 실패 | (a) systemd restart (event 9 와 동일 격리 — try/except) (b) jsonl write 실패 시 백업 + manual `jq` 정정 (마지막 수단) (c) escalation 중복 push 시 jsonl `escalated=true` 미PATCH 의심 — read-after-write 검증 강화 |
+| event 13 false escalation (단계 1 통과 직전 SLA 도달) | 단계 1 통과 시각 vs escalation push 시각 race — `rev-sla-metrics.jsonl` 의 `completed_iso` 가 `escalated_at_iso` 보다 1분 이내 | (a) escalation row preserve (회고 evidence) (b) DIGEST 후속 push `✅ PR #<N> 단계 1 통과 (escalation 후 <m>m)` — 사용자 가시 정정 (c) SLA 목표값 5분 buffer 검토 (별 spec 회고) |
 
 ### 5-4) directive status enum 정의 (free-form drift 종식)
 
@@ -146,7 +150,7 @@ type DirectiveStatus =
 
 - **단위**: 각 event hook 호출이 잘 되는지 — bot.py 의 `on_message` mock + helper-queue 검증, wrapper.sh 의 cycle-status diff 검증, directive_board_sync 의 mismatch detect 검증.
 - **통합**: 사용자 1 directive 메시지 → 5초 내 forum-post + jsonl 등록 + thread comment 모두 자동 (현 ~10분). e2e 테스트로 측정.
-- **회귀**: validation 매트릭스 (마이그 단계 4) — 12 event 의 각 hook 이 코드에 존재하는지 자동 검증.
+- **회귀**: validation 매트릭스 (마이그 단계 4) — 13 event 의 각 hook 이 코드에 존재하는지 자동 검증. event 13 (`rev_stage1_sla_missed`) 는 `watchdog_rev_sla_loop` 본문 구현 별 PR 머지 후 추가 (rev-sla.md §3-3 박제 기준).
 
 ## 8) 오픈 질문
 
@@ -159,3 +163,4 @@ type DirectiveStatus =
 ## 9) 결정 로그
 
 - 2026-05-24: 초안 작성 (status=draft) — plan sub-agent, 사용자 strategic 정정 #1074. ADR-0019 동반 spec.
+- 2026-05-29 (plan round 11): event 13 `rev_stage1_sla_missed` 추가 — `rev-sla.md §3-3` `watchdog_rev_sla_loop` 박제와 1:1 매핑. nmae-cycle-watchdog.md §5-7 5중 안전망 layer 5 와 동일 trigger. last_reviewed 2026-05-29.

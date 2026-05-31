@@ -1,0 +1,35 @@
+[project]
+name = "mobruji-agent"
+version = "0.1.0"
+description = "mobruji nmae agent — Claude Agent SDK orchestration (legacy CLI+tmux 대체)"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+
+dependencies = [
+    # Claude Agent SDK — agent loop + tool definitions + subagent primitive
+    "claude-agent-sdk>=0.1.0",
+    # python-dotenv — bot.py 와 같은 .env 공유 (Discord ID / token)
+    "python-dotenv>=1.0",
+    # pydantic — state machine dataclass + tool input_schema 검증
+    "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mobruji_agent*"]
+exclude = ["tests*", "venv*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

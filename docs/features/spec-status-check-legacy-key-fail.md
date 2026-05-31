@@ -19,7 +19,8 @@ last_reviewed: 2026-05-27
 
 **배경 — 박제 사례**:
 - PR #1167 (`docs(infra): docs/features + docs/decisions README 인덱스 sync`) 작업 중
-  `docs/features/rev-e2e-3-stages.md` frontmatter 가 legacy schema (`name` / `owners` /
+  `docs/features/rev-e2e-3-stages.md` (2026-05-30 PR #1367 머지로 `rev-e2e-2-stages.md`
+  로 rename, 단계 3 폐기) frontmatter 가 legacy schema (`name` / `owners` /
   `related-issues: ["#882", "#851"]`) 로 잔존하여 README 표 `last_reviewed` 컬럼이 채워
   지지 못한 사례 발견.
 - PR #1169 (`docs(infra): rev-e2e-3-stages frontmatter modernize`) 에서 modernize
