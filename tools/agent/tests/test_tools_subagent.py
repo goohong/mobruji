@@ -61,3 +61,14 @@ def test_mark_subagent_completed_removes_lock(isolated_db):
     ts.mark_subagent_completed("be")
     remaining = events.get_state("in_flight_agents")
     assert remaining == ["fe"]
+
+
+def test_launch_cycle_thread_id_satisfies_pending_requirement(isolated_db):
+    """#1401: cycle_thread_id 제공 시 directive thread 부재여도 'pending 미등록' 통과."""
+    import tools_subagent as ts, tools_cycle as tc
+    import pytest as _pt
+
+    tc.register_directive_pending("msg-1", "x")  # thread_id 미설정
+    # cycle_thread_id 가 pending 역할 → ValueError(미등록) 대신 wrapper 부재로 진행.
+    with _pt.raises(FileNotFoundError):
+        ts.launch_subagent("be", "msg-1", "t", "k", cycle_thread_id="T-CYCLE")

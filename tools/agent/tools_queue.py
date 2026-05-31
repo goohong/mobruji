@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,6 +27,50 @@ logger = logging.getLogger("agent.work_queue")
 IN_FLIGHT_STARTED_KEY = "in_flight_started"
 STALE_THRESHOLD = timedelta(hours=2)
 CYCLES = ("be", "fe", "rev", "plan")
+# (#1401) cycle forum thread 동기 생성 — discord-reply.sh 가 thread_id 를 stdout 으로
+# 즉시 반환 (forum_create_thread 는 비동기 event 라 id 즉시 미수신). 자율 경로가
+# 📌 dialogue thread 대신 전용 cycle forum thread 에 보고하게 하는 핵심.
+DISCORD_REPLY_BIN = os.environ.get(
+    "DISCORD_REPLY_BIN",
+    "/home/mobruji/mobruji-bridge/tools/discord-daemon/discord-reply.sh",
+)
+
+
+def _create_cycle_thread(cycle: str, title: str, body: str) -> str | None:
+    """cycle forum 에 thread 신설 → thread_id 반환. 실패 시 None (graceful).
+
+    discord-reply.sh --forum-post-auto-tag <cycle> 동기 호출 (서비스 env 의 토큰/
+    forum id 상속). stdout 마지막 숫자줄 = thread_id (snowflake).
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 — 고정 경로 + argv list
+            [DISCORD_REPLY_BIN, "--forum-post-auto-tag", cycle, title[:99], body],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "cycle thread 생성 rc=%d cycle=%s stderr=%r",
+                result.returncode, cycle, (result.stderr or "")[:200],
+            )
+            return None
+        for line in reversed((result.stdout or "").strip().splitlines()):
+            digits = "".join(ch for ch in line if ch.isdigit())
+            if len(digits) >= 17:  # Discord snowflake
+                return digits
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("cycle thread 생성 실패 cycle=%s exc=%r", cycle, exc)
+    return None
+
+
+def _cycle_thread_body(cycle: str, directive_id: str, title: str, task: str) -> str:
+    """cycle forum thread starter 본문 (6 marker 양식)."""
+    return (
+        f"🛠️ **{title}**\n\n"
+        f"💬 작업\n{task}\n\n"
+        f"🆔 사이클: `{cycle}` · directive: `{directive_id}`\n\n"
+        f"📋 진행 (🟡 대기)\n- [ ] launch\n- [ ] 구현/분석\n- [ ] PR\n\n"
+        f"🔖 관련 *(진행되며 추가)*\n\n---\n_갱신: 적재 시점_"
+    )
 
 
 def _now_iso() -> str:
@@ -79,18 +125,34 @@ def enqueue_directive(
     )
     if not result["enqueued"]:
         return result  # 이미 큐/처리 중 — no-op
+
+    # (#1401) 전용 cycle forum thread 신설 → 적재/시작/진행/완료 보고를 여기로 통일
+    # (📌 dialogue thread 대신 — 사용자가 be/fe/rev/plan forum 에서 1 task = 1 thread 로 본다).
+    cycle_thread = _create_cycle_thread(
+        cycle, title, _cycle_thread_body(cycle, directive_id, title, task),
+    )
+    directive = ev.get_state(f"directive:{directive_id}") or {}
+    if cycle_thread:
+        directive["cycle_thread_id"] = cycle_thread
+        ev.set_state(f"directive:{directive_id}", directive)
+    report_thread = cycle_thread or thread_id  # 생성 실패 시 dialogue thread fallback
+
     _set_board_assigned(directive_id, cycle, task)
     ev.append_event(
         "work_enqueued",
         {"cycle": cycle, "directive_id": directive_id,
-         "position": result["position"], "priority": priority},
+         "position": result["position"], "priority": priority,
+         "cycle_thread_id": cycle_thread or ""},
     )
     urgent = " 🔴" if priority >= wq.PRIORITY_URGENT else ""
     _comment(
-        thread_id,
+        report_thread,
         f"📥 **{cycle}**{urgent} 큐 {result['position']}번째로 적재했습니다 "
         f"(앞 대기 {result['ahead']}건). 사이클이 비면 자동으로 시작합니다.",
     )
+    # 사용자가 보는 지시 thread 에도 cycle 배정 1줄 (cycle thread 와 다를 때만).
+    if cycle_thread and thread_id and thread_id != cycle_thread:
+        _comment(thread_id, f"→ **{cycle}** 사이클 큐에 적재했습니다 (진행은 {cycle} forum thread 에서).")
     return result
 
 
@@ -127,8 +189,15 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
             continue
 
         directive_id = nxt["directive_id"]
+        # (#1401) 보고 대상 = 전용 cycle forum thread (enqueue 가 directive state 에 저장).
+        # 없으면 dialogue thread fallback.
+        directive = ev.get_state(f"directive:{directive_id}") or {}
+        report_thread = directive.get("cycle_thread_id") or nxt.get("thread_id", "")
         try:
-            ts.launch_subagent(cycle, directive_id, nxt["title"], nxt["task"])
+            ts.launch_subagent(
+                cycle, directive_id, nxt["title"], nxt["task"],
+                cycle_thread_id=directive.get("cycle_thread_id") or None,
+            )
         except CycleAlreadyRunningError:
             continue  # race — 다음 tick 재시도
         except PausedError:
@@ -139,7 +208,7 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
                 cycle, directive_id, exc,
             )
             _comment(
-                nxt.get("thread_id", ""),
+                report_thread,
                 f"❌ **{cycle}** launch 실패 — 큐에 유지하고 다음 tick 에 재시도합니다 "
                 f"(사유: {str(exc)[:120]}).",
             )
@@ -154,7 +223,7 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
         )
         _set_board_assigned(directive_id, cycle, nxt.get("task", ""))
         _comment(
-            nxt.get("thread_id", ""),
+            report_thread,
             f"🚀 **{cycle}** 사이클이 시작했습니다 — {nxt.get('title', '')}",
         )
         launched.append({
@@ -162,7 +231,8 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
             "directive_id": directive_id,
             "title": nxt.get("title", ""),
             "task": nxt.get("task", ""),
-            "thread_id": nxt.get("thread_id", ""),
+            # exec sub-agent 가 보고할 thread = 전용 cycle forum thread (#1401).
+            "thread_id": report_thread,
         })
 
     return launched

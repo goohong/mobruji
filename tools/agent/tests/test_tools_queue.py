@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
+
+
+@pytest.fixture(autouse=True)
+def _no_real_cycle_thread(monkeypatch):
+    """기본: cycle forum thread 동기 생성(subprocess) 무력화 — 결정성. 개별 테스트가 override."""
+    import tools_queue as tq
+    monkeypatch.setattr(tq, "_create_cycle_thread", lambda *a, **k: None)
 
 
 def _seed_directive(directive_id: str, thread_id: str = "T1") -> None:
@@ -48,7 +57,7 @@ def test_dispatch_launches_idle_cycle(isolated_db, monkeypatch):
 
     calls: list[tuple] = []
     monkeypatch.setattr(ts, "launch_subagent",
-                        lambda c, d, t, k: calls.append((c, d)) or {"ok": True})
+                        lambda c, d, t, k, **kw: calls.append((c, d)) or {"ok": True})
     monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
     _seed_directive("d1")
     tq.enqueue_directive("rev", "d1", "title", "task", thread_id="T1")
@@ -64,7 +73,7 @@ def test_dispatch_skips_busy_cycle(isolated_db, monkeypatch):
     import tools_queue as tq, tools_subagent as ts, tools_discord as td, events as ev
 
     calls: list = []
-    monkeypatch.setattr(ts, "launch_subagent", lambda *a: calls.append(a))
+    monkeypatch.setattr(ts, "launch_subagent", lambda *a, **kw: calls.append(a))
     monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
     _seed_directive("d1")
     tq.enqueue_directive("rev", "d1", "t", "task", thread_id="T1")
@@ -81,7 +90,7 @@ def test_dispatch_recovers_stale_lock_then_launches(isolated_db, monkeypatch):
     import tools_queue as tq, tools_subagent as ts, tools_discord as td, events as ev
 
     calls: list[tuple] = []
-    monkeypatch.setattr(ts, "launch_subagent", lambda c, d, t, k: calls.append((c, d)))
+    monkeypatch.setattr(ts, "launch_subagent", lambda c, d, t, k, **kw: calls.append((c, d)))
     monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
     ev.set_state("in_flight_agents", ["rev"])
     stale = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
@@ -98,7 +107,7 @@ def test_dispatch_noop_when_paused(isolated_db, monkeypatch):
     import tools_queue as tq, tools_subagent as ts, tools_discord as td, events as ev
 
     calls: list = []
-    monkeypatch.setattr(ts, "launch_subagent", lambda *a: calls.append(a))
+    monkeypatch.setattr(ts, "launch_subagent", lambda *a, **kw: calls.append(a))
     monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
     _seed_directive("d1")
     tq.enqueue_directive("rev", "d1", "t", "task", thread_id="T1")
@@ -106,3 +115,39 @@ def test_dispatch_noop_when_paused(isolated_db, monkeypatch):
 
     assert tq.dispatch_once() == []
     assert calls == []
+
+
+def test_enqueue_creates_cycle_thread_and_reports_there(isolated_db, monkeypatch):
+    """#1401: cycle forum thread 신설 → directive state 저장 + 거기로 📥 보고."""
+    import tools_queue as tq, tools_discord as td, events as ev
+
+    monkeypatch.setattr(tq, "_create_cycle_thread", lambda *a, **k: "999000111222333444")
+    comments: list[tuple[str, str]] = []
+    monkeypatch.setattr(td, "forum_comment", lambda tid, body: comments.append((tid, body)))
+    _seed_directive("d1", thread_id="DLG1")  # dialogue thread
+
+    tq.enqueue_directive("plan", "d1", "스펙 작성", "task", thread_id="DLG1")
+
+    # directive state 에 cycle_thread_id 저장
+    assert ev.get_state("directive:d1")["cycle_thread_id"] == "999000111222333444"
+    # 📥 적재 댓글이 cycle thread 로
+    assert any(tid == "999000111222333444" and "큐" in body for tid, body in comments)
+    # 지시(dialogue) thread 엔 cycle 배정 pointer
+    assert any(tid == "DLG1" and "plan" in body for tid, body in comments)
+
+
+def test_dispatch_passes_cycle_thread_to_launch_and_exec(isolated_db, monkeypatch):
+    """#1401: dispatch 가 cycle_thread_id 를 launch + launched.thread_id 로 전달."""
+    import tools_queue as tq, tools_subagent as ts, tools_discord as td, events as ev
+
+    monkeypatch.setattr(tq, "_create_cycle_thread", lambda *a, **k: "555")
+    monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
+    launch_kw: dict = {}
+    monkeypatch.setattr(ts, "launch_subagent",
+                        lambda c, d, t, k, **kw: launch_kw.update(kw))
+    _seed_directive("d1", thread_id="DLG1")
+    tq.enqueue_directive("plan", "d1", "t", "task", thread_id="DLG1")
+
+    launched = tq.dispatch_once()
+    assert launch_kw.get("cycle_thread_id") == "555"  # wrapper 가 cycle thread 재사용
+    assert launched[0]["thread_id"] == "555"  # exec 도 cycle thread 로 보고
