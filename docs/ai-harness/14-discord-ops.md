@@ -545,6 +545,10 @@ fi
 - `06-domain-model.md §4` (등재 후보 — `placeholder thread id` / `launch thread cache file` / `cycle launch thread id`)
 - 메모리: `[[feedback-cycle-forum-placeholder-guard]]` (사고 박제 누적 시 등재)
 
+### 8-8) directive 자동 완료 + 위임 링크 동작 (흐름검증 기록)
+
+- **위임 링크**: directive launch 시 `directive_status.sh <id> in_progress [pr_url] [cycle]` 로 위임 cycle 채널·PR URL 을 directive thread 에 기록하고 `진행` 태그로 전이한다 (`agent-launch-wrapper.sh` 강제). **자동 완료**: sub-agent PR body 의 `directive: <id>` 라인 → PR 머지 webhook → `directive_status.sh completed` 자동 호출 → `완료` 태그 전이 (자식 완료 시 부모 directive `🟢` cascade). 상세: `actors/nmae.md §6`.
+
 ## §7 변경 이력
 
 | 일자 | 변경 | PR |
@@ -552,3 +556,4 @@ fi
 | 2026-05-21 | 최초 작성 (카테고리 3종 + 명령 syntax 정의) | #175 |
 | 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | #1155 |
 | 2026-05-29 | §8-7 placeholder thread_id 가드 F-1~F-4 cross-ref + `--digest` 단발 모드 fallback 종착점 박제 (plan round 16) | #1336 |
+| 2026-05-31 | §8-8 directive 자동 완료 + 위임 링크 동작 기록 (흐름검증) | _본 PR_ |
