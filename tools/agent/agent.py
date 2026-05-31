@@ -96,7 +96,13 @@ TOOL_EMOJI_MAP = {
 
 # 기본 Claude tool (Bash / Read / Edit / Write / ...) noise skip 목록.
 # helper-tool-progress.sh 와 동일 정책 — 매 turn 다수 발생하는 read-only tool 은 thread 가시화에서 제외.
-_NOISY_BUILTIN_TOOLS = frozenset({"Read", "Glob", "Grep", "TaskList", "TaskGet", "TaskCreate", "TaskUpdate"})
+# (#1411) ToolSearch 추가 — MCP 도구(post_discord_message 등) 로딩용 내부 검색이라
+# 사용자 thread 에 "🔍 ToolSearch 주르륵" 노이즈만 됨 (2026-05-31 사용자 정정: 첫 질문에
+# 답 안 오고 로그만 주르륵). Read/Glob/Grep/Task* 와 동일하게 스트리밍 제외.
+_NOISY_BUILTIN_TOOLS = frozenset({
+    "Read", "Glob", "Grep", "TaskList", "TaskGet", "TaskCreate", "TaskUpdate",
+    "ToolSearch",
+})
 
 
 def _format_tool_progress(tool_name: str, tool_input: dict) -> str | None:
