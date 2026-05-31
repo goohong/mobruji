@@ -35,6 +35,10 @@ import tools_subagent as ts
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
+
+# (#1398 rev 🟡-2) fire-and-forget sub-agent exec task 참조 보관 — event loop 가
+# task 를 weak ref 로만 유지해 고부하 시 중도 GC 취소되는 사고 차단. done 시 자동 제거.
+_EXEC_TASKS: set = set()
 EVENTS_BATCH_SIZE = 10
 
 
@@ -522,7 +526,19 @@ async def agent_loop(stop_event: asyncio.Event) -> None:
             import tools_queue as tq
             launched = tq.dispatch_once()
             if launched:
-                logger.info("work-queue dispatched: %s", launched)
+                logger.info("work-queue dispatched: %s",
+                            [{"cycle": x["cycle"], "directive_id": x["directive_id"]} for x in launched])
+                # (#1396) 실제 sub-agent 실행 — flag on 일 때만 (기본 off = 부기-only).
+                import subagent_runner as sr
+                if sr.exec_enabled():
+                    for item in launched:
+                        _t = asyncio.create_task(sr.run_subagent_execution(
+                            item["cycle"], item["directive_id"],
+                            item.get("title", ""), item.get("task", ""),
+                            item.get("thread_id", ""),
+                        ))
+                        _EXEC_TASKS.add(_t)
+                        _t.add_done_callback(_EXEC_TASKS.discard)
         except Exception as exc:  # noqa: BLE001
             logger.warning("work-queue dispatch_once 실패: %r", exc)
 

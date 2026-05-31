@@ -157,6 +157,12 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
             nxt.get("thread_id", ""),
             f"🚀 **{cycle}** 사이클이 시작했습니다 — {nxt.get('title', '')}",
         )
-        launched.append({"cycle": cycle, "directive_id": directive_id})
+        launched.append({
+            "cycle": cycle,
+            "directive_id": directive_id,
+            "title": nxt.get("title", ""),
+            "task": nxt.get("task", ""),
+            "thread_id": nxt.get("thread_id", ""),
+        })
 
     return launched

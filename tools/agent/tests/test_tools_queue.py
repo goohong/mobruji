@@ -55,7 +55,8 @@ def test_dispatch_launches_idle_cycle(isolated_db, monkeypatch):
 
     launched = tq.dispatch_once()
     assert ("rev", "d1") in calls
-    assert launched == [{"cycle": "rev", "directive_id": "d1"}]
+    assert len(launched) == 1
+    assert launched[0]["cycle"] == "rev" and launched[0]["directive_id"] == "d1"
     assert wq.peek_next("rev") is None  # 큐에서 제거됨
 
 
@@ -90,7 +91,7 @@ def test_dispatch_recovers_stale_lock_then_launches(isolated_db, monkeypatch):
 
     launched = tq.dispatch_once()
     assert ("rev", "d1") in calls  # stale 회복 후 launch
-    assert {"cycle": "rev", "directive_id": "d1"} in launched
+    assert any(x["cycle"] == "rev" and x["directive_id"] == "d1" for x in launched)
 
 
 def test_dispatch_noop_when_paused(isolated_db, monkeypatch):
