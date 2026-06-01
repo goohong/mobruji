@@ -229,32 +229,45 @@ def _find_pr_number(worktree) -> str | None:  # noqa: ANN001
         return None
 
 
-def _ensure_pr_directive_xref(pr_num: str, directive_id: str, worktree) -> None:  # noqa: ANN001
-    """(#1427) PR 본문에 `directive: <id>` 크로스레프 멱등 보강.
+def _ensure_pr_xrefs(
+    pr_num: str,
+    directive_id: str,
+    cycle: str,
+    cycle_thread_id: str,
+    worktree,  # noqa: ANN001
+) -> None:
+    """(#1427/#1440) PR 본문에 머지 자동완료용 크로스레프 멱등 보강.
 
-    bot.py 의 directive_complete_on_merge_loop 는 PR 본문의 `directive: <id>` 로
-    PR↔directive forum thread 를 연결해 머지 시 자동 완료(태그 ✅ + 본문 갱신)한다.
-    sub-agent 가 본문에 누락하면 머지해도 forum 태그·본문이 안 바뀌고 댓글만 남는다.
-    rev-pr-* 합성 id 는 forum directive 가 아니므로 제외.
+    bot.py 의 두 loop 가 PR 본문 ref 로 forum thread 를 찾아 머지 시 자동 완료한다:
+    - `directive: <id>` → directive_complete_on_merge_loop → directive forum 태그 ✅ + 본문.
+    - `cycle-forum: <cycle>:<thread_id>` → cycle_thread_complete_on_merge_loop → cycle forum ✅ retag.
+    sub-agent 가 본문에 누락하면 머지해도 forum 태그가 안 바뀌고 댓글만 남던 사고
+    (2026-05-31 사용자 정정). rev-pr-* 합성 directive id 는 forum directive 아니라 제외.
     """
-    if not directive_id or directive_id.startswith("rev-pr-"):
+    markers: list[str] = []
+    if directive_id and not directive_id.startswith("rev-pr-"):
+        markers.append(f"directive: {directive_id}")
+    if cycle in ("be", "fe", "rev", "plan") and cycle_thread_id and str(cycle_thread_id).isdigit():
+        markers.append(f"cycle-forum: {cycle}:{cycle_thread_id}")
+    if not markers:
         return
     try:
         cur = subprocess.run(
             ["gh", "pr", "view", str(pr_num), "--json", "body", "-q", ".body"],
             capture_output=True, text=True, timeout=15, check=False, cwd=str(worktree),
-        ).stdout
-        marker = f"directive: {directive_id}"
-        if marker in (cur or ""):
+        ).stdout or ""
+        missing = [m for m in markers if m not in cur]
+        if not missing:
             return
-        new_body = (cur.rstrip() + f"\n\n{marker}") if (cur and cur.strip()) else marker
+        block = "\n".join(missing)
+        new_body = (cur.rstrip() + f"\n\n{block}") if cur.strip() else block
         subprocess.run(
             ["gh", "pr", "edit", str(pr_num), "--body", new_body],
             capture_output=True, text=True, timeout=15, check=False, cwd=str(worktree),
         )
-        logger.info("PR #%s 본문에 directive xref 보강: %s", pr_num, directive_id)
+        logger.info("PR #%s 본문 xref 보강: %s", pr_num, missing)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("PR directive xref 보강 실패 pr=#%s exc=%r", pr_num, exc)
+        logger.warning("PR xref 보강 실패 pr=#%s exc=%r", pr_num, exc)
 
 
 def _notify_user_done(
@@ -298,12 +311,14 @@ def _on_exec_success(cycle: str, directive_id: str, title: str, thread_id: str, 
     import tools_cycle as tc
     pr_num = _find_pr_number(worktree)
     if pr_num:
-        # (#1427) PR 본문에 `directive: <id>` 크로스레프 보강. bot.py 의
-        # directive_complete_on_merge_loop 가 머지 시 이 크로스레프로 PR↔directive
-        # forum thread 를 연결해 자동 완료(태그 ✅ + 본문 갱신)한다. sub-agent 가
-        # 본문에 누락하면 머지해도 forum 태그·본문이 안 바뀌고 댓글만 남던 사고
-        # (사용자 정정 2026-05-31) → exec 후처리에서 멱등 보강.
-        _ensure_pr_directive_xref(pr_num, directive_id, worktree)
+        # (#1427/#1440) PR 본문에 directive: + cycle-forum: 크로스레프 보강 →
+        # 머지 시 directive forum 완료 + cycle forum ✅ retag 자동화. sub-agent 가
+        # 누락하면 forum 태그가 안 바뀌던 사고 (사용자 정정 2026-05-31).
+        try:
+            cycle_thread_id = str((ev.get_state(f"directive:{directive_id}") or {}).get("cycle_thread_id") or "")
+        except Exception:  # noqa: BLE001 — state 읽기 실패해도 xref 보강은 directive 만이라도 진행
+            cycle_thread_id = ""
+        _ensure_pr_xrefs(pr_num, directive_id, cycle, cycle_thread_id, worktree)
         try:
             tq.enqueue_rev_for_pr_if_any(cycle, worktree)
         except Exception as exc:  # noqa: BLE001
