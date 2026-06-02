@@ -10,6 +10,11 @@
 helper 응답은 helper 측 신규 script `~/.mobruji/discord-reply.sh "<msg>"` 가
 직접 Discord REST API 로 push 합니다 (bot.py 안에서 응답 watcher 가동 안 함).
 
+배포: 본 bot.py 가 도는 전용 체크아웃(/home/mobruji/mobruji-bridge)은
+`mobruji-bridge-autodeploy.timer`(5분)가 develop 최신으로 자동 동기 + 본 파일 등
+bot 코드 변경 시 `mobruji-discord-bridge.service` 자동 재시작.
+spec: docs/features/bridge-auto-deploy.md (#1475).
+
 운영 가이드와 셋업 절차는 같은 디렉토리의 README.md 참고.
 spec: docs/features/discord-driven-mobruji.md
 """
