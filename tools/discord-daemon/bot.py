@@ -374,10 +374,17 @@ REV_POST_MERGE_AUDIT_INJECT_TEMPLATE: Final[str] = (
     "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-2-stages.md §3-2). "
     "Post-merge audit pass 시 라벨 `rev-post-merge-pass` 부여."
 )
-# Discord push template.
+# Discord push template (#1443 — 로그 형태 → narrative 유의미 문장).
+# 사용자 정정 2026-06-02: "~가 ~므로 ~하겠습니다" 식으로 알려야 의미가 있다.
 REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE: Final[str] = (
-    "🔍 rev post-merge audit trigger — PR {pr_numbers} "
-    "(Post-merge audit (단계 2) nmae inject)"
+    "🔍 PR {pr_numbers} 이(가) develop 에 머지됐으므로, 회귀가 없는지 "
+    "post-merge 검증(rev 단계 2)을 진행하겠습니다. 결과는 rev 포럼에서 확인하실 수 있습니다."
+)
+# (#1443) PR 당 1회성 inject 영구 ledger — in-memory debounce 는 재시작 시 리셋돼
+# 같은 PR 을 매 부팅마다 재알림하던 스팸 원인. 처리한 PR 번호를 파일에 박제해
+# 재시작 후에도 재알림 안 함.
+REV_POST_MERGE_AUDIT_INJECTED_LEDGER: Final[Path] = (
+    Path.home() / ".mobruji" / "rev-post-merge-injected.jsonl"
 )
 # gh CLI 실행 timeout (#1008). 네트워크 hang 시 loop block 방어.
 REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS: Final[int] = 30
@@ -4591,6 +4598,37 @@ def format_rev_post_merge_discord(pr_numbers: list[int]) -> str:
     return REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE.format(pr_numbers=joined)
 
 
+def load_post_merge_injected_ledger() -> set[int]:
+    """(#1443) 이미 post-merge 알림한 PR 번호 set (영구 ledger). 파일 부재/손상 graceful."""
+    out: set[int] = set()
+    try:
+        with open(REV_POST_MERGE_AUDIT_INJECTED_LEDGER, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.add(int(json.loads(line)["pr"]))
+                except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def append_post_merge_injected_ledger(pr_numbers: list[int]) -> None:
+    """(#1443) post-merge 알림한 PR 을 영구 ledger 에 append (graceful)."""
+    if not pr_numbers:
+        return
+    try:
+        REV_POST_MERGE_AUDIT_INJECTED_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        with open(REV_POST_MERGE_AUDIT_INJECTED_LEDGER, "a", encoding="utf-8") as handle:
+            for pr in pr_numbers:
+                handle.write(json.dumps({"pr": pr}) + "\n")
+    except OSError as exc:
+        logger.warning("post-merge injected ledger append 실패: %r", exc)
+
+
 # spec: docs/features/directive-board-template-and-tags.md §5-6 완료 자동화
 # PR B: PR 머지 webhook → directive_status.sh completed 자동 호출.
 # 사용자 정정 (2026-05-28): sub-agent PR body 에 `directive: <id>` 명시 → 머지 시 자동 status 전이.
@@ -5126,6 +5164,9 @@ async def rev_post_merge_audit_loop(
             )
         candidate_fetcher = _default_fetcher
 
+    # (#1443) PR 당 1회성 — 영구 ledger 로 재시작 후에도 같은 PR 재알림 금지.
+    injected_ledger = load_post_merge_injected_ledger()
+
     await asyncio.sleep(initial_delay)
 
     while True:
@@ -5142,9 +5183,11 @@ async def rev_post_merge_audit_loop(
                 now_monotonic=mono_now,
                 debounce_seconds=debounce_seconds,
             )
+            # (#1443) 영구 ledger 에 이미 있는 PR 제거 — PR 당 1회만 알림 (재시작 내성).
+            fresh = [p for p in fresh if p not in injected_ledger]
             if not fresh:
                 logger.debug(
-                    "rev post-merge audit: 모든 후보 debounce 적중 — skip (n=%d)",
+                    "rev post-merge audit: 신규 후보 없음 (debounce/ledger 적중) — skip (n=%d)",
                     len(candidates),
                 )
                 await asyncio.sleep(poll_interval)
@@ -5180,6 +5223,9 @@ async def rev_post_merge_audit_loop(
 
             for pr in fresh:
                 last_inject_at[pr] = mono_now
+            # (#1443) 영구 ledger 갱신 — 재시작 후에도 재알림 금지.
+            injected_ledger.update(fresh)
+            append_post_merge_injected_ledger(fresh)
             logger.info(
                 "rev_post_merge_audit_loop: inject fresh=%s candidates=%d",
                 ",".join(f"#{n}" for n in fresh),
