@@ -48,6 +48,8 @@
 | 음표명 | NoteName | `song` | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
 | 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
 | 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
+| 에너지 | Energy (Song.energy) | `song` | 곡의 음향 에너지/강렬함 정도 0.0~1.0 (nullable). 추천 mood 변별·곡 유사도 신호로 소비. 산출 출처는 미정 — 1차는 수기/시드 적재, 자동화(Spotify valence·energy fallback 또는 librosa MFCC)는 후속 결정. song-analysis-data-and-consumers.md §5-1·§8 + song-self-analysis-pipeline.md §10-9 cross-ref |
+| 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
 | 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡). 영속 단위. 엔티티 §5-3 |
 | 추천 | Recommendation | `recommendation` | 사용자 컨텍스트 기반 곡 매칭 결과 (영속 행). 요청 1 : N 행. 엔티티 §5-3 |
 | 추천 결과 | RecommendationResult | `recommendation` | 추천 요청 1건의 최종 결과 컨테이너 (요청 ID + 정렬·다양성 후처리 마친 `ScoredRecommendation` 리스트). application 이 `api.dto` 에 의존하지 않도록 domain 레이어에 둔 결과 표현 (ADR-0005 §A-7) |
