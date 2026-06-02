@@ -30,6 +30,10 @@ def test_enqueues_rev_postmerge_directive(monkeypatch):
     assert "시나리오를 재실행" not in calls["task"]
     assert "Playwright" in calls["task"]
     assert "regression:dev" in calls["task"]  # 회귀 시 라벨 지시
+    # (#1458 rev) healthcheck liveness 경로 회귀 가드 — canonical 은 /api/v1 없는 exact-match
+    # (nginx `location = /actuator/health/liveness` → backend:8081). /api/v1 붙으면 404.
+    assert "/actuator/health/liveness" in calls["task"]
+    assert "/api/v1/actuator/health/liveness" not in calls["task"]
 
 
 def test_missing_pr_number_skips(monkeypatch):

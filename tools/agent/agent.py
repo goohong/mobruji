@@ -389,7 +389,7 @@ async def handle_post_merge_review_requested(payload: dict[str, Any]) -> None:
     task = (
         f"PR #{pr_number} ({pr_title}) 이(가) develop 에 머지됐습니다 — 단계 2 **dev 배포 E2E 검증**(배포본 E2E 점검).\n"
         f"목적: 단위 테스트 재실행(단계 1·CI 중복)이 아니라, dev 배포본 자체를 대상으로 통합·배포 회귀를 잡습니다.\n"
-        f"1) dev 배포 완료 대기 — `{dev_base_url}/api/v1/actuator/health/liveness` 가 green 일 때까지 polling 후 시작 "
+        f"1) dev 배포 완료 대기 — `{dev_base_url}/actuator/health/liveness` 가 green 일 때까지 polling 후 시작 "
         f"(배포 미완 상태 검증 금지 — false negative 방지).\n"
         f"2) E2E 범위 2분류 (PR diff 보고 판정): "
         f"사용자 가시 화면(렌더/라우팅/CTA/스타일) 변경 → 브라우저 E2E — Playwright `PLAYWRIGHT_BASE_URL={dev_base_url}` "
