@@ -32,6 +32,9 @@ logger = logging.getLogger("agent.subagent_runner")
 
 WORKTREE_ROOT = Path("/home/mobruji")
 WORKTREE_PREFIX = "mobruji-"
+# (#1531) 표준 사이클(be/fe/rev/plan)은 상시 워크트리. infra 는 온디맨드 ephemeral —
+# 아래 MAIN_CHECKOUT 에서 git worktree add 로 생성, 작업 후 teardown (ADR-0027 옵션 D).
+MAIN_CHECKOUT = WORKTREE_ROOT / "mobruji"
 # sub-agent 1 task 최대 실행 시간 — 초과 시 kill + 실패 보고 + lock 해제.
 EXEC_TIMEOUT_SECONDS = 45 * 60
 DEFAULT_MODEL = "claude-opus-4-8"
@@ -61,6 +64,39 @@ def exec_enabled() -> bool:
 
 def worktree_path(cycle: str) -> Path:
     return WORKTREE_ROOT / f"{WORKTREE_PREFIX}{cycle}"
+
+
+def _ephemeral_worktree_add(directive_id: str) -> Path:
+    """(#1531) infra 온디맨드 ephemeral 워크트리 생성 — `git worktree add origin/develop`.
+
+    spec: docs/features/on-demand-infra-dispatch.md. directive 별 고유 경로
+    (standing 워크트리/develop 점유와 충돌 없음). 생성 전 stale prune + 동일 경로
+    제거(재사용/crash 잔존 가드). 실패 시 RuntimeError → 호출부 finally 가 lock 해제.
+    """
+    safe = "".join(ch for ch in str(directive_id) if ch.isalnum() or ch in "-_")[:40]
+    wt = WORKTREE_ROOT / f"{WORKTREE_PREFIX}infra-{safe}"
+    g = ["git", "-C", str(MAIN_CHECKOUT), "worktree"]
+    subprocess.run([*g, "prune"], capture_output=True, text=True, timeout=30, check=False)
+    subprocess.run([*g, "remove", "--force", str(wt)], capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(
+        [*g, "add", "--detach", str(wt), "origin/develop"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ephemeral worktree add 실패: {(result.stderr or '')[:200]}")
+    logger.info("infra ephemeral worktree 생성: %s", wt)
+    return wt
+
+
+def _ephemeral_worktree_remove(wt: Path) -> None:
+    """(#1531) infra ephemeral 워크트리 teardown — graceful. 성공/실패/타임아웃 무관 호출."""
+    g = ["git", "-C", str(MAIN_CHECKOUT), "worktree"]
+    try:
+        subprocess.run([*g, "remove", "--force", str(wt)], capture_output=True, text=True, timeout=30, check=False)
+        subprocess.run([*g, "prune"], capture_output=True, text=True, timeout=30, check=False)
+        logger.info("infra ephemeral worktree teardown: %s", wt)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("ephemeral worktree teardown 실패 wt=%s exc=%r", wt, exc)
 
 
 def role_prompt(cycle: str, worktree: Path | None = None) -> str:
@@ -144,9 +180,17 @@ async def run_subagent_execution(
     fire-and-forget asyncio task 로 호출 (agent_loop). 예외/타임아웃 graceful —
     어떤 경우에도 `mark_subagent_completed` 로 lock 해제 (영구 점유 방지).
     """
+    ephemeral_infra = cycle == "infra"
     wt = worktree_path(cycle)
-    logger.info("subagent exec 시작: cycle=%s directive=%s wt=%s", cycle, directive_id, wt)
+    logger.info(
+        "subagent exec 시작: cycle=%s directive=%s wt=%s%s",
+        cycle, directive_id, wt, " (ephemeral infra)" if ephemeral_infra else "",
+    )
     try:
+        # (#1531) infra 는 상시 워크트리가 없다 — ephemeral 생성(git worktree add
+        # origin/develop). 생성 실패 시 예외 → 아래 except + finally(lock 해제) 경로.
+        if ephemeral_infra:
+            wt = await asyncio.to_thread(_ephemeral_worktree_add, directive_id)
         # (#1398 rev 🟡-1) argv 빌드(shlex.split CLAUDE_BIN)도 try 안에서 — unbalanced
         # quote 등 ValueError 가 finally 밖으로 탈출해 lock 미해제되는 사고 차단.
         prompt = build_task_prompt(cycle, directive_id, title, task, thread_id)
@@ -204,6 +248,13 @@ async def run_subagent_execution(
         if thread_id:
             _safe_comment(thread_id, f"❌ {cycle} sub-agent 실행 실패: {str(exc)[:150]}")
     finally:
+        # (#1531) infra ephemeral 워크트리 teardown — 성공/실패/타임아웃 무관. claude
+        # 프로세스 그룹은 위에서 이미 kill 됐으므로 워크트리 제거 안전. lock 해제와 동일하게 보장.
+        if ephemeral_infra:
+            try:
+                await asyncio.to_thread(_ephemeral_worktree_remove, wt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("infra ephemeral teardown 실패 wt=%s exc=%r", wt, exc)
         # 어떤 경우에도 lock 해제 — dispatcher 가 큐 다음 항목 진행.
         try:
             ts.mark_subagent_completed(cycle)

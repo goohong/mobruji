@@ -72,3 +72,27 @@ def test_launch_cycle_thread_id_satisfies_pending_requirement(isolated_db):
     # cycle_thread_id 가 pending 역할 → ValueError(미등록) 대신 wrapper 부재로 진행.
     with _pt.raises(FileNotFoundError):
         ts.launch_subagent("be", "msg-1", "t", "k", cycle_thread_id="T-CYCLE")
+
+
+def test_launch_infra_skips_wrapper_and_no_thread_required(isolated_db, monkeypatch):
+    """#1531: infra launch — wrapper subprocess 건너뜀(standing 워크트리/채널 부재) +
+    pending thread 면제(PR 코멘트 보고). lock + event 만."""
+    import tools_subagent as ts
+    import events as ev
+
+    # directive 는 thread 없이 등록 (infra 는 전용 forum 없음)
+    ev.set_state("directive:infra-d1", {
+        "directive_id": "infra-d1", "summary": "infra task", "status": "polished",
+        "thread_id": None, "assigned_cycle": "infra",
+        "delegation_reason": None, "pr_url": None, "closed_reason": None,
+    })
+    wrapper_calls = []
+    monkeypatch.setattr(ts.subprocess, "run",
+                        lambda *a, **k: wrapper_calls.append(a) or None)
+
+    result = ts.launch_subagent("infra", "infra-d1", "title", "task")
+    # wrapper subprocess 미호출 (infra 는 skip)
+    assert wrapper_calls == []
+    # lock + event 부기는 됨
+    assert "infra" in (ev.get_state("in_flight_agents") or [])
+    assert result["cycle"] == "infra"
