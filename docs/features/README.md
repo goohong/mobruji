@@ -170,8 +170,10 @@ frontmatter의 `status` 필드로 추적한다.
 | [audio-tooling-bootstrap](audio-tooling-bootstrap.md) | Python 오디오 분석 툴링 부트스트랩 | shipped | 2026-05-24 |
 | [external-api-fallback](external-api-fallback.md) | 외부 API graceful fallback (Spotify / MusicBrainz / YouTube / iTunes 횡단) | draft | 2026-05-24 |
 | [musicbrainz-integration](musicbrainz-integration.md) | MusicBrainz 통합 — ISRC/mbid backfill + 메타 보강 | draft | 2026-05-24 |
+| [song-catalog-genre-browse](song-catalog-genre-browse.md) | 장르 카탈로그 — 노래방 책 형태 곡 열람 (둘러보기) | draft | 2026-05-29 |
 | [song-curation-seed-100](song-curation-seed-100.md) | 노래방 시드 곡 큐레이션 100곡 확장 | draft | 2026-05-22 |
 | [song-metadata-source](song-metadata-source.md) | 곡 메타데이터 출처 | shipped | 2026-05-23 |
+| [song-search-and-filter](song-search-and-filter.md) | 곡 검색 / 필터 — 제목·가수 검색 + 난이도·음역대·분위기 좁히기 (찾기) | draft | 2026-06-03 |
 | [song-self-analysis-pipeline](song-self-analysis-pipeline.md) | 자체 곡 분석 파이프라인 | draft | 2026-05-22 |
 | [spotify-audio-features-integration](spotify-audio-features-integration.md) | Spotify Audio Features 통합 — mood signal (valence/energy) 보강 | draft | 2026-05-24 |
 
