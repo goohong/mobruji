@@ -5,6 +5,8 @@ import java.util.List;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.EntityGraph.EntityGraphType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
 
@@ -24,4 +26,20 @@ public interface RecommendationRequestRepository extends JpaRepository<Recommend
      */
     @EntityGraph(type = EntityGraphType.FETCH, attributePaths = {})
     List<RecommendationRequestEntity> findBySessionIdOrderByCreatedAtDescIdDesc(String sessionId);
+
+    /**
+     * 한 세션의 이전 요청들에서 제외/부른 곡으로 영속된 {@code excludeSongIds} 를 중복 없이 1쿼리로 조회한다 (#1549).
+     *
+     * <p>"부른 곡 기반 다음곡 추천"({@code /next}) 흐름에서 seed 곡은 {@code excludeSongIds} 에 합쳐져 영속되므로,
+     * 이 쿼리는 "이전에 부른 곡 + 명시 제외한 곡" 을 함께 회수한다. {@code recommended} 곡(결과 row) 과 합쳐
+     * 세션 단위 누적 제외를 구성한다. {@code ElementCollection} 을 JOIN 으로 펼쳐 {@code DISTINCT} — 요청별
+     * lazy collection 접근(N+1) 대신 단일 select.
+     */
+    @Query("""
+            SELECT DISTINCT songId
+            FROM RecommendationRequestEntity req
+            JOIN req.excludeSongIds songId
+            WHERE req.sessionId = :sessionId
+            """)
+    List<Long> findDistinctExcludeSongIdsBySessionId(@Param("sessionId") String sessionId);
 }

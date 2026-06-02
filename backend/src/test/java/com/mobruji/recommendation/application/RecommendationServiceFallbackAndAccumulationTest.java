@@ -196,7 +196,7 @@ class RecommendationServiceFallbackAndAccumulationTest {
 
     private static CreateRecommendationCommand command(final Mood mood, final List<Long> excludeSongIds) {
         return new CreateRecommendationCommand(
-                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, excludeSongIds);
+                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, excludeSongIds, false);
     }
 
     private static String extractToken(final String message, final String key) {

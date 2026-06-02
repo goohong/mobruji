@@ -11,11 +11,15 @@ import java.util.Objects;
  *
  * <p>{@code excludeSongIds} 는 seed 외에 추가로 제외할 곡(예: 스와이프에서 패스한 곡). null 이 아닌
  * 빈 리스트로 정규화된 값을 받는다(api.dto 의 {@code excludeSongIdsOrEmpty()} 결과 등).
+ *
+ * <p>{@code excludeSessionHistory} 는 #1549 세션 단위 자동 중복 회피 플래그. {@code true}면 seed/명시 제외에
+ * 더해 같은 세션의 이전 추천 결과 곡까지 자동 누적 제외한다. {@code create} 파이프라인으로 전파된다.
  */
 public record NextRecommendationCommand(
         String sessionId,
         List<Long> seedSongIds,
-        List<Long> excludeSongIds
+        List<Long> excludeSongIds,
+        boolean excludeSessionHistory
 ) {
 
     public NextRecommendationCommand {

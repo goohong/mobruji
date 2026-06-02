@@ -85,13 +85,20 @@ public class RecommendationService {
         }
 
         final CreateRecommendationCommand derivedCommand = seedSongProfiler.profile(
-                nextRecommendationCommand.sessionId(), seedSongs, mergedExcludeIds);
+                nextRecommendationCommand.sessionId(), seedSongs, mergedExcludeIds,
+                nextRecommendationCommand.excludeSessionHistory());
         return create(derivedCommand);
     }
 
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
         final long startNanos = System.nanoTime();
-        final List<Long> excludeSongIds = createRecommendationCommand.excludeSongIds();
+        // 세션 단위 자동 중복 회피(#1549): 플래그가 켜지면 같은 세션의 이전 추천 결과 곡 + 이전 제외/부른 곡을
+        // 클라이언트가 넘긴 excludeSongIds 에 누적 병합한다. 병합 결과를 영속·필터·seed 에 일관되게 사용해
+        // 결정성(같은 입력 → 같은 결과)을 유지한다.
+        final List<Long> excludeSongIds = createRecommendationCommand.excludeSessionHistory()
+                ? mergeSessionHistoryExcludes(
+                        createRecommendationCommand.sessionId(), createRecommendationCommand.excludeSongIds())
+                : createRecommendationCommand.excludeSongIds();
 
         final RecommendationRequestEntity savedRequest = recommendationRequestRepository.save(
                 RecommendationRequestEntity.create(
@@ -317,6 +324,23 @@ public class RecommendationService {
                 savedRequest.getAgeGroup(),
                 excludeSongIds);
         return new SeedContext(seed, inputHash);
+    }
+
+    /**
+     * 세션 단위 자동 중복 회피(#1549): 같은 세션의 이전 추천 결과 곡 + 이전 제외/부른 곡을 클라이언트 제외 목록에
+     * 누적 병합한다.
+     *
+     * <p>병합 순서: (1) 클라이언트가 명시한 {@code clientExcludeSongIds} 를 앞에 두고 (2) 이전 추천 결과 곡,
+     * (3) 이전 제외/부른 곡 순으로 {@link LinkedHashSet} 에 누적해 중복을 제거한다. 두 history 쿼리는 각각
+     * {@code DISTINCT} 1쿼리(N+1 없음). 최종 순서는 결정성에 영향이 없다 — {@link SeedDeriver} 가 seed 도출 시
+     * 정렬로 보존하고, 후보 필터는 {@link HashSet} membership 만 사용하기 때문이다.
+     */
+    private List<Long> mergeSessionHistoryExcludes(
+            final String sessionId, final List<Long> clientExcludeSongIds) {
+        final Set<Long> accumulated = new LinkedHashSet<>(clientExcludeSongIds);
+        accumulated.addAll(recommendationRepository.findDistinctRecommendedSongIdsBySessionId(sessionId));
+        accumulated.addAll(recommendationRequestRepository.findDistinctExcludeSongIdsBySessionId(sessionId));
+        return new ArrayList<>(accumulated);
     }
 
     record ScoredSong(Song song, Scored scored) {

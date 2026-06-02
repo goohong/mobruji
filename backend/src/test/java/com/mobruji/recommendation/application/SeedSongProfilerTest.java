@@ -39,7 +39,7 @@ class SeedSongProfilerTest {
                     songWithMidi(60, 80));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.voiceRangeLow()).isEqualTo(55);
@@ -53,7 +53,7 @@ class SeedSongProfilerTest {
             final List<Song> seeds = List.of(songWithKey(MusicalKey.C_MAJOR));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.voiceRangeLow()).isEqualTo(53);
@@ -67,7 +67,7 @@ class SeedSongProfilerTest {
             final List<Song> seeds = List.of(songWithKey(MusicalKey.UNKNOWN));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.voiceRangeLow()).isEqualTo(SeedSongProfiler.NEUTRAL_VOICE_LOW);
@@ -83,7 +83,7 @@ class SeedSongProfilerTest {
                     songWithKey(MusicalKey.C_MAJOR));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.voiceRangeLow()).isEqualTo(53);
@@ -105,7 +105,7 @@ class SeedSongProfilerTest {
                     songWithMood(Mood.EMOTIONAL));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.mood()).isEqualTo(Mood.UPBEAT);
@@ -120,7 +120,7 @@ class SeedSongProfilerTest {
                     songWithMood(Mood.UPBEAT));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.mood()).isEqualTo(Mood.values()[0]);
@@ -133,7 +133,7 @@ class SeedSongProfilerTest {
             final List<Song> seeds = List.of(songWithKey(MusicalKey.C_MAJOR));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.mood()).isNull();
@@ -151,7 +151,7 @@ class SeedSongProfilerTest {
             final List<Song> seeds = List.of(songWithBpm(120), songWithBpm(130));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.preferredBpm()).isEqualTo(125);
@@ -164,7 +164,7 @@ class SeedSongProfilerTest {
             final List<Song> seeds = List.of(songWithKey(MusicalKey.C_MAJOR));
 
             // when
-            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of());
+            final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(), false);
 
             // then
             assertThat(command.preferredBpm()).isNull();
@@ -178,7 +178,7 @@ class SeedSongProfilerTest {
         final List<Song> seeds = List.of(songWithKey(MusicalKey.C_MAJOR));
 
         // when
-        final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(7L, 8L));
+        final CreateRecommendationCommand command = seedSongProfiler.profile(SESSION_ID, seeds, List.of(7L, 8L), false);
 
         // then
         assertThat(command.excludeSongIds()).containsExactly(7L, 8L);
@@ -187,7 +187,7 @@ class SeedSongProfilerTest {
     @Test
     @DisplayName("빈 seed 리스트는 거부한다")
     void rejectsEmptySeeds() {
-        assertThatThrownBy(() -> seedSongProfiler.profile(SESSION_ID, List.of(), List.of()))
+        assertThatThrownBy(() -> seedSongProfiler.profile(SESSION_ID, List.of(), List.of(), false))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

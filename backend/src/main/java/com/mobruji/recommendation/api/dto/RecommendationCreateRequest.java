@@ -35,6 +35,9 @@ import com.mobruji.user.domain.SessionIdPatterns;
  * <p>{@code sessionId} 는 client 가 발급한 UUIDv4 (ADR-0011).
  * {@link SessionIdPatterns#UUID_V4} 형식 강제 — {@code SessionRotateRequest} /
  * {@code VoiceRangeCreateRequest} 와 동일한 검증 일관성 유지 (#948 후속).
+ *
+ * <p>{@code excludeSessionHistory}(#1549)는 세션 단위 자동 중복 회피 플래그. {@code true}면 서버가 같은
+ * {@code sessionId}의 이전 추천 결과 곡과 이전 제외 곡을 자동 누적 제외한다. null 허용(미입력 = {@code false}).
  */
 public record RecommendationCreateRequest(
         @NotBlank @Size(max = AnonymousSession.SESSION_ID_MAX_LENGTH) @Pattern(
@@ -45,7 +48,8 @@ public record RecommendationCreateRequest(
         Mood mood,
         @Min(30) @Max(300) Integer preferredBpm,
         AgeGroup ageGroup,
-        List<Long> excludeSongIds
+        List<Long> excludeSongIds,
+        Boolean excludeSessionHistory
 ) {
 
     /**
@@ -55,8 +59,16 @@ public record RecommendationCreateRequest(
         return excludeSongIds == null ? List.of() : excludeSongIds;
     }
 
+    /**
+     * null-safe 접근자. 미입력(null)은 {@code false}로 정규화 — 기본은 기존 동작(세션 누적 제외 비활성).
+     */
+    public boolean excludeSessionHistoryOrFalse() {
+        return excludeSessionHistory != null && excludeSessionHistory;
+    }
+
     public CreateRecommendationCommand toCommand() {
         return new CreateRecommendationCommand(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup, excludeSongIdsOrEmpty());
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup,
+                excludeSongIdsOrEmpty(), excludeSessionHistoryOrFalse());
     }
 }
