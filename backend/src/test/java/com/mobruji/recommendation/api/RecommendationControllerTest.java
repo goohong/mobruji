@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.mobruji.recommendation.application.CreateRecommendationCommand;
 import com.mobruji.recommendation.application.NextRecommendationCommand;
 import com.mobruji.recommendation.application.RecommendationService;
+import com.mobruji.recommendation.application.TrendingService;
 import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationResult;
 import com.mobruji.recommendation.domain.ScoredRecommendation;
@@ -60,6 +61,9 @@ class RecommendationControllerTest {
 
     @MockitoBean
     private RecommendationService recommendationService;
+
+    @MockitoBean
+    private TrendingService trendingService;
 
     @Test
     @DisplayName("POST /recommendations: 정상 입력 → 201 + requestId/recommendations 매핑")
