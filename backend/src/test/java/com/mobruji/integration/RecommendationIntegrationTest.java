@@ -3,8 +3,10 @@ package com.mobruji.integration;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,6 +84,11 @@ class RecommendationIntegrationTest {
                 .body("recommendations.size()", lessThanOrEqualTo(10))
                 .body("recommendations[0].rankPosition", equalTo(1))
                 .body("recommendations[0].matchReason", notNullValue())
+                // 설명가능성(#1484): top-level voiceFit(0~1) + 짧은 한국어 사유 노출
+                .body("recommendations[0].voiceFit", notNullValue())
+                .body("recommendations[0].voiceFit", greaterThanOrEqualTo(0.0f))
+                .body("recommendations[0].voiceFit", lessThanOrEqualTo(1.0f))
+                .body("recommendations[0].voiceFitReason", notNullValue())
                 .body("recommendations[0].breakdown", notNullValue())
                 .body("recommendations[0].breakdown.keyMatch", notNullValue())
                 .body("recommendations[0].breakdown.rangeFit", notNullValue())
@@ -97,7 +104,10 @@ class RecommendationIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("requestId", equalTo(requestId))
-                .body("recommendations.size()", greaterThan(0));
+                .body("recommendations.size()", greaterThan(0))
+                // 재조회 경로는 breakdown 미영속 → voiceFit/voiceFitReason 도 null (#1484)
+                .body("recommendations[0].voiceFit", nullValue())
+                .body("recommendations[0].voiceFitReason", nullValue());
     }
 
     @Test

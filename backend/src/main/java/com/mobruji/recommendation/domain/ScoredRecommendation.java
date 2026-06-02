@@ -11,6 +11,10 @@ import com.mobruji.song.domain.Song;
  *
  * <p>{@code breakdown}은 score 산정 시점의 raw 신호(0~1) 5종을 담아 응답에 그대로 노출한다. 영속 엔티티에는 저장되지 않아
  * {@code readById} 경로(과거 추천 재조회)에서는 {@code null}이 들어온다. UI는 null이면 펼침 영역을 숨기는 식으로 동작한다.
+ *
+ * <p>{@link #voiceFit()} / {@link #voiceFitReason()}은 "왜 이 곡?"(설명 가능성, #1484) 전면 노출용으로,
+ * breakdown 의 {@code rangeFit} 신호를 곡별 음역 적합도 점수(0~1)와 짧은 한국어 사유로 풀어 준다. breakdown 이
+ * 없는(과거 추천 재조회) 경로에서는 둘 다 {@code null} — 응답 DTO 에서 그대로 통과시킨다.
  */
 public record ScoredRecommendation(
         Song song,
@@ -34,5 +38,40 @@ public record ScoredRecommendation(
      */
     public ScoredRecommendation(final Song song, final double score, final String matchReason, final int rankPosition) {
         this(song, score, matchReason, rankPosition, null);
+    }
+
+    /**
+     * 곡별 음역 적합도 점수(0~1). breakdown 의 {@code rangeFit} 신호를 전면 노출한다.
+     * 과거 추천 재조회 경로(breakdown null)에서는 {@code null}.
+     */
+    public Double voiceFit() {
+        return breakdown == null ? null : breakdown.rangeFit();
+    }
+
+    /**
+     * 음역 적합도를 풀어 주는 짧은 한국어 사유. breakdown 이 없으면(과거 추천 재조회) {@code null}.
+     * 곡 키가 UNKNOWN(keyMatch &lt; 1.0)이면 적합도 산정 근거가 없으므로 그 사실을 그대로 알린다.
+     */
+    public String voiceFitReason() {
+        if (breakdown == null) {
+            return null;
+        }
+        return describeVoiceFit(breakdown.keyMatch(), breakdown.rangeFit());
+    }
+
+    private static String describeVoiceFit(final double keyMatch, final double rangeFit) {
+        if (keyMatch < 1.0) {
+            return "곡 키 정보가 없어 음역대 적합도를 정확히 알기 어려워요";
+        }
+        if (rangeFit >= 0.7) {
+            return "원곡 키가 음역대에 아주 잘 맞아요";
+        }
+        if (rangeFit >= 0.4) {
+            return "원곡 키가 음역대에 무난하게 맞아요";
+        }
+        if (rangeFit > 0.0) {
+            return "원곡 키가 음역대에 다소 부담될 수 있어요";
+        }
+        return "원곡 키가 음역대와 잘 맞지 않아요";
     }
 }
