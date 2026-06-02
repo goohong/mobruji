@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import shlex
+import signal
 import subprocess
 from pathlib import Path
 
@@ -151,15 +152,25 @@ async def run_subagent_execution(
         prompt = build_task_prompt(cycle, directive_id, title, task, thread_id)
         role = role_prompt(cycle, wt)
         argv = _claude_argv(prompt, role)
+        # (#1481) start_new_session=True → claude 가 새 세션·프로세스 그룹 리더가 된다
+        # (pgid == pid). sub-agent 가 background 로 띄운 자식(next dev / bootRun /
+        # GradleDaemon 등)도 같은 그룹에 속해, 종료 시 그룹 전체를 kill 해 고아(PPID 1)
+        # 누수를 막는다. 과거엔 proc.kill() 이 claude 본체만 죽이고 자식은 reparent 돼
+        # 며칠씩 잔존(450MB next dev -p 4322), NCP RAM 잠식 → #1453 재유발.
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=str(wt),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        pgid = proc.pid  # 새 세션 리더라 pgid == pid.
         try:
             _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             rc = proc.returncode
             logger.info("subagent exec 종료: cycle=%s rc=%s", cycle, rc)
+            # (#1481) claude 종료 직후 그룹 잔여 자식(background next dev/bootRun 등) 즉시
+            # 정리 — _on_exec_success(git/gh) 지연 전에 reap 해 PID 재사용 창 최소화.
+            await _kill_process_group(pgid, cycle, reason="exec 종료 후 잔여 자식")
             if rc != 0:
                 # (#1427) 과거엔 stderr 를 캡처만 하고 버려 rc!=0 원인이 journal 에
                 # 안 남았다 (rev rc=1 자동 launch 실패 진단 불가). stderr tail 을 로그.
@@ -183,7 +194,8 @@ async def run_subagent_execution(
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("exec 완료 후처리 실패 cycle=%s exc=%r", cycle, exc)
         except asyncio.TimeoutError:
-            proc.kill()
+            # (#1481) 그룹 전체 kill — claude 본체 + background 자식 동시 정리.
+            await _kill_process_group(pgid, cycle, reason=f"{timeout/60:.0f}분 타임아웃")
             logger.warning("subagent exec 타임아웃 kill: cycle=%s (%.0fs)", cycle, timeout)
             if thread_id:
                 _safe_comment(thread_id, f"⏱ {cycle} sub-agent {timeout/60:.0f}분 타임아웃 — 중단.")
@@ -200,6 +212,34 @@ async def run_subagent_execution(
             ev.set_state("in_flight_started", started)
         except Exception as exc:  # noqa: BLE001
             logger.warning("subagent exec lock 해제 실패: cycle=%s exc=%r", cycle, exc)
+
+
+async def _kill_process_group(pgid: int, cycle: str, *, reason: str) -> None:
+    """(#1481) sub-agent 프로세스 그룹 전체 종료 — claude 본체 + 그것이 background 로
+    띄운 자식(next dev / bootRun / GradleDaemon 등)을 함께 reap 해 고아 누수 방지.
+
+    SIGTERM 으로 정중히 → 짧게 대기 → 남으면 SIGKILL. 이미 비어 있으면(자식 없음)
+    ProcessLookupError → 정상(죽일 게 없음). graceful — 실패해도 호출부 흐름 막지 않는다
+    (lock 해제는 finally 가 보장). async — SIGTERM 유예 대기에 event loop 안 막음.
+    """
+    if not pgid or pgid <= 1:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return  # 그룹에 남은 프로세스 없음 — 누수 없음.
+    except OSError as exc:
+        logger.warning("그룹 SIGTERM 실패 cycle=%s pgid=%s: %r", cycle, pgid, exc)
+        return
+    # SIGTERM 후 잠깐 — 정상 종료 여유. 남으면 SIGKILL.
+    try:
+        await asyncio.sleep(1.5)
+        os.killpg(pgid, signal.SIGKILL)
+        logger.info("sub-agent 그룹 SIGKILL cycle=%s pgid=%s (%s) — 잔여 자식 강제 정리", cycle, pgid, reason)
+    except ProcessLookupError:
+        logger.info("sub-agent 그룹 정리 cycle=%s pgid=%s (%s) — SIGTERM 으로 종료", cycle, pgid, reason)
+    except OSError as exc:
+        logger.warning("그룹 SIGKILL 실패 cycle=%s pgid=%s: %r", cycle, pgid, exc)
 
 
 def _safe_comment(thread_id: str, body: str) -> None:
