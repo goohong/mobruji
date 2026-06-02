@@ -31,7 +31,7 @@ DirectiveStatus = Literal[
     "completed",       # PR 머지 완료
     "closed",          # 사용자 정정 / cleanup 으로 종결
 ]
-CycleName = Literal["be", "fe", "rev", "plan"]
+CycleName = Literal["be", "fe", "rev", "plan", "infra"]
 
 
 @dataclass
