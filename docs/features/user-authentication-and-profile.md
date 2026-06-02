@@ -223,5 +223,3 @@ V<next+2>__add_user_id_to_owned_entities.sql  -- anonymous-to-account-conversion
   - **보안**: 시크릿 외부화 + OAuth redirect 화이트리스트 + state CSRF + 비밀번호 해시 + 토큰 마스킹 로깅 + secret-scanning 게이트.
   - **마이그레이션 SoT 분리**: `create_user`/`add_user_id` 는 `anonymous-to-account-conversion.md`, `create_user_profile` 는 본 spec 소유. nmae 가 PR 순서 조정.
   - **`06-domain-model.md` §7 D4 방향**: "회원가입 필수 vs 익명 시작" 은 본 spec + 정책 spec 으로 **익명 1순위 + 가치 지점 전환** 방향 확정(§7 표 자체는 canonical 이라 미편집).
-</content>
-</invoke>
