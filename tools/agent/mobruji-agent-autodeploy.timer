@@ -1,0 +1,14 @@
+[Unit]
+Description=mobruji agent 자동 배포 타이머 (5분 간격)
+
+[Timer]
+# 부팅 4분 후 첫 실행(bridge 타이머 3분과 어긋나게 — gh/네트워크 동시 부하 회피),
+# 이후 직전 실행 종료로부터 5분 간격.
+OnBootSec=4min
+OnUnitActiveSec=5min
+# 시스템 정지 중 놓친 실행은 부팅 후 1회 보충.
+Persistent=true
+Unit=mobruji-agent-autodeploy.service
+
+[Install]
+WantedBy=timers.target
