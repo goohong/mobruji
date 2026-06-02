@@ -248,13 +248,13 @@ export function SongCard(props: SongCardProps) {
   // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
   if (isModalMode) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
+      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
         <button
           type="button"
           onClick={onShowDetail}
           aria-label={`${displayTitle} 상세 보기`}
           aria-haspopup="dialog"
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </button>
@@ -270,11 +270,11 @@ export function SongCard(props: SongCardProps) {
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
+      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
         <Link
           href={href}
           aria-label={`${displayTitle} 상세 보기`}
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </Link>
@@ -289,7 +289,7 @@ export function SongCard(props: SongCardProps) {
   return (
     <li
       tabIndex={0}
-      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)] dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]"
+      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)] dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]"
     >
       {body}
       {breakdownPanel}

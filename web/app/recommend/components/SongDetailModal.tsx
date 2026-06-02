@@ -195,7 +195,7 @@ export function SongDetailModal({
       // fixed inset-0 으로 충분 — body 직속이 아니어도 stacking context를 z-50 으로 부각.
       role="presentation"
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--modal-backdrop)] px-4 py-6 backdrop-blur-sm sm:items-center"
+      className="animate-fade-in fixed inset-0 z-50 flex items-end justify-center bg-[var(--modal-backdrop)] px-4 py-6 backdrop-blur-sm sm:items-center"
     >
       <div
         ref={dialogRef}
@@ -204,7 +204,7 @@ export function SongDetailModal({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className="relative flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl bg-[var(--surface-modal)] p-6 shadow-2xl ring-1 ring-[var(--ring-soft-detail)]"
+        className="animate-scale-in relative flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl bg-[var(--surface-modal)] p-6 shadow-2xl ring-1 ring-[var(--ring-soft-detail)]"
       >
         <div className="flex items-start justify-between gap-4">
           <h2

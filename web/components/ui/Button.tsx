@@ -76,8 +76,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   // (ThemeToggle / BottomNav) 와 동일 패턴으로 `--cta-secondary-ring` 토큰으로
   // 통일한다 (tokens.css 가 light=zinc-500 / dark=zinc-500 균일 outline 으로
   // 정의해 OS 다크 환경에서도 가시성 유지).
+  // 마이크로 인터랙션(#1493): press 시 살짝 눌리는 scale 피드백. transform 도
+  // 함께 transition 되도록 `transition-colors` 대신 `transition` 으로 확장한다.
+  // disabled/loading 상태에선 press scale 을 끈다(눌림 착시 방지).
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]";
+    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] active:scale-[0.97] disabled:active:scale-100";
   const widthClass = fullWidth ? "w-full" : "";
   const merged = [
     base,

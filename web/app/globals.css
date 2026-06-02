@@ -76,3 +76,64 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/*
+ * ───────── Micro-interaction entrance utilities (#1493) ─────────
+ *
+ * tokens.css 가 정의한 모션 토큰(`--duration-*` / `--ease-*`)을 사용하는 진입
+ * 애니메이션 유틸. 페이지/모달/카드 전환에 절제된 fade·scale 을 입힌다.
+ *
+ * a11y: tokens.css 의 전역 `prefers-reduced-motion` 가드가 animation-duration 을
+ * 10ms 로 단축하지만, 진입 애니메이션은 시작 상태(opacity:0)가 잠깐 보일 수 있어
+ * motion-sensitive 사용자에게는 keyframe 자체를 끄고 즉시 최종 상태로 둔다.
+ */
+@keyframes mobruji-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mobruji-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mobruji-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: mobruji-fade-in var(--duration-slow) var(--ease-out) both;
+}
+
+.animate-fade-in-up {
+  animation: mobruji-fade-in-up var(--duration-slow) var(--ease-out) both;
+}
+
+.animate-scale-in {
+  animation: mobruji-scale-in var(--duration-slow) var(--ease-spring) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fade-in-up,
+  .animate-scale-in {
+    animation: none;
+  }
+}
