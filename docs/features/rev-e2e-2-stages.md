@@ -126,7 +126,7 @@ mmae evidence (사용자 인식 일부 정정):
 
 - [ ] **PR rev2s-1** (본 PR, plan / docs): 본 spec 신설 (`docs/features/rev-e2e-2-stages.md`) + 기존 spec rename (`git mv rev-e2e-3-stages.md rev-e2e-2-stages.md`). 영향 = 1 파일 rename + 본문 rewrite (단계 3 본문 제거 + 명명 변경).
 - [ ] **PR rev2s-2** (plan / docs): propagation cleanup — `rev-sla.md` §3-1 매트릭스 / §3-2 T0 / §3-3 단계 3 행 정리 / `rev-qa-protocol.md` §5-9-3 / `rev-direct-qa-extension.md` 시나리오 3 / `sub-agent.md §2-rev` "3단계 e2e" → "2단계 e2e" + 단계 3 row 제거 / `web-e2e-playwright.md` / `visual-regression-ci.md` / `emergency-hotfix-flow.md` / `cycle-forum-placeholder-guard.md` / `security-disclosure-flow.md` / `rev-gate-audit-workflow.md` / `discord-reply-cycle-channel-forum-adapter.md` / `work-cycle-simplification.md` / `song-catalog-genre-browse.md` / `README.md` 의 `rev-e2e-3-stages` reference 일괄 `rev-e2e-2-stages` 로 갱신. 상세: §10.
-- [ ] **PR rev2s-3** (be / infra, mmae 직접 가능): Discord `PR_REVIEW_FORUM_ID` 의 `available_tags` 4종 정정 (`🟡 Pre-merge review` / `🔵 dev 배포 E2E 검증` / `✅ rev pass` / `❌ rev fail`). NCP bot.py discord.py 코드 직접 정정. (단계 2 명칭 = 2026-06-02 #1461 재정의 반영)
+- [ ] **PR rev2s-3** (be / infra, mmae 직접 가능): Discord `PR_REVIEW_FORUM_ID` 의 `available_tags` 4종 한국어 → 영어 정정 (`🟡 Pre-merge review` / `🔵 Post-merge audit` / `✅ rev pass` / `❌ rev fail`). NCP bot.py discord.py 코드 직접 정정.
 - [ ] **PR rev2s-4** (be / infra): bot.py 코드 주석 정정 — `rev_post_merge_audit_loop` 등 함수 주석 / log message 의 "단계 3" / "rev-prod-pass" / "regression:prod" 박제 폐기.
 
 ### 보호 영역 변경 여부 (필수 명시)
@@ -207,7 +207,7 @@ nmae tmux pane 에 audit launch 알림을 inject 한다.
 
 | 대상 | 변경 |
 |---|---|
-| `PR_REVIEW_FORUM_ID` `available_tags` | 4종 정정: `🟡 1차 review` → `🟡 Pre-merge review` / `🔵 사후 E2E QA` → `🔵 dev 배포 E2E 검증` (2026-06-02 #1461 재정의) / `✅ rev pass` 유지 / `❌ rev fail` 유지 |
+| `PR_REVIEW_FORUM_ID` `available_tags` | 4종 한국어 → 영어 정정: `🟡 1차 review` → `🟡 Pre-merge review` / `🔵 사후 E2E QA` → `🔵 Post-merge audit` / `✅ rev pass` 유지 / `❌ rev fail` 유지 |
 | `REV_FORUM_ID` thread 명명 (있다면) | "rev 3단계" / "stage 3" 박제 제거 |
 
 ### 10-5. 메모리 영향 (자율 갱신 — drift 발견 시)

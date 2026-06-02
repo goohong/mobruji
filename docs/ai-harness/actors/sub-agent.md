@@ -247,15 +247,15 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - **매 사이클 첫 액션**: `bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all` — 2 stage 큐 discovery ([[feedback-rev-queue-script]]). 큐 출력 → §E-2 절차 → 라벨 → 다음 호출 자동 제외 (멱등성). (단계 3 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`; `rev-queue.sh stage3` 정리는 별 PR rev2s-4)
 - **2단계 e2e** ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]):
   - 🟡 Pre-merge review (단계 1, PR 머지 전) — `reviewed:claude` 라벨 + ✅/📝/❌ 코멘트 의무 (없으면 `rev-gate.yml` fail → 머지 차단)
-  - 🔵 dev 배포 E2E 검증 (단계 2, develop dev 배포 후 배포본 대상 E2E) — `rev-post-merge-pass` / `regression:dev` 라벨. 단위 테스트 재실행 아님 (배포본 통합·배포 회귀 검증)
-  - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-2-stages.md` (단계 구조) + `docs/features/stage2-dev-deploy-e2e.md` (단계 2 무엇을·어떻게) SoT**
+  - 🔵 Post-merge audit (단계 2, develop 머지 후 dev 환경) — `rev-post-merge-pass` / `regression:dev` 라벨
+  - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-2-stages.md` SoT**
 - **단계 1 visual diff 판단 (사전 박제, `scope:web` PR — Playwright workflow 활성화 후 자동 가드)**: `docs/features/visual-regression-ci.md §3-4` SoT — workflow 배포 전이라도 룰 우선 학습 (ADR-0019 망각 가드 정신). 3-row 판단 매트릭스 요약:
   - diff = 0 (no change) → 🟢 통과, 코멘트 생략 가능
   - diff > 0.1% + PR body `## visual baseline update` 섹션 의도 명시 (예: ADR-0018 swap 사유) → 🟢 사유 합리성 검토 후 통과, `rev단계1: 🟢 visual baseline 갱신 의도 확인` 코멘트
   - diff > 0.1% + PR body 섹션 부재 또는 "baseline 변경 없음" → 🔴 시각 회귀 의심, `reviewed:claude` 라벨 부착 차단 + fe sub-agent 에 root cause + PR body 보강 위임
   - 활성화 시점: visual-regression-ci.md §6 PR 3 (Playwright workflow + 최초 baseline 24 개) 머지 후. 본 룰 자체는 spec 박제 직후 사이클부터 학습 적용 — workflow 미배포 단계에선 매뉴얼 screenshot 매트릭스로 동등 판단.
 - **코드 리뷰 + 품질 검증 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
-- **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 🟡 Pre-merge review (단계 1) = cycle forum push / 🔵 dev 배포 E2E 검증 (단계 2) = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴). (단계 3 폐기 2026-05-30)
+- **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 🟡 Pre-merge review (단계 1) = cycle forum push / 🔵 Post-merge audit (단계 2) = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴). (단계 3 폐기 2026-05-30)
 - **round 종료 wrapper 호출 의무** (강제 메커니즘): rev 매 round 종료 직전 다음 명령 호출. 누락 = 사용자 가시화 X.
   ```bash
   bash tools/rev-queue/round-summary.sh <round_id>
