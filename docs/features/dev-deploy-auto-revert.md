@@ -54,6 +54,8 @@ end-user 가시화 없음 (개발 사이클 내부).
 
 ## 4) 알려진 한계 / 결정
 
+- **PR 이벤트 워크플로우는 default branch(main)에서만 trigger** (2026-06-02 검증으로 확인): `pull_request_target`(및 `pull_request`) 워크플로우는 GitHub 이 default branch 의 파일을 발견·실행한다. 본 repo 는 default=main 인데 작업은 develop 으로 머지되므로, **워크플로우가 main 에 있어야 활성화**된다 (develop 에만 두면 dormant — `gh run` 이 `404 not found on the default branch`). 워크플로우 자체는 `ref: develop` 를 checkout 하므로 **동작 대상은 develop** 그대로. → develop·main 양쪽에 동일 파일 유지 필요 (다음 release 시 자동 동기).
+- **github-script 의 인증 토큰** (2026-06-02 검증으로 확인): `actions/github-script` 는 job env(`GH_TOKEN`)가 아니라 **자체 `github-token` 입력**(기본 GITHUB_TOKEN)으로 인증한다. GITHUB_TOKEN 은 repo 설정상 PR 생성 금지(`GitHub Actions is not permitted to create or approve pull requests`, 403)라, PR 생성 step 에 `github-token: ${{ secrets.REVERT_PAT || secrets.GITHUB_TOKEN }}` 를 **명시**해야 한다. REVERT_PAT(사용자 토큰)은 이 제약을 받지 않는다.
 - **GITHUB_TOKEN 으로 만든 PR 은 다른 workflow 를 trigger 하지 않는다** (GitHub 의 의도된 재귀 방지). 즉 revert PR 에 `rev-gate.yml` / `auto-label.yml` 이 자동으로 안 돌 수 있다.
   - 대응: workflow 가 revert PR 생성 시 **라벨을 명시 부착**(auto-label 의존 제거). rev 단계 1 은 nmae/rev 가 `gh pr list` 로 발굴하므로 workflow trigger 와 무관하게 검토된다.
   - rev-gate 가 required check 라 revert PR 에서 안 돌아 머지가 막히면: (a) `secrets.REVERT_PAT`(PAT) 이 설정돼 있으면 그 토큰으로 PR 을 만들어 정상 trigger / (b) PAT 미설정 시 nmae 가 revert PR 에 빈 커밋 push 로 check 재유발 또는 admin merge. **권장 = REVERT_PAT 설정** (§6 오픈 질문 Q1).
