@@ -29,7 +29,8 @@ public record NextRecommendationRequest(
                 regexp = SessionIdPatterns.UUID_V4, message = SessionIdPatterns.UUID_V4_MESSAGE
         ) String sessionId,
         @NotEmpty List<Long> seedSongIds,
-        List<Long> excludeSongIds
+        List<Long> excludeSongIds,
+        Boolean excludeSessionHistory
 ) {
 
     /**
@@ -39,7 +40,15 @@ public record NextRecommendationRequest(
         return excludeSongIds == null ? List.of() : excludeSongIds;
     }
 
+    /**
+     * null-safe 접근자. 미입력(null)은 {@code false}로 정규화 — 기본은 seed 자동 제외만 적용(기존 동작).
+     */
+    public boolean excludeSessionHistoryOrFalse() {
+        return excludeSessionHistory != null && excludeSessionHistory;
+    }
+
     public NextRecommendationCommand toCommand() {
-        return new NextRecommendationCommand(sessionId, seedSongIds, excludeSongIdsOrEmpty());
+        return new NextRecommendationCommand(
+                sessionId, seedSongIds, excludeSongIdsOrEmpty(), excludeSessionHistoryOrFalse());
     }
 }

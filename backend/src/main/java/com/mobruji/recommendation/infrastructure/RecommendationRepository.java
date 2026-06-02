@@ -24,6 +24,22 @@ public interface RecommendationRepository extends JpaRepository<Recommendation, 
     List<Recommendation> findByRecommendationRequestIdIn(Collection<Long> recommendationRequestIds);
 
     /**
+     * 한 세션에서 지금까지 추천 결과로 노출된 곡 ID 를 중복 없이 1쿼리로 조회한다 (#1549 세션 단위 중복 회피).
+     *
+     * <p>{@code recommendation} 결과 row 를 {@code recommendation_request} 와 application 레벨 join 으로 묶어
+     * (도메인 간 FK 미설정 정책과 일관) 같은 {@code sessionId} 의 요청에 속한 결과 곡만 모은다.
+     * 호출 측({@code RecommendationService})이 {@code excludeSongIds} 에 누적 병합해 반복 추천을 막는다.
+     * {@code DISTINCT} 로 요청별 중복 곡을 collapse — 세션 history 가 커도 IN-쿼리 1회로 N+1 회피.
+     */
+    @Query("""
+            SELECT DISTINCT r.songId
+            FROM Recommendation r, RecommendationRequestEntity req
+            WHERE r.recommendationRequestId = req.id
+              AND req.sessionId = :sessionId
+            """)
+    List<Long> findDistinctRecommendedSongIdsBySessionId(@Param("sessionId") String sessionId);
+
+    /**
      * 추천 결과 히스토리(다른 사용자 포함 전체)를 기간/분위기/음역대로 필터링해 곡별 인기도를 집계한다 (#1488 트렌딩).
      *
      * <p>{@code recommendation} 결과 row 를 {@code recommendation_request} 와 application 레벨 join 으로 묶어

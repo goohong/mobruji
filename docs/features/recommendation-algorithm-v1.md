@@ -30,6 +30,7 @@ last_reviewed: 2026-05-23
 - [x] 매칭 근거(`matchReason`)는 한 줄 한국어 문장으로 사용자에게 노출 가능한 수준이어야 한다 (예: "원곡 키가 사용자 음역대 안에 있음").
 - [x] **점수 신호 분해(`breakdown`)** — Spotify "Why this song?" UX 영감(P2). 가중치 적용 전 raw 신호 5종(`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`, 각 0~1)을 응답에 노출해 fe 14 matchReason 펼침 UX를 backend가 정확히 채우게 한다. 영속 엔티티에는 저장되지 않으므로 `GET /recommendations/{id}` 재조회 경로의 `breakdown`은 `null`.
 - [x] `RecommendationRequest`와 결과는 영속화한다(이력/분석). `excludeSongIds`는 별 join table `recommendation_request_exclude_song`에 영속(PR #74, closes #72/#73).
+- [x] **세션 단위 자동 중복 회피** — opt-in `excludeSessionHistory`(기본 false, 하위호환). `true`면 서버가 같은 `sessionId`의 이전 추천 결과 곡 + 이전 제외/부른 곡을 `excludeSongIds`에 자동 누적 병합해 반복 추천을 방지한다. `/api/v1/recommendations` + `/recommendations/next` 양쪽 적용. 누적 결과는 영속·필터·seed 에 일관 반영(결정성 보존). 출처: #1549.
 
 ### 비기능 요구사항
 - p95 응답 200ms / p99 400ms 이내 (DB 100~수백곡 카탈로그 가정). **임계 단일 진실: `docs/features/recommendation-p95-regression-guard.md` §5-3** (PR #471, closes #273 — 200ms/400ms 단일 진실 박제). 본 spec 은 참조만, 직접 숫자 갱신 금지. 의도된 변화 시 p95-regression-guard §6 baseline 갱신 절차로만 변경 가능. 회귀 가드는 k6 + GH Actions (`scripts/load/recommendation.k6.js` + `.github/workflows/load-test.yml`).
@@ -250,3 +251,9 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **사유 산정**: `rangeFit` 구간별 한국어 — `≥0.7` "아주 잘 맞아요" / `≥0.4` "무난하게 맞아요" / `>0.0` "다소 부담될 수 있어요" / `=0.0` "잘 맞지 않아요". 곡 키 UNKNOWN(`keyMatch < 1.0`)이면 "곡 키 정보가 없어 음역대 적합도를 정확히 알기 어려워요" — 적합도 산정 근거 부재를 그대로 알린다.
   - **알고리즘 영향 없음**: score 산식·가중치·`SeedDeriver` 입력·다양성 후처리 모두 무변경. raw 신호(`rangeFit`)를 응답 표현으로 풀어 노출하는 범위에 그친다.
   - **테스트**: `ScoredRecommendation` 단위(구간별 사유 / UNKNOWN 키 / breakdown null) + `RecommendedSongResponse.from` 매핑(voiceFit·사유 보존 / null 통과) + E2E(POST 응답 voiceFit [0,1]·사유 노출 / GET 재조회 null).
+- 2026-06-03: **세션 단위 자동 중복 회피 — `excludeSessionHistory` opt-in 플래그 (closes #1549)**.
+  - **배경**: 같은 세션에서 "다시" 추천을 반복하면 직전과 같은 곡이 다시 떠 다양성이 떨어졌다. 회피하려면 클라이언트가 직접 이전 결과 곡을 모아 `excludeSongIds` 로 매번 넘겨야 했다 — 상태 관리 부담이 fe 로 넘어가 있었다.
+  - **TO-BE**: `RecommendationCreateRequest` / `NextRecommendationRequest` 에 `excludeSessionHistory: Boolean?`(기본 false) 추가. `true` 면 `RecommendationService.create` 가 같은 `sessionId` 의 (a) 이전 추천 결과 곡(`Recommendation` row) + (b) 이전 제외/부른 곡(`RecommendationRequestEntity.excludeSongIds`) 을 클라이언트 제외 목록에 누적 병합한다. `/next` 흐름은 `SeedSongProfiler.profile(..., excludeSessionHistory)` 로 플래그를 전파해 같은 경로를 탄다.
+  - **쿼리**: `RecommendationRepository.findDistinctRecommendedSongIdsBySessionId` + `RecommendationRequestRepository.findDistinctExcludeSongIdsBySessionId` 각각 `DISTINCT` 1쿼리 — 요청별 lazy collection 접근(N+1) 회피.
+  - **결정성**: 병합 결과를 영속·후보 필터·`SeedDeriver` 입력에 일관 반영한다. 누적 패턴(§9 2026-05-21)과 동일 — 제외 셋이 커지면 seed 가 달라져 다음 결과가 변주된다. 기본 false 이므로 기존 결정성 E2E(같은 입력 반복 → 같은 결과)는 무변경.
+  - **테스트**: `RecommendationSessionHistoryDedupTest` E2E(2회 호출 무중복 / 3회 누적 / 기본 false 결정성 / `/next` 전파) + `RecommendationCreateRequestTest`(플래그 정규화·toCommand 매핑).
