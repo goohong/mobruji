@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.recommendation.domain.ScoreBreakdown;
+import com.mobruji.recommendation.domain.TransposeSuggestion;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
@@ -55,6 +56,17 @@ public class RecommendationScorer {
      */
     static final double MOOD_MAX_DISTANCE = Math.sqrt(2.0);
 
+    /**
+     * 조옮김(transpose) 탐색 범위(반음). 카라오케 기기 통상 키 조절 폭(±6)에 맞춰, 이 안에서만 최적 이동량을 찾는다.
+     */
+    static final int MAX_TRANSPOSE_SEMITONES = 6;
+
+    /**
+     * 조옮김을 제안하는 voiceFit(rangeFit) 임계. 이 값 이상이면 원곡 그대로도 음역대에 무난하다고 보고 제안하지 않는다.
+     * {@link ScoredRecommendation} 의 voiceFit 사유 분기("무난하게 맞아요" 경계)와 동일한 0.4 를 쓴다.
+     */
+    static final double TRANSPOSE_SUGGEST_FIT_THRESHOLD = 0.4;
+
     private final RecommendationProperties recommendationProperties;
 
     public Scored score(
@@ -86,7 +98,9 @@ public class RecommendationScorer {
                 + jitter;
         final ScoreBreakdown breakdown = new ScoreBreakdown(
                 keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit);
-        return new Scored(total, breakdown);
+        final TransposeSuggestion suggestedTranspose = suggestTranspose(
+                song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
+        return new Scored(total, breakdown, suggestedTranspose);
     }
 
     static double voiceRangeFit(final MusicalKey keyOriginal, final int voiceLow, final int voiceHigh) {
@@ -94,6 +108,14 @@ public class RecommendationScorer {
         if (rootMidi < 0) {
             return 0.5; // UNKNOWN key — neutral
         }
+        return voiceRangeFitForRoot(rootMidi, voiceLow, voiceHigh);
+    }
+
+    /**
+     * 키 root MIDI 가 주어졌을 때의 음역 적합도(0~1). {@link #voiceRangeFit}이 위임하며, 조옮김 탐색은
+     * {@code rootMidi} 에 반음 이동량을 더한 값으로 같은 산식을 재사용해 voiceFit 과 비교 가능한 값을 얻는다.
+     */
+    static double voiceRangeFitForRoot(final int rootMidi, final int voiceLow, final int voiceHigh) {
         final int songLow = rootMidi + MusicalKeyMidiResolver.LOW_OFFSET;
         final int songHigh = rootMidi + MusicalKeyMidiResolver.HIGH_OFFSET;
         final int songSpan = songHigh - songLow;
@@ -111,6 +133,47 @@ public class RecommendationScorer {
         final double centerDistance = Math.abs(rootMidi - userCenter);
         final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
         return reachability * centeredness;
+    }
+
+    /**
+     * 키 조옮김(transpose) 제안 (#1544). 원곡 키가 사용자 음역대에 부담스러운(voiceFit 낮은) 곡에 대해,
+     * {@code ±MAX_TRANSPOSE_SEMITONES} 반음 안에서 적합도를 가장 끌어올리는 이동량을 찾는다.
+     *
+     * <p>{@code null} 을 돌려주는 경우(=제안 없음):
+     * <ul>
+     * <li>곡 키가 UNKNOWN — 적합도 산정 근거가 없어 어디로 옮길지 계산할 수 없음.</li>
+     * <li>원곡 그대로도 voiceFit 이 {@link #TRANSPOSE_SUGGEST_FIT_THRESHOLD} 이상 — 굳이 옮길 필요 없음.</li>
+     * <li>±범위 안에서 원곡보다 적합도를 높이는 이동량이 없음.</li>
+     * </ul>
+     *
+     * <p>탐색은 이동 폭이 작은 순(|반음|=1→6)으로 돌며 더 높은 적합도일 때만 갱신한다. 따라서 같은 적합도라면
+     * 더 작은 이동량을, 폭이 같으면 내림(-)을 우선해 결정적으로 한 값을 고른다.
+     */
+    static TransposeSuggestion suggestTranspose(
+            final MusicalKey keyOriginal, final int voiceLow, final int voiceHigh) {
+        final int rootMidi = MusicalKeyMidiResolver.rootMidi(keyOriginal);
+        if (rootMidi < 0) {
+            return null; // UNKNOWN key — 산정 근거 없음
+        }
+        final double originalFit = voiceRangeFitForRoot(rootMidi, voiceLow, voiceHigh);
+        if (originalFit >= TRANSPOSE_SUGGEST_FIT_THRESHOLD) {
+            return null; // 원곡 그대로도 무난
+        }
+        int bestSemitones = 0;
+        double bestFit = originalFit;
+        for (int magnitude = 1; magnitude <= MAX_TRANSPOSE_SEMITONES; magnitude++) {
+            for (final int semitones : new int[]{-magnitude, magnitude}) {
+                final double fit = voiceRangeFitForRoot(rootMidi + semitones, voiceLow, voiceHigh);
+                if (fit > bestFit) {
+                    bestFit = fit;
+                    bestSemitones = semitones;
+                }
+            }
+        }
+        if (bestSemitones == 0) {
+            return null; // 어느 방향으로도 개선되지 않음
+        }
+        return new TransposeSuggestion(bestSemitones, bestFit);
     }
 
     /**
@@ -258,11 +321,20 @@ public class RecommendationScorer {
     /**
      * 점수 계산 결과 — 가중 합산된 {@code total}과 raw 신호 분해를 함께 담는다.
      * 정렬·랭킹은 {@code total}만 사용하고, breakdown은 응답·로깅·디버깅용.
+     * {@code suggestedTranspose}는 voiceFit 낮은 곡의 권장 조옮김(#1544)으로, 없으면 {@code null}.
      */
     public record Scored(
             double total,
-            ScoreBreakdown breakdown
+            ScoreBreakdown breakdown,
+            TransposeSuggestion suggestedTranspose
     ) {
+
+        /**
+         * 조옮김 제안이 없는 호출 편의 생성자(테스트 stub 등). {@code suggestedTranspose} 를 {@code null} 로 둔다.
+         */
+        public Scored(final double total, final ScoreBreakdown breakdown) {
+            this(total, breakdown, null);
+        }
 
         public double voiceRangeFit() {
             return breakdown.rangeFit();

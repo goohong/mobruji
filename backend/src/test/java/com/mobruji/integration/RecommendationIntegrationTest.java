@@ -248,6 +248,84 @@ class RecommendationIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E (#1544): voiceFit 낮은 곡은 suggestedTranspose(반음) + 조옮김 후 voiceFit 이 노출된다")
+    void e2e_transposeSuggestedForLowFitSong() {
+        // given: A_MAJOR(root 69) 한 곡만 시드. 사용자 음역 [50,70](center 60)은 곡 키 중심(69)과 멀어 voiceFit 이 낮다.
+        //        -6 반음 내리면 root 63 → 음역대 중심에 가까워져 적합도가 크게 오른다(0.4 임계 초과).
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(buildSong("높은키곡", "어떤가수", MusicalKey.A_MAJOR, Mood.UPBEAT, "발라드"));
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e08",
+                  "voiceRangeLow": 50,
+                  "voiceRangeHigh": 70,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        final Integer requestId = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                // 원곡 voiceFit 은 낮음(< 0.4) → 조옮김 제안이 채워진다.
+                .body("recommendations[0].voiceFit", lessThanOrEqualTo(0.4f))
+                .body("recommendations[0].suggestedTranspose", equalTo(-6))
+                .body("recommendations[0].transposedVoiceFit", notNullValue())
+                // 조옮김 후 적합도는 원곡보다 높고(임계 초과) [0,1] 범위 안.
+                .body("recommendations[0].transposedVoiceFit", greaterThan(0.4f))
+                .body("recommendations[0].transposedVoiceFit", lessThanOrEqualTo(1.0f))
+                .body("recommendations[0].suggestedTransposeReason", equalTo("6키 내려 부르면 음역대에 더 잘 맞아요"))
+                .extract().path("requestId");
+
+        // 재조회 경로는 breakdown 미영속 → 조옮김 필드도 null.
+        given()
+                .when()
+                .get("/api/v1/recommendations/" + requestId)
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .body("recommendations[0].suggestedTranspose", nullValue())
+                .body("recommendations[0].transposedVoiceFit", nullValue())
+                .body("recommendations[0].suggestedTransposeReason", nullValue());
+    }
+
+    @Test
+    @DisplayName("E2E (#1544): 원곡 그대로 음역대에 무난한 곡은 조옮김 제안이 없다(null)")
+    void e2e_noTransposeWhenFitIsAdequate() {
+        // given: E_MAJOR(root 64) 한 곡. 사용자 음역 [55,75](center 65)은 곡 키 중심과 거의 일치 → voiceFit 높음.
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(buildSong("딱맞는곡", "어떤가수", MusicalKey.E_MAJOR, Mood.UPBEAT, "발라드"));
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e09",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].voiceFit", greaterThanOrEqualTo(0.4f))
+                .body("recommendations[0].suggestedTranspose", nullValue())
+                .body("recommendations[0].transposedVoiceFit", nullValue())
+                .body("recommendations[0].suggestedTransposeReason", nullValue());
+    }
+
+    @Test
     @DisplayName("E2E: 없는 추천 ID는 404")
     void e2e_notFound() {
         given()
