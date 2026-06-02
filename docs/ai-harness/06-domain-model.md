@@ -74,6 +74,8 @@
 | 인증 제공자 | OAuthProvider | `user` | 회원 인증 출처 enum — `KAKAO` / `GOOGLE` / `EMAIL`. `User.provider` 필드. OAuth 2종은 Authorization Code Flow, `EMAIL` 은 비밀번호 해시 + 이메일 인증 |
 | 사용자 프로필 | UserProfile | `user` | 회원의 재방문 prefill 용 선호 영속 (선호 장르 다중 / 선호 분위기 다중 `Mood` / 기본 성별 nullable). `User` 1:1. **음역대는 중복 저장하지 않고** 기존 `VoiceRange`/`VoiceRangeSnapshot` 을 userId owner 로 재사용. 추천 폼 prefill (`GET /users/me/profile`) 로 "재방문 시 재입력 불필요" 보장 (#1491). 엔티티 §5-8 |
 | 회원 인증 가드 | UserAuthGuard | `user` | 회원 전용 endpoint 의 토큰 인증 컴포넌트 (신설). 익명 sessionId 용 `SessionAuthGuard` (ADR-0011) 와 **별 트랙 공존** — 한 endpoint 가 두 인증을 동시에 요구하지 않음. 미인증 호출 시 401. user-authentication-and-profile.md §5-2 |
+| 온보딩 | Onboarding | `user` (web) | 신규(첫 진입) 사용자가 진입부터 **첫 추천 도달**까지 거치는 안내 흐름. 신규 BE 엔티티 없이 기존 `VoiceRange`/`RecommendationRequest`/`AnonymousSession` 을 재사용하고, 완료 여부는 클라이언트(localStorage) 상태로만 추적 (PoC). first-user-onboarding-flow.md |
+| 페르소나 진입 경로 | PersonaEntryPath | `user` (web) | 온보딩 첫 화면에서 사용자가 선택하는 의도별 분기 — `BEGINNER`(입문, P-C) / `PRACTICE`(연습, P-A) / `MOOD`(분위기, P-B). 각 경로가 자식 spec(F1 가이드 측정 / F2 고음 뚫기 / F3 분위기 모드)으로 연결. 페르소나 정의 SoT = user-persona-and-pain-points.md §2. first-user-onboarding-flow.md |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
