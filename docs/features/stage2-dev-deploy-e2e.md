@@ -44,7 +44,7 @@ last_reviewed: 2026-06-02
 - [ ] **브라우저 가능** 항목 → Playwright 를 `PLAYWRIGHT_BASE_URL`=dev 로 실행 (`web-e2e-playwright.md` / `rev-browser-e2e-env.md` 스위트 재사용)
 - [ ] **브라우저 불가** 항목 → 프론트 호출 (API) E2E — `web/lib/api/` 클라이언트 호출 또는 직접 HTTP (`curl` / RestAssured) 를 dev endpoint 대상으로
 - [ ] dev 배포 완료 감지 — `cd-dev.yml` healthcheck green 확인 후 검증 시작 (배포 미완 상태 검증 = false negative 방지)
-- [ ] 통과 → `rev-post-merge-pass` 라벨 + PR 코멘트 `✅ dev 배포 E2E 검증 pass` / 실패 → `regression:dev` 라벨 + revert 후속 이슈 + Discord push
+- [ ] 통과 → `rev-post-merge-pass` 라벨 + PR 코멘트 `✅ dev 배포 E2E 검증 pass` / 실패 → `regression:dev` 라벨 + revert 후속 이슈 + Discord push (**항상 즉시 자동**) → 실제 dev 롤백은 Discord 사용자 확인 게이트 (Q4=(c), §9). rev 자체는 롤백을 수행하지 않음 (read-only)
 - [ ] e2e 불가능 PR (코드 변경 없음) 은 단계 2 후보에서 제외 (skip)
 - [ ] 용어 정정 propagation — "회귀 검토" / "Post-merge audit" → "dev 배포 E2E 검증" (§6 propagation)
 
@@ -74,7 +74,7 @@ last_reviewed: 2026-06-02
 - **`web/playwright.config.ts` / `PLAYWRIGHT_BASE_URL` env 분기 config 작성** — `web-e2e-playwright.md` / `rev-browser-e2e-env.md` 소관.
 - **rev 워크트리 브라우저 binary 셋업 절차** — `rev-browser-e2e-env.md` 소관. 본 spec 은 "무엇을 검증하는가" 를 정의하고, "어느 환경에서 어떻게 구동하는가" 는 그 spec 에 위임.
 - **dev 배포 메커니즘 (`cd-dev.yml`) 자체의 구축/수정** — 이미 실재 (§5-5). 본 spec 은 그 결과물을 검증 대상으로 삼을 뿐.
-- **E2E 실패 시 자동 롤백** — `cd-dev.yml` 은 healthcheck 실패 시 직전 SHA 롤백을 이미 한다. rev 의 배포본 E2E 실패는 healthcheck green 이후 발견되는 **기능 회귀** 이므로 자동 롤백 대상인지 = **오픈 질문 Q4**.
+- **E2E 실패 시 dev 자동 롤백** — `cd-dev.yml` 은 healthcheck 실패 시 직전 SHA 롤백을 이미 한다. rev 의 배포본 E2E 실패는 healthcheck green 이후 발견되는 **기능 회귀** 인데, 이 경우의 dev 롤백은 **자동이 아니라 사용자 확인 게이트** (Q4=(c), §9). rev 는 read-only 이므로 롤백을 직접 수행하지 않고, 알림/`regression:dev` 라벨/revert 후속 이슈만 즉시 자동 발행한다.
 
 ## 5) 설계
 
@@ -126,7 +126,8 @@ dev 배포본 검증 대상 endpoint (예시):
    │    ├─ 브라우저 가능 → PLAYWRIGHT_BASE_URL=dev npx playwright test --grep @smoke
    │    └─ 브라우저 불가 → web/lib/api 호출 또는 curl dev endpoint + 응답 검증
    └─ 통과 → rev-post-merge-pass 라벨 + ✅ 코멘트 → bridge 검색 대상 제외 → loop 종료
-   └─ 실패 → regression:dev 라벨 + revert 후속 이슈 + Discord push
+   └─ 실패 → regression:dev 라벨 + revert 후속 이슈 + Discord push (즉시 자동)
+              └─ dev 롤백? → Discord 사용자 확인 게이트 (Q4=(c)) — rev 직접 수행 X
 ```
 
 **현 `agent.py` task 본문 (교체 대상)**:
@@ -176,22 +177,29 @@ dev 배포 메커니즘은 **이미 실재** — 선행 구축 불요.
 
 ## 8) 오픈 질문
 
-> 결정 필요 — nmae(사용자)가 답하면 §9 결정 로그로 이동. 본 spec 의 핵심 미결 지점.
+> Q1~Q6 모두 2026-06-02 결정 완료 → §9 결정 로그 참조. 신규 미결 발생 시 본 표에 추가.
 
-| # | 질문 | 선택지 | 담당/기한 |
+| # | 질문 | 결정 | 출처 |
 |---|---|---|---|
-| Q1 | dev 배포 trigger / URL 의 canonical 값 | (a) `http://101.79.20.94/` 직접 하드코딩 / (b) env (`PLAYWRIGHT_DEV_URL` / `DEV_BASE_URL`) 주입 — `ncp-dev-deployment.md` 실제 URL 과 동기 | @goohong / impl PR 2 전. 권장 = (b) 하드코딩 회피 |
-| Q2 | 브라우저 가능 vs 브라우저 불가 **분류 기준** | (a) rev sub-agent 가 diff 보고 매번 판단 (휴리스틱) / (b) PR scope 라벨 기반 자동 (`scope:web`=브라우저, `scope:recommendation`/`scope:song`=API) / (c) 변경 파일 경로 기반 (`web/app/**`=브라우저, `backend/**`+`web/lib/api/**`=API) | @goohong / impl PR 2 전 |
-| Q3 | dev 배포 **완료 대기 방식** | (a) GitHub Actions `cd-dev` run 성공 polling (API) / (b) dev healthcheck endpoint 직접 polling (`curl .../actuator/health/liveness`) / (c) 고정 대기 (~5분 후 시작, 현 룰) | @goohong / impl PR 2 전. 권장 = (a) 또는 (b) — 고정 대기는 false negative 위험 |
-| Q4 | dev 배포 E2E **실패 시 자동 롤백** 여부 | (a) 롤백 없음 — `regression:dev` 라벨 + revert 후속 이슈만 (현 단계 2 룰) / (b) rev 가 dev 를 직전 머지 SHA 로 자동 롤백 (`cd-dev.yml` workflow_dispatch + 이전 SHA) / (c) Discord 사용자 확인 후 수동 롤백 | @goohong / impl PR 2 전 |
-| Q5 | 라벨 명 `rev-post-merge-pass` — 재정의 후 rename 여부 | (a) 유지 (배선 대량 변경 회피, 멱등성 표식 의미 충분) / (b) `dev-deploy-e2e-pass` 등으로 rename (bot.py / rev-queue / agent.py / domain-model 동시 갱신) | @goohong / impl PR 3 전. 권장 = (a) |
-| Q6 | `web/playwright.config.ts` 미도입 동안 (브라우저 가능 항목) 처리 | (a) 프론트 호출·HTTP fallback 으로 부분 검증 / (b) 단계 2 자체를 web-e2e-playwright impl PR 1 머지까지 no-op pass | @goohong / impl PR 1 전. 권장 = (a) |
+| Q1 | dev 배포 trigger / URL 의 canonical 값 | **(b) env 주입** (`PLAYWRIGHT_DEV_URL` / `DEV_BASE_URL`) — `ncp-dev-deployment.md` URL 과 동기, 하드코딩 회피 | 2026-06-02 §9 |
+| Q2 | 브라우저 가능 vs 브라우저 불가 **분류 기준** | **(a) rev sub-agent 가 diff 보고 매번 판단** (휴리스틱) | 2026-06-02 §9 |
+| Q3 | dev 배포 **완료 대기 방식** | **(b) dev healthcheck endpoint 직접 polling** (`curl .../actuator/health/liveness`) | 2026-06-02 §9 |
+| Q4 | dev 배포 E2E **실패 시 대응** | **(c) 사용자 확인 후 롤백** — 단, 알림/`regression:dev` 라벨/revert 후속 이슈는 **항상 즉시**, 실제 롤백만 사용자 확인 | 2026-06-02 §9 |
+| Q5 | 라벨 명 `rev-post-merge-pass` — 재정의 후 rename 여부 | **(a) 유지** (배선 대량 변경 회피, 멱등성 표식 의미 충분) | 2026-06-02 §9 |
+| Q6 | `web/playwright.config.ts` 미도입 동안 (브라우저 가능 항목) 처리 | **(a) 프론트 호출·HTTP fallback 으로 부분 검증** | 2026-06-02 §9 |
 
 ## 9) 결정 로그
 
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
 - 2026-06-02: 초안 작성 (status=draft). 사용자 정정 — 단계 2 ("머지 후 회귀 검토") 의 (1) 용어 어색 + (2) 단위 테스트 재실행 = pre-merge rev 중복 무의미 사유로 **폐기 대신 재정의** 지시. 올바른 단계 2 = develop dev 배포 후 **배포본 E2E** (브라우저 가능 = Playwright `PLAYWRIGHT_BASE_URL`=dev / 브라우저 불가 = 프론트 호출·HTTP) 로 통합·배포 회귀 검증. 용어 = "dev 배포 E2E 검증" / "배포본 E2E 점검" ('감사' 금지). 배선 = #1448 (PR #1447) `post_merge_review_requested` event → rev 큐 재사용, rev task 본문만 교체. dev 배포 = `cd-dev.yml` 실재 (선행 구축 불요). 단계 1 유지 / 단계 3 폐기 유지.
+- 2026-06-02: Q1~Q6 결정 (status=draft 유지, impl PR 착수 가능).
+  - **Q1 = (b) env 주입** — dev URL 은 `PLAYWRIGHT_DEV_URL` / `DEV_BASE_URL` 환경 변수로 주입, `ncp-dev-deployment.md` canonical URL 과 동기. 하드코딩 회피.
+  - **Q2 = (a) rev diff 휴리스틱** — 브라우저 가능/불가 분류는 rev sub-agent 가 PR diff 를 보고 매 사이클 판단. 사용자 판단 위임 (확신 부재 — rev 가 실제 변경 성격을 가장 정확히 본다는 점에 기댐). 휴리스틱이 흔들리면 추후 파일 경로 기반(Q2-c)으로 격상 가능.
+  - **Q3 = (b) healthcheck polling** — dev 배포 완료는 `curl .../actuator/health/liveness` green 으로 확인 후 검증 시작. 고정 대기(false negative) 회피.
+  - **Q4 = (c) 사용자 확인 후 롤백** (사용자 "확신 없음 — 판단 위임", nmae 판단). 근거: (1) rev read-only 불변 원칙 (§3 비기능) 과 자동 롤백(b) 충돌, (2) NCP 소형 VM 과부하(#1453) — 무인 자동 롤백 = 추가 deploy thrash 위험, (3) dev = 외부 사용자 없는 dogfooding 환경이라 forward-fix(revert 후속 이슈 → 다음 사이클 자율 수정) 가 일차 경로. **메커니즘 분리**: `regression:dev` 라벨 + revert 후속 이슈 + Discord push 는 실패 시 **항상 즉시** 자동 실행, 실제 dev 롤백만 Discord 사용자 확인 게이트.
+  - **Q5 = (a) 라벨명 유지** — `rev-post-merge-pass` 그대로. 배선(bot.py / rev-queue / agent.py / domain-model) 대량 변경 회피, 멱등성 표식 의미 충분.
+  - **Q6 = (a) HTTP fallback** — `web/playwright.config.ts` 미도입 동안 브라우저 가능 항목은 프론트 호출·HTTP fallback 으로 부분 검증 (단계 2 자체 no-op pass 회피).
 
 ## 10) 관련
 
