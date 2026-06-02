@@ -694,7 +694,7 @@ rm -rf ~/.claude/projects/-Users-goohong-workspace-github-mobruji-be
 ### 왜
 - 본진이 직접 구현하면 1 사이클 turn 이 길어진다 → 다른 3 사이클 launch 가 끊긴다.
 - 본진 context 가 폭증하면 `/clear` 빈도가 늘어나며, `/clear` 직전 doc-check (CLAUDE.md §15) 도 누락 위험이 커진다.
-- 위임은 sub-agent 워크트리 격리 + 코드 변경 트래킹 가능 (PR / git log) 이라 감사 trail 도 확보된다.
+- 위임은 sub-agent 워크트리 격리 + 코드 변경 트래킹 가능 (PR / git log) 이라 이력 추적(audit trail) 도 확보된다.
 
 ### 검증
 - nmae turn 종료 시점에 cycle-status.json 4 워크트리 모두 `in_progress` 또는 `last_completed.completed_at` 이 최근 10 분 안인지 확인.

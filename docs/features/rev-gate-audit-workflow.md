@@ -1,5 +1,5 @@
 ---
-feature: rev-gate-audit workflow (post-merge bypass 감사)
+feature: rev-gate-audit workflow (post-merge bypass 점검)
 slug: rev-gate-audit-workflow
 status: draft
 owner: @goohong
@@ -9,7 +9,7 @@ related_prs: [1322]
 last_reviewed: 2026-05-29
 ---
 
-# rev-gate-audit workflow (post-merge bypass 감사)
+# rev-gate-audit workflow (post-merge bypass 점검)
 
 ## 1) 개요 (What / Why)
 
@@ -17,7 +17,7 @@ last_reviewed: 2026-05-29
 
 본 spec 은 PR #1322 (`rev-gate-required-check-enforcement`) §3-3 의 후속 — 사전 차단 강화 spec 안 "post-merge audit hook" 한 항목만 떼어 workflow 본문 / 트리거 / output / 부수 효과를 상세화한다.
 
-트리거 사고: PR #1318 (2026-05-29) admin override merge — `enforce_admins=false` 우회 + `reviewed:claude` 사후 부착 (3분 차) + head commit check-runs 0건. 사전 차단을 강화하더라도 emergency-hotfix / whitelist / race window 잔존 → 사후 감사 채널 필수.
+트리거 사고: PR #1318 (2026-05-29) admin override merge — `enforce_admins=false` 우회 + `reviewed:claude` 사후 부착 (3분 차) + head commit check-runs 0건. 사전 차단을 강화하더라도 emergency-hotfix / whitelist / race window 잔존 → 사후 점검 채널 필수.
 
 ## 2) 사용자 시나리오
 
@@ -273,7 +273,7 @@ jobs:
 
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
-- **2026-05-29**: 초안 작성 (status=draft). 트리거 — PR #1322 (`rev-gate-required-check-enforcement`) §3-3 의 후속 분리. plan round 8 작업. 사전 차단 (branch protection / rev-gate.yml) 과 사후 감사 (본 workflow) 를 분리 spec 으로 박제하여 책임 경계 명확화 + 작업 PR 단위 분할.
+- **2026-05-29**: 초안 작성 (status=draft). 트리거 — PR #1322 (`rev-gate-required-check-enforcement`) §3-3 의 후속 분리. plan round 8 작업. 사전 차단 (branch protection / rev-gate.yml) 과 사후 점검 (본 workflow) 를 분리 spec 으로 박제하여 책임 경계 명확화 + 작업 PR 단위 분할.
 - **2026-05-29**: §3-3-2 emergency-hotfix 분기 — 우회 자체를 차단하지 않고 "사후 의무 issue 강제" 로 합리화. PR #1322 §3-2 의 정책 (사후 rev 단계 2 의무 트리거) 과 sync.
 - **2026-05-29**: §3-3-3 bypass 분기 — DIGEST + issue 2 채널 동시 push 채택. 사용자 가시화 [[feedback-helper-thread-usage]] 일관성.
 - **2026-05-29**: §3-4 idempotency — workflow 재실행 시 issue 중복 생성 차단 + 기존 issue 에 timestamp 추가. nmae backlog 노이즈 ↓.
