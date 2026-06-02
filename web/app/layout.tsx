@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
 import { BottomNav } from "@/components/nav/BottomNav";
+import { HomeLink } from "@/components/nav/HomeLink";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
@@ -88,6 +89,7 @@ export default function RootLayout({
       */}
       <body className="min-h-full flex flex-col pb-20 md:pb-0">
         <Providers>{children}</Providers>
+        <HomeLink />
         <ThemeToggle />
         <BottomNav />
         <ServiceWorkerRegistrar />
