@@ -33,7 +33,7 @@ class RecommendationRequestEntityCreateTest {
     void create_valid_setsCreatedAtAndExcludeIds() {
         // given / when
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 120, List.of(10L, 20L));
+                "sess-1", 50, 70, Mood.UPBEAT, 120, null, List.of(10L, 20L));
 
         // then
         assertThat(entity.getSessionId()).isEqualTo("sess-1");
@@ -50,7 +50,7 @@ class RecommendationRequestEntityCreateTest {
     @DisplayName("null guard: sessionId가 null이면 NullPointerException")
     void create_nullSessionId_throws() {
         assertThatThrownBy(() -> RecommendationRequestEntity.create(
-                null, 50, 70, Mood.UPBEAT, 120, List.of()))
+                null, 50, 70, Mood.UPBEAT, 120, null, List.of()))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("sessionId");
     }
@@ -59,7 +59,7 @@ class RecommendationRequestEntityCreateTest {
     @DisplayName("null guard: excludeSongIds가 null이면 NullPointerException")
     void create_nullExcludeSongIds_throws() {
         assertThatThrownBy(() -> RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 120, null))
+                "sess-1", 50, 70, Mood.UPBEAT, 120, null, null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("excludeSongIds");
     }
@@ -68,7 +68,7 @@ class RecommendationRequestEntityCreateTest {
     @DisplayName("invariant: voiceRangeLow > voiceRangeHigh 면 IllegalArgumentException")
     void create_invertedRange_throws() {
         assertThatThrownBy(() -> RecommendationRequestEntity.create(
-                "sess-1", 80, 60, Mood.UPBEAT, 120, List.of()))
+                "sess-1", 80, 60, Mood.UPBEAT, 120, null, List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("voiceRangeLow")
                 .hasMessageContaining("voiceRangeHigh");
@@ -80,7 +80,7 @@ class RecommendationRequestEntityCreateTest {
         // 단일 노트 voice range도 영속 가능해야 한다 (특수 케이스: 분석 실패 fallback 등).
         // 가드가 `<` 가 아닌 `>` 라는 invariant 보존.
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "sess-1", 60, 60, Mood.UPBEAT, 120, List.of());
+                "sess-1", 60, 60, Mood.UPBEAT, 120, null, List.of());
 
         assertThat(entity.getVoiceRangeLow()).isEqualTo(60);
         assertThat(entity.getVoiceRangeHigh()).isEqualTo(60);
@@ -92,7 +92,7 @@ class RecommendationRequestEntityCreateTest {
         // 도메인 docstring(v2 #218): "nullable — 미입력 시 mood 기반 default 사용".
         // null 거부로 가드가 좁아지면 회귀.
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, null, List.of());
+                "sess-1", 50, 70, Mood.UPBEAT, null, null, List.of());
 
         assertThat(entity.getPreferredBpm()).isNull();
     }
@@ -101,7 +101,7 @@ class RecommendationRequestEntityCreateTest {
     @DisplayName("preferredBpm 범위 (회귀 가드): 30 미만이면 IllegalArgumentException")
     void create_preferredBpmBelowMin_throws() {
         assertThatThrownBy(() -> RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 29, List.of()))
+                "sess-1", 50, 70, Mood.UPBEAT, 29, null, List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("preferredBpm");
     }
@@ -110,7 +110,7 @@ class RecommendationRequestEntityCreateTest {
     @DisplayName("preferredBpm 범위 (회귀 가드): 300 초과면 IllegalArgumentException")
     void create_preferredBpmAboveMax_throws() {
         assertThatThrownBy(() -> RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 301, List.of()))
+                "sess-1", 50, 70, Mood.UPBEAT, 301, null, List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("preferredBpm");
     }
@@ -119,9 +119,9 @@ class RecommendationRequestEntityCreateTest {
     @DisplayName("preferredBpm 경계 (회귀 가드): 30 / 300 정확히 허용")
     void create_preferredBpmBoundary_allowed() {
         final RecommendationRequestEntity low = RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 30, List.of());
+                "sess-1", 50, 70, Mood.UPBEAT, 30, null, List.of());
         final RecommendationRequestEntity high = RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 300, List.of());
+                "sess-1", 50, 70, Mood.UPBEAT, 300, null, List.of());
 
         assertThat(low.getPreferredBpm()).isEqualTo(30);
         assertThat(high.getPreferredBpm()).isEqualTo(300);
@@ -134,7 +134,7 @@ class RecommendationRequestEntityCreateTest {
         final List<Long> mutable = new ArrayList<>();
         mutable.add(100L);
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "sess-1", 50, 70, Mood.UPBEAT, 120, mutable);
+                "sess-1", 50, 70, Mood.UPBEAT, 120, null, mutable);
 
         // when: 원본을 변형
         mutable.add(200L);

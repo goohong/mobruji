@@ -64,6 +64,7 @@ public class RecommendationService {
                         createRecommendationCommand.voiceRangeHigh(),
                         createRecommendationCommand.mood(),
                         createRecommendationCommand.preferredBpm(),
+                        createRecommendationCommand.ageGroup(),
                         excludeSongIds));
 
         // 후보 곡 단계에서 excludeSongIds 필터링.
@@ -87,6 +88,7 @@ public class RecommendationService {
                             savedRequest.getVoiceRangeHigh(),
                             savedRequest.getMood(),
                             savedRequest.getPreferredBpm(),
+                            savedRequest.getAgeGroup(),
                             random);
                     return new ScoredSong(song, scored);
                 })
@@ -268,6 +270,7 @@ public class RecommendationService {
                 savedRequest.getVoiceRangeHigh(),
                 savedRequest.getMood(),
                 savedRequest.getPreferredBpm(),
+                savedRequest.getAgeGroup(),
                 excludeSongIds);
         final String inputHash = SeedDeriver.hashHex16(
                 savedRequest.getSessionId(),
@@ -275,6 +278,7 @@ public class RecommendationService {
                 savedRequest.getVoiceRangeHigh(),
                 savedRequest.getMood(),
                 savedRequest.getPreferredBpm(),
+                savedRequest.getAgeGroup(),
                 excludeSongIds);
         return new SeedContext(seed, inputHash);
     }

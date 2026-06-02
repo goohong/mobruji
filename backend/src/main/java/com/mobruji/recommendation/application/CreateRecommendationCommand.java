@@ -3,6 +3,7 @@ package com.mobruji.recommendation.application;
 import java.util.List;
 import java.util.Objects;
 
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.song.domain.Mood;
 
 /**
@@ -14,6 +15,9 @@ import com.mobruji.song.domain.Mood;
  *
  * <p>{@code preferredBpm}은 v2(#218)에서 도입된 사용자 선호 BPM 입력(옵션, nullable).
  * null이면 mood 기반 default BPM으로 폴백한다 ({@code RecommendationProperties.Tempo.moodDefaultBpm}).
+ *
+ * <p>{@code ageGroup}은 #1487에서 도입된 연령대 입력(옵션, nullable). null이면 generationFit 신호가 0 이 되어
+ * 랭킹에 영향이 없다.
  */
 public record CreateRecommendationCommand(
         String sessionId,
@@ -21,6 +25,7 @@ public record CreateRecommendationCommand(
         int voiceRangeHigh,
         Mood mood,
         Integer preferredBpm,
+        AgeGroup ageGroup,
         List<Long> excludeSongIds
 ) {
 

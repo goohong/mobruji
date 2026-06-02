@@ -65,6 +65,14 @@ public class RecommendationRequestEntity {
     @Column(name = "preferred_bpm")
     private Integer preferredBpm;
 
+    /**
+     * #1487에서 추가된 요청자 연령대. nullable — 미입력 시 generationFit 신호가 0 이 되어 랭킹에 영향이 없다.
+     * 결정성 seed 입력에도 포함된다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "age_group", length = 16)
+    private AgeGroup ageGroup;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -91,6 +99,7 @@ public class RecommendationRequestEntity {
             final int voiceRangeHigh,
             final Mood mood,
             final Integer preferredBpm,
+            final AgeGroup ageGroup,
             final List<Long> excludeSongIds) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(excludeSongIds, "excludeSongIds must not be null");
@@ -110,6 +119,7 @@ public class RecommendationRequestEntity {
                 voiceRangeHigh,
                 mood,
                 preferredBpm,
+                ageGroup,
                 LocalDateTime.now(),
                 new ArrayList<>(excludeSongIds));
     }

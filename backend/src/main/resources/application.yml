@@ -83,6 +83,7 @@ recommendation:
     mood: 0.3
     popularity: 0.1
     tempo-match: 0.1
+    generation: 0.15
   diversity:
     max-same-artist: 2
     max-same-genre: 4
@@ -100,6 +101,19 @@ recommendation:
       GROOVY: 110
       NOSTALGIC: 90
     fallback-bpm: 110
+  # #1487 generationFit 신호 설정.
+  # distance-tolerance-years: |songReleaseYear - representativeYear|가 이 값 이상이면 0, 미만이면 선형 감쇠.
+  # representative-year: 연령대별 "대표 시기"(그 세대가 즐겨 부르는 곡이 많이 나온 시기 추정값).
+  #   곡 발매연도가 이 값에 가까울수록 가산. 연령대 미입력 시 generationFit=0(랭킹 무영향).
+  generation:
+    distance-tolerance-years: 15
+    representative-year:
+      TEENS: 2022
+      TWENTIES: 2015
+      THIRTIES: 2005
+      FORTIES: 1995
+      FIFTIES: 1985
+      SIXTIES_PLUS: 1975
   result-count: 10
   jitter-magnitude: 0.01
   # spec §3 비기능 — 결정성: 같은 입력 → 같은 결과.
