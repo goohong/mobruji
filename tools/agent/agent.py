@@ -438,7 +438,9 @@ user_cycle_hint: {cycle_hint}
 
 cycle 결정 규칙:
 - user_cycle_hint 가 "auto" 가 아니면 (사용자 명시 위임) → **그 cycle 강제 사용, 판단 X**.
-- "auto" 이면 summary + description 보고 적절한 cycle (be / fe / rev / plan) 판단.
+- "auto" 이면 summary + description 보고 적절한 cycle (be / fe / rev / plan) 판단. 이때:
+  - **중간 규모 이상**(신규 도메인 / 외부 연동 / 다중 PR 예상 / 새 엔드포인트+UI 동시 / 아직 Feature Spec 없는 큰 기능)은 먼저 **plan 사이클**에 위임해 `docs/features/` spec 을 설계하게 한다 (CLAUDE.md 기능기획 권장 — 설계 먼저). plan 의 spec 이 선 후 be/fe 가 구현. delegation_reason 에 "설계 선행" 명시.
+  - 단순 추가/수정/버그픽스/문구·필드 1~2개는 plan 거치지 말고 바로 be/fe.
 
 처리 (#1388 — 즉시 launch 폐지, 큐 적재):
 1. 위 규칙으로 cycle 결정.
