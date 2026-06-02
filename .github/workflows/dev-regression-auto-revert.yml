@@ -1,0 +1,162 @@
+name: dev-regression-auto-revert
+
+# dev 배포 E2E 회귀(단계 2) 자동 revert 배선 — spec: docs/features/dev-deploy-auto-revert.md (#1463).
+#
+# 흐름:
+#   rev sub-agent 가 단계 2(dev 배포 E2E 검증)에서 dev 배포본 회귀 발견 →
+#   머지된 원본 PR 에 `regression:dev` 라벨 부착 → 본 workflow trigger →
+#   회귀 커밋(squash merge SHA) git revert → revert PR 자동 생성(base develop) →
+#   원본 PR 에 cross-link 코멘트 + `dev-revert-opened` 멱등 마커.
+#   revert PR 머지는 기존 rev+nmae 흐름이 책임 (본 workflow 는 "자동 생성까지만").
+#
+# 보안: pull_request_target 는 secret 접근 가능하므로 PR head 코드를 절대
+#   checkout/실행하지 않는다. develop 만 checkout 하고 이미 머지된 커밋의
+#   git revert + gh CLI 만 실행한다.
+#
+# 한계: GITHUB_TOKEN 으로 만든 PR 은 다른 workflow(rev-gate 등)를 자동 trigger
+#   하지 않는다. REVERT_PAT secret 이 있으면 그것으로 PR 을 만들어 정상 trigger,
+#   없으면 GITHUB_TOKEN 으로 만들고 라벨을 명시 부착(rev 는 gh pr list 로 발굴).
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# 같은 PR 에 대한 중복 실행 직렬화 (라벨 재부착 등).
+concurrency:
+  group: auto-revert-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-revert:
+    # regression:dev 라벨이 '머지된' PR 에 부착될 때만.
+    if: >-
+      github.event.label.name == 'regression:dev' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      # PAT 우선 — 있으면 revert PR 이 rev-gate 등 정상 trigger. 없으면 GITHUB_TOKEN.
+      GH_TOKEN: ${{ secrets.REVERT_PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Idempotency guard — 이미 revert 열렸으면 skip
+        id: guard
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            if (labels.includes('dev-revert-opened')) {
+              core.notice(`PR #${process.env.PR_NUMBER} 는 이미 dev-revert-opened — skip.`);
+              core.setOutput('skip', 'true');
+              return;
+            }
+            if (!process.env.MERGE_SHA) {
+              core.warning('merge_commit_sha 부재 — revert 불가, skip.');
+              core.setOutput('skip', 'true');
+              return;
+            }
+            core.setOutput('skip', 'false');
+
+      - name: Checkout develop (PR head 아님 — 보안)
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ secrets.REVERT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: git revert + push revert 브랜치
+        if: steps.guard.outputs.skip == 'false'
+        id: revert
+        run: |
+          set -euo pipefail
+          git config user.name "mobruji-bot"
+          git config user.email "noreply@anthropic.com"
+          REVERT_BRANCH="auto-revert/pr-${PR_NUMBER}-dev-regression"
+          git checkout -b "$REVERT_BRANCH" origin/develop
+          # squash merge = 단일 부모 커밋 → -m 불요. 충돌 시 비제로 종료.
+          if ! git revert --no-edit "$MERGE_SHA"; then
+            git revert --abort || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push origin "$REVERT_BRANCH"
+          echo "conflict=false" >> "$GITHUB_OUTPUT"
+          echo "branch=$REVERT_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: 충돌 시 — 수동 revert 알림 후 종료
+        if: steps.guard.outputs.skip == 'false' && steps.revert.outputs.conflict == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const n = Number(process.env.PR_NUMBER);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: n,
+              body: `⚠️ **자동 revert 충돌** — dev 배포 E2E 회귀(\`regression:dev\`) 자동 revert 가 `
+                + `${process.env.MERGE_SHA.slice(0,8)} 되돌리는 중 충돌했습니다. 수동 revert 가 필요합니다.`,
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: n,
+              labels: ['dev-revert-conflict'],
+            }).catch(e => core.warning(`label add 실패: ${e.message}`));
+
+      - name: revert PR 생성 + 원본 PR cross-link
+        if: steps.guard.outputs.skip == 'false' && steps.revert.outputs.conflict == 'false'
+        uses: actions/github-script@v7
+        env:
+          REVERT_BRANCH: ${{ steps.revert.outputs.branch }}
+        with:
+          script: |
+            const n = Number(process.env.PR_NUMBER);
+            const branch = process.env.REVERT_BRANCH || `auto-revert/pr-${n}-dev-regression`;
+            const title = process.env.PR_TITLE || '';
+
+            // 원본 PR 의 type:* / scope:* 라벨 복사 + 마커.
+            const orig = (context.payload.pull_request.labels || []).map(l => l.name);
+            const carried = orig.filter(l => l.startsWith('type:') || l.startsWith('scope:'));
+            const revertLabels = [...new Set([...carried, 'ai-generated', 'ai:claude', 'dev-revert'])];
+
+            const body = [
+              `## 자동 revert (dev 배포 E2E 회귀)`,
+              ``,
+              `원본 PR #${n} 이(가) develop dev 배포 후 단계 2 dev 배포 E2E 검증에서 회귀(\`regression:dev\`)로 판정되어 자동 생성된 revert PR 입니다.`,
+              ``,
+              `- 되돌린 커밋: \`${process.env.MERGE_SHA}\``,
+              `- 머지 후 cd-dev 가 정상 코드로 dev 를 재배포합니다.`,
+              `- 머지는 기존 rev 단계 1 + nmae 흐름이 책임집니다 (본 PR 은 자동 "생성"만).`,
+              ``,
+              `spec: docs/features/dev-deploy-auto-revert.md / stage2-dev-deploy-e2e.md §9 (Q4=b)`,
+              ``,
+              `🤖 Generated with [Claude Code](https://claude.com/claude-code)`,
+            ].join('\n');
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              base: 'develop', head: branch,
+              title: `revert: ${title} (dev 배포 E2E 회귀 #${n})`,
+              body,
+            });
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: pr.number, labels: revertLabels,
+            }).catch(e => core.warning(`revert PR label 실패: ${e.message}`));
+
+            // 원본 PR cross-link 코멘트 + 멱등 마커.
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: n,
+              body: `🔴 **dev 배포 E2E 회귀** — 자동 revert PR #${pr.number} 를 생성했습니다. `
+                + `rev 단계 1 통과 + 머지 시 cd-dev 가 dev 를 정상 코드로 재배포합니다.`,
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: n, labels: ['dev-revert-opened'],
+            }).catch(e => core.warning(`marker label 실패: ${e.message}`));
+
+            core.notice(`revert PR #${pr.number} 생성 (원본 #${n}).`);
