@@ -374,10 +374,11 @@ REV_POST_MERGE_AUDIT_INJECT_TEMPLATE: Final[str] = (
     "develop deploy 후 시나리오 재실행 (spec docs/features/rev-e2e-2-stages.md §3-2). "
     "Post-merge audit pass 시 라벨 `rev-post-merge-pass` 부여."
 )
-# Discord push template.
+# Discord push template (#1447 — 로그형 → narrative, '감사' 금지).
 REV_POST_MERGE_AUDIT_DISCORD_TEMPLATE: Final[str] = (
-    "🔍 rev post-merge audit trigger — PR {pr_numbers} "
-    "(Post-merge audit (단계 2) nmae inject)"
+    "🔍 PR {pr_numbers} 이(가) develop 에 머지됐으므로, dev 환경 회귀가 없는지 "
+    "머지 후 코드 리뷰(rev 단계 2)를 진행합니다. rev 큐에 적재했고, 결과는 rev forum 에서 "
+    "확인하실 수 있습니다."
 )
 # gh CLI 실행 timeout (#1008). 네트워크 hang 시 loop block 방어.
 REV_POST_MERGE_AUDIT_GH_TIMEOUT_SECONDS: Final[int] = 30
@@ -5113,9 +5114,8 @@ async def rev_post_merge_audit_loop(
         logger.info("rev_post_merge_audit_loop disabled (poll_interval<=0)")
         return
 
-    inject_session = inject_target.split(":", 1)[0]
+    # (#1447) tmux inject 폐기 → event 발행. inject_session/missing_session 가드 불요.
     last_inject_at: dict[int, float] = {}
-    missing_session_warned = False
     missing_channel_warned = False
 
     if candidate_fetcher is None:
@@ -5150,19 +5150,17 @@ async def rev_post_merge_audit_loop(
                 await asyncio.sleep(poll_interval)
                 continue
 
-            if not tmux_has_session(inject_session):
-                if not missing_session_warned:
-                    logger.warning(
-                        "rev post-merge audit: tmux session 부재 — skip (target=%s)",
-                        inject_target,
-                    )
-                    missing_session_warned = True
-                await asyncio.sleep(poll_interval)
-                continue
-            missing_session_warned = False
-
-            inject_msg = format_rev_post_merge_inject(fresh)
-            tmux_inject_text(inject_target, inject_msg)
+            # (#1447) tmux inject (nmae STRICT 룰상 무시 → 리뷰 영영 안 돎) 폐기.
+            # PR 별로 post_merge_review_requested event 발행 → agent 가 rev 큐에 적재
+            # → dispatcher 가 rev 실행 → rev 가 dev 회귀 검토 후 rev-post-merge-pass 부여
+            # → 다음 polling 부터 검색 대상에서 빠져 loop 자연 종료. enqueue 는 멱등
+            # (rev-postmerge-{num} 중복 적재 no-op)이라 라벨 부여 전 재발행돼도 안전.
+            for pr in fresh:
+                append_agent_event("post_merge_review_requested", {
+                    "pr_number": pr,
+                    "pr_url": f"https://github.com/goohong/mobruji/pull/{pr}",
+                    "pr_title": "",
+                })
 
             channel = client.get_channel(digest_channel_id)
             if channel is None:

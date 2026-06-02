@@ -200,6 +200,8 @@ AGENT_EVENT_KINDS: frozenset[str] = frozenset({
     "subagent_completed",
     # Phase E (2026-05-29) — 사용자 적재 directive → cycle 분배 + launch_subagent.
     "directive_approved",
+    # (#1447) bridge merge 감지 loop → post-merge 코드 리뷰(단계 2)를 rev 큐에 적재.
+    "post_merge_review_requested",
 })
 
 
@@ -360,6 +362,46 @@ async def handle_pr_merged(payload: dict[str, Any]) -> None:
     tc.set_directive_forum_status(str(directive_id), "completed", pr_url=pr_url or "")
 
 
+async def handle_post_merge_review_requested(payload: dict[str, Any]) -> None:
+    """(#1447) bridge 의 merge 감지 loop 가 요청한 post-merge 코드 리뷰(단계 2)를
+    rev 큐에 적재 — dispatcher 가 rev sub-agent 를 실행한다.
+
+    이전엔 nmae tmux pane 에 inject 했으나 nmae STRICT 룰상 무시됐고, 리뷰가
+    영영 안 돌아 15분마다 무한 재알림하던 사고 fix (사용자 정정 2026-06-02:
+    "review 가 안 됐으면 review 를 실행하게 고쳐야지"). rev 가 dev 회귀 검토 후
+    `rev-post-merge-pass` 라벨을 부여하면 bridge 검색 대상에서 빠져 loop 자연 종료.
+    """
+    pr_number = payload.get("pr_number")
+    if not pr_number:
+        logger.warning("post_merge_review_requested: pr_number 누락 — skip payload=%s", payload)
+        return
+    pr_url = payload.get("pr_url", "")
+    pr_title = payload.get("pr_title", "")
+    directive_id = f"rev-postmerge-{pr_number}"
+    task = (
+        f"PR #{pr_number} ({pr_title}) 이(가) develop 에 머지됐습니다 — 머지 후 회귀 검토(단계 2).\n"
+        f"절차: 최신 develop 을 checkout 해 이 PR 관련 테스트/시나리오를 재실행하고 dev 환경 회귀가 없는지 확인.\n"
+        f"검토 완료 후 **반드시** `gh pr edit {pr_number} -R goohong/mobruji --add-label rev-post-merge-pass` 로 라벨 부여 "
+        f"(이 라벨이 붙어야 재알림 loop 가 멈춥니다). 회귀 발견 시: 후속 이슈 등록 + 코멘트로 명시하되 라벨은 부여(검토 완료 표시).\n"
+        f"구현(코드 수정) 금지 — 검토만. PR URL: {pr_url}"
+    )
+    try:
+        import tools_queue as tq
+        result = tq.enqueue_directive(
+            cycle="rev",
+            directive_id=directive_id,
+            title=f"머지 후 회귀 검토 — PR #{pr_number}",
+            task=task,
+            thread_id="",
+        )
+        logger.info(
+            "post_merge_review_requested: rev 큐 적재 PR #%s → %s",
+            pr_number, result.get("enqueued"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("post_merge_review_requested 적재 실패 PR #%s: %r", pr_number, exc)
+
+
 async def handle_subagent_completed(payload: dict[str, Any]) -> None:
     cycle = payload.get("cycle")
     if cycle:
@@ -486,6 +528,8 @@ HANDLERS = {
     "subagent_completed": handle_subagent_completed,
     # Phase E (2026-05-29) — 사용자 적재 directive 처리
     "directive_approved": handle_directive_approved,
+    # (#1447) bridge → post-merge 코드 리뷰 적재
+    "post_merge_review_requested": handle_post_merge_review_requested,
 }
 
 
