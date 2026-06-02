@@ -62,4 +62,9 @@ spotless {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// (#1453) 소형 NCP VM(2vCPU/3.9GB, swap 1GB) 에서 be sub-agent 가 test 를 돌릴 때
+	// 병렬 fork × 무제한 heap 이 swap thrash(load 29, ssh hang)를 유발했다. test fork 를
+	// 단일·heap 상한으로 묶어 피크 메모리를 경계한다. CI(여유 RAM)에서도 안전·결정적.
+	maxParallelForks = 1
+	maxHeapSize = '512m'
 }
