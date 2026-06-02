@@ -218,8 +218,13 @@ def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
             })
         enqueue_directive(
             "rev", did, f"rev 코드 리뷰 — PR #{num}",
-            f"PR #{num} (branch {branch}) 3단계 e2e 코드 리뷰 + 품질 검증 후 통과 시 "
-            f"`gh pr edit {num} --add-label reviewed:claude`.\n"
+            f"PR #{num} (branch {branch}) 코드 리뷰 + 품질 검증.\n"
+            f"**0단계 (#1518) — 승인 전 CI 확인 필수**: 먼저 `gh pr checks {num}` 로 필수 체크"
+            f"(build-and-test / lint-typecheck-build 등) 상태를 확인한다. **하나라도 fail 이면 "
+            f"reviewed:claude 부여 절대 금지** — 대신 `❌ rev fail: <실패 체크명 / 원인 요약>` 코멘트 + "
+            f"빌드/테스트 깨짐 내용으로 후속 이슈 등록(`gh issue create`) 후 종료(머지 보류). CI 가 "
+            f"green 일 때만(아직 진행 중이면 완료까지 대기) 아래 검토·승인을 진행한다.\n"
+            f"검토 + 품질 검증 통과 시 `gh pr edit {num} --add-label reviewed:claude`.\n"
             f"**중요 — rev-gate 머지 게이트 (#1499)**: 이 PR 이 type:fix/feat + scope:web/backend 면 "
             f"reviewed:claude 라벨만으로는 부족하고, PR 코멘트에 **정확히 다음 문자열 중 하나**가 있어야 머지된다 "
             f"(rev-gate.yml 가 정규식으로 검사):\n"
