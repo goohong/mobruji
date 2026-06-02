@@ -60,8 +60,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // THEME_INIT_SCRIPT 가 hydration 직전에 root html 의 className 에 dark
+    // 클래스를 동적으로 추가/제거한다. server render className 과 hydration 시점
+    // className 이 다르므로 React 가 mismatch 경고를 띄우거나 일부 환경에서
+    // className 을 server 버전으로 덮어써 다크 클래스가 사라지는 회귀가 있다
+    // (이슈 #1170). suppressHydrationWarning 으로 이 element 한정 mismatch 경고를
+    // silence 한다 — next-themes 등 표준 패턴.
     <html
       lang="ko"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>

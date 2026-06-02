@@ -5,12 +5,14 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.mobruji.user.domain.AnonymousSession;
+import com.mobruji.user.domain.SessionIdPatterns;
 import com.mobruji.user.infrastructure.AnonymousSessionRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +52,15 @@ public class SessionAuthGuard {
 
     private static final String HEADER_NAME = "X-Session-Id";
 
+    /**
+     * UUIDv4 형식 가드용 컴파일된 regex.
+     *
+     * <p>{@link SessionIdPatterns#UUID_V4} 와 동일한 정규식이며 매 호출마다 컴파일하지 않도록 캐시한다.
+     * legacy {@code sess_<ts>_<rand>} 형식 (PR #991 이전 fallback) / 대문자 hex / 임의 문자열 등을
+     * verify 진입 시점에 차단해 *Request DTO 의 {@code @Pattern} 400 으로 도달하기 전 401 로 일관화.
+     */
+    private static final Pattern SESSION_ID_UUID_V4_PATTERN = Pattern.compile(SessionIdPatterns.UUID_V4);
+
     private final AnonymousSessionRepository anonymousSessionRepository;
     private final SessionActivityTracker sessionActivityTracker;
     private final Duration ttl;
@@ -72,6 +83,14 @@ public class SessionAuthGuard {
         if (presentedSessionId == null || presentedSessionId.isBlank()) {
             log.warn("session-bound endpoint 접근 거부 — {} 헤더 누락", HEADER_NAME);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "missing session id");
+        }
+        // sessionId 형식 가드 — ADR-0011 client UUIDv4 발급 전제. legacy `sess_<ts>_<rand>` (PR #991 이전
+        // fallback) / 대문자 hex / 임의 문자열은 verify 진입 시점에 401 로 차단해 *Request DTO
+        // {@code @Pattern} 400 으로 가는 우회 경로를 막는다. invalid format 은 정상 호출자가 아니므로
+        // bootstrap 옵션 (a) 의 "행 없으면 통과" 도 적용하지 않는다.
+        if (!SESSION_ID_UUID_V4_PATTERN.matcher(pathSessionId).matches()) {
+            log.warn("session-bound endpoint 접근 거부 — path sessionId 형식 불일치");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid session id format");
         }
         final byte[] expected = pathSessionId.getBytes(StandardCharsets.UTF_8);
         final byte[] presented = presentedSessionId.getBytes(StandardCharsets.UTF_8);

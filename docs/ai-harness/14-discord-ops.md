@@ -79,7 +79,7 @@ gh secret set DISCORD_WEBHOOK_URL --repo goohong/mobruji
 ## 5) 운영 시 유의
 
 - **하드코딩 금지**: webhook URL은 secret으로만. `.github/workflows/`에 URL 박지 말 것 (보호 영역).
-- **노이즈 관리**: 알림이 너무 많아지면 `on:` 트리거에서 빼거나 `if:` 조건으로 라벨/브랜치 필터링 추가. 예: `if: contains(github.event.pull_request.labels.*.name, 'needs-human-review')` 만 발송하도록 좁히기.
+- **노이즈 관리**: 알림이 너무 많아지면 `on:` 트리거에서 빼거나 `if:` 조건으로 라벨/브랜치 필터링 추가. 예: `if: contains(github.event.pull_request.labels.*.name, 'type:release')` 만 발송하도록 좁히기 (2026-05-28 `needs-human-review` 라벨 폐지).
 - **민감정보**: 이슈/PR 제목·본문에 secret/토큰/사용자 음역대 원문이 들어가지 않도록 주의 (`docs/ai-harness/04-security-policy.md`). 알림에 그대로 노출된다.
 - **장애 시**: Discord webhook 자체 장애나 GitHub Actions 큐 지연 가능. 알림은 "best-effort 모니터링"이고 단일 SoT 아님. 진짜 상태는 GitHub에서 확인.
 
@@ -205,7 +205,7 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 
 - `DISCORD_BOT_TOKEN` 등 시크릿 키는 **automation 금지** (자동 diff 알림에도 값 포함 금지).
 - 운영자가 secret 저장소 (1Password / NCP secret 등) 에서 직접 복사·붙여넣기.
-- 시크릿 키가 추가/rotation 된 PR 은 `needs-human-review` 라벨 + 본문에 운영자 액션 명시 의무.
+- 시크릿 키가 추가/rotation 된 PR 은 본문에 운영자 액션 명시 의무 (rev sub-agent 가 review 대행, 2026-05-28 `needs-human-review` 라벨 폐지).
 
 ### 9-4) drift 자동 감지 후보 (다음 사이클)
 
@@ -268,13 +268,20 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 | 채널 이름 | env 변수 | channel id | 사용 시점 |
 |---|---|---|---|
 | #모부르지 | `MOBRUJI_CHANNEL_ID` | 1506925497651560458 | 사용자 ↔ helper 양방향. bot auto-ack + helper 본답 + AskUser push |
-| #모부르지-지시 | `DIRECTIVE_BOARD_CHANNEL_ID` | (별도 신설) | 사용자 지시 directive-board. `--directive-board` mode (§helper-directive-board) |
-| #모부르지-be | `BE_CHANNEL_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
-| #모부르지-fe | `FE_CHANNEL_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
-| #모부르지-rev | `REV_CHANNEL_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 3단계 e2e 진행 |
-| #모부르지-plan | `PLAN_CHANNEL_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
+| #모부르지-지시 (forum) | `DIRECTIVE_BOARD_FORUM_ID` | 1507992370044600442 | 사용자 지시 directive-board. event-driven (PR #1129) — `directive_append.sh` / `directive_status.sh` 호출 |
+| #모부르지-be (forum) | `BE_CHANNEL_ID` / `BE_FORUM_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
+| #모부르지-fe (forum) | `FE_CHANNEL_ID` / `FE_FORUM_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
+| #모부르지-rev (forum) | `REV_CHANNEL_ID` / `REV_FORUM_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 2단계 e2e 진행 (🟡 Pre-merge review / 🔵 Post-merge audit) |
+| #모부르지-plan (forum) | `PLAN_CHANNEL_ID` / `PLAN_FORUM_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
 | #모부르지-digest | `DIGEST_CHANNEL_ID` | 1507617571384328312 | cron digest 본체 (5분 주기 4 사이클 aggregate) + cross-cycle decision |
 | #모부르지-알림 / -alert | `ALERT_CHANNEL_ID` | (별도) | cycle idle / future-ts ERROR / Claude usage 임계 |
+
+> **2026-05-28 정리 (이슈 #1190, directive 1508005814928019550)**: 구 텍스트 채널
+> `DIRECTIVE_BOARD_CHANNEL_ID` env 는 PR #1129 event-driven 전환으로 폐기 — `.env.example`
+> 에서 삭제됨. 사이클 채널 id (BE/FE/REV/PLAN_CHANNEL_ID) 는 forum 으로 전환 완료
+> 되었으며 같은 channel id 가 forum type 으로 운영됨. `discord-reply.sh --cycle-channel`
+> 은 forum adapter (PR #1155) 가 자동 감지. Discord UI 측 잔존 텍스트 채널 archive /
+> delete 는 사용자 결정 영역.
 
 ### actor 별 채널 사용 룰
 
@@ -490,9 +497,63 @@ bash /home/mobruji/.mobruji/discord-reply.sh \
 
 관련 룰: `actors/nmae.md §11-6` + 메모리 `[[feedback-nmae-forum-channel-enforce]]` `[[feedback-nmae-per-cycle-channel]]` `[[feedback-nmae-directive-board-update-flow]]`.
 
+### 8-7) Placeholder thread_id 가드 + `--digest` 단발 모드 fallback 종착점
+
+> **SoT**: `docs/features/cycle-forum-placeholder-guard.md §3` + §5-4 sequence. 본 sub-section 은 14-discord-ops 의 §8 forum mode 와 fallback chain 의 cross-ref 만 박제 — 가드 본문은 spec 우선.
+
+`~/.mobruji/last-launch-thread.txt` (그리고 친구 `helper-current-thread.txt`) 에 **Discord snowflake 가 아닌 짧은 placeholder 값** (예: `99999`) 이 박혀 fallback chain 이 줄줄이 fail 하는 사고 (2026-05-29 plan 사이클 evidence) 가 박제됨. 본 §8 forum mode 와의 관계:
+
+| 가드 | 위치 | 동작 | 본 §8 영향 |
+|---|---|---|---|
+| **F-1** (write guard) | `atomic_write_thread_file` (discord-reply.sh) | write 직전 `^[0-9]{17,20}$` snowflake 검증 — fail 시 write skip + stderr warning + exit 1 | `--forum-post` stdout (`thread_id`) 가 valid snowflake 일 때만 cache file 박힘. 호출자 sub-agent inherit chain 보호 |
+| **F-2** (`--auto-ack-thread` 추출 가드) | `jq -r '.id // empty'` 직후 | 추출 결과 재검증 — placeholder / 빈 값 / 너무 짧음 → write skip + stdout 빈 줄 (sub-agent inherit chain 끊김 명시) | helper / nmae 가 `--auto-ack-thread` 호출 시 Discord API 4xx 응답을 사일런스 발사 방지 |
+| **F-3** (reader quarantine) | `--auto-thread` mode reader (line 1800 부근) | file read 후 snowflake 검증 fail → file 자동 quarantine (`.txt.invalid-<ts>` rename) + 다음 fallback chain 진행 | `--auto-thread` → `--forum-comment` 등 forum mode 호출 직전의 마지막 가드. quarantine 후 fallback 종착점 = `--digest` 단발 모드 |
+| **F-4** (wrapper stale invalidate) | `agent-launch-wrapper.sh` pending-thread 부재 진입 | DIGEST fallback push 와 함께 stale `last-launch-thread.txt` invalidate (rename or truncate) | 다음 sub-agent launch 시점에 옛 placeholder 값 read 사고 차단 |
+
+#### `--digest` 단발 모드 fallback chain 종착점
+
+`--auto-thread` → `--forum-comment <thread_id>` → forum mode 가 모두 fail (placeholder quarantine + helper-current-thread 미가용) 일 때 sub-agent 의 룰 우선순위:
+
+1. `sub-agent.md §1-11` STRICT — **별 forum thread 생성 금지** (`--forum-post`, `--forum-post-auto-tag`, `forum_create_thread` 호출 금지). 즉 forum mode 로 새 thread 신설 fallback X.
+2. fallback 종착 = **`discord-reply.sh --digest` 단발 모드** 1회 push. cron digest (`§6` 본문) 와 별개의 즉시 단발 호출.
+3. 동반 의무: nmae 보고 (사이클 종결) + `[CYCLE-FORUM-GUARD]` stderr warning prefix.
+
+```bash
+# F-3 quarantine 후 --auto-thread reader 의 fallback 종착 예시 (sub-agent)
+LAUNCH_RAW=$(cat ~/.mobruji/last-launch-thread.txt 2>/dev/null || echo "")
+if ! validate_snowflake "$LAUNCH_RAW"; then
+  # F-3 quarantine 발사 (별 process)
+  bash /home/mobruji/.mobruji/discord-reply.sh --digest \
+    "⚠️ <sub-agent> 사이클 사일런스 — placeholder thread_id quarantined, forum mode fallback 종착. nmae 보고."
+  # nmae 알림 + 사이클 종결 (별 thread 신설 금지 룰 준수)
+fi
+```
+
+#### Cron digest 보고 의무 (`cycle-forum-placeholder-guard.md §3-비기능` 관측성)
+
+24h 누적 quarantine 카운트 → cron digest signature 에 추가:
+
+```
+🛡️ cycle-forum guard quarantine: 3건 (last-launch-thread placeholder) — 직전 24h
+```
+
+`tools/discord-daemon/check_env_drift.py` 류 cron 또는 bot.py `[CYCLE-FORUM-GUARD]` prefix journal grep → DIGEST 채널 push.
+
+관련 spec / 메모리:
+- `docs/features/cycle-forum-placeholder-guard.md` (F-1 ~ F-6 + 5-4 sequence + 8-Q1~Q4 오픈 질문)
+- `docs/features/cycle-forum-operation.md §5-6` fallback chain 본문 SoT
+- `06-domain-model.md §4` (등재 후보 — `placeholder thread id` / `launch thread cache file` / `cycle launch thread id`)
+- 메모리: `[[feedback-cycle-forum-placeholder-guard]]` (사고 박제 누적 시 등재)
+
+### 8-8) directive 자동 완료 + 위임 링크 동작 (흐름검증 기록)
+
+- **위임 링크**: directive launch 시 `directive_status.sh <id> in_progress [pr_url] [cycle]` 로 위임 cycle 채널·PR URL 을 directive thread 에 기록하고 `진행` 태그로 전이한다 (`agent-launch-wrapper.sh` 강제). **자동 완료**: sub-agent PR body 의 `directive: <id>` 라인 → PR 머지 webhook → `directive_status.sh completed` 자동 호출 → `완료` 태그 전이 (자식 완료 시 부모 directive `🟢` cascade). 상세: `actors/nmae.md §6`.
+
 ## §7 변경 이력
 
 | 일자 | 변경 | PR |
 |---|---|---|
 | 2026-05-21 | 최초 작성 (카테고리 3종 + 명령 syntax 정의) | #175 |
-| 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | _본 PR_ |
+| 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | #1155 |
+| 2026-05-29 | §8-7 placeholder thread_id 가드 F-1~F-4 cross-ref + `--digest` 단발 모드 fallback 종착점 박제 (plan round 16) | #1336 |
+| 2026-05-31 | §8-8 directive 자동 완료 + 위임 링크 동작 기록 (흐름검증) | _본 PR_ |

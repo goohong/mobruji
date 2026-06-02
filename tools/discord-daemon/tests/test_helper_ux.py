@@ -1,9 +1,10 @@
-"""helper UX infra 단위 테스트 (#880).
+"""helper UX infra 단위 테스트 (#880, reaction-only #1175).
 
 세 가지 기능을 한 PR 에 묶어 검증:
 
 1. **bot.py 1초 generic auto-ack** — on_message 진입 시 `BOT_AUTO_ACK=1` (default)
-   이면 generic ack 한 줄을 채널에 push, `BOT_AUTO_ACK=0` 이면 skip.
+   이면 사용자 메시지에 👀 emoji reaction 만 add (text/both mode 폐기 #1175).
+   `BOT_AUTO_ACK=0` 이면 skip.
 2. **reply.referenced_message forwarding** — `build_reply_context_prefix` 가
    답장 컨텍스트가 있을 때 prefix `[답장→ ...] <body>` 를 붙이고, 없으면 그대로.
 3. **discord-reply.sh thread mode** — 셸 스크립트 자체는 외부 Discord REST 호출이
@@ -235,86 +236,79 @@ class BotAutoAckTests(unittest.TestCase):
             asyncio.run(handler(message))
         return message
 
-    def test_auto_ack_mode_text_pushes_generic_ack(self) -> None:
-        # mode 명시 = text → 기존 채팅 ack push (legacy 경로 회귀 가드).
-        env = self._build_env(auto_ack="1", auto_ack_mode="text")
+    def test_auto_ack_enabled_adds_reaction_only(self) -> None:
+        # #1175: default 동작 = 사용자 메시지에 👀 reaction 만 add (auto-ack).
+        # 별도 채팅 ack push 없음 (채널 가독성 ↑).
+        # 매 사용자 메시지엔 별도 분기로 📌 (PIN_REACTION_EMOJI) 도 부착됨 — 본
+        # 테스트는 auto-ack 분기가 👀 를 add 했는지 만 검증.
+        env = self._build_env()
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=1
         )
         self._run_handler(env, message)
-        message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
-        message.add_reaction.assert_not_awaited()
+        message.channel.send.assert_not_awaited()
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
 
-    def test_auto_ack_disabled_skips_push(self) -> None:
+    def test_auto_ack_disabled_skips_reaction(self) -> None:
+        # BOT_AUTO_ACK=0 이면 auto-ack 👀 reaction 안 함. 📌 PIN marker 는
+        # auto-ack 와 무관한 별도 분기이므로 여전히 add 될 수 있음 — 여기선
+        # 👀 가 호출되지 않았다는 것만 검증.
         env = self._build_env(auto_ack="0")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=2
         )
         self._run_handler(env, message)
         message.channel.send.assert_not_awaited()
-        message.add_reaction.assert_not_awaited()
-
-    def test_auto_ack_default_mode_is_reaction(self) -> None:
-        # BOT_AUTO_ACK_MODE 미명시 → default=reaction. channel.send 안 호출, add_reaction 호출.
-        env = self._build_env()
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=3
-        )
-        self._run_handler(env, message)
-        message.channel.send.assert_not_awaited()
-        message.add_reaction.assert_awaited_once_with(
-            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
-        )
-
-    def test_auto_ack_mode_both_pushes_reaction_and_text(self) -> None:
-        env = self._build_env(auto_ack="1", auto_ack_mode="both")
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=4
-        )
-        self._run_handler(env, message)
-        message.add_reaction.assert_awaited_once_with(
-            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
-        )
-        message.channel.send.assert_awaited_once_with(bot.BOT_AUTO_ACK_TEXT)
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertNotIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
 
     def test_auto_ack_emoji_override(self) -> None:
+        # BOT_AUTO_ACK_EMOJI env 로 다른 emoji 지정 가능.
         env = self._build_env(auto_ack_emoji="🔥")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=5
         )
         self._run_handler(env, message)
-        message.add_reaction.assert_awaited_once_with("🔥")
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn("🔥", calls)
+        self.assertNotIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+        message.channel.send.assert_not_awaited()
 
-    def test_auto_ack_unknown_mode_falls_back_to_default(self) -> None:
-        env = self._build_env(auto_ack_mode="invalid")
+    def test_auto_ack_default_constants(self) -> None:
+        # default emoji = 👀. text/both mode 관련 상수는 #1175 에서 폐기.
+        self.assertEqual(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "👀")
+        self.assertEqual(bot.BOT_AUTO_ACK_DEFAULT_ENABLED, "1")
+
+    def test_auto_ack_legacy_text_constants_removed(self) -> None:
+        # #1175 회귀 가드: text/both mode 관련 상수가 bot 모듈에서 제거됐는지 확인.
+        # 외부 import 잔존 시 본 테스트 실패 → cleanup 누락 알림.
+        self.assertFalse(
+            hasattr(bot, "BOT_AUTO_ACK_TEXT"),
+            "BOT_AUTO_ACK_TEXT 상수는 #1175 에서 폐기됐어야 합니다",
+        )
+        self.assertFalse(
+            hasattr(bot, "BOT_AUTO_ACK_MODE_DEFAULT"),
+            "BOT_AUTO_ACK_MODE_DEFAULT 는 #1175 에서 폐기됐어야 합니다",
+        )
+        self.assertFalse(
+            hasattr(bot, "BOT_AUTO_ACK_MODES_ALLOWED"),
+            "BOT_AUTO_ACK_MODES_ALLOWED 는 #1175 에서 폐기됐어야 합니다",
+        )
+
+    def test_auto_ack_mode_env_is_ignored(self) -> None:
+        # #1175: BOT_AUTO_ACK_MODE env 가 set 돼 있어도 reaction-only 동작.
+        # backward-compat — 사용자 운영 env 잔존 시에도 silent 깨짐 없음.
+        env = self._build_env(auto_ack_mode="text")
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=6
         )
         self._run_handler(env, message)
-        # invalid → default(reaction) fallback. add_reaction 만 호출.
-        message.add_reaction.assert_awaited_once_with(
-            bot.BOT_AUTO_ACK_EMOJI_DEFAULT
-        )
+        # text mode 무시 → channel.send 안 호출.
         message.channel.send.assert_not_awaited()
-
-    def test_auto_ack_default_constants(self) -> None:
-        # default mode = reaction / 기본 emoji = 👀 — env 가 비어도 본 상수가 적용된다.
-        self.assertEqual(bot.BOT_AUTO_ACK_MODE_DEFAULT, "reaction")
-        self.assertEqual(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "👀")
-        self.assertIn("text", bot.BOT_AUTO_ACK_MODES_ALLOWED)
-        self.assertIn("reaction", bot.BOT_AUTO_ACK_MODES_ALLOWED)
-        self.assertIn("both", bot.BOT_AUTO_ACK_MODES_ALLOWED)
-
-    def test_auto_ack_text_v2_phrasing_guard(self) -> None:
-        """BOT_AUTO_ACK_TEXT 문구 회귀 가드 (이슈 #943 v2).
-
-        사용자 정정 (2026-05-24): helper-nmae 협업 관계 표현 필수.
-        '🤖 helper bot' prefix + 'nmae 상태 확인' 두 substring 모두 포함해야 한다.
-        문구 자체 변경 시 본 가드 갱신 후 진행. text mode 가 살아 있는 한 본
-        가드는 유효 — reaction mode 가 default 가 되어도 text 경로 회귀 보호.
-        """
-        self.assertIn("🤖 helper bot", bot.BOT_AUTO_ACK_TEXT)
-        self.assertIn("nmae 상태 확인", bot.BOT_AUTO_ACK_TEXT)
+        # 👀 reaction 은 정상 add.
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
 
     # ------------------------------------------------------------------
     # secondary reaction (#1080) — nmae 점유 상태 emoji
@@ -404,21 +398,25 @@ class BotAutoAckTests(unittest.TestCase):
             self.assertEqual(result, "P")
 
     def test_secondary_reaction_disabled_by_default_skips(self) -> None:
-        # _build_env default = secondary_reaction_enabled="0" → 기존 회귀 가드.
-        env = self._build_env(auto_ack_mode="reaction")
+        # _build_env default = secondary_reaction_enabled="0".
+        # primary 👀 auto-ack + 📌 pin marker = 2회. secondary 안 함.
+        env = self._build_env()
         message = _make_fake_message(
             content="hello", channel_id=999, author_id=111, message_id=10
         )
         self._run_handler(env, message)
-        # primary reaction 만 호출 (1회).
-        self.assertEqual(message.add_reaction.await_count, 1)
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
+        # secondary emoji (⚡⏳🕐) 부재 확인.
+        for secondary in ("⚡", "⏳", "🕐"):
+            self.assertNotIn(secondary, calls)
 
     def test_secondary_reaction_idle_adds_lightning(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
             self._write_cycle_status(cycle_path, occupied=0)
             env = self._build_env(
-                auto_ack_mode="reaction",
                 secondary_reaction_enabled="1",
                 cycle_status_path=str(cycle_path),
             )
@@ -426,19 +424,17 @@ class BotAutoAckTests(unittest.TestCase):
                 content="hello", channel_id=999, author_id=111, message_id=11
             )
             self._run_handler(env, message)
-            # primary 👀 + secondary ⚡ = 2회 호출.
-            self.assertEqual(message.add_reaction.await_count, 2)
+            # primary 👀 + secondary ⚡ + 📌 pin marker.
             calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertEqual(
-                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "⚡"]
-            )
+            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+            self.assertIn("⚡", calls)
+            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
 
     def test_secondary_reaction_partial_adds_hourglass(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
             self._write_cycle_status(cycle_path, occupied=2)
             env = self._build_env(
-                auto_ack_mode="reaction",
                 secondary_reaction_enabled="1",
                 cycle_status_path=str(cycle_path),
             )
@@ -446,18 +442,16 @@ class BotAutoAckTests(unittest.TestCase):
                 content="hello", channel_id=999, author_id=111, message_id=12
             )
             self._run_handler(env, message)
-            self.assertEqual(message.add_reaction.await_count, 2)
             calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertEqual(
-                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "⏳"]
-            )
+            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+            self.assertIn("⏳", calls)
+            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
 
     def test_secondary_reaction_full_adds_clock(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
             self._write_cycle_status(cycle_path, occupied=4)
             env = self._build_env(
-                auto_ack_mode="reaction",
                 secondary_reaction_enabled="1",
                 cycle_status_path=str(cycle_path),
             )
@@ -465,16 +459,15 @@ class BotAutoAckTests(unittest.TestCase):
                 content="hello", channel_id=999, author_id=111, message_id=13
             )
             self._run_handler(env, message)
-            self.assertEqual(message.add_reaction.await_count, 2)
             calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertEqual(
-                calls, [bot.BOT_AUTO_ACK_EMOJI_DEFAULT, "🕐"]
-            )
+            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+            self.assertIn("🕐", calls)
+            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
 
     def test_secondary_reaction_file_missing_silent_skip(self) -> None:
-        # cycle-status.json 부재 → secondary skip (primary 만 1회).
+        # cycle-status.json 부재 → secondary skip.
+        # primary 👀 + 📌 만 호출. ⚡⏳🕐 부재.
         env = self._build_env(
-            auto_ack_mode="reaction",
             secondary_reaction_enabled="1",
             cycle_status_path="/nonexistent/cycle-status.json",
         )
@@ -482,7 +475,11 @@ class BotAutoAckTests(unittest.TestCase):
             content="hello", channel_id=999, author_id=111, message_id=14
         )
         self._run_handler(env, message)
-        self.assertEqual(message.add_reaction.await_count, 1)
+        calls = [c.args[0] for c in message.add_reaction.await_args_list]
+        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
+        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
+        for secondary in ("⚡", "⏳", "🕐"):
+            self.assertNotIn(secondary, calls)
 
     def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거
@@ -849,6 +846,15 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
             # #987: 신규 우선순위 체인이 운영 ~/.mobruji 파일을 읽지 못하게 격리.
             "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
             "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            # PR #1268: 본 클래스는 본답 main POST payload (message_reference) 만
+            # 검증한다. PR #1233 의 control emoji 자동 부착 + PR #1262 (commit
+            # 6a08c59) writing auto-hook default ON 이 fake curl 의 -d payload
+            # capture 에 reaction PUT / typing POST / DELETE 라인을 끼워넣어
+            # _first_payload 의 json.loads 가 실패 → 두 hook 모두 격리. 동작
+            # 검증은 별도 케이스 (DiscordReplyControlEmojiTests / writing
+            # auto-hook 시나리오) 가 담당하므로 scope 분리.
+            "MOBRUJI_CONTROL_EMOJI": "0",
+            "BOT_WRITING_AUTO_HOOK_ENABLED": "0",
         })
         # HELPER_TURN_TARGET_MSG_ID env 가 부모 프로세스에서 흘러들면 #987
         # 우선순위 2 가 LAST_USER_MSG_ID_FILE 보다 위라 테스트 의도 깨짐 → 명시 제거.
@@ -1364,6 +1370,11 @@ class DiscordReplyBareBodyTests(unittest.TestCase):
             # #987: 운영 ~/.mobruji 격리.
             "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
             "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            # PR #1233 (9b0ade1) 본답 push 직후 ❓ control emoji 자동 부착이
+            # main channel POST 외 reaction PUT 1건을 추가 — 본 테스트는 bare
+            # body 의 단일 main POST 시나리오만 검증하므로 제어 emoji 격리.
+            # 제어 emoji 자체 동작 검증은 별도 케이스 (scope 분리).
+            "MOBRUJI_CONTROL_EMOJI": "0",
         })
         run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         result = subprocess.run(
@@ -1476,6 +1487,15 @@ class DiscordReplyResolvePriorityTests(unittest.TestCase):
             "LAST_USER_MSG_ID_FILE": str(last_id_path),
             "HELPER_TARGET_FILE": str(target_path),
             "HELPER_QUEUE_FILE": str(queue_path),
+            # PR #1268: 본 클래스는 resolve 우선순위 체인이 본답 main POST payload
+            # 의 message_reference 에 어떤 msg_id 를 박는지만 검증한다. PR #1233
+            # control emoji 자동 부착 + PR #1262 (commit 6a08c59) writing
+            # auto-hook default ON 이 fake curl -d payload capture 에 reaction
+            # PUT / typing POST / DELETE 라인을 끼워넣어 _first_payload 의
+            # json.loads 가 실패 → 두 hook 모두 격리. 개별 케이스는 extra_env
+            # 로 명시 override 가능.
+            "MOBRUJI_CONTROL_EMOJI": "0",
+            "BOT_WRITING_AUTO_HOOK_ENABLED": "0",
         })
         # HELPER_TURN_TARGET_MSG_ID 는 default 로 비움. 호출자가 extra_env 로 지정.
         run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
@@ -1667,6 +1687,12 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
             "LAST_USER_MSG_ID_FILE": str(last_id_path),
             "HELPER_TARGET_FILE": str(target_path),
             "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            # PR #1233 (9b0ade1) 본답 push 직후 ❓ control emoji 자동 부착이
+            # writing marker hook 호출 카운트에 reaction PUT 1건을 추가 — 본
+            # 테스트 클래스는 writing marker / auto-hook 의 호출 패턴만
+            # 검증하므로 제어 emoji 격리. 개별 케이스가 extra_env 로 명시
+            # override 가능.
+            "MOBRUJI_CONTROL_EMOJI": "0",
         })
         run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
         if extra_env:
@@ -1772,18 +1798,30 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
             urls = Path(url_capture).read_text().splitlines()
             self.assertEqual(len(urls), 0)
 
-    # ── bare body 자동 hook (default on) ────────────────────────────────────
+    # ── bare body 자동 hook (default OFF — 사용자 directive 2026-05-29 #1294) ──
+    #
+    # PR #1252 (#1262) 가 default OFF → ON 전환했으나, 사용자가 노이즈로 판단해
+    # 1일 만에 OFF 재전환 (#1294). 명시 opt-in (BOT_WRITING_AUTO_HOOK_ENABLED=1)
+    # 시에만 자동 hook 동작.
+    #
+    # NOTE: 본 영역 테스트는 ❓ control emoji 자동 부착(PR #1233/#1234) 과 독립
+    # 검증 목표 — 모든 _run 호출에 `MOBRUJI_CONTROL_EMOJI=0` 명시 부여로 control
+    # emoji path 격리. writing auto hook default 값 자체만 회귀 검증.
 
     def test_bare_body_auto_hook_calls_reaction_typing_message_remove(self) -> None:
-        """본답 (bare body) push 시 자동 hook: PUT reaction + POST typing + POST message + DELETE reaction.
+        """opt-in (BOT_WRITING_AUTO_HOOK_ENABLED=1) 본답 push 자동 hook 회귀 가드:
+        PUT reaction + POST typing + POST message + DELETE reaction.
 
         target msg id 는 last-user-msg-id.txt (valid snowflake) 에서 resolve.
-        자동 hook 은 BOT_WRITING_AUTO_HOOK_ENABLED=1 옵트인 (default off).
+        자동 hook 은 default OFF (#1294) — env=1 명시 부여 시에만 동작.
         """
         result, url_capture, method_capture = self._run(
             "본답",
             last_id_content="12345678901234567",
-            extra_env={"BOT_WRITING_AUTO_HOOK_ENABLED": "1"},
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
@@ -1803,11 +1841,14 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("/reactions/", urls[3])
 
     def test_bare_body_auto_hook_skipped_when_no_reply(self) -> None:
-        """--no-reply → REPLY_TO_ID 빈 문자열 → writing hook 자동 skip."""
+        """--no-reply → REPLY_TO_ID 빈 문자열 → writing hook 자동 skip (opt-in 환경에서도)."""
         result, url_capture, _ = self._run(
             "--no-reply", "본답",
             last_id_content="12345678901234567",
-            extra_env={"BOT_WRITING_AUTO_HOOK_ENABLED": "1"},
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
@@ -1816,11 +1857,14 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("/channels/42/messages", urls[0])
 
     def test_bare_body_auto_hook_skipped_when_target_absent(self) -> None:
-        """last-user-msg-id 없음 → REPLY_TO_ID 빈 → hook skip."""
+        """last-user-msg-id 없음 → REPLY_TO_ID 빈 → hook skip (opt-in 환경에서도)."""
         result, url_capture, _ = self._run(
             "본답",
             last_id_content=None,
-            extra_env={"BOT_WRITING_AUTO_HOOK_ENABLED": "1"},
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
@@ -1828,28 +1872,52 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("/messages", urls[0])
 
     def test_bare_body_auto_hook_off_by_default(self) -> None:
-        """BOT_WRITING_AUTO_HOOK_ENABLED default OFF — 자동 hook 자체 no-op.
+        """BOT_WRITING_AUTO_HOOK_ENABLED default OFF — env 미설정 시 자동 hook no-op.
 
-        본답 push 1건만 발생 (기존 호환 보장). 운영에서 helper 본체가 명시 호출
-        `--writing-marker` / `--writing-done` 룰을 안정적으로 학습한 뒤 옵트인.
+        사용자 directive 2026-05-29 (#1294): 진행단계 자동 이모지 즉시 끄기.
+        PR #1252 default ON 결정 1일 만에 OFF 재전환. 본 테스트 = default 값이
+        OFF 인지 회귀 가드 (다음 default ON 재시도 PR 방지).
         """
         result, url_capture, _ = self._run(
             "본답",
             last_id_content="12345678901234567",
+            extra_env={"MOBRUJI_CONTROL_EMOJI": "0"},
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         urls = Path(url_capture).read_text().splitlines()
+        # default OFF 이므로 message push 1건만 (reaction/typing 없음).
+        self.assertEqual(len(urls), 1, f"호출 카운트: {urls}")
+        self.assertIn("/messages", urls[0])
+
+    def test_bare_body_auto_hook_opt_out_when_env_zero(self) -> None:
+        """BOT_WRITING_AUTO_HOOK_ENABLED=0 명시 → 자동 hook no-op (default 와 동일 동작 확인).
+
+        default OFF 와 동일하지만 env 명시 부여 path 회귀 가드 (#1294 default OFF
+        후에도 systemd / launchd unit env 의 명시 0 부여가 동작하는지 검증).
+        """
+        result, url_capture, _ = self._run(
+            "본답",
+            last_id_content="12345678901234567",
+            extra_env={
+                "BOT_WRITING_AUTO_HOOK_ENABLED": "0",
+                "MOBRUJI_CONTROL_EMOJI": "0",
+            },
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        # 명시 OFF 이므로 message push 1건만 (reaction/typing 없음).
         self.assertEqual(len(urls), 1, f"호출 카운트: {urls}")
         self.assertIn("/messages", urls[0])
 
     def test_bare_body_auto_hook_partial_reaction_only(self) -> None:
-        """TYPING_INDICATOR_ENABLED=0 + AUTO_HOOK on → PUT + POST message + DELETE 3건."""
+        """opt-in (AUTO_HOOK=1) + TYPING_INDICATOR_ENABLED=0 → PUT + POST message + DELETE 3건."""
         result, url_capture, methods_capture = self._run(
             "본답",
             last_id_content="12345678901234567",
             extra_env={
                 "BOT_WRITING_AUTO_HOOK_ENABLED": "1",
                 "BOT_TYPING_INDICATOR_ENABLED": "0",
+                "MOBRUJI_CONTROL_EMOJI": "0",
             },
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -1860,6 +1928,228 @@ class DiscordReplyWritingMarkerTests(unittest.TestCase):
         self.assertIn("POST", methods[1])
         self.assertIn("/messages", urls[1])
         self.assertIn("DELETE", methods[2])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1267: MOBRUJI_CONTROL_EMOJI 양방향 정합 — bare body 본답 후 ❓ reaction PUT
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class DiscordReplyControlEmojiBidirectionalTests(unittest.TestCase):
+    """`MOBRUJI_CONTROL_EMOJI` env 양방향 정합 검증 (#1267).
+
+    PR #1233 (`9b0ade1`) / PR #1234 (`76f1f21`) 가 discord-reply.sh 본답 (bare
+    body) push 직후 ❓ U+2753 control emoji reaction PUT 1건을 자동 부착. PR
+    #1265 는 다른 test 6건 baseline 회귀를 `MOBRUJI_CONTROL_EMOJI=0` 격리로 fix
+    했지만 정합 자체 검증은 hole — env 토글 동작이 변해도 fail 안 함.
+
+    본 케이스는 토글 양방향:
+    - case A (unset = default = "1"): 본답 POST 1건 + reaction PUT 1건 = 2 호출
+    - case B (env "0"): 본답 POST 1건만 = 1 호출
+    - case C (명시 "1"): case A 와 동일 — env explicit 도 default 와 같음
+
+    회귀 가드: discord-reply.sh 의 control emoji 분기 (`MOBRUJI_CONTROL_EMOJI:-1`)
+    가 폐기 / default 변경 / 분기 조건 변경 시 즉시 fail.
+
+    BOT_WRITING_AUTO_HOOK_ENABLED 는 명시적으로 "0" 으로 격리 — writing hook
+    의 추가 PUT/POST/DELETE 호출이 control emoji 카운트 검증과 섞이지 않게 함
+    (writing hook 자체 동작은 DiscordReplyWritingMarkerTests 가 담당).
+    """
+
+    SCRIPT_PATH = (
+        Path(__file__).resolve().parent.parent / "discord-reply.sh"
+    )
+
+    # ❓ U+2753 → URL-encoded UTF-8 byte sequence (PUT /reactions endpoint 용).
+    # discord-reply.sh L1716 가 `reaction_add ... "%E2%9D%93"` 호출 — endpoint URL
+    # 안 emoji 위치에 동일 sequence 가 포함되는지 검증.
+    CONTROL_EMOJI_URLENC = "%E2%9D%93"
+
+    def _make_fake_curl(
+        self, tmpdir: str, url_capture_path: str, method_capture_path: str
+    ) -> Path:
+        """fake curl — URL + method 캡처 (PUT/POST/DELETE 구분).
+
+        DiscordReplyWritingMarkerTests._make_fake_curl 와 동일 골격. 별도 함수로
+        둔 이유는 본 클래스가 control emoji 검증만 책임지므로 helper 의존성을
+        최소화.
+        """
+        fake_curl = Path(tmpdir) / "curl"
+        fake_curl.write_text(
+            "#!/usr/bin/env bash\n"
+            "URL=\"\"\n"
+            "METHOD=\"GET\"\n"
+            "PAYLOAD=\"\"\n"
+            "while [[ $# -gt 0 ]]; do\n"
+            "  case \"$1\" in\n"
+            "    -X) shift; METHOD=\"$1\";;\n"
+            "    -d) shift; PAYLOAD=\"$1\";;\n"
+            "    http*) URL=\"$1\";;\n"
+            "  esac\n"
+            "  shift\n"
+            "done\n"
+            f"printf '%s\\n' \"$URL\" >> {url_capture_path}\n"
+            f"printf '%s\\n' \"$METHOD\" >> {method_capture_path}\n"
+            # POST /channels/{id}/messages 응답 — discord-reply.sh 가 .id 를 jq
+            # 로 parse 해 reaction PUT 의 message_id 로 사용. 18-digit snowflake
+            # 형식으로 reaction_add URL 안에 정상 박힘.
+            "printf '{\"id\": \"999999999999999999\"}\\n200'\n"
+        )
+        fake_curl.chmod(0o755)
+        return fake_curl
+
+    def _run(
+        self,
+        *args: str,
+        control_emoji_env: str | None,
+    ):
+        """tmpdir 안에서 fake curl + env setup → discord-reply.sh 본답 실행.
+
+        control_emoji_env:
+          - None: env 자체 미설정 (default 동작 = "1" — control emoji 부착)
+          - "0":  env 명시 "0" — control emoji skip
+          - "1":  env 명시 "1" — default 와 동일 동작
+        """
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        url_capture = str(Path(tmpdir) / "urls.txt")
+        method_capture = str(Path(tmpdir) / "methods.txt")
+        self._make_fake_curl(tmpdir, url_capture, method_capture)
+
+        env_path = Path(tmpdir) / "test.env"
+        env_path.write_text(
+            "DISCORD_BOT_TOKEN=stub\n"
+            "MOBRUJI_CHANNEL_ID=42\n"
+            "DISCORD_RETRY_MAX=1\nDISCORD_RETRY_BASE_SEC=0\n",
+            encoding="utf-8",
+        )
+
+        new_path = f"{tmpdir}:{os.environ.get('PATH', '')}"
+        run_env = os.environ.copy()
+        run_env.update({
+            "DISCORD_DAEMON_ENV_PATH": str(env_path),
+            "PATH": new_path,
+            # 운영 ~/.mobruji 격리 — reply target / queue / thread 모두 부재.
+            "LAST_USER_MSG_ID_FILE": str(Path(tmpdir) / "nonexistent.txt"),
+            "HELPER_TARGET_FILE": str(Path(tmpdir) / "helper-current-target.txt"),
+            "HELPER_QUEUE_FILE": str(Path(tmpdir) / "helper-queue.jsonl"),
+            "HELPER_THREAD_FILE": str(Path(tmpdir) / "helper-current-thread.txt"),
+            # writing hook 격리 — PR #1262 (`BOT_WRITING_AUTO_HOOK_ENABLED`
+            # default ON) 가 본답 push 전후로 PUT reaction + POST typing +
+            # DELETE reaction 호출을 추가. 본 클래스는 control emoji 카운트만
+            # 검증하므로 명시 OFF. writing hook 자체 동작은
+            # DiscordReplyWritingMarkerTests 가 담당.
+            "BOT_WRITING_AUTO_HOOK_ENABLED": "0",
+        })
+        run_env.pop("HELPER_TURN_TARGET_MSG_ID", None)
+        # MOBRUJI_CONTROL_EMOJI 명시 처리. control_emoji_env=None 이면 부모 env 에
+        # 잔존할 수도 있으므로 pop. "0" / "1" 면 update.
+        run_env.pop("MOBRUJI_CONTROL_EMOJI", None)
+        if control_emoji_env is not None:
+            run_env["MOBRUJI_CONTROL_EMOJI"] = control_emoji_env
+
+        result = subprocess.run(
+            ["bash", str(self.SCRIPT_PATH), "본답 메시지"],
+            capture_output=True,
+            text=True,
+            env=run_env,
+            timeout=5,
+        )
+        return result, url_capture, method_capture
+
+    def _count_control_emoji_put(
+        self, urls: list[str], methods: list[str]
+    ) -> int:
+        """PUT /reactions/{❓ urlenc}/@me 호출 카운트."""
+        count = 0
+        for url, method in zip(urls, methods):
+            if (
+                method == "PUT"
+                and "/reactions/" in url
+                and self.CONTROL_EMOJI_URLENC in url
+                and url.endswith("/@me")
+            ):
+                count += 1
+        return count
+
+    def test_default_unset_attaches_control_emoji_reaction(self) -> None:
+        """env 미설정 = default "1" — 본답 POST 후 ❓ reaction PUT 1건 발생."""
+        result, url_capture, method_capture = self._run(
+            control_emoji_env=None,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        # 2건 호출: POST /messages + PUT /reactions/❓/@me.
+        self.assertEqual(len(urls), 2, f"호출 카운트 다름: {urls}")
+        # 첫 번째 = 본답 POST.
+        self.assertIn("POST", methods[0])
+        self.assertIn("/channels/42/messages", urls[0])
+        # ❓ reaction PUT 1건 (호출 순서 무관 — 카운트 검증).
+        self.assertEqual(
+            self._count_control_emoji_put(urls, methods),
+            1,
+            f"❓ reaction PUT 1건 기대: urls={urls} methods={methods}",
+        )
+
+    def test_env_zero_skips_control_emoji_reaction(self) -> None:
+        """env "0" — ❓ reaction PUT 0건, 본답 POST 1건만."""
+        result, url_capture, method_capture = self._run(
+            control_emoji_env="0",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        # 1건 호출 — 본답 POST 만.
+        self.assertEqual(len(urls), 1, f"호출 카운트 다름: {urls}")
+        self.assertIn("POST", methods[0])
+        self.assertIn("/channels/42/messages", urls[0])
+        # ❓ reaction PUT 부재 확인.
+        self.assertEqual(
+            self._count_control_emoji_put(urls, methods),
+            0,
+            f"❓ reaction PUT 0건 기대: urls={urls} methods={methods}",
+        )
+
+    def test_env_one_attaches_control_emoji_reaction(self) -> None:
+        """env "1" 명시 — default 와 동일 (정합 회귀 가드)."""
+        result, url_capture, method_capture = self._run(
+            control_emoji_env="1",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        self.assertEqual(len(urls), 2, f"호출 카운트 다름: {urls}")
+        self.assertEqual(
+            self._count_control_emoji_put(urls, methods),
+            1,
+            f"❓ reaction PUT 1건 기대 (env=1 명시): urls={urls} methods={methods}",
+        )
+
+    def test_control_emoji_targets_main_push_message_id(self) -> None:
+        """❓ reaction 의 URL 안 message_id 가 본답 POST 응답 .id 와 일치.
+
+        discord-reply.sh L1713-1716 의 분기 — POST 응답 jq parse → reaction_add
+        에 message_id 전달. fake curl 이 모든 POST 에 동일 id
+        "999999999999999999" 를 반환하므로 reaction PUT URL 안 message_id 위치에
+        같은 값이 들어가야 한다.
+        """
+        result, url_capture, method_capture = self._run(
+            control_emoji_env=None,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        urls = Path(url_capture).read_text().splitlines()
+        methods = Path(method_capture).read_text().splitlines()
+        # ❓ PUT URL 추출.
+        put_urls = [
+            url for url, method in zip(urls, methods)
+            if method == "PUT" and self.CONTROL_EMOJI_URLENC in url
+        ]
+        self.assertEqual(
+            len(put_urls), 1, f"❓ PUT URL 1건 기대: {put_urls}"
+        )
+        # message_id 위치 = /messages/{id}/reactions/...
+        self.assertIn("/messages/999999999999999999/reactions/", put_urls[0])
 
 
 if __name__ == "__main__":

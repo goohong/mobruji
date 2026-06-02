@@ -59,16 +59,16 @@ nmae 가 sub-agent launch 시 prompt 첫 줄에 한 줄만 박는다:
 
 `git push --no-verify` / `git commit --no-verify` / `--no-gpg-sign` 등 금지. hook 실패 → 원인 수정 → 재커밋. 우회 필요한 정당한 사유 있으면 nmae 사전 보고.
 
-### 1-8) 보호 영역 라벨 — `needs-human-review` 부착 의무
+### 1-8) 보호 영역 — 정보성 분류 (라벨 의무 폐지 2026-05-28)
 
-다음 경로 변경 시 PR 라벨 필수 (CLAUDE.md §4 SoT, 트림 X):
+다음 경로 변경은 PR title / scope 에서 명확히 신호 (CLAUDE.md §4 SoT). **rev sub-agent 가 review 대행하므로 별도 라벨 부착 의무 없음** ([[feedback-needs-human-review-deprecated]]):
 
 - `.github/workflows/**`, `.github/CODEOWNERS`, `**/db/migration/**`, `**/resources/db/**`
 - `**/application*.yml`, `.env*`, `backend/build.gradle*`, `backend/gradle/**`
-- `web/next.config.*`, `web/package.json`, **lockfile 전체** (devDep only diff 도 보호 영역, [[feedback-lockfile-protected]])
+- `web/next.config.*`, `web/package.json`, **lockfile 전체**
 - `Dockerfile`, `docker-compose*.yml`, `LICENSE`
 
-`.github/workflows/auto-label.yml` 가 자동 부착 — 부착 실패 시 워크플로우 자체 fail (머지 차단). 라벨은 머지 시까지 유지 — 임의 제거 금지.
+`.github/workflows/auto-label.yml` 가 변경 감지 시 core.notice 로 visibility 만 제공 (라벨 자동 부착 / check fail 폐지). rev 사이클이 다른 PR 과 동일하게 통과 의무 — release 머지만 사용자 명시 확인.
 
 ### 1-9) PR 생성 표준 — `--base develop` 강제 ([[feedback-pr-base-develop]])
 
@@ -90,7 +90,92 @@ gh pr create --base develop --title "<type>(<scope>): <제목> (#<이슈>)" --la
 | plan | `session:plan` |
 | helper sub-agent | `session:helper` |
 
-### 1-11) Discord thread 진행 stream
+### 1-11) Cycle forum thread 진행 + 4 tag 자동 전이 (cycle-forum-operation 2026-05-28)
+
+**spec**: `docs/features/cycle-forum-operation.md` SoT.
+
+**[STRICT — 2026-05-29 PR #1247]** sub-agent 의 모든 진행 / 결과 push 는 `$LAUNCH_THREAD_ID` (또는 `$PENDING_THREAD_ID`) thread **안** 에만 한다. **별 thread 생성 절대 금지** — `--forum-post`, `--forum-post-auto-tag`, `forum_create_thread` 호출 금지. 결과 보고 / 분석 완료 / 의견 / 진행 메모 모두 `--forum-edit` (본문 PATCH) 또는 `--forum-comment` / `--auto-thread` (thread 안 stream) 로만. 사용자 정정 (2026-05-29): "양식 안 맞는 게시물" = sub-agent 가 별 thread 생성한 noise. 1 task = 1 thread 원칙 강제.
+
+**단, PlaceholderThreadId 가드 (PR #1306) 통과 후 DIGEST fallback 채널 진행 가능** — `LaunchThreadCacheFile` (`~/.mobruji/last-launch-thread.txt`) 가 placeholder (예: `99999`) 로 오염되어 `--auto-thread` reject + helper-current-thread 미가용일 때, sub-agent 는 별 thread 신설 금지 룰을 그대로 유지하되 DIGEST 채널 (`discord-reply.sh --digest` 또는 `--reply` 단발) 로 1회 알림 push + nmae 보고 후 사이클 종결. 즉 fallback chain 의 종착이 "사일런스" 가 아니라 "DIGEST 단발 + nmae 알림" 으로 강제. 상세: `docs/features/cycle-forum-placeholder-guard.md` F-3 (reader quarantine) + F-4 (wrapper stale invalidate) + `06-domain-model.md §4` PlaceholderThreadId.
+
+**4 tag 라이프사이클** (모든 cycle 작업 = individual thread, backlog single thread 폐기):
+- 🟡 대기: nmae 가 `wrapper --register-pending` 호출 시 신설
+- ⏳ 진행: wrapper launch 시 기존 🟡 thread 재사용 + retag (코드 강제)
+- ✅ 완료: bot.py polling 자동 (PR 머지 detect, branch ↔ thread_id cache)
+- ❌ 실패: sub-agent / rev 명시 호출 — **`--reason` 필수**
+
+**sub-agent milestone 시 본문 PATCH (큰 milestone = PR 생성 / PR 머지 2건만)**:
+
+```bash
+# milestone 시 본문 PATCH — discord-reply.sh --forum-edit (PR 생성 / 머지 시점 의무)
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-edit "$LAUNCH_THREAD_ID" "$(cat <<'EOF'
+🛠️ **{...}**
+...
+📋 진행 ({현재 단계})
+- [x] launch — {launch_ts}
+- [x] 분석 / 설계 — {summary} ({ts})
+- [x] 구현 — branch={branch}
+- [x] 검증 — checkstyle+spotless+test green
+- [x] PR 생성 — #1234
+- [ ] PR 머지
+
+⏭️ 다음 단계
+PR rev 단계 1 통과 + auto-merge 대기
+
+🔖 관련
+- PR: #1234
+- directive: {id} (있으면)
+---
+_갱신: {ts}_
+EOF
+)"
+
+# 댓글 append = milestone 1줄 stream (이력 추적)
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "[milestone] PR #1234 생성"
+```
+
+본문 PATCH = 사용자가 thread 한 번 보면 어디까지 진행됐는지 즉시 파악. 댓글 = milestone 이력 추적.
+
+**❌ 종결 시 사유 강제** (rev / 사용자 HOLD 결정):
+```bash
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-retag <thread_id> <cycle> "실패" --reason "<사유>"
+```
+`--reason` 누락 시 exit 1 + 본문 `❌ 종결 사유: <reason>` 자동 PATCH.
+
+
+
+> 본 섹션은 `docs/features/cycle-forum-operation.md` 와 PR D 의 PATCH 룰 통합본. cycle forum 의 운영 모델 SoT 는 cycle-forum-operation.md 우선.
+
+cycle forum thread 본문은 `agent-launch-wrapper.sh` 가 launch 시점에 template 박음 (📋 진행 6 체크박스 + 결과 / 다음 단계 / 관련 섹션). **sub-agent 가 큰 milestone (PR 생성 / PR 머지) 시 본문의 체크박스 [x] update + 댓글 append**:
+
+```bash
+# milestone 시 (예: PR 생성 후) 본문 PATCH — discord-reply.sh --forum-edit
+bash /home/mobruji/.mobruji/discord-reply.sh --forum-edit "$LAUNCH_THREAD_ID" "$(cat <<'EOF'
+🛠️ **{...기존 title...}**
+...
+📋 진행
+- [x] launch
+- [x] 분석 / 설계 — {짧은 요약}
+- [x] 구현 — branch={...}
+- [x] 검증 — checkstyle+spotless+test green
+- [x] PR 생성 — #1234
+- [ ] PR 머지
+
+🔖 관련
+- PR: #1234
+- directive: {id} (있으면)
+---
+_갱신: {ts}_
+EOF
+)"
+
+# 댓글 append 는 milestone 1 줄 stream (기존 패턴 유지)
+bash /home/mobruji/.mobruji/discord-reply.sh --auto-thread "[milestone] PR #1234 생성"
+```
+
+본문 PATCH = 사용자가 thread 한 번 보면 어디까지 진행됐는지 즉시 파악 (사용자 정정 2026-05-28). 댓글 = milestone 이력 추적.
+
+
 
 nmae/helper 가 `--auto-ack-thread` 로 사전 thread 생성 → `~/.mobruji/last-launch-thread.txt` atomic write. sub-agent 권장 호출 (file 자동 read, hallucination 우회):
 
@@ -115,6 +200,20 @@ bash ~/.mobruji/directive_status.sh <directive_id_or_thread_id> completed [pr_ur
 
 jsonl entry status + Discord forum 태그 retag + body PR URL 을 atomic. directive 가 아닌 (단순 사이클 후속 백로그) 경우 skip.
 
+### 1-13b) PR body 에 `cycle-forum:` 명시 의무 (PR cf-3, cycle-forum-operation §5-5)
+
+sub-agent 가 PR 생성 시 **PR body 에 다음 라인 의무 명시**:
+
+```text
+cycle-forum: <be|fe|rev|plan>:<thread_id>
+```
+
+예: `cycle-forum: be:1509466456230989926`
+
+bot.py `cycle_thread_complete_on_merge_loop` 가 PR 머지 시 PR body grep + 매칭된 thread 자동 ✅ retag. 누락 시 사용자 forum sidebar 에서 작업 ⏳ 상태 그대로 — 가시화 사고.
+
+thread_id 출처: nmae 가 launch 시 wrapper 가 emit 한 `LAUNCH_THREAD_ID=<id>` (cycle channel push) 또는 `PENDING_THREAD_ID=<id>` (register-pending). nmae 가 sub-agent launch prompt 에 inherit.
+
 ### 1-14) watchdog inject 대응 — sub-agent 입장은 §4 보고 양식만 책임
 
 nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본인은 자기 완료 보고 시 §4 "다음 사이클 후보" 를 제시해 nmae 가 단계 1 후보를 1초 안에 선정할 수 있게 돕는 것이 1차 방어선.
@@ -130,6 +229,7 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 품질 게이트 (push 전): `cd backend && ./gradlew checkstyleMain spotlessCheck test` — 포맷 위반 시 `./gradlew spotlessApply`
 - **새 엔드포인트 = 성공 케이스 E2E (RestAssured) 필수** (`07-testing-guide.md`)
 - DDD 계층 침범 금지 (Controller → Repository 직접 호출 등)
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-fe (mobruji-fe)
 
@@ -138,19 +238,71 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 품질 게이트: `cd /home/mobruji/mobruji-fe/web && npm run lint && npm run typecheck && npm test && npm run build`
 - API 호출 = `web/src/lib/api/` 집중. `NEXT_PUBLIC_*` / 서버 전용 구분.
 - **의존성 설치 / `node_modules` 조작 절대 금지** ([[feedback-npm-install-symlink-swap]]) — `npm install` / `npm ci` / `pnpm install` / `yarn` / `rm` / `mv` / `ln` 모두 금지. symlink 보존이 필수. 누락 (`Cannot find module …`) 시 nmae 보고 + 사이클 일시 정지.
-- `web/package.json` / lockfile 변경 = 보호 영역 (`needs-human-review`).
+- `web/package.json` / lockfile 변경 = 정보성 보호 영역 (라벨 의무 폐지 2026-05-28, rev 가 review 대행).
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-rev (mobruji-rev)
 
 - **파일 수정 절대 금지** (`pre-push` hook 으로 push 차단). PR 코멘트만.
-- **매 사이클 첫 액션**: `bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all` — 3 stage 큐 discovery ([[feedback-rev-queue-script]]). 큐 출력 → §E-2 절차 → 라벨 → 다음 호출 자동 제외 (멱등성).
-- **3단계 e2e** ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]):
-  - 단계 1 (PR 머지 전) — `reviewed:claude` 라벨 + ✅/📝/❌ 코멘트 의무 (없으면 `rev-gate.yml` fail → 머지 차단)
-  - 단계 2 (develop 머지 후 dev 환경) — `rev-post-merge-pass` / `regression:dev` 라벨
-  - 단계 3 (release 후 production) — `rev-prod-pass` / `regression:prod` 라벨
-  - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-3-stages.md` SoT**
-- **감사 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
-- 발견 사항은 PR 코멘트만. 이슈 등록은 nmae.
+- **매 사이클 첫 액션**: `bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all` — 2 stage 큐 discovery ([[feedback-rev-queue-script]]). 큐 출력 → §E-2 절차 → 라벨 → 다음 호출 자동 제외 (멱등성). (단계 3 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`; `rev-queue.sh stage3` 정리는 별 PR rev2s-4)
+- **2단계 e2e** ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]):
+  - 🟡 Pre-merge review (단계 1, PR 머지 전) — `reviewed:claude` 라벨 + ✅/📝/❌ 코멘트 의무 (없으면 `rev-gate.yml` fail → 머지 차단)
+  - 🔵 dev 배포 E2E 검증 (단계 2, develop dev 배포 후 배포본 대상 E2E) — `rev-post-merge-pass` / `regression:dev` 라벨. 단위 테스트 재실행 아님 (배포본 통합·배포 회귀 검증)
+  - 상세 절차 / 명령 / 라벨 reference: **`docs/features/rev-e2e-2-stages.md` (단계 구조) + `docs/features/stage2-dev-deploy-e2e.md` (단계 2 무엇을·어떻게) SoT**
+- **단계 1 visual diff 판단 (사전 박제, `scope:web` PR — Playwright workflow 활성화 후 자동 가드)**: `docs/features/visual-regression-ci.md §3-4` SoT — workflow 배포 전이라도 룰 우선 학습 (ADR-0019 망각 가드 정신). 3-row 판단 매트릭스 요약:
+  - diff = 0 (no change) → 🟢 통과, 코멘트 생략 가능
+  - diff > 0.1% + PR body `## visual baseline update` 섹션 의도 명시 (예: ADR-0018 swap 사유) → 🟢 사유 합리성 검토 후 통과, `rev단계1: 🟢 visual baseline 갱신 의도 확인` 코멘트
+  - diff > 0.1% + PR body 섹션 부재 또는 "baseline 변경 없음" → 🔴 시각 회귀 의심, `reviewed:claude` 라벨 부착 차단 + fe sub-agent 에 root cause + PR body 보강 위임
+  - 활성화 시점: visual-regression-ci.md §6 PR 3 (Playwright workflow + 최초 baseline 24 개) 머지 후. 본 룰 자체는 spec 박제 직후 사이클부터 학습 적용 — workflow 미배포 단계에선 매뉴얼 screenshot 매트릭스로 동등 판단.
+- **코드 리뷰 + 품질 검증 표준 절차** (비기능 매트릭스 grep / LGTM self-guard / 누적 경고 봉인 / 결론 헤더 폐기): **`docs/features/rev-qa-protocol.md` SoT** ([[feedback-rev-qa-protocol]]).
+- **단계 별 보고 템플릿 + Discord push 차등** (사용자 정정 2026-05-28 — rev 작업 가시화): `docs/features/rev-qa-protocol.md §5-9` SoT. 🟡 Pre-merge review (단계 1) = cycle forum push / 🔵 dev 배포 E2E 검증 (단계 2) = DIGEST push / ❌ = DIGEST + 사용자 reply. PR 코멘트 format 통일 (`rev단계N: 🟢/🟡/🔴 ...` 검색 패턴). (단계 3 폐기 2026-05-30)
+- **round 종료 wrapper 호출 의무** (강제 메커니즘): rev 매 round 종료 직전 다음 명령 호출. 누락 = 사용자 가시화 X.
+  ```bash
+  bash tools/rev-queue/round-summary.sh <round_id>
+  ```
+  wrapper 가 jsonl scan + 단계 별 push 분기 + ❌ 사용자 reply 자동. 상세: `rev-qa-protocol.md §5-9-5`.
+- **flock 의존 shell test 실행 시 wrapper 의무** (PR #1194, 이슈 #1192): macOS rev 환경에 `flock` 명령 부재로 lock 의존 shell test 가 false-fail 하는 사고 (rev #1175 보고: 14건 false-fail) 가 박제됨. lock 의존 shell test 는 **반드시 `tools/rev-queue/flock-fallback.sh exec` wrapper 통해 실행** — 로컬 flock 가용 시 직접 실행, 부재 시 자동 NCP ssh fallback (`MOBRUJI_NCP_HOST` 설정 시) 또는 graceful warning + exit 3. 직접 호출 금지. 상세: `tools/rev-queue/README.md §flock-fallback.sh`.
+
+  ```bash
+  # 검증 명령 예시 (macOS rev 환경 false-fail 방지)
+  bash tools/rev-queue/flock-fallback.sh detect tests/lock-dependent-test.sh  # exit 0=의존 1=비의존 2=파일없음
+  MOBRUJI_NCP_HOST=user@ncp-host \
+    bash tools/rev-queue/flock-fallback.sh exec tests/lock-dependent-test.sh   # 자동 fallback
+  ```
+
+- 발견 사항은 PR 코멘트만. 이슈 등록은 nmae (be/fe/rev 이슈 등록 금지 유지).
+- **findings 블록 emit 의무** (#1392, 2026-05-31 — 후속 이슈 자동 등록 코드 강제): 🔴/🟡 발견 사항이 1건 이상이면 PR 코멘트(또는 별도 코멘트) **마지막**에 아래 machine-readable 블록을 포함한다. `reviewed:claude` 라벨 부착 시 `.github/workflows/rev-findings-register.yml` 가 이 블록을 파싱해 후속 이슈를 **멱등 자동 등록**한다 (mmae 수작업 관례 폐지 — rev 는 여전히 이슈 등록 X, 보고만). 🟢 통과뿐이면 블록 생략 가능.
+  ```
+  <!-- rev-findings
+  [
+    {"severity":"🟡","title":"work-queue launch 재시도 cap 부재","scope":"infra","type":"fix","body":"… 한 줄 사유 + 보강안 …"},
+    {"severity":"🔴","title":"…","scope":"…","type":"…","body":"…"}
+  ]
+  -->
+  ```
+  - severity: `🔴`(시급) | `🟡`(권장) 만 등록 대상. title 필수. scope/type 는 §4 final 값 (미지정/오타 시 scope=infra, type=fix fallback). body = 한 줄 사유 + 보강안.
+  - 멱등 키 = `rev-finding:PR<n>:<title-slug>` (workflow 가 이슈 body 에 삽입) — 재라벨/재실행 시 중복 등록 안 됨.
+- **미통과(차단) 시 사용자 보고 + 추적 의무** (#1406, 2026-05-31 — 실패 경로 비대칭 해소): 🔴 로 `reviewed:claude` 를 **부착하지 않을 때**(머지 차단), rev 는 다음을 한다 (통과 경로는 자동인데 실패 경로가 막다른 길+무보고였던 갭):
+  1. PR 에 **`rev-blocked` 라벨 부착** (`gh pr edit <n> --add-label rev-blocked`).
+  2. **사용자 채널(#모부르지)에 보고 push** — `discord-reply.sh "⚠️ PR #<n> rev 미통과 — <사유 1-2줄>. rework 필요."` (정중체, 2-4줄, 줄바꿈). 자율인데도 막힌 PR 을 사용자가 인지하게.
+  3. 위 findings 블록(🔴/🟡)을 emit — `rev-blocked` 라벨 부착 시 `rev-findings-register.yml` 가 rework 이슈를 자동 등록 (통과·미통과 양쪽 트리거).
+  - **rework 는 사용자 확인 후** (자동 재시도 X — 자율 산출물 오류는 사람이 한 번 본다, release gate 철학 일관). [[feedback-rev-release-gate]]
+- **작업 보고 양식 — AS-IS/TO-BE** (#1413, 2026-05-31, 모든 cycle 공통): cycle forum 진행/완료 보고는 **나열 금지**, 아래 Discord 마크다운 양식으로 (`build_task_prompt` 가 강제 — `REPORT_TEMPLATE`). AS-IS = **원래 어땠나**(변경 전/문제), TO-BE = **이렇게 바꿨다**(적용; 진행·차단이면 바꿀 목표). 코드펜스(```) 로 감싸지 말 것 (마크다운 렌더).
+  ```
+  ## <제목> · <✅ 완료 | 🟡 진행 | ⛔ 차단>
+
+  **AS-IS** — 원래
+  - <변경 전 / 문제였던 점>
+
+  **TO-BE** — 적용
+  - <무엇을 어떻게 바꿨나>
+
+  **다음** *(진행·차단 시만)*
+  - <다음 / 차단 사유>
+
+  🔗 PR #<N>
+  ```
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. round 종료 보고 PATCH 시도 시도 양식 유지 의무 — 통째 덮어쓰기는 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-plan (mobruji-plan)
 
@@ -158,12 +310,42 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - 금지: `backend/**` / `web/**` 구현 코드
 - ADR/spec 규약: `docs/decisions/README.md`, `docs/features/README.md`, `docs/features/_template.md`
 - **신규 spec frontmatter 의무** ([[feedback-spec-frontmatter-required]]) — `_template.md` 의 `---` ~ `---` 블록 복제 + 8 필드 (feature/slug/status/owner/scope/related_issues/related_prs/last_reviewed). push 전 `head -1 docs/features/<slug>.md` 가 `---` 인지 확인. `.github/workflows/spec-status-check.yml` 가 누락 시 fail → 머지 차단.
+- **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
 ### 2-helper (sub-agent, helper 본체가 `Agent` 도구로 launch)
 
 - 작업 가능: helper 본체와 동일 — 사용자 응답 / helper 자체 수정 / discord-reply.sh / tools/discord-daemon 등
 - 금지: `backend/**` / `web/**` 도메인 구현 (be/fe 영역, nmae 위임)
 - PR 라벨: `session:helper` 명시 부착 (브랜치 prefix 자유 — 자동 부착 룰이 모호)
+
+#### directive 본문 정제 task (spec [[directive-board-template-and-tags]] §5-6)
+
+**helper 본체가 매 turn-start 시 queue 의 `type=directive_polish` pending task 발견 → helper sub-agent batch launch**. 사용자 응답 우선 → 그 후 polish task 처리.
+
+**launch prompt 패턴** (helper 본체가 Agent 도구 호출):
+```
+공통 룰: docs/ai-harness/actors/sub-agent.md §2-helper. 역할 = helper sub-agent.
+
+Task: directive_polish batch (N건).
+
+pending list (helper-queue.jsonl 의 status=pending + type=directive_polish):
+- directive_id=<X>, thread_id=<A>, raw_body="<...>"
+- directive_id=<Y>, thread_id=<B>, raw_body="<...>"
+
+각 directive 마다:
+1. cycle-status.json 의 최근 사이클 상황 read (컨텍스트 파악)
+2. 한 줄 요약 + 1-2 문장 컨텍스트 + category 분류 (🎯 결정 / 🛠️ 작업 / 🐛 사고 / 💡 spec) 생성
+3. discord-reply.sh --forum-edit <thread_id> "<정제된 본문 (spec §5-3 정제 후 template)>" 호출
+4. discord-reply.sh --forum-retag <thread_id> directive "<category tag>" 호출
+
+완료 후 보고: 처리 N건, OK X건, fail Y건 + fail 사유.
+```
+
+**helper 본체가 sub-agent 보고 받은 후 helper-queue 의 처리 완료 task status: pending → done atomic update**.
+
+**helper sub-agent 의 정제 완료 의무**: 각 directive 정제 후 `bash tools/directive-board/mark-polished.sh <directive_id>` 호출 — jsonl 의 `polished=true` 박힘 + **nmae tmux pane 자동 inject** (PR E-1, 학습 의존 ↓). nmae 가 `backlog-scan.sh` default filter (polished=true 만) 통해 정제 완료된 entry 만 분배 → race 가드. 누락 시 nmae 가 영원히 무시 (default filter 가 polished=false 차단).
+
+batch 효과: 1 launch 가 N task 처리 — launch overhead 분담. N=1 도 정상 동작 (overhead 그대로지만 흐름 일관). 한 turn 처리 한도 = max 5 (5+ 이면 다음 turn 에 남은 것 처리).
 
 ### 2-기획·이슈 등록
 
@@ -196,7 +378,7 @@ be / fe / rev = **이슈 등록 금지** (nmae 보고만). plan 은 docs/spec/AD
 - PR URL + draft/ready + mergeable (yes/no/UNKNOWN)
 - 변경 한 줄 요약 (코드 dump 금지)
 - 품질 게이트 결과 (be: checkstyle+spotless+test / fe: lint+typecheck+test+build / plan: 해당 없음)
-- 보호 영역 변경 여부 + `needs-human-review` 부착 여부
+- 보호 영역 변경 여부 (정보성 — 라벨 의무 폐지 2026-05-28)
 
 ### 4-2) 발견 사항 분류
 

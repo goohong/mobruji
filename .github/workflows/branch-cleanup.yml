@@ -27,8 +27,8 @@ name: branch-cleanup
 #   - sweep.sh 자체 whitelist (main / develop / HEAD / 현재 checkout) 보존.
 #
 # 보호 영역:
-#   - 본 workflow 는 `.github/workflows/**` 보호 영역. 신설 PR 은
-#     `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+#   - 본 workflow 는 `.github/workflows/**` 정보성 보호 영역. rev sub-agent
+#     review 대행 (2026-05-28 `needs-human-review` 폐지, CLAUDE.md §4).
 
 on:
   workflow_dispatch:

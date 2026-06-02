@@ -13,7 +13,7 @@ name: Auto Update Project Status
 #   - vars.PROJECT_URL: 보드 URL (auto-add workflow와 공유)
 #   - secrets.PROJECT_TOKEN: repo + project scope의 Classic PAT (user-owned project 필수)
 #
-# 보호 영역(.github/workflows/**) — 변경 시 needs-human-review 라벨 필수.
+# 보호 영역(.github/workflows/**) — rev sub-agent 가 review 대행 (2026-05-28 `needs-human-review` 폐지).
 
 on:
   pull_request:

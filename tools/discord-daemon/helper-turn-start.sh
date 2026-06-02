@@ -44,11 +44,24 @@ TARGET_FILE="${MOBRUJI_DIR}/helper-current-target.txt"
 CYCLE_STATUS_FILE="${MOBRUJI_DIR}/cycle-status.json"
 USER_PRESENCE_FILE="${MOBRUJI_DIR}/user-presence.json"
 QUEUE_FILE="${MOBRUJI_DIR}/helper-queue.jsonl"
+USER_MODE_FILE="${MOBRUJI_DIR}/user-mode.txt"
 
 HAS_JQ=0
 if command -v jq >/dev/null 2>&1; then
   HAS_JQ=1
 fi
+
+# ─── USER_MODE marker — spec: docs/features/discord-reaction-choice-input.md ───
+# AUTO (default, 자율) / ASK (질문 받는 mode). file 부재/잘못된 값 = AUTO.
+# helper LLM 이 이 marker 보고 `--choices` 사용 여부 결정.
+user_mode="AUTO"
+if [[ -r "$USER_MODE_FILE" ]]; then
+  raw_mode=$(head -1 "$USER_MODE_FILE" 2>/dev/null | tr -d '[:space:]' | tr 'a-z' 'A-Z')
+  if [[ "$raw_mode" == "ASK" || "$raw_mode" == "AUTO" ]]; then
+    user_mode="$raw_mode"
+  fi
+fi
+echo "===USER_MODE:${user_mode}==="
 
 echo "=== helper turn-start (#1014) ==="
 
@@ -80,7 +93,13 @@ fi
 # 또는 BOT_WRITING_AUTO_HOOK_ENABLED=1 자동 hook 가 처리 (본 wrapper 책임 X).
 # discord-reply.sh path 해결: 본 스크립트와 같은 디렉토리. symlink 운영도 대응
 # (readlink -f BASH_SOURCE → 실제 위치 → dirname).
-if [[ -n "$target_id" && "$target_id" =~ ^[0-9]{17,20}$ ]]; then
+#
+# 사용자 directive 2026-05-29 (#1294): 진행단계 자동 이모지 즉시 끄기.
+# BOT_WRITING_AUTO_HOOK_ENABLED=0 (default) 시 본 wrapper 의 `--writing-marker`
+# 호출 자체도 skip — 명시 라인 보존하여 opt-in (env=1) 만 켤 수 있게 가드.
+if [[ "${BOT_WRITING_AUTO_HOOK_ENABLED:-0}" != "1" ]]; then
+  echo "[2/7] writing marker ON: skip (BOT_WRITING_AUTO_HOOK_ENABLED!=1 — 사용자 directive 2026-05-29 #1294)"
+elif [[ -n "$target_id" && "$target_id" =~ ^[0-9]{17,20}$ ]]; then
   SCRIPT_SELF="${BASH_SOURCE[0]}"
   if command -v readlink >/dev/null 2>&1; then
     SCRIPT_RESOLVED=$(readlink -f "$SCRIPT_SELF" 2>/dev/null || echo "$SCRIPT_SELF")
@@ -154,19 +173,55 @@ else
   echo "[4/7] user-presence: ?"
 fi
 
-# ─── 5) helper-queue 마지막 pending 표시 ────────────────────────────────────
+# ─── 5) helper-queue 마지막 pending 표시 + directive_polish 종류별 count ─────
+# spec: docs/features/directive-board-template-and-tags.md §5-6
+# bot.py 가 📌 등록 시 queue 에 type=directive_polish task append. helper 본체가
+# 다음 turn 에서 발견 시 helper sub-agent batch launch (정제 + category tag PATCH).
 if [[ -r "$QUEUE_FILE" ]]; then
   if [[ "$HAS_JQ" -eq 1 ]]; then
     pending_count=$(jq -s '[.[] | select(.status == "pending")] | length' "$QUEUE_FILE" 2>/dev/null)
-    last_pending=$(jq -r 'select(.status == "pending") | .message_id // "?"' "$QUEUE_FILE" 2>/dev/null | tail -1)
-    echo "[5/7] queue: pending=${pending_count:-?} last_pending_msg_id=${last_pending:-?} — append 의무 잊지 말기"
+    polish_count=$(jq -s '[.[] | select(.status == "pending" and .type == "directive_polish")] | length' "$QUEUE_FILE" 2>/dev/null)
+    last_pending=$(jq -r 'select(.status == "pending") | .message_id // .directive_id // "?"' "$QUEUE_FILE" 2>/dev/null | tail -1)
+    echo "[5/7] queue: pending=${pending_count:-?} (directive_polish=${polish_count:-0}) last_pending=${last_pending:-?} — append 의무 잊지 말기"
+    if [[ "${polish_count:-0}" -gt 0 ]]; then
+      # polish task 종류별 ids — helper 본체가 sub-agent batch launch 결정에 사용.
+      polish_ids=$(jq -r 'select(.status == "pending" and .type == "directive_polish") | .directive_id' "$QUEUE_FILE" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+      echo "[5b/7] directive_polish pending ids: ${polish_ids} — helper sub-agent batch launch 대상 (spec §5-6)"
+    fi
   else
     pending_count=$(grep -c '"status": "pending"' "$QUEUE_FILE" 2>/dev/null || echo "?")
-    echo "[5/7] queue: pending=${pending_count} (jq 미설치 raw count) — append 의무 잊지 말기"
+    polish_count=$(grep -c '"type": "directive_polish"' "$QUEUE_FILE" 2>/dev/null || echo "?")
+    echo "[5/7] queue: pending=${pending_count} (directive_polish raw=${polish_count}, jq 미설치) — append 의무 잊지 말기"
   fi
 else
   echo "[5/7] queue: ! ${QUEUE_FILE} 부재 (turn 종료 직전 신설 필요)" >&2
   echo "[5/7] queue: ?"
+fi
+
+# ─── 5b) directive-board jsonl ↔ Discord forum mismatch detect (#1129 PR 3) ─
+# spec: docs/features/directive-board-event-driven-redesign.md §4
+# polling sync_loop 폐기 후 actor 호출 누락 detect — helper turn 시작 시점에
+# 최근 20 entry 의 jsonl status 와 Discord forum tag 를 diff. mismatch 발견 시
+# visible [!] warning emit. helper 가 보고 즉시 정정 호출 (directive_status.sh).
+# graceful: diff 헬퍼 자체가 exit 0 보장. wrapper turn 안 깨짐.
+if [[ -n "${SCRIPT_DIR:-}" ]]; then
+  DIFF_SH_HTS="${SCRIPT_DIR}/../directive-board/jsonl-forum-diff.sh"
+else
+  # SCRIPT_DIR 미설정 (writing marker 분기 안 들어간 경우) — fallback resolve.
+  SCRIPT_SELF_HTS="${BASH_SOURCE[0]}"
+  if command -v readlink >/dev/null 2>&1; then
+    SCRIPT_RESOLVED_HTS=$(readlink -f "$SCRIPT_SELF_HTS" 2>/dev/null || echo "$SCRIPT_SELF_HTS")
+  else
+    SCRIPT_RESOLVED_HTS="$SCRIPT_SELF_HTS"
+  fi
+  DIFF_SH_HTS="$(dirname "$SCRIPT_RESOLVED_HTS")/../directive-board/jsonl-forum-diff.sh"
+fi
+if [[ -x "$DIFF_SH_HTS" ]]; then
+  DIFF_OUT=$("$DIFF_SH_HTS" --limit 20 2>/dev/null || true)
+  if [[ -n "$DIFF_OUT" ]]; then
+    # mismatch 있을 때만 출력 — 없는 케이스 silent (signal-to-noise ↑).
+    printf '%s\n' "$DIFF_OUT"
+  fi
 fi
 
 # ─── 6) 다음 액션 reminder ──────────────────────────────────────────────────

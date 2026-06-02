@@ -11,7 +11,7 @@
 #   `helper-launch.sh` 런처를 경유합니다.
 # - 런처와 역할 정의(`helper-role.md`)는 브랜치 전환에 흔들리지 않도록 `~/.mobruji`
 #   안에 두는 것이 SoT 입니다. 본 repo 안 사본(`tools/discord-daemon/helper-role.md`,
-#   `tools/discord-daemon/helper-launch.sh`)은 PR 리뷰/감사용 reference 입니다.
+#   `tools/discord-daemon/helper-launch.sh`)은 PR 리뷰/검증용 reference 입니다.
 # - 변경 절차: docs/features/helper-role-enforcement.md §운영 변경 절차 참조.
 
 [Unit]
@@ -23,10 +23,20 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 User=mobruji
-WorkingDirectory=/home/mobruji/mobruji
+# 2026-05-29: cwd 를 /home/mobruji 로 변경 (git repo 아닌 dir). Claude Code 가
+# cwd 의 git context 자동 로드 시 사용자 명령을 git 작업으로 잘못 해석 → helper
+# 본체 relay-only 룰 ([[feedback-helper-relay-only]]) 위반 사고 영구 방지.
+# spec: docs/features/helper-cwd-not-git-repo.md.
+WorkingDirectory=/home/mobruji
 Environment=HOME=/home/mobruji
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; then /usr/bin/tmux new-session -d -s helper -c /home/mobruji/mobruji "/home/mobruji/.mobruji/helper-launch.sh"; fi'
+# spec: docs/features/helper-tool-visibility.md (2026-05-29).
+# Claude Code PreToolUse hook (helper-tool-progress.sh) 가 marker 검사해
+# helper 본체만 도구 호출 가시화 push. helper-launch.sh 의 `export` backup —
+# systemd 가 ExecStop=kill-session 후 ExecStart 가 새 tmux session 만들 때
+# 자식 process (claude) 가 직접 상속받도록 ENV 명시.
+Environment=MOBRUJI_HOOK_ACTOR=helper
+ExecStart=/bin/bash -c 'if ! /usr/bin/tmux has-session -t helper 2>/dev/null; then /usr/bin/tmux new-session -d -s helper -c /home/mobruji "/home/mobruji/.mobruji/helper-launch.sh"; fi'
 ExecStop=/usr/bin/tmux kill-session -t helper
 
 [Install]

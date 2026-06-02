@@ -10,15 +10,14 @@ name: Rev Gate
 # Squash merge 가 막힌다 (admin override 또는 whitelist 라벨 필요).
 #
 # Whitelist 라벨 (rev 게이트 우회):
-#   - `needs-human-review` — 보호 영역 (`.github/workflows/**` 등) 사용자 승인 영역
-#   - `type:release` — release PR (develop → main)
+#   - `type:release` — release PR (develop → main). 사용자 명시 확인이라 게이트 면제.
 #
 # Escape hatch 의도:
 #   helper 자율 사이클이 rev 게이트 때문에 marble (deadlock) 나는 것 방지.
-#   사용자가 명시적으로 human review 라벨 박은 PR + release PR 은 통과.
+#   release PR 은 사용자 직접 확인 (release 머지 게이트 [[feedback-rev-release-gate]]).
 #
-# 본 워크플로우 자체는 `.github/workflows/**` 보호 영역이므로 신설 PR 은
-# `needs-human-review` 라벨 필수 (CLAUDE.md §4).
+# 2026-05-28: `needs-human-review` whitelist 폐지 — rev sub-agent 가 사용자 review 를
+# 대행하므로 별도 라벨 분기 불필요 + 다른 agent 에게 혼동 유발.
 #
 # 관련:
 #   - docs/features/rev-e2e-3-stages.md §3-1
@@ -48,11 +47,21 @@ jobs:
               return;
             }
 
-            const labels = pr.labels.map(l => l.name);
-            core.info(`PR #${pr.number} labels: ${labels.join(', ') || '(none)'}`);
+            // (#1419) context.payload.pull_request.labels 는 event trigger 시점에
+            // 고정된 snapshot 이다. labeled event 는 라벨 1개가 추가되기 "직전"
+            // payload 를 담는 경우가 있고, re-run 은 원본 payload 를 그대로 재사용해
+            // reviewed:claude 부착 후에도 라벨을 인식하지 못한다 (auto-merge deadlock).
+            // 항상 현재 라벨을 API 로 재조회한다.
+            const { data: prData } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+            const labels = prData.labels.map(l => l.name);
+            core.info(`PR #${pr.number} labels (live): ${labels.join(', ') || '(none)'}`);
 
-            // 1) Whitelist — rev 게이트 우회 허용 라벨
-            const whitelist = ['needs-human-review', 'type:release'];
+            // 1) Whitelist — rev 게이트 우회 허용 라벨 (2026-05-28: release 만 남김)
+            const whitelist = ['type:release'];
             const matchedWhitelist = whitelist.filter(w => labels.includes(w));
             if (matchedWhitelist.length > 0) {
               core.info(`Whitelist label(s) present (${matchedWhitelist.join(', ')}) — rev gate skipped.`);
@@ -64,7 +73,7 @@ jobs:
               core.setFailed(
                 `PR #${pr.number} 는 'reviewed:claude' 라벨이 없습니다. ` +
                 `rev sub-agent 의 단계 1 (PR 머지 전) 검사 후 라벨 부여 필요. ` +
-                `Whitelist (needs-human-review / type:release) 라벨도 없음. ` +
+                `Whitelist (type:release) 라벨도 없음. ` +
                 `상세: docs/features/rev-e2e-3-stages.md §3-1`
               );
               return;

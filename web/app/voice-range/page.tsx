@@ -111,9 +111,15 @@ export default function VoiceRangePage() {
    *  4) auto CTA Link : bg-zinc-900 ... dark:bg-zinc-50 → brand-500/600 + shadow-brand
    *  5) section heading h2 (각 1건) : text-zinc-900 dark:text-zinc-50 → --text-primary
    *
+   * #1044 단계 4 PR 12 — NoteSelect 내부 잔여 zinc 일괄 swap:
+   *  6) label <span> : text-zinc-700 dark:text-zinc-300 → --text-label (PR 10 토큰 재사용)
+   *  7) <select> : border-zinc-300 / bg-white / text-zinc-900 / focus:border-zinc-500
+   *     + dark:border-zinc-700 / dark:bg-zinc-950 / dark:text-zinc-50
+   *     → --border-input / --bg-base / --text-primary / --border-input-focus
+   *     (input PR 10 토큰 + --bg-base 재사용 — select dark bg-zinc-950 가 input
+   *     dark zinc-900 과 다르므로 별도 토큰 대신 --bg-base 매핑이 정확)
+   *
    * 미swap (후속 PR 양보):
-   *  - NoteSelect 내부 border / focus 색 (스타일 변경 없이 토큰 매핑 부재)
-   *  - (resolved #1044 PR 9) role="alert" 에러 텍스트의 text-red-600 dark:text-red-400 → --danger-fg-soft 토큰 swap.
    *  - <Button /> 컴포넌트 — 별도 컴포넌트라 본 페이지 범위 밖.
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
@@ -263,9 +269,7 @@ function NoteSelect({
 }: NoteSelectProps) {
   return (
     <label className="flex flex-col gap-2 text-sm">
-      <span className="font-medium text-zinc-700 dark:text-zinc-300">
-        {label}
-      </span>
+      <span className="font-medium text-[var(--text-label)]">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -274,7 +278,7 @@ function NoteSelect({
         // undefined 일 때는 속성 자체를 생략한다 (빈 문자열 ≠ 미지정).
         aria-invalid={invalid ? true : undefined}
         aria-describedby={describedBy}
-        className="h-11 rounded-lg border border-zinc-300 bg-white px-3 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+        className="h-11 rounded-[var(--radius-md)] border border-[var(--border-input)] bg-[var(--bg-base)] px-3 text-base text-[var(--text-primary)] focus:border-[var(--border-input-focus)] focus:outline-none"
       >
         {options.map((midi) => (
           <option key={midi} value={midi}>

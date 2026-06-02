@@ -3,6 +3,8 @@
 기능 단위의 **living document** 저장소. 한 번 쓰고 끝나는 구현 계획이 아니라,
 기능이 존재하는 동안 계속 유지·갱신되는 명세서다.
 
+> **Note (2026-05-28, PR #1202 follow-up)**: 본 디렉토리 안 spec 다수에 `needs-human-review` 라벨 언급이 historical 컨텍스트로 남아 있습니다. **해당 라벨은 2026-05-28 폐지** — rev sub-agent 가 사용자 review 를 대행하므로 별도 라벨 부착 의무 없습니다. 보호 영역 (`CLAUDE.md §4`) 은 정보성 분류로 유지되며 rev 사이클이 추가 신중도 가중 처리합니다. 실제 PR 작성 시 `needs-human-review` 라벨 부착 X. spec 본문의 historical mention 은 작성 시점 컨텍스트로 그대로 보존 (loaded 문서 아님 — 후속 spec 갱신 PR 에서 점진적 정정).
+
 ## 1) 왜 필요한가
 
 - **합의 이력**: 요구사항/설계 결정을 누가 언제 왜 내렸는지 한 파일에 모음
@@ -75,7 +77,9 @@ frontmatter의 `status` 필드로 추적한다.
 ## 7) 템플릿
 
 `_template.md`를 복사해서 시작한다. 모든 섹션을 다 채울 필요는 없지만,
-"범위/비범위", "오픈 질문", "결정 로그"는 비우지 말 것.
+"범위/비범위", "오픈 질문", "결정 로그"는 비우지 말 것. `§6 보호 영역
+변경 여부` 항목도 명시 의무 — 변경 없음이라도 ☐ 없음 체크. rev 사이클이
+가중도 정보로 활용한다 (정보성 — 부재가 머지 차단을 유발하지는 않음).
 
 ## 8) AI 에이전트 의무
 
@@ -108,6 +112,8 @@ frontmatter의 `status` 필드로 추적한다.
 | [cycle-backlog-and-auto-merge-hooks](cycle-backlog-and-auto-merge-hooks.md) | cycle-backlog-and-auto-merge-hooks | implemented | 2026-05-26 |
 | [deployment-infrastructure](deployment-infrastructure.md) | 운영 배포 인프라 (Phase 5 prod — NCP 별 VM + Cloudflare, ADR-0015 재결정 반영) | draft | 2026-05-24 |
 | [directive-board-event-driven-redesign](directive-board-event-driven-redesign.md) | directive board event-driven redesign | approved | 2026-05-27 |
+| [directive-board-stale-close-policy](directive-board-stale-close-policy.md) | Directive board stale entry 분류 + close 정책 (대기 long-running entry 정리) | draft | 2026-05-28 |
+| [directive-cleanup-option-b](directive-cleanup-option-b.md) | 잔존 directive 정리 — 옵션 B (분류 기반 자율 sweep + 정책 영속화) | draft | 2026-05-29 |
 | [directive-jsonl-mismatch-sweep](directive-jsonl-mismatch-sweep.md) | directive-board jsonl ↔ Discord mismatch 106건 자동 sweep + 지속 sync | draft | 2026-05-26 |
 | [discord-daemon-hosting](discord-daemon-hosting.md) | Discord 데몬 호스팅 (무료 24/7 옵션) | draft | 2026-05-23 |
 | [discord-driven-mobruji](discord-driven-mobruji.md) | Discord-driven maestro (tmux interactive + Discord bridge) | draft | 2026-05-24 |
@@ -117,6 +123,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [discord-reply-length-split](discord-reply-length-split.md) | discord-reply.sh length 2000 초과 split + retry | draft | 2026-05-26 |
 | [discord-status-push](discord-status-push.md) | Discord 상태 push 룰 (maestro 사이클 트레일) | approved | 2026-05-24 |
 | [event-action-mapping](event-action-mapping.md) | event-action-mapping | approved | 2026-05-26 |
+| [heartbeat-watchdog-initial-delay](heartbeat-watchdog-initial-delay.md) | Heartbeat watchdog initial delay 확장 (false-positive missing 회귀 fix) | draft | 2026-05-28 |
 | [helper-agent](helper-agent.md) | Helper Agent (nmae 영구 가동으로 mmae 대체 + 사용자 양방향 전담) | draft | 2026-05-23 |
 | [helper-direct-work-guard-subagent-context](helper-direct-work-guard-subagent-context.md) | helper-direct-work-guard sub-agent context 보강 | implementing | 2026-05-27 |
 | [helper-role-enforcement](helper-role-enforcement.md) | Helper Role Enforcement (relay-only 정의 + system prompt 강제 메커니즘) | draft | 2026-05-26 |
@@ -125,6 +132,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [helper-writing-marker-timing-fix](helper-writing-marker-timing-fix.md) | helper writing marker timing fix | implementing | 2026-05-27 |
 | [internal-label-scrub](internal-label-scrub.md) | 내부 ID 라벨 scrub (A1/B2/D1 → user-friendly paraphrase 분리) | draft | 2026-05-24 |
 | [librosa-ci-build-monitoring](librosa-ci-build-monitoring.md) | librosa CI 빌드 시간 모니터링 + 캐싱 전략 | draft | 2026-05-24 |
+| [loop-heartbeat-reliability](loop-heartbeat-reliability.md) | Loop heartbeat reliability — `record_loop_heartbeat` "skip on continue" 패턴 일소 (try/finally 단일 종점) | draft | 2026-05-28 |
 | [maestro-auto-wake](maestro-auto-wake.md) | maestro 자동 wake 사이클 (idle 시 self-perpetuating + secondary backup) | approved | 2026-05-24 |
 | [ncp-dev-deployment](ncp-dev-deployment.md) | Phase 4 — NCP maestro VM에 mobruji dev 환경 docker 격리 배포 | shipped | 2026-05-24 |
 | [ncp-maestro-resilience](ncp-maestro-resilience.md) | NCP maestro 전체 사이클 멈춤 위험 점검 + 회복 자동화 | approved | 2026-05-23 |
@@ -134,9 +142,12 @@ frontmatter의 `status` 필드로 추적한다.
 | [redundant-rules-audit-2026-05-26](redundant-rules-audit-2026-05-26.md) | Redundant Rules Audit (2026-05-26) | draft | 2026-05-26 |
 | [release-cadence-v0.4.0](release-cadence-v0.4.0.md) | Release Cadence v0.4.0 — cutoff 룰 + 범위 결정 | draft | 2026-05-24 |
 | [release-fork-watchdog](release-fork-watchdog.md) | release fork watchdog (scheduled GHA + 임계치 Discord push) | draft | 2026-05-27 |
-| [rev-e2e-3-stages](rev-e2e-3-stages.md) | rev 3단계 e2e 자율 QA | draft | (frontmatter legacy) |
+| [rev-browser-e2e-env](rev-browser-e2e-env.md) | rev 사이클 브라우저 E2E 검증 환경 (headless 브라우저 + 2 단계 워크플로우 통합) | draft | 2026-05-31 |
+| [rev-e2e-2-stages](rev-e2e-2-stages.md) | rev 2 단계 e2e 자율 QA (Pre-merge / Post-merge) | draft | 2026-05-30 |
+| [rev-fe-browser-qa-replacement](rev-fe-browser-qa-replacement.md) | rev 실 브라우저 FE QA 단계 — 기존 E2E 대체 정책 (replacement scope + 도구 결정) | draft | 2026-05-31 |
 | [rev-qa-protocol](rev-qa-protocol.md) | rev 세션 QA 실행 검증 프로토콜 | implementing | 2026-05-24 |
 | [spec-status-check-legacy-key-fail](spec-status-check-legacy-key-fail.md) | spec-status-check legacy key hard fail | draft | 2026-05-27 |
+| [stage2-dev-deploy-e2e](stage2-dev-deploy-e2e.md) | 단계 2 재정의 — dev 배포 E2E 검증 (배포본 E2E 점검) | draft | 2026-06-02 |
 | [systemd-restart-always](systemd-restart-always.md) | mobruji-helper.service Type=simple + Restart=always | draft | 2026-05-26 |
 | [user-decisions-pending-2026-05-26](user-decisions-pending-2026-05-26.md) | User Decisions Pending — 2026-05-26 권고안 | draft | 2026-05-26 |
 | [v03-roadmap](v03-roadmap.md) | v0.3 P1~P3 로드맵 (백로그 우선순위 정리) | draft | 2026-05-24 |
@@ -188,6 +199,7 @@ frontmatter의 `status` 필드로 추적한다.
 | Slug | Feature | Status | Last reviewed |
 |---|---|---|---|
 | [ui-ux-redesign](ui-ux-redesign.md) | UI/UX 디자인 4단계 부활 (audit → ref → spec → 구현) | approved | 2026-05-24 |
+| [web-e2e-playwright](web-e2e-playwright.md) | web/ Playwright e2e 인프라 도입 (design tokens 시각 회귀 가드) | draft | 2026-05-28 |
 
 ## 10) Frontmatter 필드 의무
 

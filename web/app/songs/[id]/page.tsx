@@ -42,6 +42,7 @@ import {
   type Difficulty,
 } from "@/lib/difficulty";
 import { midiToCombinedNoteName } from "@/lib/notes";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useLikesStore } from "@/store/likes";
 
 export default function SongDetailPage() {
@@ -123,6 +124,8 @@ function SongDetailView({ song }: SongDetailViewProps) {
       ? midiToCombinedNoteName(song.lowMidi)
       : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1284 — 한국 곡 한국어 표시 우선 (heading + 좋아요 aria-label 동일 표시).
+  const displayTitle = formatSongDisplayTitle(song);
 
   return (
     <Shell>
@@ -139,20 +142,20 @@ function SongDetailView({ song }: SongDetailViewProps) {
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
           Song detail
         </p>
-        <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-50">
-          {song.title}
+        <h1 className="text-3xl font-semibold text-[var(--text-primary)]">
+          {displayTitle}
         </h1>
-        <p className="text-base text-zinc-600 dark:text-zinc-300">
+        <p className="text-base text-[var(--text-secondary)]">
           {song.artist}
         </p>
         <div className="pt-1">
-          <DetailLikeButton songId={song.id} songTitle={song.title} />
+          <DetailLikeButton songId={song.id} songTitle={displayTitle} />
         </div>
       </header>
 
       <section
         aria-label="가창 정보"
-        className="flex flex-col gap-4 rounded-2xl bg-white p-5 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+        className="flex flex-col gap-4 rounded-2xl bg-[var(--cta-secondary-bg)] p-5 ring-1 ring-[var(--ring-soft-detail)]"
       >
         <div className="flex flex-wrap items-center gap-3">
           {difficulty ? (
@@ -162,16 +165,16 @@ function SongDetailView({ song }: SongDetailViewProps) {
               가창 난이도 정보가 아직 없어요
             </span>
           )}
-          <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+          <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
             키 {keyLabel}
           </span>
           {song.genre ? (
-            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+            <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
               {song.genre}
             </span>
           ) : null}
           {song.mood ? (
-            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+            <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
               {song.mood}
             </span>
           ) : null}
@@ -195,9 +198,9 @@ function SongDetailView({ song }: SongDetailViewProps) {
 
       <section
         aria-label="메타 정보"
-        className="flex flex-col gap-3 rounded-2xl bg-white p-5 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+        className="flex flex-col gap-3 rounded-2xl bg-[var(--cta-secondary-bg)] p-5 ring-1 ring-[var(--ring-soft-detail)]"
       >
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           메타 정보
         </h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
@@ -213,13 +216,13 @@ function SongDetailView({ song }: SongDetailViewProps) {
       <div className="flex flex-wrap gap-3">
         <Link
           href="/recommend"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--cta-neutral-bg)] px-5 text-sm font-medium text-[var(--cta-neutral-fg)] hover:bg-[var(--cta-neutral-bg-hover)]"
         >
           비슷한 곡 추천 받기
         </Link>
         <Link
           href="/voice-range"
-          className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 px-5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="inline-flex h-11 items-center justify-center rounded-full border border-[var(--cta-secondary-border)] px-5 text-sm font-medium text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
         >
           음역대 입력하기
         </Link>
@@ -250,10 +253,10 @@ function DetailLikeButton({ songId, songTitle }: DetailLikeButtonProps) {
       onClick={() => toggleLike(songId)}
       aria-pressed={liked}
       aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 ${
+      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] ${
         liked
           ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-          : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          : "border border-[var(--cta-secondary-border)] text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
       }`}
     >
       <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
@@ -273,7 +276,7 @@ function NoteCell({ label, value }: NoteCellProps) {
       <dt className="text-xs text-[var(--text-caption)]">{label}</dt>
       <dd
         aria-label={`${label} ${value}`}
-        className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50"
+        className="text-2xl font-semibold text-[var(--text-primary)]"
       >
         {value}
       </dd>
@@ -292,7 +295,7 @@ function MetaCell({ label, value }: MetaCellProps) {
   return (
     <div className="flex flex-col gap-1">
       <dt className="text-xs text-[var(--text-caption)]">{label}</dt>
-      <dd className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+      <dd className="text-sm font-medium text-[var(--text-body-emphasis)]">
         {display}
       </dd>
     </div>
@@ -332,7 +335,7 @@ type ShellProps = {
 
 function Shell({ children }: ShellProps) {
   return (
-    <main className="flex flex-1 flex-col items-center bg-zinc-50 px-6 py-12 dark:bg-zinc-950">
+    <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-6 py-12">
       <div className="flex w-full max-w-2xl flex-col gap-6">{children}</div>
     </main>
   );
@@ -347,11 +350,11 @@ function SongDetailSkeleton() {
         aria-label="곡 정보를 불러오는 중"
         className="flex flex-col gap-4"
       >
-        <div className="h-3 w-16 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="h-8 w-2/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="h-4 w-1/3 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="mt-2 h-32 w-full animate-pulse rounded-2xl bg-zinc-200 dark:bg-zinc-800" />
-        <div className="h-32 w-full animate-pulse rounded-2xl bg-zinc-200 dark:bg-zinc-800" />
+        <div className="h-3 w-16 animate-pulse rounded bg-[var(--meter-track-bg)]" />
+        <div className="h-8 w-2/3 animate-pulse rounded bg-[var(--meter-track-bg)]" />
+        <div className="h-4 w-1/3 animate-pulse rounded bg-[var(--meter-track-bg)]" />
+        <div className="mt-2 h-32 w-full animate-pulse rounded-2xl bg-[var(--meter-track-bg)]" />
+        <div className="h-32 w-full animate-pulse rounded-2xl bg-[var(--meter-track-bg)]" />
       </div>
     </Shell>
   );
@@ -360,16 +363,16 @@ function SongDetailSkeleton() {
 function NotFoundView() {
   return (
     <Shell>
-      <div className="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-zinc-300 bg-white p-6 dark:border-zinc-700 dark:bg-zinc-900">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <div className="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] p-6">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           곡을 찾을 수 없습니다
         </h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           요청하신 곡이 카탈로그에 없어요. 검색에서 다시 찾아보세요.
         </p>
         <Link
           href="/songs"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-[var(--cta-neutral-bg)] px-5 text-sm font-medium text-[var(--cta-neutral-fg)] hover:bg-[var(--cta-neutral-bg-hover)]"
         >
           검색으로 가기
         </Link>

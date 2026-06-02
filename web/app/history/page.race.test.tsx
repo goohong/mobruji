@@ -272,8 +272,10 @@ describe("/history 페이지 query/source 전환 race 가드 (fixture refixture,
     });
 
     // BE source 카드 노출, local 카드는 사라짐 (displayEntries 가 BE 우선).
+    // closes #1284 — `formatSongDisplayTitle` 가 language=ko 인 dual-name title
+    // ("be-곡-100") 을 한국어 우선 swap → "곡-100 (be)" 으로 표시.
     await waitFor(() => {
-      expect(screen.getByText("be-곡-100")).toBeInTheDocument();
+      expect(screen.getByText("곡-100 (be)")).toBeInTheDocument();
     });
     expect(screen.queryByText("곡-10")).not.toBeInTheDocument();
 

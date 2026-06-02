@@ -49,23 +49,27 @@ export default function Home() {
   const hasMeasurement = hasHydrated && voiceRangeId !== null;
 
   /*
-   * ADR-0018 단계 4 PR 2 — homepage 토큰 swap 1차.
+   * ADR-0018 단계 4 — homepage 토큰 swap.
    *
-   * 본 PR 에서 swap 한 요소 (총 8개):
-   *  1) <main> 배경 : `bg-zinc-50 ... dark:bg-zinc-950` → `bg-[var(--bg-subtle)]`
-   *  2) <main> padding : `px-6 py-12` → `px-[var(--page-padding-x)] py-[var(--page-padding-y)]`
-   *  3) h1 색상 : `text-zinc-900 dark:text-zinc-50` → `text-[var(--text-primary)]`
-   *  4) header 부제 색상 : `text-zinc-600 dark:text-zinc-400` → `text-[var(--text-secondary)]`
-   *  5) NewUser 카드 배경 + ring + radius : `bg-white ring-zinc-200 rounded-2xl ...` → tokens
-   *  6) Returning 카드 동일 패턴
-   *  7) NewUser primary CTA : `bg-zinc-900 ...` (검정) → `bg-[var(--brand-500)] hover:bg-[var(--brand-600)]` (브랜드 indigo)
-   *  8) Returning primary CTA 동일 패턴
+   * PR 2 (#1137) — first-paint 핵심 5요소 swap:
+   *  1) <main> 배경 + padding (--bg-subtle + --page-padding-*)
+   *  2) h1 / header 부제 (--text-primary + --text-secondary)
+   *  3) NewUser/Returning 카드 (--bg-base + --shadow-sm + --border + --radius-lg)
+   *  4) primary CTA (--brand-500 / --brand-600 + --shadow-brand)
+   *
+   * PR 8 (#1170) — `--text-caption` 통합 (보조 caption 페어 일괄 swap).
+   *
+   * PR 11 (#1044) — 잔여 zinc hardcode swap (본 PR):
+   *  5) NewUser/Returning 패널 h2/p (--text-primary + --text-secondary)
+   *  6) FlowStep 텍스트 라벨 (--text-label)
+   *  7) 보조 CTA "직접 입력으로 시작" / "음역대 다시 측정" (--cta-secondary-*)
+   *  8) VoiceRangeSummary 박스 3종 (--badge-neutral-bg + --text-* 재사용)
+   *  9) SecondaryNav 4 link (--cta-secondary-* + --border-input)
+   * 10) FlowStep index chip (--surface-step-*)
+   * 11) disclaimer "익명 세션..." (--text-disclaimer)
    *
    * 다크 모드: tokens.css 의 `:where(html.dark)` selector 가 토큰값을 자동
-   * swap 하므로 swap 한 요소에서는 `dark:` prefix 를 제거할 수 있다. 보조 CTA /
-   * SecondaryNav / FlowStep / VoiceRangeSummary 는 후속 PR (단계 4 PR 3+) 에
-   * 양보 — 본 PR scope 는 "first-paint 핵심 5요소 (배경/h1/카드/CTA/padding)" 로
-   * 한정해 회귀 표면 최소화.
+   * swap → 사용처에서 `dark:` prefix 제거.
    */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
@@ -86,7 +90,7 @@ export default function Home() {
 
         <SecondaryNav />
 
-        <p className="text-xs text-zinc-500 dark:text-zinc-500">
+        <p className="text-xs text-[var(--text-disclaimer)]">
           익명 세션으로 동작합니다. 회원가입 없음.
         </p>
       </div>
@@ -110,18 +114,18 @@ function NewUserPanel() {
       <div className="space-y-2">
         <h2
           id="home-onboarding-heading"
-          className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
+          className="text-lg font-semibold text-[var(--text-primary)]"
         >
           시작하기
         </h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           음역대를 알아야 부르기 편한 키의 곡만 추려서 보여드릴 수 있어요.
         </p>
       </div>
 
       <ol
         aria-label="이용 단계"
-        className="flex flex-col gap-2 text-sm text-zinc-700 dark:text-zinc-300"
+        className="flex flex-col gap-2 text-sm text-[var(--text-label)]"
       >
         <FlowStep index={1} label="음역대 측정 (자동 1분 or 직접 입력)" />
         <FlowStep index={2} label="분위기·성별·속도 선택" />
@@ -138,7 +142,7 @@ function NewUserPanel() {
         </Link>
         <Link
           href="/voice-range"
-          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-zinc-300 bg-white px-6 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] px-6 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           직접 입력으로 시작
         </Link>
@@ -176,11 +180,11 @@ function ReturningUserPanel() {
       <div className="space-y-2">
         <h2
           id="home-returning-heading"
-          className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
+          className="text-lg font-semibold text-[var(--text-primary)]"
         >
           다시 오신 걸 환영해요
         </h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-[var(--text-secondary)]">
           음역대 정보가 저장돼 있어요. 바로 추천받거나, 필요하면 다시 측정할 수 있어요.
         </p>
       </div>
@@ -200,7 +204,7 @@ function ReturningUserPanel() {
         </Link>
         <Link
           href="/voice-range/auto"
-          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-zinc-300 bg-white px-6 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] px-6 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           음역대 다시 측정
         </Link>
@@ -235,7 +239,7 @@ function VoiceRangeSummary({
     return (
       <p
         aria-label="저장된 음역대"
-        className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+        className="rounded-lg bg-[var(--badge-neutral-bg)] px-3 py-2 text-sm text-[var(--badge-neutral-fg)]"
       >
         저장된 음역대 <span className="font-semibold">{lowNote} ~ {highNote}</span>
       </p>
@@ -246,7 +250,7 @@ function VoiceRangeSummary({
       <p
         role="status"
         aria-live="polite"
-        className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-[var(--text-caption)] dark:bg-zinc-800"
+        className="rounded-lg bg-[var(--badge-neutral-bg)] px-3 py-2 text-sm text-[var(--text-caption)]"
       >
         음역대 불러오는 중…
       </p>
@@ -256,7 +260,7 @@ function VoiceRangeSummary({
   return (
     <p
       aria-label="저장된 음역대 ID"
-      className="rounded-lg bg-zinc-100 px-3 py-2 text-xs text-[var(--text-caption)] dark:bg-zinc-800"
+      className="rounded-lg bg-[var(--badge-neutral-bg)] px-3 py-2 text-xs text-[var(--text-caption)]"
     >
       저장된 음역대 #{voiceRangeId}
     </p>
@@ -284,7 +288,7 @@ function SecondaryNav() {
           <li key={item.href}>
             <Link
               href={item.href}
-              className="inline-flex h-11 w-full items-center justify-center rounded-full border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--border-input)] bg-[var(--cta-secondary-bg)] px-3 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
             >
               {item.label}
             </Link>
@@ -305,7 +309,7 @@ function FlowStep({ index, label }: FlowStepProps) {
     <li className="flex items-start gap-3">
       <span
         aria-hidden="true"
-        className="mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+        className="mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--surface-step-bg)] text-xs font-semibold text-[var(--surface-step-fg)]"
       >
         {index}
       </span>

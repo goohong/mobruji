@@ -28,6 +28,22 @@ export const THEME_STORAGE_KEY = "mobruji-theme";
 export const THEME_DARK_CLASS = "dark";
 
 /**
+ * 같은 탭에서 모드 변경을 알리는 보조 custom event 이름 (이슈 #1170 production fix).
+ *
+ * 배경:
+ *  - `dispatchEvent(new StorageEvent("storage", {key, newValue}))` 는 spec 상 같은
+ *    탭 listener 에게 fire 되지만, 일부 production browser 에서 `StorageEvent.key`
+ *    필드가 constructor option 에서 누락된 채 `null` 로 떨어지는 보고가 있음.
+ *  - 그 경우 `subscribe()` 안의 `event.key === THEME_STORAGE_KEY` 필터가 false 가
+ *    되어 useSyncExternalStore 의 callback 이 호출되지 않음 → React state 가
+ *    stale 한 채 button click 이 시각적으로만 반영되거나 그마저도 깜빡 후 revert.
+ *  - 이 custom event 는 useSyncExternalStore re-read 를 강제하는 보조 채널.
+ *  - StorageEvent 가 정상이면 callback 이 2번 호출되지만 useSyncExternalStore 가
+ *    snapshot 동일성 비교로 idempotent — 추가 re-render 없음.
+ */
+export const THEME_CHANGE_EVENT = "mobruji-theme-change";
+
+/**
  * layout `<head>` 에 inline 으로 삽입하는 초기화 스크립트.
  *
  * - hydration 전에 `<html class="dark">` 여부를 결정해 라이트→다크 flash(FOUC) 방지.
@@ -67,17 +83,23 @@ function subscribe(callback: () => void): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
+  // 다른 탭의 localStorage 변경 — spec 상 `StorageEvent.key` 가 채워진다.
   const onStorage = (event: StorageEvent): void => {
     if (event.key === THEME_STORAGE_KEY) {
       callback();
     }
   };
+  // 같은 탭 setMode 알림 — `THEME_CHANGE_EVENT` custom event (이슈 #1170 fix).
+  // 인공 StorageEvent constructor 의 key 필드 누락 회귀 우회.
+  const onThemeChange = (): void => callback();
   const mql = window.matchMedia("(prefers-color-scheme: dark)");
   const onPrefersChange = (): void => callback();
   window.addEventListener("storage", onStorage);
+  window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
   mql.addEventListener("change", onPrefersChange);
   return () => {
     window.removeEventListener("storage", onStorage);
+    window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
     mql.removeEventListener("change", onPrefersChange);
   };
 }
@@ -170,14 +192,13 @@ export function useTheme(): {
   const setMode = useCallback((next: ThemeMode): void => {
     applyHtmlClass(resolveIsDark(next));
     persistMode(next);
-    // 같은 탭에서는 'storage' 이벤트가 발생하지 않으므로 명시적으로 dispatch.
+    // 같은 탭에서는 native 'storage' 이벤트가 발생하지 않는다.
+    // 인공 StorageEvent constructor 는 일부 production browser 에서 `key` 필드가
+    // 누락된 채 fire 되어 subscribe filter 가 false → React state stale 상태로
+    // 시각 토글만 됐다가 다음 effect 에서 revert 되는 회귀가 있었다 (이슈 #1170).
+    // 같은 탭 broadcast 는 의미가 명확한 custom event 채널로 일원화.
     if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new StorageEvent("storage", {
-          key: THEME_STORAGE_KEY,
-          newValue: next,
-        }),
-      );
+      window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
     }
   }, []);
 

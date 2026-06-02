@@ -1,0 +1,129 @@
+name: Rev Findings Auto-Register
+
+# rev sub-agent 가 PR 코멘트에 emit 한 구조화 findings 블록을 파싱해 후속 이슈를
+# 자동 등록 (멱등). 사용자 정정 2026-05-31: 🟡/🔴 → 후속 이슈 등록이 mmae 수작업
+# 관례였던 "가장 약한 고리" 를 CI 로 코드 강제 (mmae/nmae LLM in-the-loop 제거).
+#
+# trigger: PR 에 `reviewed:claude`(통과) 또는 `rev-blocked`(미통과, #1406) 라벨 부착 시.
+#
+# findings 블록 포맷 (rev 가 PR 코멘트에 포함 — rev 는 이슈 등록 X, 보고만):
+#   <!-- rev-findings
+#   [{"severity":"🟡","title":"...","scope":"infra","type":"fix","body":"..."}]
+#   -->
+#   severity: 🔴(시급) | 🟡(권장). 🟢(통과) 항목은 등록 X.
+#   여러 코멘트에 블록이 있으면 마지막(최신) 블록을 최종으로 사용.
+#
+# 멱등: 생성 이슈 body 에 marker `rev-finding:PR<n>:<slug>` 삽입 → 재실행/재라벨 시
+#   동일 marker 검색해 중복 생성 skip.
+#
+# 관련: 이슈 #1392, 메모리 [[feedback-auto-register-rev-findings]],
+#       docs/ai-harness/actors/sub-agent.md (rev findings 블록 emit 의무).
+
+on:
+  pull_request_target:
+    types: [labeled]
+    branches: [develop, main]
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+jobs:
+  register:
+    # 통과(reviewed:claude) + 미통과(rev-blocked, #1406) 양쪽 트리거 — findings 블록
+    # 파싱 → 후속/rework 이슈 멱등 자동 등록. 실패 경로 무보고 갭 해소.
+    if: github.event.label.name == 'reviewed:claude' || github.event.label.name == 'rev-blocked'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const prNum = pr.number;
+            const { owner, repo } = context.repo;
+
+            const VALID_SCOPES = ['user', 'song', 'recommendation', 'voice', 'infra', 'web', 'feedback'];
+            const VALID_TYPES = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore'];
+
+            // 1) PR 의 모든 코멘트 수집 (issue comments).
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: prNum, per_page: 100,
+            });
+
+            // 2) rev-findings 블록 추출 — 마지막(최신) 블록을 최종으로 사용.
+            const blockRe = /<!--\s*rev-findings\s*([\s\S]*?)-->/g;
+            let findings = [];
+            for (const c of comments) {
+              let m;
+              while ((m = blockRe.exec(c.body || '')) !== null) {
+                try {
+                  const parsed = JSON.parse(m[1].trim());
+                  if (Array.isArray(parsed)) findings = parsed;
+                } catch (e) {
+                  core.warning(`rev-findings 블록 parse 실패 (comment ${c.id}): ${e}`);
+                }
+              }
+            }
+            if (findings.length === 0) {
+              core.info('rev-findings 블록 없음 — 등록할 후속 이슈 없음 (graceful).');
+              return;
+            }
+
+            const slug = (s) => (s || '')
+              .toLowerCase()
+              .replace(/[^a-z0-9가-힣]+/g, '-')
+              .replace(/^-+|-+$/g, '')
+              .slice(0, 40);
+
+            let created = 0, skipped = 0;
+            for (const f of findings) {
+              const sev = (f.severity || '').trim();
+              if (sev !== '🔴' && sev !== '🟡') {
+                core.info(`severity 무시 (${sev || 'none'}): ${f.title || '(no title)'}`);
+                continue;
+              }
+              const title = (f.title || '').trim();
+              if (!title) { core.warning('title 없는 finding skip'); continue; }
+
+              const marker = `rev-finding:PR${prNum}:${slug(title)}`;
+              const search = await github.rest.search.issuesAndPullRequests({
+                q: `repo:${owner}/${repo} in:body "${marker}"`, per_page: 1,
+              });
+              if (search.data.total_count > 0) {
+                core.info(`이미 등록됨 — skip: ${marker}`);
+                skipped++;
+                continue;
+              }
+
+              const scope = VALID_SCOPES.includes(f.scope) ? f.scope : 'infra';
+              const type = VALID_TYPES.includes(f.type) ? f.type : 'fix';
+              const urgent = sev === '🔴';
+              const labels = ['ai-generated', `scope:${scope}`, `type:${type}`];
+
+              const body = [
+                `rev 코드 리뷰 후속 자동 등록 — PR #${prNum} ${sev} finding.`,
+                '',
+                (f.body || '').trim() || '(상세 본문 없음 — PR 코멘트 참조)',
+                '',
+                `원본 PR: #${prNum}`,
+                `<!-- ${marker} -->`,
+              ].join('\n');
+
+              try {
+                const issue = await github.rest.issues.create({
+                  owner, repo, title: `${sev} ${title} (rev #${prNum})`, body, labels,
+                });
+                created++;
+                core.info(`등록: #${issue.data.number} ${title}`);
+                if (urgent) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number: prNum,
+                    body: `🔴 rev 시급 finding → 후속 이슈 #${issue.data.number} 자동 등록. nmae 즉시 트리거 권고.`,
+                  });
+                }
+              } catch (e) {
+                core.warning(`이슈 생성 실패 (${title}): ${e}`);
+              }
+            }
+            core.info(`rev-findings 자동 등록 완료 — created=${created} skipped=${skipped} (PR #${prNum}).`);

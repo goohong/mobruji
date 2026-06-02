@@ -180,6 +180,95 @@ assert_exit "--no-refresh-backlog default ON override (exit 0)" 0 $RC
 rm -rf "$TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 9) directive-board mismatch detect — diff 헬퍼 stderr emit (#1129 impl PR 3)
+# ─────────────────────────────────────────────────────────────────────────────
+# wrapper 는 set-active 직후 jsonl-forum-diff.sh 호출. diff 헬퍼 stdout 은
+# wrapper stderr 로 redirect (stdout 계약 보존). 본 테스트는:
+#   (a) jsonl 에 mismatch entry 존재 시 stderr 에 [!] warning 라인 emit
+#   (b) stdout 의 첫 블록은 confirm/echo-prompt 그대로 유지 (mismatch 미혼합)
+TMP=$(make_tmp)
+export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
+# jsonl: mismatch 1건 (jsonl=완료 vs forum=진행 중).
+DIR_JSONL="$TMP/directive-board.jsonl"
+printf '%s\n' '{"ts":"2026-05-27 10:00 KST","summary":"WRP mismatch","status":"완료","message_id":"m-wrp","thread_id":"t-wrp"}' > "$DIR_JSONL"
+# fake discord-reply.sh — --forum-state-dump directive 응답.
+DUMP_FILE="$TMP/dump.jsonl"
+printf '%s\n' '{"thread_id":"t-wrp","name":"a","tags":["진행 중"]}' > "$DUMP_FILE"
+FAKE_REPLY="$TMP/discord-reply.sh"
+cat > "$FAKE_REPLY" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--forum-state-dump" && "\${2:-}" == "directive" ]]; then
+  cat "$DUMP_FILE"
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "$FAKE_REPLY"
+
+# diff 헬퍼는 DIRECTIVE_BOARD_JSONL_PATH + DISCORD_REPLY_BIN env 사용.
+STDOUT_FILE="$TMP/stdout.txt"
+STDERR_FILE="$TMP/stderr.txt"
+DIRECTIVE_BOARD_JSONL_PATH="$DIR_JSONL" DISCORD_REPLY_BIN="$FAKE_REPLY" \
+  "$WRAPPER" plan --title "wrapper mismatch detect" \
+  > "$STDOUT_FILE" 2> "$STDERR_FILE"
+RC=$?
+assert_exit "mismatch 환경에서도 wrapper exit 0" 0 $RC
+STDOUT_OUTPUT="$(cat "$STDOUT_FILE")"
+STDERR_OUTPUT="$(cat "$STDERR_FILE")"
+assert_contains "stderr 에 mismatch warning" "$STDERR_OUTPUT" "directive-board mismatch detected"
+assert_contains "stderr 에 thread_id=t-wrp" "$STDERR_OUTPUT" "thread_id=t-wrp"
+# stdout 첫 블록은 confirm 그대로.
+assert_contains "stdout confirm 유지" "$STDOUT_OUTPUT" "cycle-status set-active OK"
+# stdout 에는 mismatch warning 이 섞이면 안 됨 (호출자 stdout grep 시 prompt 오염 방지).
+if [[ "$STDOUT_OUTPUT" == *"directive-board mismatch detected"* ]]; then
+  FAIL=$((FAIL + 1))
+  FAILURES+=("mismatch 가 stdout 으로 새어 나옴 (prompt 오염)")
+  echo "FAIL: mismatch 가 stdout 으로 새어 나옴"
+else
+  PASS=$((PASS + 1))
+  echo "PASS: stdout 에 mismatch 미혼합"
+fi
+rm -rf "$TMP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1385: --directive-id 가 있으면 directive-board.jsonl 의 정제 summary 를
+#   forum 제목으로 사용 (sub-agent forum 제목도 LLM 정제 제목 — 가독성).
+#   jq 있을 때만 검증 (graceful fallback 은 자명).
+# ─────────────────────────────────────────────────────────────────────────────
+if command -v jq >/dev/null 2>&1; then
+  TMP=$(make_tmp)
+  export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
+  DIR_JSONL="$TMP/directive-board.jsonl"
+  printf '%s\n' '{"message_id":"mid-999","summary":"브라우저 자동 QA 환경 도입","status":"대기","last_updated_kst":"2026-05-30 18:00 KST","thread_id":"t-999"}' > "$DIR_JSONL"
+  CAP="$TMP/cap.txt"
+  FAKE_REPLY="$TMP/discord-reply.sh"
+  cat > "$FAKE_REPLY" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$CAP"
+echo 555000111222333444
+EOF
+  chmod +x "$FAKE_REPLY"
+
+  AGENT_LAUNCH_NO_DISCORD=0 \
+  DIRECTIVE_BOARD_JSONL_PATH="$DIR_JSONL" \
+  DISCORD_REPLY_SH="$FAKE_REPLY" \
+    "$WRAPPER" --register-pending be \
+      --title "장황하고 raw 한 원본 메시지 그대로의 제목 — 가독성 떨어짐" \
+      --directive-id "mid-999" >/dev/null 2>&1
+  CAP_CONTENT="$(cat "$CAP" 2>/dev/null || true)"
+  assert_contains "#1385 정제 summary 가 forum 제목으로" "$CAP_CONTENT" "브라우저 자동 QA 환경 도입"
+  if [[ "$CAP_CONTENT" == *"장황하고 raw 한 원본"* ]]; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("#1385 raw 제목이 정제 제목으로 대체되지 않음")
+    echo "FAIL: #1385 raw 제목 미대체"
+  else
+    PASS=$((PASS + 1))
+    echo "PASS: #1385 raw 제목 → 정제 제목 대체"
+  fi
+  rm -rf "$TMP"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 결과
 # ─────────────────────────────────────────────────────────────────────────────
 echo

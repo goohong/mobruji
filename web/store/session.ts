@@ -216,6 +216,34 @@ export const useSessionStore = create<SessionState>()(
     {
       name: "mobruji-session",
       storage: createJSONStorage(() => localStorage),
+      /**
+       * persist hydration 시점에 legacy / invalid sessionId 를 폐기 (closes #1255 후속,
+       * be PR #1255 GlobalExceptionHandler 회귀 가드).
+       *
+       * 사고: 사용자 device 의 localStorage 에 PR #991 이전 발급된 `sess_<ts>_<rand>`
+       * 형식 sessionId 가 영속되어 있으면, `ensureSessionId()` 를 호출하지 않고
+       * `state.sessionId` 만 직접 read 하는 page (예: home `ReturningUserPanel`,
+       * `/recommend` 진입 query) 가 그대로 legacy ID 를 `readVoiceRange()` /
+       * `createRecommendation()` 에 전달 → BE `@Pattern(UUID_V4)` 400.
+       *
+       * 해결: hydration 콜백에서 sessionId 형식을 직접 검증하고, invalid 면 sessionId +
+       * voiceRangeId 동시 null 화. voiceRangeId 도 클리어하는 이유는 voice_range row 가
+       * 기존 legacy sessionId 에 bound 되어 있어 새 sessionId 로 BE 조회 시 401/404 가
+       * 나오기 때문 — `NoSessionFallback` UX 가 자동으로 음역대 재등록 prompt 를
+       * 표시하도록 한다 (사용자 데이터 손실 0 — voice_range 입력 한 번 다시).
+       *
+       * excludedSongIds 도 같이 비운다 — 다른 사용자 세션의 누적 목록을 끌고 가지 않도록.
+       */
+      onRehydrateStorage: () => (state) => {
+        if (!state) {
+          return;
+        }
+        if (state.sessionId !== null && !isValidSessionId(state.sessionId)) {
+          state.sessionId = null;
+          state.voiceRangeId = null;
+          state.excludedSongIds = [];
+        }
+      },
     },
   ),
 );

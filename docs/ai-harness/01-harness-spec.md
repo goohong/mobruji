@@ -43,7 +43,7 @@
 - 라이선스: `LICENSE`
 - AI 단독으로 위 파일을 신규 생성/삭제하는 PR은 원칙적으로 분할하거나 사람이 직접 작성한다.
 
-> **결정 근거 (영속)**: 보호 영역 목록과 "사람 검토 필수" 원칙은 다중 AI 운영 모델의 일부다. 5 워크트리 + maestro 오케스트레이션 default 와 함께 `docs/decisions/0014-multi-agent-worktree-orchestration.md` (ADR-0014) 에서 항시 가동 룰·sub-agent 위임 패턴을 결정한다. CLAUDE.md §4 "운영 원칙"(권장 수준 + `needs-human-review` 라벨 가시화)도 같은 ADR 맥락. 본 §6 변경 시 ADR-0014 와 정합성 확인.
+> **결정 근거 (영속)**: 보호 영역 목록과 "신중 검토" 원칙은 다중 AI 운영 모델의 일부다. 5 워크트리 + maestro 오케스트레이션 default 와 함께 `docs/decisions/0014-multi-agent-worktree-orchestration.md` (ADR-0014) 에서 항시 가동 룰·sub-agent 위임 패턴을 결정한다. CLAUDE.md §4 "운영 원칙" 도 같은 ADR 맥락. **2026-05-28 정정**: `needs-human-review` 라벨 폐지 — rev sub-agent 가 review 대행 ([[feedback-needs-human-review-deprecated]]). 보호 영역 = 정보성 분류. 본 §6 변경 시 ADR-0014 와 정합성 확인.
 
 ## 7) 비목표
 

@@ -22,7 +22,7 @@
 - 다른 워크트리/maestro 건드리지 마
 - 메모리(`~/.claude/projects/*/memory/`) 쓰기 금지
 - `--no-verify`로 hook 우회 금지
-- 보호 영역 변경 시 `needs-human-review` 라벨 부여
+- 보호 영역 = 정보성 분류 (2026-05-28 `needs-human-review` 라벨 폐지, rev sub-agent 가 review 대행)
 
 > 위 5줄 공통 룰은 매번 반복하지 말고 prompt에 다음 한 줄만 박는다:
 > `공통 룰은 docs/ai-harness/actors/sub-agent.md 따른다. 역할은 <be|fe|rev|plan>.`
@@ -352,15 +352,15 @@ rev sub-agent 가 매 사이클 시작 시 `bash tools/rev-queue/rev-queue.sh al
 
 | Stage | 의미 | 후보 필터 |
 |---|---|---|
-| stage1 | PR 머지 전 (단계 1 e2e) | `reviewed:claude` 라벨 없는 open PR |
-| stage2 | develop 머지 1h+ 후 (단계 2 사후) | `rev-post-merge-pass` 라벨 없는 merged PR |
-| stage3 | 최근 release tag PR (단계 3 production) | `rev-prod-pass` 라벨 없는 release PR |
+| stage1 | PR 머지 전 (🟡 Pre-merge review, 단계 1 e2e) | `reviewed:claude` 라벨 없는 open PR |
+| stage2 | develop dev 배포 후 (🔵 dev 배포 E2E 검증, 단계 2) | `rev-post-merge-pass` 라벨 없는 merged PR |
+| ~~stage3~~ (폐기 2026-05-30) | ~~최근 release tag PR (단계 3 production)~~ | ~~`rev-prod-pass` 라벨 없는 release PR~~ — `rev-e2e-2-stages.md §1-1` (production 환경 부재). `rev-queue.sh stage3` 정리는 PR rev2s-4. |
 
-처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-3-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
+처리 절차: rev sub-agent prompt `docs/ai-harness/actors/sub-agent.md §2-rev` + 단계별 SoT `docs/features/rev-e2e-2-stages.md` 참조. 라벨 부착 후 다음 rev-queue 호출에서 자동 제외 (멱등성).
 
-**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 단계 1 코멘트 부재 시 머지 차단. whitelist: `needs-human-review` / `type:release`.
+**GitHub Actions 게이트**: `.github/workflows/rev-gate.yml` 이 `reviewed:claude` 라벨 + 🟡 Pre-merge review (단계 1) 코멘트 부재 시 머지 차단. whitelist: `type:release` (2026-05-28 `needs-human-review` whitelist 폐지).
 
-상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-3-stages.md`, CLAUDE.md §4 품질 게이트.
+상세: `tools/rev-queue/README.md`, `docs/features/rev-e2e-2-stages.md`, CLAUDE.md §4 품질 게이트.
 
 ## 1) 셋업 (최초 1회)
 
@@ -530,10 +530,10 @@ hook 스크립트는 `scripts/git-hooks/pre-push`. 워크트리 basename이 `mob
 | **maestro** | `mobruji` | 오케스트레이션·**기획·이슈 등록·백로그 우선순위**·공유 영역 관리·develop 점유 | `CLAUDE.md`, `AGENTS.md`, `docs/ai-harness/**`, root 설정, 일회성 인프라 보수 PR | 다른 세션 브랜치 체크아웃(=develop 점유 해제) |
 | **be** | `mobruji-be` | 백엔드 **구현 전용** | `backend/**`, `docs/features/*.md`(backend 부분), `docs/ai-harness/06-domain-model.md` §5/§6 (Spring entity 변경 시) | `web/**`, 다른 세션의 브랜치, **기획/이슈 등록(maestro에 보고만)** |
 | **fe** | `mobruji-fe` | 프론트엔드 **구현 전용** | `web/**`, `docs/features/*.md`(UI 부분) | `backend/**`, 다른 세션의 브랜치, **기획/이슈 등록(maestro에 보고만)** |
-| **rev** | `mobruji-rev` | 사후 감사 + **QA 실행 검증** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 maestro에 보고 |
+| **rev** | `mobruji-rev` | 사후 코드 리뷰 + **품질 검증(QA) 실행** (read + PR 코멘트만, 파일 수정 금지) | (없음 — `pre-push` hook으로 push 차단됨) | 모든 직접 수정. 이슈 등록은 maestro에 보고 |
 
 ### rev 세션의 QA 책임 (정형화)
-rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용자 결정 2026-05-22, "에러를 막는 것이 1순위"). 코드 리뷰만으로는 런타임 에러 / 환경 의존 / API 통합 실패가 잡히지 않기 때문.
+rev는 read-only 코드 리뷰 **외에 실 QA 실행 검증도 담당**한다 (사용자 결정 2026-05-22, "에러를 막는 것이 1순위"). 코드 리뷰만으로는 런타임 에러 / 환경 의존 / API 통합 실패가 잡히지 않기 때문.
 
 **정형 spec**: `docs/features/rev-qa-protocol.md` — QA 결정 트리, smoke 시나리오, 환경, 도구, 결과 형식이 모두 한 곳에 있다. rev sub-agent는 prompt 외 추가 질문 없이 이 spec만 보고 QA를 수행할 수 있어야 한다.
 
@@ -546,7 +546,7 @@ rev는 read-only 감사 **외에 실 QA 실행 검증도 담당**한다 (사용�
 | **C. 통합 (FE+BE)** | A+B 동시 또는 contract 변경 | A + B + 도메인 smoke 시나리오 (음역/추천/좋아요/이력) |
 | **D. auth & security** | SessionAuthGuard / AuthFilter / security yml | A 또는 B + 헤더 누락/위조로 401/403 검증 |
 | **E. DB 마이그레이션** | `db/migration/**` 추가 | A + Flyway clean→migrate 재현 |
-| **F. spec & docs only** | `docs/**`만 변경 | **QA 생략**, 감사만 |
+| **F. spec & docs only** | `docs/**`만 변경 | **QA 생략**, 코드 리뷰만 |
 | **G. CI/infra only** | workflows / docker-compose만 변경 | dry-run 또는 라인 리뷰 |
 | **H. 비기능 spec 위반 위험** | 결정성/p95/관측성 도메인 (recommendation, voice) | A + spec §3 비기능 한 줄씩 검증 |
 
@@ -694,7 +694,7 @@ rm -rf ~/.claude/projects/-Users-goohong-workspace-github-mobruji-be
 ### 왜
 - 본진이 직접 구현하면 1 사이클 turn 이 길어진다 → 다른 3 사이클 launch 가 끊긴다.
 - 본진 context 가 폭증하면 `/clear` 빈도가 늘어나며, `/clear` 직전 doc-check (CLAUDE.md §15) 도 누락 위험이 커진다.
-- 위임은 sub-agent 워크트리 격리 + 코드 변경 트래킹 가능 (PR / git log) 이라 감사 trail 도 확보된다.
+- 위임은 sub-agent 워크트리 격리 + 코드 변경 트래킹 가능 (PR / git log) 이라 이력 추적(audit trail) 도 확보된다.
 
 ### 검증
 - nmae turn 종료 시점에 cycle-status.json 4 워크트리 모두 `in_progress` 또는 `last_completed.completed_at` 이 최근 10 분 안인지 확인.

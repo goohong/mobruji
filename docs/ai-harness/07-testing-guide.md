@@ -83,7 +83,7 @@ void recommend_called_returnsSongsInRange() {
 
 ## 6) Frontend 테스트
 - 컴포넌트: React Testing Library + Vitest/Jest
-- E2E: Playwright (도입 시점은 추후 ADR)
+- E2E: Playwright — spec `docs/features/web-e2e-playwright.md` (draft, PR #1193). impl PR 1~3 머지 후 본 항목 갱신.
 - 우선순위: 추천 결과 표시 컴포넌트, 입력 폼 검증
 - 신규 페이지/주요 인터랙션은 최소 1개 컴포넌트 테스트 동반
 

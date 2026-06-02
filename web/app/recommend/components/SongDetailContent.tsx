@@ -43,6 +43,7 @@ import {
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
 type SongDetailContentProps =
@@ -71,6 +72,9 @@ export function SongDetailContent(props: SongDetailContentProps) {
   const lowestNoteName =
     typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
+  // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
+  const displayTitle = formatSongDisplayTitle(song);
 
   return (
     <div className="flex flex-col gap-5">
@@ -82,17 +86,17 @@ export function SongDetailContent(props: SongDetailContentProps) {
               #{item.rankPosition}
             </p>
           ) : null}
-          <p className="text-base text-zinc-700 dark:text-zinc-300">
+          <p className="text-base text-[var(--text-body-strong)]">
             {song.artist}
           </p>
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {difficulty ? <DifficultyBadge difficulty={difficulty} /> : null}
-            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+            <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
               키 {keyLabel}
             </span>
             {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
             {song.mood ? (
-              <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+              <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
                 {song.mood}
               </span>
             ) : null}
@@ -103,7 +107,7 @@ export function SongDetailContent(props: SongDetailContentProps) {
       {highestNoteName || lowestNoteName ? (
         <section
           aria-label="음역"
-          className="flex items-baseline gap-6 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-950"
+          className="flex items-baseline gap-6 rounded-xl bg-[var(--surface-detail-section)] p-4"
         >
           {highestNoteName ? (
             <NoteCell label="최고음" value={highestNoteName} />
@@ -132,13 +136,13 @@ export function SongDetailContent(props: SongDetailContentProps) {
 
       <section
         aria-label="액션"
-        className="flex flex-col gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-800"
+        className="flex flex-col gap-3 border-t border-[var(--ring-soft-detail)] pt-4"
       >
         <div className="flex flex-wrap gap-2">
-          <DetailLikeButton songId={song.id} songTitle={song.title} />
-          <DetailBookmarkButton songId={song.id} songTitle={song.title} />
+          <DetailLikeButton songId={song.id} songTitle={displayTitle} />
+          <DetailBookmarkButton songId={song.id} songTitle={displayTitle} />
         </div>
-        <YouTubeSearchLink songTitle={song.title} songArtist={song.artist} />
+        <YouTubeSearchLink songTitle={displayTitle} songArtist={song.artist} />
       </section>
     </div>
   );
@@ -166,8 +170,11 @@ function AlbumCover({ song }: AlbumCoverProps) {
   const url = song.albumCoverUrl ?? null;
   const [failed, setFailed] = useState(false);
 
+  // closes #1284 — placeholder / alt 텍스트도 한국 곡 한국어 우선.
+  const displayTitle = formatSongDisplayTitle(song);
+
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="large" songTitle={song.title} />;
+    return <AlbumCoverPlaceholder size="large" songTitle={displayTitle} />;
   }
 
   return (
@@ -180,9 +187,9 @@ function AlbumCover({ song }: AlbumCoverProps) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
-        alt={`${song.title} 앨범 커버`}
+        alt={`${displayTitle} 앨범 커버`}
         onError={() => setFailed(true)}
-        className="h-48 w-48 rounded-2xl object-cover ring-1 ring-zinc-200 dark:ring-zinc-800"
+        className="h-48 w-48 rounded-2xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
       />
     </div>
   );
@@ -210,7 +217,7 @@ export function AlbumCoverPlaceholder({
       <div
         role="img"
         aria-label={`${songTitle} 앨범 커버 (이미지 없음)`}
-        className={`flex items-center justify-center bg-gradient-to-br from-zinc-200 to-zinc-300 ring-1 ring-zinc-200 dark:from-zinc-800 dark:to-zinc-700 dark:ring-zinc-800 ${sizeClass}`}
+        className={`flex items-center justify-center bg-gradient-to-br from-[var(--surface-cover-from)] to-[var(--surface-cover-to)] ring-1 ring-[var(--ring-soft-detail)] ${sizeClass}`}
       >
         <MusicNoteIcon size={size === "large" ? 56 : 24} />
       </div>
@@ -258,17 +265,17 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
   return (
     <section
       aria-label="추천 사유"
-      className="flex flex-col gap-3 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-950"
+      className="flex flex-col gap-3 rounded-xl bg-[var(--surface-detail-section)] p-4"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
           추천 사유
         </h3>
-        <span className="font-mono text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="font-mono text-xs text-[var(--text-detail-meta)]">
           score {item.score.toFixed(2)}
         </span>
       </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+      <p className="text-sm text-[var(--text-body-strong)]">
         {item.matchReason}
       </p>
       <dl className="flex flex-col gap-1.5">
@@ -277,7 +284,7 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
         ))}
       </dl>
       {hasEstimated ? (
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-500">
+        <p className="text-[11px] text-[var(--text-disclaimer)]">
           ※ 점수 분해는 클라이언트 추정값입니다. 백엔드 산출값이 추가되면 자동으로 교체됩니다.
         </p>
       ) : null}
@@ -294,7 +301,7 @@ function BreakdownRow({ entry }: BreakdownRowProps) {
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="flex min-w-0 flex-col">
-        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+        <span className="text-sm font-medium text-[var(--text-body-emphasis)]">
           {entry.label}
         </span>
         <span className="truncate text-xs text-[var(--text-caption)]">
@@ -303,7 +310,7 @@ function BreakdownRow({ entry }: BreakdownRowProps) {
       </dt>
       <dd
         aria-label={`${entry.label} 점수 ${percent}%`}
-        className="shrink-0 font-mono text-xs tabular-nums text-zinc-700 dark:text-zinc-300"
+        className="shrink-0 font-mono text-xs tabular-nums text-[var(--text-body-strong)]"
       >
         {percent}%
       </dd>
@@ -322,7 +329,7 @@ function NoteCell({ label, value }: NoteCellProps) {
       <span className="text-xs text-[var(--text-caption)]">{label}</span>
       <span
         aria-label={`${label} ${value}`}
-        className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50"
+        className="text-2xl font-semibold text-[var(--text-primary)]"
       >
         {value}
       </span>
@@ -341,7 +348,7 @@ function MetaCell({ label, value }: MetaCellProps) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs text-[var(--text-caption)]">{label}</span>
-      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+      <span className="text-sm font-medium text-[var(--text-body-emphasis)]">
         {display}
       </span>
     </div>
@@ -428,10 +435,10 @@ function DetailLikeButton({ songId, songTitle }: DetailFeedbackButtonProps) {
         aria-pressed={liked}
         aria-busy={isPending}
         aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           liked
             ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-            : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            : "border border-[var(--cta-secondary-border)] text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
         }`}
       >
         <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
@@ -472,10 +479,10 @@ function DetailBookmarkButton({ songId, songTitle }: DetailFeedbackButtonProps) 
         aria-label={
           bookmarked ? `${songTitle} 북마크 해제` : `${songTitle} 북마크`
         }
-        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-progress disabled:opacity-60 ${
+        className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full px-5 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           bookmarked
             ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
-            : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            : "border border-[var(--cta-secondary-border)] text-[var(--cta-secondary-fg)] hover:bg-[var(--cta-secondary-bg-hover)]"
         }`}
       >
         <span aria-hidden="true">🔖</span>
@@ -512,7 +519,7 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
-      className="inline-flex min-h-12 w-fit items-center gap-2 rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+      className="inline-flex min-h-12 w-fit items-center gap-2 rounded-full bg-[var(--cta-neutral-bg)] px-5 py-2.5 text-sm font-semibold text-[var(--cta-neutral-fg)] transition-colors hover:bg-[var(--cta-neutral-bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
     >
       <span aria-hidden="true">▶</span>
       <span>YouTube에서 듣기</span>
@@ -540,9 +547,11 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
   // 네트워크 비용 최소화. onError 시 placeholder 로 fallback.
   const url = song.albumCoverUrl ?? null;
   const [failed, setFailed] = useState(false);
+  // closes #1284 — thumbnail placeholder / alt 도 한국 곡 한국어 우선.
+  const displayTitle = formatSongDisplayTitle(song);
 
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="thumbnail" songTitle={song.title} />;
+    return <AlbumCoverPlaceholder size="thumbnail" songTitle={displayTitle} />;
   }
 
   return (
@@ -551,9 +560,9 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
     <img
       src={url}
       loading="lazy"
-      alt={`${song.title} 앨범 커버`}
+      alt={`${displayTitle} 앨범 커버`}
       onError={() => setFailed(true)}
-      className="h-14 w-14 rounded-xl object-cover ring-1 ring-zinc-200 dark:ring-zinc-800"
+      className="h-14 w-14 rounded-xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
     />
   );
 }

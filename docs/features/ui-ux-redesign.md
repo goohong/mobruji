@@ -6,7 +6,7 @@ owner: @goohong
 scope: web
 related_issues: [1044]
 related_prs: []
-last_reviewed: 2026-05-24
+last_reviewed: 2026-05-29
 ---
 
 # UI/UX 디자인 4단계 부활 (audit → ref → spec → 구현)
@@ -61,15 +61,20 @@ last_reviewed: 2026-05-24
 - [x] visual ref 인용표 (§5-3)
 
 #### 단계 4 — 컴포넌트별 PR 분할 구현 (fe sub-agent, 9 PR 순차 — §6)
-- [ ] PR 1: design tokens 도입 (`app/globals.css` + `lib/theme/tokens.ts`)
-- [ ] PR 2: Button — press scale + brand color + spring transition
-- [ ] PR 3: SongCard — gradient stripe + stagger fade-in + active scale
-- [ ] PR 4: SongDetailModal → bottom sheet (drag handle + slide-from-bottom)
-- [ ] PR 5: VoiceRangeAuto — pitch wave 시각화 + circular progress ring
-- [ ] PR 6: LikeButton — heart pop + sparkle + spring
-- [ ] PR 7: page transitions (view-transition-api + hero morph)
-- [ ] PR 8: brand wordmark + logo SVG icon set
-- [ ] PR 9: 폰트 (Pretendard + Geist 통합)
+- [x] PR 1: design tokens 도입 (`app/globals.css` + `lib/theme/tokens.ts`) — **shipped (PR #1131 2026-05-26)**
+- **잔존 zinc swap 추적**: `docs/features/design-tokens-residual-swap-matrix.md` SoT — 현 활성 41 / 10 파일 / 4 신규 토큰 결정 대기 (2026-05-29). 단계 4 PR 2-9 (Button/SongCard redesign goal) 진입 전 swap 완결 게이트 통과 의무.
+- **PR 2-9 세부 spec 분할 (2026-05-29)** — 본 spec §6 의 PR 별 골자는 다음 3 SoT 로 분할 (per-PR 세부 — 변경 / 회귀 가드 / 자율 결정 default):
+  - `docs/features/ui-ux-redesign-pr-2-9-component-matrix.md` — PR 2 / 3 / 6 / 7 / 8 / 9 묶음 matrix (작은 LOC + 단일 컴포넌트 영향)
+  - `docs/features/ui-ux-redesign-pr-4-bottom-sheet.md` — PR 4 단독 (drag handle / swipe-to-close / focus trap / scroll lock 5 회귀 가드)
+  - `docs/features/ui-ux-redesign-pr-5-pitch-wave.md` — PR 5 단독 (Web Audio 회귀 / 60fps SVG ring / 알고리즘 결정성)
+- [ ] PR 2: Button — press scale + brand color + spring transition (세부: `pr-2-9-component-matrix.md §5-1 PR 2`)
+- [ ] PR 3: SongCard — gradient stripe + stagger fade-in + active scale (세부: `pr-2-9-component-matrix.md §5-1 PR 3`)
+- [ ] PR 4: SongDetailModal → bottom sheet (drag handle + slide-from-bottom) (세부: `pr-4-bottom-sheet.md` SoT)
+- [ ] PR 5: VoiceRangeAuto — pitch wave 시각화 + circular progress ring (세부: `pr-5-pitch-wave.md` SoT)
+- [ ] PR 6: LikeButton — heart pop + sparkle + spring (세부: `pr-2-9-component-matrix.md §5-1 PR 6`)
+- [ ] PR 7: page transitions (view-transition-api + hero morph) (세부: `pr-2-9-component-matrix.md §5-1 PR 7`)
+- [ ] PR 8: brand wordmark + logo SVG icon set (세부: `pr-2-9-component-matrix.md §5-1 PR 8`)
+- [ ] PR 9: 폰트 (Pretendard + Geist 통합) (세부: `pr-2-9-component-matrix.md §5-1 PR 9`)
 
 ### 비기능 요구사항
 
@@ -334,3 +339,4 @@ PR 8 (logo/wordmark) — 외부 디자인 산출물 의존, 독립 진행 가능
 - 2026-05-24: design tokens ADR-0018 결정 (color brand indigo-violet, Pretendard + Geist, Major Third typography scale).
 - 2026-05-24: 9 PR 분할 의존성 순서 확정 (PR 1 = tokens 기반, PR 2-9 = token 의존만).
 - 2026-05-24: 단계 4 진행 트리거 — Q1-Q5 의 자율 결정 default 또는 사용자 결정 후 PR 1 launch.
+- 2026-05-29: 단계 4 PR 2-9 세부 spec 3 분할 — `ui-ux-redesign-pr-2-9-component-matrix.md` (PR 2/3/6/7/8/9 묶음) + `ui-ux-redesign-pr-4-bottom-sheet.md` (PR 4 단독) + `ui-ux-redesign-pr-5-pitch-wave.md` (PR 5 단독). 분리 사유: PR 4 = drag/swipe/focus-trap/scroll-lock 5 회귀 가드 깊이, PR 5 = Web Audio 회귀 + 60fps SVG 알고리즘 결정성. 본 spec §6 은 상위 backlog SoT + 분리 spec link 만 잔존.

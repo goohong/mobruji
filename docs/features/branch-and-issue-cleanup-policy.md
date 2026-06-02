@@ -32,7 +32,7 @@ last_reviewed: 2026-05-26
 
 - **시나리오 A (개발자)**: 신규 사이클 진입 시 `git branch -r` 결과가 100 행 미만으로 정돈된 상태 — 활성 PR / 활성 사이클 branch 만 보임. stale 식별 시간 0.
 - **시나리오 B (nmae 오케스트레이션)**: 사이클 완료 후 squash merge → 30 일 경과 → 자동 sweep 후보 등록 → dry-run report PR 생성 → 사용자 review → `--apply --yes` 1회 → cycle 종료.
-- **시나리오 C (rev 감사)**: closed-not-merged branch / orphan issue 식별 — referent 보존 여부 결정 후 cleanup.
+- **시나리오 C (rev 코드 리뷰)**: closed-not-merged branch / orphan issue 식별 — referent 보존 여부 결정 후 cleanup.
 
 ## 3) 요구사항
 

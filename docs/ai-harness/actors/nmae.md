@@ -51,10 +51,57 @@ inject 받으면 **다음 turn 시작 즉시**: 백로그 후보 1개 선정 →
 
 - `~/.mobruji/directive-board.jsonl` 의 각 entry status = 단일 진실. Discord #모부르지-지시 forum 본문/태그는 그 view. **수동 Discord 본문 edit 금지** (desync 원인) — 반드시 헬퍼 호출. [[feedback-nmae-directive-board-update-flow]]
 - 3 트리거 atomic 호출 (상세 `docs/features/directive-board-event-driven-redesign.md`):
-  - (a) 지시 분류 → `directive_append.sh <msg_id> "<title>" [pr_url]`
-  - (b) 위임 / launch → `directive_status.sh <id> in_progress [pr_url]` (`agent-launch-wrapper.sh` 강제)
+  - (a) 지시 분류 → `directive_append.sh <msg_id> "<title>" [pr_url] [body] [user_id]`
+  - (b) 위임 / launch → `directive_status.sh <id> in_progress [pr_url] [cycle] [reason]` (`agent-launch-wrapper.sh` 강제)
   - (c) 완료 / 머지 → `directive_status.sh <id> completed [pr_url]`
 - 강제: `helper-turn-start.sh`(helper) + `agent-launch-wrapper.sh`(launch) 가 turn/launch 시작 시 jsonl ↔ forum mismatch warning. polling sync_loop 폐기 (#1129 — 자동 PATCH 불완전 + 5분 latency 가 desync 원인).
+
+### 11-7b) cycle forum 작업 등록 — `wrapper --register-pending` (spec: [[cycle-forum-operation]])
+
+**nmae 가 directive 분배 결정 시점에 cycle forum 의 🟡 대기 thread 신설 의무** (사용자 정정 2026-05-28 옵션 Y):
+
+```bash
+bash tools/agent-launch-wrapper.sh --register-pending <cycle> "<title>" \
+  [--description "..."] [--directive-id "..."]
+```
+
+동작:
+1. 해당 cycle forum 에 🟡 대기 thread 신설 (template 본문).
+2. stdout: `PENDING_THREAD_ID=<id>` — nmae 가 cache (다음 launch 시 `--pending-thread-id <id>` 전달).
+3. backlog single thread (`tools/cycle-backlog/upsert.sh`) 폐기 — individual thread 가 그 역할.
+
+**launch 시점에 기존 🟡 thread 재사용**:
+
+```bash
+bash tools/agent-launch-wrapper.sh <cycle> --title "..." --pending-thread-id <id>
+```
+
+wrapper 가 기존 thread retag 🟡 → ⏳ + 본문 update.
+
+### 11-8) directive 백로그 운영 — nmae 가 owner (spec: [[directive-board-template-and-tags]])
+
+**매 사이클 시작 시 의무**:
+1. `bash tools/directive-board/backlog-scan.sh` 호출 — 🟡 대기 entry list 출력 (cycle 별 분류 후보 포함).
+2. 새 🟡 대기 entry 1+ 있으면 4 분기 휴리스틱으로 분배 결정:
+
+| 동사 / 대상 명확성 | 분배 |
+|---|---|
+| 명확 + 명확 | be / fe / rev 직접 |
+| 모호 ("해결해" / "이상해") | **plan** (가벼운 분석 모드 — A/B/C 옵션 + 추천만, 작업 X) |
+| 신규 도메인 / 다중 PR / 외부 연동 | **plan** (무거운 spec 모드 — docs/features/*.md) |
+| 단순 결정 / mode 전환 | 즉시 nmae 반영 |
+
+3. **plan 위임 시 사유 명시 의무** (사용자 정정 2026-05-28):
+```bash
+bash ~/.mobruji/directive_status.sh <id> in_progress "" plan "<사유>"
+```
+사유 예시: `신규 도메인 (X-Y 추천 엔진), 다중 PR 예상` / `문제 정의 불명확 — 해결 방법 선택지 발굴 필요` / `사용자 결정 분기점 다수 — spec 합의 우선`. be/fe/rev 위임도 reason 명시 권장 (의무 X).
+
+4. **cycle-specific auto-inject** (사용자 정정 2026-05-28): cycle idle 발견 시 그 cycle 의 🟡 대기 directive (assigned_cycle 매칭) 우선 inject — "프론트가 놀고있다 그러면 알아서 가져가야지". `agent-launch-wrapper.sh` 흐름과 cross.
+
+5. **plan 가벼운 분석 완료** = thread 본문 PATCH (A/B/C + 추천) + status 🟣 결정 대기 전이. 작업 X — 사용자 결정 대기. 사용자가 thread 댓글 (예: "B로 가자") → bot.py 자동 새 directive 등록 (`parent_directive_id` 필드) → nmae 다음 사이클에서 be/fe 위임.
+
+6. **완료** = sub-agent PR body 에 `directive: <id>` 명시 → PR 머지 webhook → `directive_status.sh completed` 자동. cascade: 자식 완료 시 부모 🟢 자동.
 
 ---
 
@@ -69,6 +116,6 @@ inject 받으면 **다음 turn 시작 즉시**: 백로그 후보 1개 선정 →
 | **rev** | `/home/mobruji/mobruji-rev` | **수정 금지** (PR 코멘트만) | read-only 실행 검증. 매 사이클 첫 액션 `tools/rev-queue/rev-queue.sh all` |
 | **plan** | `/home/mobruji/mobruji-plan` | `docs/**` `.github/**` (보호 영역 라벨) | 없음 |
 
-- 공통 비협상: 워크트리 격리 + 동시 1 ([[feedback-worktree-lock]]) / 메모리 직접 수정 금지(nmae 만 갱신) / 사용자 wait state 금지 — 자율 결정 default ([[feedback-sub-agent-no-user-wait]]) / hook 우회(`--no-verify`) 금지 / `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) / 보호 영역 변경 시 `needs-human-review` / session 라벨 (be→backend, fe→frontend, rev→review, plan→plan).
-- **be**: 새 엔드포인트 성공 케이스 E2E(RestAssured) 필수, DDD 계층 침범 금지. **rev**: 3단계 e2e — 단계 1 머지 전 / 2 develop 후 / 3 release 후 ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]). **plan**: docs/ADR/spec 만, 구현 코드 금지.
+- 공통 비협상: 워크트리 격리 + 동시 1 ([[feedback-worktree-lock]]) / 메모리 직접 수정 금지(nmae 만 갱신) / 사용자 wait state 금지 — 자율 결정 default ([[feedback-sub-agent-no-user-wait]]) / hook 우회(`--no-verify`) 금지 / `gh pr create --base develop` 강제 ([[feedback-pr-base-develop]]) / 보호 영역 = 정보성 분류 (라벨 의무 폐지 2026-05-28, rev 대행) / session 라벨 (be→backend, fe→frontend, rev→review, plan→plan).
+- **be**: 새 엔드포인트 성공 케이스 E2E(RestAssured) 필수, DDD 계층 침범 금지. **rev**: 2단계 e2e — 🟡 Pre-merge review (단계 1) 머지 전 / 🔵 Post-merge audit (단계 2) develop 후 ([[feedback-rev-e2e-always]] [[feedback-rev-release-gate]]). 단계 3 폐기 2026-05-30 — `rev-e2e-2-stages.md §1-1`. **plan**: docs/ADR/spec 만, 구현 코드 금지.
 - git 가드: stash pop conflict 후 working tree 마커 잔존 → service crash, 별도 restore 필수 ([[feedback-stash-drop-unmerged-file]]).

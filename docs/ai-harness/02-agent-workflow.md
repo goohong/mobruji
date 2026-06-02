@@ -13,7 +13,6 @@
    - [ ] `type:*` 라벨 1개 부여 (`type:feat` `type:fix` `type:refactor` `type:chore` `type:docs` `type:test` `type:style` `type:release`)
    - [ ] `scope:*` 라벨 1개 부여 (화이트리스트: `user` `song` `recommendation` `voice` `infra` `web` `feedback`)
    - [ ] AI가 작성/보조한 PR이면 `ai-generated` 라벨 부여
-   - [ ] 보호 영역(`docs/ai-harness/01-harness-spec.md` §6) 변경 시 `needs-human-review` 라벨 부여
    - [ ] PR 본문이 `.github/PULL_REQUEST_TEMPLATE.md`를 덮어쓴 경우 AI 체크리스트 블록을 수동으로 다시 채워 넣는다 (`gh pr create --body`는 템플릿을 무시함).
 4. 리뷰 1명 승인 (1인 개발 초기엔 self-approval 허용, PR 본문에 명시)
 5. Squash merge
@@ -37,6 +36,14 @@
   - 대규모 패키지 구조 변경
 - 단, 예외 머지도 PR은 생성해야 하며 사유를 본문에 기록한다.
 - 단, 예외 머지는 사후 리뷰를 필수로 수행한다. (머지 후 24시간 이내)
+
+### 4-1) rev-gate 합법 우회 — `type:emergency-hotfix` 라벨 (cross-ref)
+- production-down / security / data-integrity / CI-down 즉시 패치 한정.
+- 라벨 부착 시 `rev-gate.yml` whitelist skip → 즉시 머지 가능, 단 사후 audit 의무.
+- 사후 의무: `rev-gate-audit.yml` 자동 issue (`audit:emergency-hotfix-followup`) + DIGEST push + 다음 사이클 rev 단계 2 launch.
+- 부적합 사유 (rev 대기 길어서 / docs only / admin 자체 검토) 라벨 사용 금지.
+- 상세 정책 / PR body 필수 섹션 / 사용 이력: **`docs/features/emergency-hotfix-flow.md` SoT**.
+- 관련 spec: `docs/features/rev-gate-required-check-enforcement.md` §3-2 (whitelist) + `docs/features/rev-gate-audit-workflow.md` §3-3-2 (사후 분기).
 
 ## 5) 사후 리뷰(Post Review) 프로세스
 1. 머지 당일 담당자가 `Post-Review` 라벨을 PR에 추가한다.
@@ -230,7 +237,7 @@ GitHub repo settings 에 다음 protection 도입을 권고 (별도 인프라 PR
   - `Block force pushes`.
   - `Restrict deletions`.
 - **CODEOWNERS 활용**: `.github/CODEOWNERS` 의 `docs/ai-harness/**` / `.github/workflows/**` / `**/db/migration/**` 등 보호 영역에 `@mobruji-maestro` 지정. PR 머지 시 CODEOWNER approval 필요.
-- 본 권고는 인프라 PR 분리 — 보호 영역 (`.github/CODEOWNERS`, GitHub settings) 변경이므로 `needs-human-review` 라벨 동반.
+- 본 권고는 인프라 PR 분리 — 보호 영역 (`.github/CODEOWNERS`, GitHub settings) 변경이지만 rev sub-agent 가 review 대행 (2026-05-28 `needs-human-review` 라벨 폐지).
 
 ## 9) Feature Spec 프로세스
 중간 규모 이상 기능은 단발 PR 계획 대신 **living document**로서의 Feature Spec을 먼저 작성·합의한 뒤 구현에 착수한다.
@@ -295,7 +302,7 @@ maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 �
 - **maestro** (`mobruji`): 기획·이슈 등록·백로그 우선순위·공유 영역(`CLAUDE.md`/`docs/ai-harness/**`) 보수·develop 점유. 코드/테스트 작성은 sub-agent 위임 default.
 - **be** (`mobruji-be`): `backend/**` 구현 전용.
 - **fe** (`mobruji-fe`): `web/**` 구현 전용.
-- **rev** (`mobruji-rev`): 사후 감사 + QA 실행 검증. 파일 수정 금지 (`pre-push` hook 차단).
+- **rev** (`mobruji-rev`): 사후 코드 리뷰 + 품질 검증(QA) 실행. 파일 수정 금지 (`pre-push` hook 차단).
 - **plan** (`mobruji-plan`): ADR/spec/`docs/ai-harness/**` 갱신 전담. v0.2 메타 전환 후 maestro 부담 분산용 (`feedback-plan-session-option`, `project-plan-session-active`).
 
 > 풀스택 기능은 be/fe 두 PR로 분리. 같은 PR에서 두 에이전트가 평행 작업 후 사람이 픽하는 패턴은 비용 크므로 학습/비교 목적에만.
@@ -307,7 +314,7 @@ maestro 오케스트레이션 + 워크트리 영역 분담이 default. 상세 �
 - 새 룰 추가는 `CLAUDE.md`/`AGENTS.md` 한 번에 갱신한다 (drift 방지).
 
 ### 10-5) 충돌 발생 시
-- 같은 파일/심볼을 동시에 만지는 경우 → 후순위 PR이 사람 중재 요청(PR 코멘트 + `needs-human-review` 라벨).
+- 같은 파일/심볼을 동시에 만지는 경우 → 후순위 PR이 PR 코멘트로 충돌 사실 명시 + nmae 가 사이클 우선순위 재조정 (2026-05-28 `needs-human-review` 라벨 폐지).
 - spec(`docs/features/*.md`)의 결정 로그 충돌 → 사람이 합의 결정 후 다시 spec 갱신 PR.
 - `.github/workflows/session-collision-check.yml`이 PR 열릴 때 자동으로 다른 open PR과의 파일 겹침을 검출해 코멘트로 경고.
 

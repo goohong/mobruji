@@ -107,6 +107,14 @@ if [[ $# -lt 1 ]]; then
   usage
 fi
 
+# spec: docs/features/cycle-forum-operation.md §5-3 — --register-pending mode 신설.
+# nmae 가 backlog 등록 시 호출. 첫 args = --register-pending 이면 mode 분기.
+MODE="launch"
+if [[ "${1:-}" == "--register-pending" ]]; then
+  MODE="register-pending"
+  shift
+fi
+
 WORKTREE="$1"
 shift
 
@@ -124,6 +132,10 @@ DESCRIPTION=""
 ECHO_PROMPT=""
 NO_CYCLE_PUSH=0
 REFRESH_BACKLOG="${CYCLE_BACKLOG_REFRESH_DEFAULT:-0}"
+# spec: cycle-forum-operation.md §5-4 — 기존 🟡 대기 thread 재사용 시 명시.
+# wrapper 가 retag 🟡 → ⏳ + 본문 [x] launch update.
+PENDING_THREAD_ID=""
+DIRECTIVE_ID=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -152,6 +164,14 @@ while [[ $# -gt 0 ]]; do
     --no-refresh-backlog)
       REFRESH_BACKLOG=0
       ;;
+    --pending-thread-id)
+      shift; [[ $# -gt 0 ]] || { echo "ERROR: --pending-thread-id requires value" >&2; exit 2; }
+      PENDING_THREAD_ID="$1"
+      ;;
+    --directive-id)
+      shift; [[ $# -gt 0 ]] || { echo "ERROR: --directive-id requires value" >&2; exit 2; }
+      DIRECTIVE_ID="$1"
+      ;;
     -h|--help)
       usage
       ;;
@@ -168,8 +188,126 @@ if [[ -z "$TITLE" ]]; then
   exit 2
 fi
 
+# (#1385) sub-agent forum 제목도 LLM 정제 제목을 쓰도록 — DIRECTIVE_ID 가 있으면
+# directive-board.jsonl 의 정제된 summary 를 제목 권위 소스로 사용. nmae 가 verbose
+# 제목을 넘겨도 forum sidebar 가독성 보장 (지시 forum 과 동일 제목). jq 부재 / 미발견
+# / "(빈 본문)" 이면 넘어온 TITLE 유지 (graceful, 추가 latency·LLM 호출 없음).
+_DIRECTIVE_BOARD_JSONL="${DIRECTIVE_BOARD_JSONL_PATH:-${HOME:-/tmp}/.mobruji/directive-board.jsonl}"
+if [[ -n "$DIRECTIVE_ID" && -f "$_DIRECTIVE_BOARD_JSONL" ]] && command -v jq >/dev/null 2>&1; then
+  _CLEAN_SUMMARY="$(jq -r --arg id "$DIRECTIVE_ID" \
+    'select((.message_id == $id) or (.source_queue_msg_id == $id) or (.thread_id == $id)) | .summary // empty' \
+    "$_DIRECTIVE_BOARD_JSONL" 2>/dev/null | head -n1)"
+  if [[ -n "$_CLEAN_SUMMARY" && "$_CLEAN_SUMMARY" != "(빈 본문)" ]]; then
+    TITLE="$_CLEAN_SUMMARY"
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPDATE_SH="$SCRIPT_DIR/cycle-status/update.sh"
+
+# spec: docs/features/cycle-forum-operation.md §5-3
+# register-pending mode = nmae 가 backlog 등록 시 호출. cycle forum 에 🟡 대기
+# thread 신설 + template body. set-active / cycle-status update 는 skip (launch 안 함).
+# stdout: PENDING_THREAD_ID=<id> — nmae 가 cache (다음 launch 시 --pending-thread-id 전달).
+if [[ "$MODE" == "register-pending" ]]; then
+  if [[ -z "$TITLE" ]]; then
+    echo "ERROR: --register-pending mode 는 --title 필수" >&2
+    exit 2
+  fi
+
+  # discord-reply.sh resolve.
+  DISCORD_REPLY_SH="${DISCORD_REPLY_SH:-${HOME:-/tmp}/.mobruji/discord-reply.sh}"
+  if [[ ! -x "$DISCORD_REPLY_SH" ]]; then
+    ALT="$SCRIPT_DIR/discord-daemon/discord-reply.sh"
+    if [[ -x "$ALT" ]]; then
+      DISCORD_REPLY_SH="$ALT"
+    else
+      echo "ERROR: discord-reply.sh 부재 — pending thread 신설 불가" >&2
+      exit 5
+    fi
+  fi
+
+  PENDING_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
+  PENDING_DESC="${DESCRIPTION:-$TITLE}"
+
+  _build_pending_body() {
+    local _cycle="$1" _title="$2" _desc="$3" _ts="$4" _did="$5"
+    local _did_line=""
+    if [[ -n "$_did" ]]; then
+      _did_line="
+- directive: \`${_did}\`"
+    fi
+    cat <<EOF
+🛠️ **${_title}**
+
+💬 작업 / 의도
+${_desc}
+
+🆔 사이클: \`${_cycle}\` · 📋 PR: #—
+🕐 launch: 대기 중 · ⏱️ 진행 —
+
+📋 진행 (🟡 대기)
+- [ ] launch (nmae 위임)
+- [ ] 분석 / 설계
+- [ ] 구현
+- [ ] 검증 (lint / test / typecheck)
+- [ ] PR 생성
+- [ ] PR 머지
+
+✅ 결과 *(종결 시점에만 채워짐)*
+—
+
+⏭️ 다음 단계
+nmae launch 대기
+
+🔖 관련${_did_line}
+
+---
+_갱신: ${_ts} (등록)_
+EOF
+  }
+
+  PENDING_BODY="$(_build_pending_body "$WORKTREE" "$TITLE" "$PENDING_DESC" "$PENDING_TS_KST" "$DIRECTIVE_ID")"
+  # forum thread name = 🟡 prefix + title (사용자 sidebar 가시화).
+  PENDING_TITLE="🟡 ${TITLE}"
+  PENDING_TITLE="${PENDING_TITLE:0:99}"
+
+  PENDING_OUT=""
+  PENDING_RC=0
+  PENDING_OUT=$("$DISCORD_REPLY_SH" \
+    --forum-post-auto-tag "$WORKTREE" "$PENDING_TITLE" "$PENDING_BODY" 2>/dev/null) \
+    || PENDING_RC=$?
+
+  if [[ "$PENDING_RC" -ne 0 ]]; then
+    echo "ERROR: pending thread 신설 실패 (rc=$PENDING_RC, raw=$PENDING_OUT)" >&2
+    exit 6
+  fi
+
+  PENDING_THREAD_ID_RESULT=$(printf '%s' "$PENDING_OUT" | tr -d '\r' | awk 'NF{line=$0} END{print line}')
+  if [[ ! "$PENDING_THREAD_ID_RESULT" =~ ^[0-9]{17,20}$ ]]; then
+    echo "ERROR: pending thread 신설 응답 thread_id 누락 (raw=$PENDING_OUT)" >&2
+    exit 7
+  fi
+
+  # 2026-05-29 (PR fix/wrapper-pending-thread-id-auto-chain): PENDING_THREAD_ID
+  # 를 file 에 atomic write. 다음 launch mode 호출 시 --pending-thread-id 인자
+  # 부재해도 wrapper 가 자동 load — nmae LLM 학습 의존 폐기. code 강제.
+  PENDING_CACHE_DIR="${HOME:-/tmp}/.mobruji/cycle-pending-thread"
+  mkdir -p "$PENDING_CACHE_DIR" 2>/dev/null || true
+  PENDING_CACHE_FILE="$PENDING_CACHE_DIR/${WORKTREE}.txt"
+  PENDING_CACHE_TMP="${PENDING_CACHE_FILE}.tmp.$$"
+  if printf '%s\n' "$PENDING_THREAD_ID_RESULT" > "$PENDING_CACHE_TMP" 2>/dev/null \
+      && mv "$PENDING_CACHE_TMP" "$PENDING_CACHE_FILE" 2>/dev/null; then
+    echo "agent-launch-wrapper.sh: PENDING_THREAD_ID cache 작성 ($PENDING_CACHE_FILE)" >&2
+  else
+    echo "agent-launch-wrapper.sh: PENDING_THREAD_ID cache 작성 실패 — graceful (다음 launch 시 직접 인자 명시 필요)" >&2
+    rm -f "$PENDING_CACHE_TMP" 2>/dev/null || true
+  fi
+
+  printf 'PENDING_THREAD_ID=%s\n' "$PENDING_THREAD_ID_RESULT"
+  echo "agent-launch-wrapper.sh: --register-pending OK (cycle=$WORKTREE, thread=$PENDING_THREAD_ID_RESULT)" >&2
+  exit 0
+fi
 
 if [[ ! -x "$UPDATE_SH" ]]; then
   # update.sh 가 실행 권한 없거나 부재 — 환경 문제. wrapper fail (silent skip 금지).
@@ -186,6 +324,26 @@ fi
 if ! "$UPDATE_SH" "${UPDATE_ARGS[@]}" >&2; then
   echo "ERROR: cycle-status update.sh 호출 실패 — Agent launch 차단" >&2
   exit 4
+fi
+
+# ─── directive-board jsonl ↔ Discord forum mismatch detect (#1129 impl PR 3) ─
+#
+# spec: docs/features/directive-board-event-driven-redesign.md §4
+# CLAUDE.md §11-11.
+#
+# polling sync_loop 폐기 (PR #1129 impl PR 1) 후 actor 호출 누락 사고는
+# 발생 가능 (sub-agent reasoning interrupt, helper crash 등). sub-agent launch
+# 시작 시점에 jsonl 최근 N=20 entry ↔ Discord forum 태그 diff 를 출력해
+# nmae / sub-agent 가 즉시 정정 호출 (`directive_status.sh`) 할 수 있게 한다.
+#
+# graceful: diff 헬퍼 자체가 exit 0 보장. wrapper stdout 계약 (첫 블록 =
+# --echo-prompt 본문 또는 confirm 라인, 마지막 블록 = LAUNCH_THREAD_ID) 을
+# 깨지 않게 diff 헬퍼 stdout 은 wrapper stderr 로 redirect — Discord launch
+# thread / tmux pane / journal 에서는 visible, 호출자가 stdout grep 으로
+# prompt body 추출할 때는 섞이지 않는다.
+DIFF_SH="$SCRIPT_DIR/directive-board/jsonl-forum-diff.sh"
+if [[ -x "$DIFF_SH" ]]; then
+  "$DIFF_SH" --limit 20 >&2 2>&1 || true
 fi
 
 # ─── (선택) cycle 백로그 refresh — 2026-05-26 사용자 정정 박제 ───────────────
@@ -261,44 +419,139 @@ if [[ ! -x "$DISCORD_REPLY_SH" ]]; then
 fi
 
 # launch 알림 본문 — description 우선, 없으면 title. forum thread 본문은
-# 운영자가 클릭해 들어왔을 때 worktree / task / launch 시각 즉시 보이도록 멀티라인.
+# 운영자가 클릭해 들어왔을 때 sub-agent 가 어떤 작업 / 어디까지 진행 / 다음 단계
+# 즉시 파악되도록 template 본문 (spec: docs/features/directive-board-template-and-tags.md §5-6).
 ANNOUNCE_BODY="${DESCRIPTION:-$TITLE}"
-LAUNCH_TS="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')"
+LAUNCH_TS_ISO="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')"
+LAUNCH_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
 FORUM_TITLE="sub-agent launch ($WORKTREE) — ${ANNOUNCE_BODY}"
 # Discord forum thread name 은 100 char 제한 — 잘라 안전.
 FORUM_TITLE="${FORUM_TITLE:0:99}"
-FORUM_BODY="$(printf 'worktree: %s\ntitle: %s\nstarted: %s' \
-  "$WORKTREE" "$ANNOUNCE_BODY" "$LAUNCH_TS")"
-if [[ -n "$TASK" ]]; then
-  FORUM_BODY="$(printf '%s\ntask: %s' "$FORUM_BODY" "$TASK")"
-fi
+
+# spec: directive-board-template-and-tags.md §5-6 cycle forum thread template.
+# 사용자 정정 (2026-05-28): "각 subagent forum 들도 무슨 작업하는지 솔직히 나는
+# 잘 모르겠어. 같은 이치로 내용 정제가 필요". launch 시점에 template 박아
+# sub-agent 가 진행되며 [x] update / 댓글 append. 정제 hook 별도 launch X.
+_build_cycle_template_body() {
+  local _worktree="$1" _title="$2" _desc="$3" _task="$4" _ts_kst="$5"
+  local _task_line=""
+  if [[ -n "$_task" ]]; then
+    _task_line="
+**Task**: ${_task}"
+  fi
+  cat <<EOF
+🛠️ **${_title}**
+
+💬 작업
+${_desc}${_task_line}
+
+🆔 사이클: \`${_worktree}\` · 🕐 launch: ${_ts_kst}
+
+📋 진행
+- [x] launch (nmae 위임)
+- [ ] 분석 / 설계
+- [ ] 구현
+- [ ] 검증 (lint / test / typecheck)
+- [ ] PR 생성
+- [ ] PR 머지
+
+🔖 관련
+- (sub-agent 가 milestone 시 PR / 이슈 / directive 링크 추가)
+
+---
+_갱신: ${_ts_kst} (launch 시점)_
+EOF
+}
+
+FORUM_BODY="$(_build_cycle_template_body "$WORKTREE" "$ANNOUNCE_BODY" "$ANNOUNCE_BODY" "$TASK" "$LAUNCH_TS_KST")"
 
 # 1차: --forum-post-auto-tag (Discord forum channel POST). stderr 는 tee 로
 # 보존해 fallback 결정에 사용. stdout 마지막 줄 = thread_id.
 FORUM_OUT=""
 FORUM_RC=0
-FORUM_OUT=$("$DISCORD_REPLY_SH" \
-  --forum-post-auto-tag "$WORKTREE" "$FORUM_TITLE" "$FORUM_BODY" 2>/dev/null) \
-  || FORUM_RC=$?
 
-if [[ "$FORUM_RC" -eq 0 ]]; then
-  LAUNCH_THREAD_ID=$(printf '%s' "$FORUM_OUT" | tr -d '\r' | awk 'NF{line=$0} END{print line}')
-  if [[ "$LAUNCH_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
-    printf 'LAUNCH_THREAD_ID=%s\n' "$LAUNCH_THREAD_ID"
-    exit 0
+# 2026-05-29 (PR fix/wrapper-pending-thread-id-auto-chain): pending-thread-id
+# 인자 부재 시 register-pending 의 cache file 에서 자동 load. nmae LLM 학습 의존
+# 폐기 — code 가 chain 강제. 사용 후 file 삭제 (다음 launch 위해 reset).
+if [[ -z "$PENDING_THREAD_ID" ]]; then
+  PENDING_CACHE_FILE="${HOME:-/tmp}/.mobruji/cycle-pending-thread/${WORKTREE}.txt"
+  if [[ -r "$PENDING_CACHE_FILE" ]]; then
+    PENDING_THREAD_ID=$(head -1 "$PENDING_CACHE_FILE" 2>/dev/null | tr -d '[:space:]')
+    if [[ -n "$PENDING_THREAD_ID" && "$PENDING_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
+      echo "agent-launch-wrapper.sh: PENDING_THREAD_ID cache 에서 load (cycle=$WORKTREE, thread=$PENDING_THREAD_ID)" >&2
+      # 사용 후 cache 삭제 — 다음 launch 시 reset 위해.
+      rm -f "$PENDING_CACHE_FILE" 2>/dev/null || true
+    else
+      PENDING_THREAD_ID=""
+    fi
   fi
-  echo "agent-launch-wrapper.sh: forum-post 응답에 valid thread_id 가 없음 (raw=$FORUM_OUT) — DIGEST fallback 시도" >&2
+fi
+
+# spec: cycle-forum-operation.md §5-4 (PR cf-4) — --pending-thread-id 명시 시
+# 기존 🟡 thread 재사용 + retag 🟡 → ⏳ + 본문 update (forum-edit). 신규 thread X.
+if [[ -n "$PENDING_THREAD_ID" && "$PENDING_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
+  # retag — forum thread 의 tag 변경. graceful (실패 시 stderr warning + 진행).
+  if ! "$DISCORD_REPLY_SH" --forum-retag "$PENDING_THREAD_ID" "$WORKTREE" "진행" \
+      >/dev/null 2>&1; then
+    echo "agent-launch-wrapper.sh: --pending-thread-id retag 실패 thread=$PENDING_THREAD_ID — graceful" >&2
+  fi
+  # 본문 update — launch 시점 정보 박힘.
+  if ! "$DISCORD_REPLY_SH" --forum-edit "$PENDING_THREAD_ID" "$FORUM_BODY" \
+      >/dev/null 2>&1; then
+    echo "agent-launch-wrapper.sh: --pending-thread-id 본문 update 실패 thread=$PENDING_THREAD_ID — graceful" >&2
+  fi
+  # LAUNCH_THREAD_ID = pending thread (sub-agent inherit).
+  printf 'LAUNCH_THREAD_ID=%s\n' "$PENDING_THREAD_ID"
+  printf 'CYCLE_CHANNEL_MSG_ID=%s\n' "$PENDING_THREAD_ID"
+  exit 0
+fi
+
+# 2026-05-29 (PR fix/cycle-forum-noise-prune): pending-thread-id 부재 시 신규
+# forum thread 생성 skip. cycle forum 의 "sub-agent launch (...)" noise thread
+# 누적 차단. spec: cycle-forum-operation.md §5-6 (1 task = 1 thread 원칙).
+# 자율 사이클 (사용자 directive 박지 않은 launch) 은 DIGEST 채널 fallback 만.
+#
+# 단 명시적 opt-in (AGENT_LAUNCH_CREATE_FORUM_THREAD=1) 시 기존 path 유지 —
+# 운영 전환기 / 디버그 친화.
+#
+# 2026-05-29 (PR fix/digest-forum-push-leak-#1283 — 사용자 directive
+# "다이제스트에 보면 forum push 실패라는데 실제로 포럼에 푸시도 없고"):
+# 본 분기는 *정책상* skip 인데 이전 status-channel 본문 suffix 가
+# "DIGEST fallback (forum push 실패)" 로 박혀 사용자에게 "forum push 시도 →
+# 실패" 로 오해를 유발. 분기에 따라 정확한 suffix 사용하도록 정정:
+#   - 정책 skip (이 if/else 아래 분기): "[DIGEST 라우팅] cycle forum policy: pending 부재"
+#   - 실제 forum-post 시도 후 실패:    "[DIGEST 라우팅] forum-post 실패 (rc=N)"
+#   - 응답 thread_id 누락:             "[DIGEST 라우팅] forum-post 응답 thread_id 누락"
+DIGEST_FALLBACK_REASON=""
+if [[ "${AGENT_LAUNCH_CREATE_FORUM_THREAD:-0}" == "1" ]]; then
+  FORUM_OUT=$("$DISCORD_REPLY_SH" \
+    --forum-post-auto-tag "$WORKTREE" "$FORUM_TITLE" "$FORUM_BODY" 2>/dev/null) \
+    || FORUM_RC=$?
+
+  if [[ "$FORUM_RC" -eq 0 ]]; then
+    LAUNCH_THREAD_ID=$(printf '%s' "$FORUM_OUT" | tr -d '\r' | awk 'NF{line=$0} END{print line}')
+    if [[ "$LAUNCH_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
+      printf 'LAUNCH_THREAD_ID=%s\n' "$LAUNCH_THREAD_ID"
+      exit 0
+    fi
+    echo "agent-launch-wrapper.sh: forum-post 응답에 valid thread_id 가 없음 (raw=$FORUM_OUT) — DIGEST fallback 시도" >&2
+    DIGEST_FALLBACK_REASON="forum-post 응답 thread_id 누락"
+  else
+    echo "agent-launch-wrapper.sh: forum-post 실패 (rc=$FORUM_RC) — DIGEST status channel fallback 시도" >&2
+    DIGEST_FALLBACK_REASON="forum-post 실패 (rc=$FORUM_RC)"
+  fi
 else
-  echo "agent-launch-wrapper.sh: forum-post 실패 (rc=$FORUM_RC) — DIGEST status channel fallback 시도" >&2
+  echo "agent-launch-wrapper.sh: pending-thread-id 부재 + AGENT_LAUNCH_CREATE_FORUM_THREAD!=1 → forum 신규 thread skip. DIGEST 라우팅 사용." >&2
+  DIGEST_FALLBACK_REASON="cycle forum policy: pending 부재"
 fi
 
 # 2차 graceful fallback: --status-channel (DIGEST text channel) — 사용자 가시성
-# 최소 보장. forum_id 미설정 / forum push 실패 시에도 사이런스 사고 재발 방지.
-# DIGEST 채널은 text channel 이라 --auto-ack-thread (text-channel API) 정상 동작.
+# 최소 보장. forum push 실제 실패 / 정책 skip 양쪽 모두 본 분기로. DIGEST 는
+# text channel 이라 --auto-ack-thread (text-channel API) 정상 동작.
 STATUS_OUT=""
 STATUS_RC=0
 STATUS_OUT=$("$DISCORD_REPLY_SH" \
-  --status-channel "$FORUM_TITLE — DIGEST fallback (forum push 실패)" 2>/dev/null) \
+  --status-channel "$FORUM_TITLE — [DIGEST 라우팅] $DIGEST_FALLBACK_REASON" 2>/dev/null) \
   || STATUS_RC=$?
 
 if [[ "$STATUS_RC" -ne 0 ]]; then

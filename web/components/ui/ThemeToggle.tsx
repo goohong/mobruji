@@ -40,11 +40,14 @@ export function ThemeToggle() {
    *  4) shadow : shadow-sm → --shadow-sm
    *  5) transition duration: transition-colors → duration-[var(--duration-base)]
    *
+   * 후속 PR (#1259 / 본 PR) 추가 swap:
+   *  6) focus ring : focus-visible:ring-zinc-500 → --cta-secondary-ring
+   *     (PR #1256 / #1259 동일 패턴 — 균일 outline 토큰)
+   *
    * 미swap (후속 PR 양보):
    *  - bg-white/90 + dark:bg-zinc-900/90 + hover:bg-white + dark:hover:bg-zinc-900
    *    : opacity suffix 가 var() 와 호환 안 됨. backdrop-blur floating button
    *    패턴 토큰화 별도 결정 필요 (PR 6+).
-   *  - focus-visible:ring-zinc-500 — semantic focus ring 토큰 매핑 미정.
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
    * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
@@ -66,7 +69,7 @@ export function ThemeToggle() {
         "hover:bg-white hover:text-[var(--text-primary)]",
         "dark:bg-zinc-900/90",
         "dark:hover:bg-zinc-900",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]",
         "pt-[env(safe-area-inset-top)]",
       ].join(" ")}
     >

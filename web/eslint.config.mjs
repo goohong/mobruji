@@ -24,6 +24,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Playwright e2e (docs/features/web-e2e-playwright.md) — Vitest 단위 테스트와 룰 분리.
+    // e2e 디렉토리는 `@playwright/test` runner 컨벤션을 따르므로 next eslint 룰 (no-console 등) 적용 제외.
+    "e2e/**",
+    "playwright.config.ts",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

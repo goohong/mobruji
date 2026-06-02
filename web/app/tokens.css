@@ -13,7 +13,7 @@
  *   5) Shadow       — elevation + brand accent
  *   6) Motion       — duration + easing + reduced-motion 가드
  *
- * 다크 모드: `:where(html.dark)` selector 로 light → dark 토큰 swap.
+ * 다크 모드: `html.dark` selector 로 light → dark 토큰 swap.
  * globals.css 의 `@custom-variant dark (&:where(.dark, .dark *))` 와 함께 동작.
  *
  * 명명 규칙:
@@ -135,10 +135,172 @@
   --badge-neutral-fg: #3f3f46; /* zinc-700 */
   --badge-success-bg: #d1fae5; /* emerald-100 */
   --badge-success-fg: #047857; /* emerald-700 */
+
+  /*
+   * Badge warning + meter/signal 의미 토큰 (#1044 단계 4 PR 12) — voice-range/auto
+   * 측정 wizard 의 안정성 indicator / mic level / progress track 매핑.
+   *
+   * 기존 hardcode 매핑:
+   *   bg-amber-100 text-amber-700 + dark:bg-amber-900/50 dark:text-amber-200
+   *                                           → --badge-warning-bg / --badge-warning-fg
+   *   meter / progress track:
+   *     bg-zinc-200 + dark:bg-zinc-800        → --meter-track-bg
+   *   "감지 중" 텍스트:
+   *     text-emerald-700 + dark:text-emerald-300
+   *                                           → --text-signal-active
+   *
+   * `--badge-success-fg` (emerald-700/200) 와 `--text-signal-active`
+   * (emerald-700/300) 는 dark 가 한 단계 다름 (chip 안정성 vs 텍스트 신호 강조)
+   * 라 별도 토큰. `--meter-track-bg` (zinc-200/zinc-800) 는 `--border`
+   * (zinc-200/zinc-700) 와 dark 가 한 단계 다름.
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --badge-warning-bg: #fef3c7; /* amber-100 */
+  --badge-warning-fg: #b45309; /* amber-700 */
+  --meter-track-bg: #e4e4e7; /* zinc-200 */
+  --text-signal-active: #047857; /* emerald-700 */
+
+  /*
+   * 홈 + 에러 페이지 의미 토큰 (#1044 단계 4 PR 11) — `app/page.tsx` + `app/error.tsx`
+   * 잔여 hardcode 일괄 swap.
+   *
+   * 그룹 1 — disclaimer 텍스트 (익명 안내 / digest 식별자 등 의도적 흐림):
+   *   text-zinc-500 + dark:text-zinc-500 → --text-disclaimer
+   *   `--text-caption` (zinc-500 / zinc-400) 과 light/dark 매핑이 다름 (dark 도
+   *   동일 zinc-500 유지) — 보조 안내문구는 다크에서 강조하지 않는 디자인 의도.
+   *
+   * 그룹 2 — secondary CTA (보조 액션 버튼, border + bg + text + hover 페어):
+   *   border-zinc-300 + bg-white + text-zinc-700 + hover:bg-zinc-100
+   *   + dark:border-zinc-700 + dark:bg-zinc-900 + dark:text-zinc-200
+   *   + dark:hover:bg-zinc-800 + focus:ring-zinc-500
+   *   → --cta-secondary-{bg,bg-hover,border,fg,ring}
+   *   home page "직접 입력으로 시작" / "음역대 다시 측정" / error page "홈으로".
+   *
+   * 그룹 3 — neutral CTA (검정/흰 invert CTA — fallback 다시 시도 등 brand 와 별):
+   *   bg-zinc-900 + text-white + hover:bg-zinc-700
+   *   + dark:bg-zinc-50 + dark:text-zinc-900 + dark:hover:bg-zinc-200
+   *   → --cta-neutral-{bg,bg-hover,fg}
+   *   error page "다시 시도" 버튼.
+   *
+   * 그룹 4 — step indicator surface (FlowStep 번호 원형 chip):
+   *   bg-zinc-200 + text-zinc-700 + dark:bg-zinc-800 + dark:text-zinc-200
+   *   → --surface-step-{bg,fg}
+   *   `--badge-neutral-*` 와 light 톤이 한 단계 다름 (zinc-200 vs zinc-100) —
+   *   step indicator 는 chip 보다 약간 진한 surface 의도라 별 토큰으로 분리.
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --text-disclaimer: #71717a; /* zinc-500 */
+
+  --cta-secondary-bg: #ffffff; /* white */
+  --cta-secondary-bg-hover: #f4f4f5; /* zinc-100 */
+  --cta-secondary-border: #d4d4d8; /* zinc-300 */
+  --cta-secondary-fg: #3f3f46; /* zinc-700 */
+  --cta-secondary-ring: #71717a; /* zinc-500 */
+
+  --cta-neutral-bg: #18181b; /* zinc-900 */
+  --cta-neutral-bg-hover: #3f3f46; /* zinc-700 */
+  --cta-neutral-fg: #ffffff; /* white */
+
+  --surface-step-bg: #e4e4e7; /* zinc-200 */
+  --surface-step-fg: #3f3f46; /* zinc-700 */
+
+  /*
+   * Recommend 상세 모달 의미 토큰 (#1044 단계 4 PR 14, PR #1219) — `recommend/components/`
+   * (SongCard.tsx + SongDetailModal.tsx + SongDetailContent.tsx) 잔여 zinc
+   * hardcode 일괄 swap.
+   *
+   * 기존 hardcode 매핑 (light → dark):
+   *   섹션 표면 (음역 박스 / 추천 사유 박스):
+   *     bg-zinc-50 + dark:bg-zinc-950          → --surface-detail-section
+   *     `--bg-subtle` (zinc-50 / zinc-900) 와 dark 가 한 단계 다름 (zinc-900 vs
+   *     zinc-950) — 상세 박스가 카드 표면보다 더 깊은 surface 의도라 별 토큰.
+   *
+   *   본문 텍스트 강조 페어 (artist / matchReason 본문 / breakdown dd):
+   *     text-zinc-700 + dark:text-zinc-300     → --text-body-strong
+   *     `--text-secondary` (zinc-600 / zinc-300) 와 light 가 한 단계 다름 — caption
+   *     이 아닌 본문 의도라 별 토큰.
+   *
+   *   meta 강조 페어 (MetaCell value / BreakdownRow label):
+   *     text-zinc-800 + dark:text-zinc-200     → --text-body-emphasis
+   *     header 본문과 다른 weight (semibold meta 정보) 으로 한 단계 더 진한 톤.
+   *
+   *   score mono 페어 (작은 메타 score 표시):
+   *     text-zinc-600 + dark:text-zinc-400     → --text-detail-meta
+   *
+   *   ring / border 한 단계 깊은 페어 (이미지 ring / 액션 border):
+   *     ring-zinc-200 + dark:ring-zinc-800     → --ring-soft-detail
+   *     border-zinc-200 + dark:border-zinc-800 → --ring-soft-detail (border 동일)
+   *     `--border` (zinc-200 / zinc-700) 와 dark 한 단계 다름.
+   *
+   *   placeholder 그라데이션 페어 (앨범 커버 fallback):
+   *     from-zinc-200 to-zinc-300 + dark:from-zinc-800 dark:to-zinc-700
+   *                                             → --surface-cover-from / --surface-cover-to
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --surface-detail-section: #fafafa; /* zinc-50 */
+  --text-body-strong: #3f3f46; /* zinc-700 */
+  --text-body-emphasis: #27272a; /* zinc-800 */
+  --text-detail-meta: #52525b; /* zinc-600 */
+  --ring-soft-detail: #e4e4e7; /* zinc-200 */
+  --surface-cover-from: #e4e4e7; /* zinc-200 */
+  --surface-cover-to: #d4d4d8; /* zinc-300 */
+
+  /*
+   * Modal 의미 토큰 (ADR-0018 §4-2, PR #1263 매트릭스 sub-PR 1) —
+   * `recommend/components/SongDetailModal.tsx` backdrop + 모달 표면 swap.
+   *
+   * 기존 hardcode 매핑 (light → dark):
+   *   backdrop:
+   *     bg-zinc-900/60                          → --modal-backdrop
+   *     light/dark 동일 (zinc-900 @ 60% opacity) — backdrop 은 항상 어두운 톤.
+   *   모달 표면:
+   *     bg-white + dark:bg-zinc-900             → --surface-modal
+   *     `--bg-base` (white / zinc-950) 와 dark 가 한 단계 다름 (zinc-900 vs
+   *     zinc-950) — 모달 표면이 페이지 base 보다 한 단계 위로 떠 있는 의도라
+   *     별 토큰으로 분리 (Q1 (a) 채택, PR #1263 자율 결정).
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --modal-backdrop: rgba(24, 24, 27, 0.6); /* zinc-900 @ 60% */
+  --surface-modal: #ffffff; /* white */
+
+  /*
+   * Chart bar + card surface 의미 토큰 (#1044 단계 4 PR 13) — history
+   * `VoiceRangeProgressCard.tsx` SVG 차트 + section card surface 잔여 zinc 일괄
+   * swap.
+   *
+   * 기존 hardcode 매핑:
+   *   bar (latest, 강조)            : fill-zinc-900  + dark:fill-zinc-100
+   *                                   → --chart-bar-active-bg
+   *   bar (latest, 하단 라벨 강조)  : fill-zinc-700  + dark:fill-zinc-200
+   *                                   = --cta-secondary-fg 와 동일 매핑 (재사용)
+   *   bar (비활성)                  : fill-zinc-300  + dark:fill-zinc-700
+   *                                   → --chart-bar-inactive-bg
+   *   card surface bg               : bg-white       + dark:bg-zinc-900
+   *                                   → --surface-card-bg
+   *   card surface ring             : ring-zinc-200  + dark:ring-zinc-800
+   *                                   → --surface-card-ring
+   *
+   * `--text-primary` (zinc-900/zinc-50) 와 `--chart-bar-active-bg` (zinc-900/
+   * zinc-100) 는 dark 가 한 단계 다름 (chart 강조 막대는 본문 텍스트보다 약간
+   * 부드러운 dark 톤). `--surface-card-bg` (white/zinc-900) 는 `--surface-input`
+   * (PR 10) 과 같은 매핑이지만 의미가 다르므로 (card vs form input) 별도 alias.
+   * `--surface-card-ring` (zinc-200/zinc-800) 도 `--border-input` 과 같은 매핑
+   * 이지만 form 의미와 분리.
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --chart-bar-active-bg: #18181b; /* zinc-900 */
+  --chart-bar-inactive-bg: #d4d4d8; /* zinc-300 */
+  --surface-card-bg: #ffffff; /* white */
+  --surface-card-ring: #e4e4e7; /* zinc-200 */
 }
 
 /* Dark mode — html.dark 클래스 토글 시 자동 swap (globals.css 의 @custom-variant 와 동작) */
-:where(html.dark) {
+html.dark {
   --bg-base: #09090b; /* zinc-950 */
   --bg-subtle: #18181b; /* zinc-900 */
   --bg-muted: #27272a; /* zinc-800 */
@@ -169,6 +331,47 @@
   --badge-neutral-fg: #d4d4d8; /* zinc-300 */
   --badge-success-bg: rgba(6, 78, 59, 0.5); /* emerald-900/50 */
   --badge-success-fg: #a7f3d0; /* emerald-200 */
+
+  /* Badge warning + meter/signal 의미 토큰 dark swap (PR 12) */
+  --badge-warning-bg: rgba(120, 53, 15, 0.5); /* amber-900/50 */
+  --badge-warning-fg: #fde68a; /* amber-200 */
+  --meter-track-bg: #27272a; /* zinc-800 */
+  --text-signal-active: #6ee7b7; /* emerald-300 */
+
+  /* 홈 + 에러 페이지 의미 토큰 dark swap (PR 11) */
+  --text-disclaimer: #71717a; /* zinc-500 — 의도적 균일 (light/dark 같음) */
+
+  --cta-secondary-bg: #18181b; /* zinc-900 */
+  --cta-secondary-bg-hover: #27272a; /* zinc-800 */
+  --cta-secondary-border: #3f3f46; /* zinc-700 */
+  --cta-secondary-fg: #e4e4e7; /* zinc-200 */
+  --cta-secondary-ring: #71717a; /* zinc-500 — 균일 outline */
+
+  --cta-neutral-bg: #fafafa; /* zinc-50 */
+  --cta-neutral-bg-hover: #e4e4e7; /* zinc-200 */
+  --cta-neutral-fg: #18181b; /* zinc-900 */
+
+  --surface-step-bg: #27272a; /* zinc-800 */
+  --surface-step-fg: #e4e4e7; /* zinc-200 */
+
+  /* Recommend 상세 모달 의미 토큰 dark swap (PR 14) */
+  --surface-detail-section: #09090b; /* zinc-950 */
+  --text-body-strong: #d4d4d8; /* zinc-300 */
+  --text-body-emphasis: #e4e4e7; /* zinc-200 */
+  --text-detail-meta: #a1a1aa; /* zinc-400 */
+  --ring-soft-detail: #27272a; /* zinc-800 */
+  --surface-cover-from: #27272a; /* zinc-800 */
+  --surface-cover-to: #3f3f46; /* zinc-700 */
+
+  /* Modal 의미 토큰 dark swap (PR #1263 매트릭스 sub-PR 1) */
+  --modal-backdrop: rgba(24, 24, 27, 0.6); /* zinc-900 @ 60% — light/dark 동일 */
+  --surface-modal: #18181b; /* zinc-900 */
+
+  /* Chart bar + card surface 의미 토큰 dark swap (PR 13) */
+  --chart-bar-active-bg: #f4f4f5; /* zinc-100 */
+  --chart-bar-inactive-bg: #3f3f46; /* zinc-700 */
+  --surface-card-bg: #18181b; /* zinc-900 */
+  --surface-card-ring: #27272a; /* zinc-800 */
 }
 
 /* ───────── 2) Typography token ───────── */
@@ -267,7 +470,7 @@
 }
 
 /* 다크 모드는 opacity 1.5배 — 같은 ratio 유지하면서 가시성 ↑ */
-:where(html.dark) {
+html.dark {
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.06);
   --shadow-md:
     0 2px 8px 0 rgba(0, 0, 0, 0.06), 0 1px 2px 0 rgba(0, 0, 0, 0.06);

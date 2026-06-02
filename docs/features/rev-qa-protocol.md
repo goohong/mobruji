@@ -12,7 +12,7 @@ last_reviewed: 2026-05-24
 # rev 세션 QA 실행 검증 프로토콜
 
 ## 1) 개요 (What / Why)
-- rev 세션은 머지된 PR(또는 머지 직전 PR)에 대해 **사후 코드 감사**와 **실 QA 실행 검증**을 모두 수행한다.
+- rev 세션은 머지된 PR(또는 머지 직전 PR)에 대해 **사후 코드 리뷰**와 **실 QA 실행 검증**을 모두 수행한다.
 - "에러를 막는 것이 1순위"라는 사용자 결정(2026-05-22)에 따라, 코드 리뷰만으로 잡히지 않는 다음 부류의 사고를 차단한다:
   - 런타임 에러 (NPE, 직렬화 실패, lazy init 등)
   - 환경 의존 실패 (Flyway baseline, 포트 충돌, env 변수 누락)
@@ -65,7 +65,7 @@ last_reviewed: 2026-05-24
 | **C. 코드 변경 (FE+BE 통합)** | A와 B 동시 또는 spec 상 contract 변경 | A + B + 통합 시나리오 (해당 도메인 smoke 시나리오 §5-3) | local 3-tier |
 | **D. auth & security** | `SessionAuthGuard`, `*AuthFilter`, `application*.yml` security 섹션, ADR 0011/0013 관련 | A 또는 B + 인증 우회 시도 (헤더 누락/위조 토큰) + 401/403 응답 검증 | local 3-tier |
 | **E. DB 마이그레이션** | `backend/src/main/resources/db/migration/**` 추가 | A + Flyway clean→migrate 재현 (`./gradlew flywayMigrate` 또는 docker compose 재기동) | local 3-tier (DB 재기동) |
-| **F. spec & docs only** | `docs/**`, `README.md`, `.md` 파일만 변경 | **QA 생략**. 코드 감사만 수행. | — |
+| **F. spec & docs only** | `docs/**`, `README.md`, `.md` 파일만 변경 | **QA 생략**. 코드 리뷰만 수행. | — |
 | **G. CI/infra only** | `.github/workflows/**`, `docker-compose*.yml` 변경 | dry-run으로 워크플로우 트리거(가능한 경우) 또는 변경 라인 사람 리뷰만 | — |
 | **H. 비기능 spec 위반 위험** | spec에 결정성/p95/관측성 요구가 있는 도메인(`recommendation`, `voice`) | A + spec §3 비기능 요구사항 한 줄씩 검증 | local 3-tier |
 
@@ -75,7 +75,7 @@ last_reviewed: 2026-05-24
 
 ```
 1. PR diff 확인 (gh pr diff <N> --name-only)
-   ├─ docs/**만 → 범주 F → QA 생략, 감사만
+   ├─ docs/**만 → 범주 F → QA 생략, 코드 리뷰만
    ├─ .github/workflows/** 또는 docker-compose → 범주 G → dry-run 또는 라인 리뷰
    └─ 코드 파일 포함 → 다음 단계
 2. 변경 영역 분류
@@ -373,6 +373,102 @@ rev 22 첫 적용 피드백 — smoke 시나리오 §5-3은 **개념적 흐름**
 - `Authorization: Bearer <MOBRUJI_ADMIN_TOKEN>` — `/api/v1/songs/stats` 등 admin endpoint. 토큰은 env로 주입 (`docs/runbooks/local-3tier-setup.md` §2-2).
 
 > **새 endpoint 추가 시**: backend PR에서 본 §5-7 을 같은 PR로 갱신한다. 갱신 없는 endpoint는 rev sub-agent가 grep을 다시 하게 되어 wall-clock 손실 + 미QA 위험.
+
+### 5-9) 단계 별 보고 템플릿 + Discord push 차등 (2026-05-28)
+
+**사용자 정정 (2026-05-28)**: "rev 가 진행한 작업이 정확히 어떤 건지(코드 리뷰, QA, 2차 E2E 등) 잘 모르겠어. 뒤에서 동작하다보니. 작업 흐름이나 보고를 체계화하면 좋을 것 같은데". 단계 별 통일된 보고 format + Discord 가시화 차등 도입.
+
+[[rev-e2e-2-stages]] §3 의 2 단계 작업 (🟡 Pre-merge review / 🔵 Post-merge audit) 이 사용자에게 가시화 안 됨. 본 절 = 사용자 가시화 강화. (구 `rev-e2e-3-stages` — 2026-05-30 rename + 단계 3 폐기, `rev-e2e-2-stages.md §1-1` evidence 참조)
+
+#### 5-9-1) 🟡 Pre-merge review (단계 1) — PR 머지 전 (코드 리뷰)
+
+**PR 코멘트 템플릿** (§5-6 의 단순 1줄 format 보강 / 검색 패턴 `rev단계1:` 추가):
+
+```markdown
+## rev 단계 1 — 코드 리뷰
+
+### 검증 항목
+- [x] 코드 변경 범위 / 의도 일치
+- [x] 비기능 매트릭스 (보안 / 성능 / 회귀 risk)
+- [x] DDD 계층 침범 / 도메인 일관성
+- [x] 테스트 커버 (성공 + 실패 케이스)
+- [x] CLAUDE.md / spec 룰 준수
+
+### 결과
+🟢 PASS — {summary 한 줄}
+
+### 발견
+- (없음 또는) {발견 + 후속 제안 / issue 등록 권장 list}
+
+rev단계1: 🟢 PASS · {PR title 30자}
+```
+
+**Discord push (단계 1)**: cycle forum 채널 (`REV_FORUM_ID`) 의 round thread — `✅ reviewed:claude #N — 코드 리뷰 통과, 머지 후보` 1줄. 사용자 가시화 가치 낮음 — cycle forum 만.
+
+#### 5-9-2) 🔵 Post-merge audit (단계 2) — develop 머지 후 (회귀 검증)
+
+**PR 코멘트 템플릿**:
+
+```markdown
+## rev 단계 2 — develop 회귀 검증
+
+### 실행 환경
+{local 3-tier / dev 서버 / staging — §5-4 결정}
+
+### 실행 시나리오
+- {시나리오 1}: {결과}
+- {시나리오 2}: {결과}
+
+### 결과
+🟢 PASS — {summary}
+
+### 측정 (해당 시)
+- p95 latency: {ms}
+- 에러율: {%}
+
+rev단계2: 🟢 PASS · #N · dev OK
+```
+
+**Discord push (단계 2)**: **DIGEST 채널 (`DIGEST_CHANNEL_ID`)** 에 1줄 push — `✅ rev단계2 #N — develop 회귀 없음 (dev smoke OK)`. 사용자가 "방금 머지된 게 안전한지" 즉시 알 수 있게.
+
+#### 5-9-3) (폐기) 단계 3 — release 후 (production smoke)
+
+> **2026-05-30 폐기** (PR rev2s-2): `rev-e2e-2-stages.md §1-1` evidence (production 환경 부재 — `.github/workflows/cd-prod.yml` / `cd-release.yml` 부재) 사유로 단계 3 자체 폐기. 향후 production 환경 신설 시 (`docs/features/deployment-infrastructure.md` Hetzner CX22 머지 의존) 본 sub-section 부활 가능 — 메모리 후보 `[[project_rev_stage_3_prod_revival]]` cross-ref.
+
+#### 5-9-4) ❌ 발견 시 가시화 (단계 무관)
+
+🔴 BLOCK 또는 e2e FAIL 발견 시:
+1. **DIGEST 채널** 에 ❌ push (예: `🔴 rev단계{N} #M — {요약} · 사고 가능`)
+2. **사용자 마지막 메시지에 reply 형태** 로 동일 본문 push (`discord-reply.sh` bare body mode — `LAST_USER_MSG_ID` 기반 자동 reply). 사용자 attention 즉시.
+3. nmae 에 fix 사이클 launch 요청 (rev → maestro hotline).
+
+#### 5-9-5) round 종료 wrapper — `tools/rev-queue/round-summary.sh`
+
+**rev sub-agent 매 round 종료 시점에 호출 의무**:
+
+```bash
+bash tools/rev-queue/round-summary.sh <round_id>
+```
+
+wrapper 가 묶는 동작 (학습 의존 ↓ 강제 메커니즘 — [[feedback-evidence-based-root-cause]]):
+1. `rev-queue.jsonl` scan → 이번 round 의 단계 1/2 별 PASS / HOLD / FAIL count 산출 (단계 3 폐기 — `rev-e2e-2-stages.md §1-1`)
+2. round 내 등록된 후속 issue 번호 list 추출
+3. 🟡 Pre-merge review (단계 1) = cycle forum (`REV_FORUM_ID`), 🔵 Post-merge audit (단계 2) = DIGEST 채널 (`DIGEST_CHANNEL_ID`) push 분기 (§5-9-1/2)
+4. ❌ 있으면 사용자 메시지 reply 추가 push (§5-9-4)
+5. 보고 format 통일 — script 가 일관 출력 (사용자가 매 round 같은 format)
+
+**출력 format 예 (DIGEST 채널)** (단계 3 폐기 후 — `tools/rev-queue/round-summary.sh` 본문 갱신은 PR rev2s-4 별 트랙):
+
+```text
+rev round 12 종료
+─────────────────
+🟡 Pre-merge review (단계 1, PR 머지 전): 3 PASS / 1 HOLD #1203
+🔵 Post-merge audit (단계 2, develop 후): 5 PASS / 1 ❌ #1196 (issue #1234 등록)
+
+후속 issue: #1234
+```
+
+**누락 감지**: rev round 종료 후 wrapper 미호출 시 nmae 의 다음 backlog scan 에서 jsonl 의 round 종료 ts 없음 발견 → 가시화 push. (보강 강제 메커니즘은 follow-up — 🟡 Pre-merge review wrapper script 우선.)
 
 ### 5-8) release gate 연계
 

@@ -152,6 +152,22 @@
 #
 #       관련 룰: CLAUDE.md §12-3 (helper 본답 push 직전/직후 자동 hook 강제 강화)
 #
+#   4b) choices — 사용자에게 선택지 prompt + reaction tap 응답
+#       (spec: docs/features/discord-reaction-choice-input.md):
+#       discord-reply.sh --choices "<질문>" "<opt1>" "<opt2>" [<opt3> ... <opt10>]
+#         → 동작:
+#             1) 본문 build: 질문 + \n\n + "1️⃣ opt1\n2️⃣ opt2\n..." 형태.
+#             2) post_channel_message (사용자 마지막 메시지 reply 형태로 — 시각적 연결).
+#             3) 응답 message_id 에 1️⃣–🔟 keycap reaction pre-attach.
+#             4) ~/.mobruji/choice-prompts.jsonl 에 register row append (event log).
+#             5) stdout = bot message_id (호출자 trace 가능).
+#         → 사용자가 reaction tap → bot.py on_raw_reaction_add 가 lookup → synthetic
+#           user msg ("[choice N/total] label") 로 helper 에 forwarding. 폴링 X —
+#           Discord Gateway native event push.
+#         → 최대 옵션 = 10 (1️⃣–🔟 keycap 한계). 옵션 < 2 시 dispatch error.
+#         → mode toggle: helper 가 USER_MODE=ASK 인 경우에만 호출 권장 (AUTO 기본).
+#           helper-turn-start.sh 가 ===USER_MODE:AUTO|ASK=== marker emit.
+#
 #   5) auto-thread (#947 helper 자동 활용 + #1021 launch thread fallback):
 #       discord-reply.sh --auto-thread "<진행 줄>"
 #         → thread_id resolve 우선순위 (높음 → 낮음):
@@ -326,6 +342,29 @@ LAST_USER_MSG_ID_FILE="${LAST_USER_MSG_ID_FILE:-${HOME:-/tmp}/.mobruji/last-user
 HELPER_TARGET_FILE="${HELPER_TARGET_FILE:-${HOME:-/tmp}/.mobruji/helper-current-target.txt}"
 HELPER_QUEUE_FILE="${HELPER_QUEUE_FILE:-${HOME:-/tmp}/.mobruji/helper-queue.jsonl}"
 
+# spec: docs/features/discord-reaction-choice-input.md — `--choices` mode.
+# 사용자가 1️⃣–🔟 keycap reaction 으로 선택지 응답. bot.py on_raw_reaction_add 가
+# choice-prompts.jsonl 의 register entry 를 lookup → synthetic msg 로 helper 전달.
+CHOICE_PROMPTS_FILE="${CHOICE_PROMPTS_FILE:-${HOME:-/tmp}/.mobruji/choice-prompts.jsonl}"
+# Unicode keycap display (사람 가독성, 메시지 본문 build 시 사용).
+CHOICE_KEYCAPS_DISPLAY=(
+  "1️⃣" "2️⃣" "3️⃣" "4️⃣" "5️⃣" "6️⃣" "7️⃣" "8️⃣" "9️⃣" "🔟"
+)
+# URL-encoded UTF-8 byte sequences (Discord REST `PUT /reactions/{emoji}/@me`).
+# 1-9: digit + VS16 (U+FE0F=EF B8 8F) + keycap (U+20E3=E2 83 A3). 🔟 = U+1F51F.
+CHOICE_KEYCAPS_URLENC=(
+  "1%EF%B8%8F%E2%83%A3"
+  "2%EF%B8%8F%E2%83%A3"
+  "3%EF%B8%8F%E2%83%A3"
+  "4%EF%B8%8F%E2%83%A3"
+  "5%EF%B8%8F%E2%83%A3"
+  "6%EF%B8%8F%E2%83%A3"
+  "7%EF%B8%8F%E2%83%A3"
+  "8%EF%B8%8F%E2%83%A3"
+  "9%EF%B8%8F%E2%83%A3"
+  "%F0%9F%94%9F"
+)
+
 # Writing marker / typing indicator 설정 (#1095, 2026-05-26).
 #
 # 두 가지 호출 경로:
@@ -334,8 +373,9 @@ HELPER_QUEUE_FILE="${HELPER_QUEUE_FILE:-${HOME:-/tmp}/.mobruji/helper-queue.json
 #      세부 부분만 disable (default 둘 다 ENABLED=1).
 #   B) bare body 자동 hook — bare body 본답 push 호출 시 자동으로 (a) ✍️ reaction +
 #      typing → push → (c) ✍️ remove 수행. helper 본체가 명시 호출을 까먹어도 강제
-#      가시화. 회귀 안전을 위해 default OFF — `BOT_WRITING_AUTO_HOOK_ENABLED=1` 로
-#      옵트인.
+#      가시화. 2026-05-29 PR #1252 §10-1 결정에 따라 default ON 전환 →
+#      사용자 directive 2026-05-29 (#1294) 로 즉시 OFF 재전환. opt-in 시
+#      `BOT_WRITING_AUTO_HOOK_ENABLED=1` 명시 부여 (systemd / launchd unit env).
 #
 # default emoji: ✍️ (U+270D + U+FE0F variation selector) — URL-encoded
 # `%E2%9C%8D%EF%B8%8F`. Discord API 는 unicode emoji 를 URL-encoded 형태로 받음.
@@ -343,9 +383,11 @@ HELPER_QUEUE_FILE="${HELPER_QUEUE_FILE:-${HOME:-/tmp}/.mobruji/helper-queue.json
 BOT_WRITING_REACTION_EMOJI="${BOT_WRITING_REACTION_EMOJI:-%E2%9C%8D%EF%B8%8F}"
 BOT_WRITING_REACTION_ENABLED="${BOT_WRITING_REACTION_ENABLED:-1}"
 BOT_TYPING_INDICATOR_ENABLED="${BOT_TYPING_INDICATOR_ENABLED:-1}"
-# bare body 자동 hook — default OFF. 명시 호출 (--writing-marker / --writing-done)
-# 와 두 path 분리. 운영 단계에서 helper 본체가 `--writing-marker` 호출 룰을
-# 안정적으로 학습하면 1 로 전환해 자동화 보강 가능 (docs/ai-harness/actors/helper.md 참고).
+# bare body 자동 hook — default OFF (사용자 directive 2026-05-29 #1294, PR #1252
+# default ON 결정 1일 만에 revert. 노이즈 판단).
+# 명시 호출 (--writing-marker / --writing-done) 은 본 env 와 무관하게 항상 동작.
+# helper 본체가 명시 호출을 까먹어도 fallback hook 으로 ✍️ 잔존 방지하던 경로 제거.
+# opt-in 시 `BOT_WRITING_AUTO_HOOK_ENABLED=1` 명시 (systemd/launchd unit env 또는 ad-hoc).
 BOT_WRITING_AUTO_HOOK_ENABLED="${BOT_WRITING_AUTO_HOOK_ENABLED:-0}"
 
 # Discord API retry 설정 (#911 G-6).
@@ -733,11 +775,12 @@ case "$1" in
     # completed 전이 시 호출.
     #
     # 형식: --update-status <thread_id> "<status>" [pr_url]
-    # 동작: forum_edit_starter 재사용 — PATCH /channels/{thread_id}/messages/{thread_id}.
-    #       본문 = "**상태**: <status>\n**갱신**: <KST timestamp>" + (pr_url 시 PR 줄 추가).
-    #       기존 starter content 를 완전히 대체 (Discord PATCH semantics).
-    # 한계: starter 본문에 사용자 작성 추가 정보가 있다면 본 갱신으로 덮어쓰임 —
-    #       directive_status.sh 호출자가 책임 (forum thread starter 는 시스템 message 가정).
+    # 동작 (#1419 내용 보존형): forum_get_starter 로 기존 본문을 읽어
+    #       directive_starter_status.py 로 📋 진행 상태줄 + 갱신 줄 + (pr_url 시)
+    #       🔖 관련 PR 줄만 수술 갱신 후 forum_edit_starter 로 PATCH.
+    #       → 📌 제목·💬 요약·🔖 관련 등 기존 내용 보존.
+    # 과거: 본문을 "상태/갱신" 2~3 줄로 통째 대체해 사용자/helper 작성 내용이
+    #       매 전이마다 소멸하는 사고가 있었음 (2026-05-31 사용자 정정).
     MODE="update-status"
     if [[ $# -lt 3 ]]; then
       echo "discord-reply.sh: --update-status <thread_id> \"<status>\" [pr_url] 형태로 입력해주세요" >&2
@@ -827,6 +870,28 @@ case "$1" in
     THREAD_ID="$2"  # user_msg_id 임시 저장. mode 실행에서 사용.
     MSG="(writing-marker placeholder)"  # MSG 빈값 가드 우회.
     NO_REPLY=1  # reaction/typing 호출은 message_reference 무관.
+    ;;
+  --choices)
+    # spec: docs/features/discord-reaction-choice-input.md
+    # --choices "<질문>" "<opt1>" "<opt2>" ... [<opt10>]
+    #   1) 본문 build (질문 + 1️⃣ opt1 + 2️⃣ opt2 + ...) → post_channel_message.
+    #   2) 응답 message_id 에 1️⃣–🔟 keycap reaction pre-attach (사용자 tap 대상).
+    #   3) ~/.mobruji/choice-prompts.jsonl 에 register entry append.
+    #   4) stdout = bot message_id (호출자 trace 가능).
+    # bot.py on_raw_reaction_add 가 lookup → synthetic user msg 로 helper 에 전달.
+    if [[ $# -lt 4 ]]; then
+      echo "discord-reply.sh: --choices <질문> <opt1> <opt2> [<opt3> ... <opt10>] (최소 2 옵션) 형태로 입력해주세요" >&2
+      exit 64
+    fi
+    MODE="choices"
+    CHOICES_QUESTION="$2"
+    shift 2
+    CHOICES_OPTS=("$@")
+    if [[ ${#CHOICES_OPTS[@]} -gt 10 ]]; then
+      echo "discord-reply.sh: --choices — 옵션은 최대 10개 (Discord keycap 0️⃣–🔟)" >&2
+      exit 64
+    fi
+    MSG="(choices placeholder)"  # MSG 빈값 가드 우회 — 실행은 CHOICES_QUESTION 사용.
     ;;
   --*)
     echo "discord-reply.sh: 알 수 없는 옵션 $1" >&2
@@ -1191,7 +1256,9 @@ atomic_write_thread_file() {
 # emoji 는 이미 URL-encoded 상태로 $BOT_WRITING_REACTION_EMOJI 에 들어있다.
 reaction_add() {
   local message_id="$1"
-  local emoji="$BOT_WRITING_REACTION_EMOJI"
+  # 두 번째 인자 = URL-encoded emoji. 미지정 시 ✍️ default — #1095 writing-marker 호환.
+  # --choices mode 가 1️⃣–🔟 keycap 을 같은 helper 로 부착 (spec #1126 후속).
+  local emoji="${2:-$BOT_WRITING_REACTION_EMOJI}"
   local response status
   response=$(curl -sS -X PUT \
     "https://discord.com/api/v10/channels/${CHANNEL}/messages/${message_id}/reactions/${emoji}/@me" \
@@ -1511,6 +1578,25 @@ forum_edit_starter() {
     "$body"
 }
 
+# (#1419) forum thread starter message 의 현재 본문(content) 만 stdout 으로 반환.
+# forum thread 의 starter message id == thread id (Discord 사양).
+# update-status 가 본문을 통째로 덮어쓰지 않고 "내용 보존형"으로 갱신하려면
+# 먼저 기존 본문을 읽어야 한다 (과거엔 getter 부재로 통째 PATCH → 내용 소멸 사고).
+# 실패 (4xx/5xx / thread 삭제) 시 빈 문자열 — 호출자가 fallback.
+forum_get_starter() {
+  local thread_id="$1"
+  local resp status payload
+  resp=$(curl -sS -X GET \
+    "https://discord.com/api/v10/channels/${thread_id}/messages/${thread_id}" \
+    -H "Authorization: Bot ${TOKEN}" \
+    -w $'\n%{http_code}' 2>/dev/null || true)
+  status="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+    printf '%s' "$payload" | jq -r '.content // ""'
+  fi
+}
+
 # forum thread applied_tags 만 PATCH — PATCH /channels/{thread_id}.
 # 다른 thread 속성 (name 등) 은 건드리지 않음.
 forum_retag_thread() {
@@ -1636,7 +1722,23 @@ case "$MODE" in
     # #1121 (2026-05-26): 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 chunk split + 순차 push.
     # 단일 chunk (cap 이하) 인 경우 단일 push 동작과 동일 (split_long_message 가 1개
     # emit). 다중 chunk 시 첫 chunk 만 reply, 나머지는 standalone — 사이드바 가시성 ↑.
-    post_channel_message_chunked "$MSG" "$REPLY_TO_ID"
+    MAIN_PUSH_RESPONSE=$(post_channel_message_chunked "$MSG" "$REPLY_TO_ID")
+    printf '%s' "$MAIN_PUSH_RESPONSE"
+
+    # 2026-05-29 (PR helper-control-emoji-auto-attach + reply-target fix): 본답
+    # push 직후 ❓ control emoji 자동 부착. 사용자 정정 (2026-05-29):
+    # "stop button은 내가 보낸 메세지에 붙는게 맞는거같은데" — ⏹ 는 사용자 명령
+    # 메시지 (bot.py on_message 가 부착), ❓ 는 helper 답 메시지 (본 path).
+    # bot.py on_raw_reaction_add 가 ❓ → 사유 설명 요청 처리.
+    # 환경 변수 MOBRUJI_CONTROL_EMOJI=0 시 skip (디버깅).
+    # graceful: reaction add 실패는 본답 push 자체 결과에 영향 없음.
+    if [[ "${MOBRUJI_CONTROL_EMOJI:-1}" == "1" ]]; then
+      MAIN_PUSH_MSG_ID=$(printf '%s' "$MAIN_PUSH_RESPONSE" | jq -r '.id // empty' 2>/dev/null || echo "")
+      if [[ -n "$MAIN_PUSH_MSG_ID" ]]; then
+        # ❓ U+2753 = E2 9D 93
+        reaction_add "$MAIN_PUSH_MSG_ID" "%E2%9D%93" || true
+      fi
+    fi
 
     # #1095: 본답 push 직후 ✍️ remove — 답 작성 완료 가시화.
     # typing 은 Discord 자체 10초 timeout + 메시지 push 후 자동 종료.
@@ -1893,6 +1995,50 @@ case "$MODE" in
     fi
     ;;
 
+  choices)
+    # spec: docs/features/discord-reaction-choice-input.md
+    # helper / nmae 가 사용자에게 선택지 prompt 던질 때 호출. event-driven —
+    # 사용자가 1️⃣–🔟 keycap reaction tap 하면 bot.py on_raw_reaction_add 가
+    # synthetic msg 로 helper 에 전달 (폴링 X, Discord Gateway native push).
+    # 1) 본문 build: 질문 + \n\n + "1️⃣ opt1\n2️⃣ opt2\n...".
+    CHOICES_BODY="$CHOICES_QUESTION"$'\n'
+    for i in "${!CHOICES_OPTS[@]}"; do
+      CHOICES_BODY+=$'\n'"${CHOICE_KEYCAPS_DISPLAY[$i]} ${CHOICES_OPTS[$i]}"
+    done
+
+    # 2) 메시지 post — 사용자 마지막 메시지에 reply 형태 (일관성 + 시각적 연결).
+    CHOICES_REPLY_TO=$(resolve_reply_to_id)
+    CHOICES_PAYLOAD=$(build_reply_payload "$CHOICES_BODY" "$CHOICES_REPLY_TO")
+    CHOICES_RESPONSE=$(post_channel_message "$CHOICES_PAYLOAD")
+    CHOICES_MSG_ID=$(printf '%s' "$CHOICES_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$CHOICES_MSG_ID" ]]; then
+      echo "discord-reply.sh: --choices — message post 실패" >&2
+      echo "$CHOICES_RESPONSE" >&2
+      exit 1
+    fi
+
+    # 3) keycap reaction pre-attach (1 ~ N). 실패 한 건은 graceful (whole bail X).
+    for i in "${!CHOICES_OPTS[@]}"; do
+      reaction_add "$CHOICES_MSG_ID" "${CHOICE_KEYCAPS_URLENC[$i]}" || true
+    done
+
+    # 4) choice-prompts.jsonl register row append (append-only event log).
+    #    bot.py lookup_choice_prompt 가 이 row 를 읽어 사용자 reaction 매칭.
+    mkdir -p "$(dirname "$CHOICE_PROMPTS_FILE")"
+    CHOICES_JSON=$(printf '%s\n' "${CHOICES_OPTS[@]}" | jq -R . | jq -sc .)
+    CHOICES_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    jq -nc \
+      --arg mid "$CHOICES_MSG_ID" \
+      --arg cid "$CHANNEL" \
+      --argjson choices "$CHOICES_JSON" \
+      --arg ts "$CHOICES_TS" \
+      '{event:"register", message_id:$mid, channel_id:$cid, choices:$choices, ts:$ts}' \
+      >> "$CHOICE_PROMPTS_FILE"
+
+    # 5) stdout = bot message_id (호출자 trace 가능).
+    printf '%s\n' "$CHOICES_MSG_ID"
+    ;;
+
   update-status)
     # PR #1129 directive-board event-driven (impl PR 2).
     # forum thread starter message 본문을 status / KST timestamp / (선택) PR URL 로
@@ -1902,13 +2048,24 @@ case "$MODE" in
     PR_URL_OPT="$FORUM_TITLE"
     # KST timestamp (jsonl entry 의 last_updated_kst 와 동일 형식).
     UPDATE_TS_KST="$(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M KST')"
-    # starter body 빌드 — markdown 2~3 줄.
-    if [[ -n "$PR_URL_OPT" ]]; then
-      NEW_STARTER_BODY=$(printf '**상태**: %s\n**갱신**: %s\n**PR**: %s' \
-        "$STATUS_TEXT" "$UPDATE_TS_KST" "$PR_URL_OPT")
-    else
-      NEW_STARTER_BODY=$(printf '**상태**: %s\n**갱신**: %s' \
-        "$STATUS_TEXT" "$UPDATE_TS_KST")
+    # (#1419) 내용 보존형 갱신 — 과거엔 본문을 "상태/갱신" 2~3 줄로 통째 PATCH 해
+    # 📌 제목·💬 요약·🔖 관련 등 사용자/helper 작성 내용이 소멸하는 사고가 있었음
+    # (2026-05-31 사용자 정정 "내용 다 죽이고 완료라고 하면 뭐해"). 이제 기존 starter
+    # 본문을 읽어 📋 진행 상태줄 + 갱신 줄만 수술 갱신 (directive_starter_status.py).
+    UPDATE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CUR_STARTER_CONTENT="$(forum_get_starter "$THREAD_ID")"
+    NEW_STARTER_BODY="$(STATUS="$STATUS_TEXT" TS="$UPDATE_TS_KST" PR="$PR_URL_OPT" \
+      python3 "${UPDATE_SELF_DIR}/directive_starter_status.py" <<<"$CUR_STARTER_CONTENT")"
+    if [[ -z "$NEW_STARTER_BODY" ]]; then
+      # transform 실패 (python 부재 등) 시 최소 안전 fallback — 단, 기존 본문이
+      # 있으면 보존(append), 없을 때만 상태 2~3 줄.
+      if [[ -n "$CUR_STARTER_CONTENT" ]]; then
+        NEW_STARTER_BODY="${CUR_STARTER_CONTENT}"$'\n\n'"**상태**: ${STATUS_TEXT} · ${UPDATE_TS_KST}"
+        [[ -n "$PR_URL_OPT" ]] && NEW_STARTER_BODY="${NEW_STARTER_BODY}"$'\n'"**PR**: ${PR_URL_OPT}"
+      else
+        NEW_STARTER_BODY="$(printf '**상태**: %s\n**갱신**: %s' "$STATUS_TEXT" "$UPDATE_TS_KST")"
+        [[ -n "$PR_URL_OPT" ]] && NEW_STARTER_BODY="${NEW_STARTER_BODY}"$'\n'"**PR**: ${PR_URL_OPT}"
+      fi
     fi
     forum_edit_starter "$THREAD_ID" "$NEW_STARTER_BODY"
     ;;

@@ -195,7 +195,7 @@ export function SongDetailModal({
       // fixed inset-0 으로 충분 — body 직속이 아니어도 stacking context를 z-50 으로 부각.
       role="presentation"
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/60 px-4 py-6 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--modal-backdrop)] px-4 py-6 backdrop-blur-sm sm:items-center"
     >
       <div
         ref={dialogRef}
@@ -204,12 +204,12 @@ export function SongDetailModal({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className="relative flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800"
+        className="relative flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl bg-[var(--surface-modal)] p-6 shadow-2xl ring-1 ring-[var(--ring-soft-detail)]"
       >
         <div className="flex items-start justify-between gap-4">
           <h2
             id={titleId}
-            className="text-xl font-semibold text-zinc-900 dark:text-zinc-50"
+            className="text-xl font-semibold text-[var(--text-primary)]"
           >
             {titleLabel}
           </h2>
@@ -217,7 +217,7 @@ export function SongDetailModal({
             type="button"
             onClick={onClose}
             aria-label="상세 닫기"
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--text-caption)] transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--text-caption)] transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
           >
             <span aria-hidden="true" className="text-lg leading-none">
               ×

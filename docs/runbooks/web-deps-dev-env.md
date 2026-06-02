@@ -86,7 +86,7 @@ PR #734 (`fix(web): NODE_OPTIONS=--preserve-symlinks 4 scripts 추가`) 가 머�
 
 - 실제 해결 (§4) 적용 후 `--preserve-symlinks` 는 **불필요**.
 - cleanup 후보: `web/package.json` 4 scripts 에서 `NODE_OPTIONS=--preserve-symlinks` 제거.
-- 단, `web/package.json` 은 **보호 영역**이므로 cleanup PR 시 `needs-human-review` 라벨 필수.
+- 단, `web/package.json` 은 **정보성 보호 영역** (CLAUDE.md §4) — rev sub-agent 가 review 대행 (2026-05-28 `needs-human-review` 라벨 폐지).
 
 ## 7) 후속 작업
 

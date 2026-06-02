@@ -59,7 +59,7 @@ last_reviewed: 2026-05-28
   fi
   ```
 - 트레이드오프: nmae 가 wrapper 우회 의도 시 false positive 위험 — 환경변수
-  `AGENT_LAUNCH_HOOK_BYPASS=1` 으로 일회성 우회 허용 (감사 trail Discord push).
+  `AGENT_LAUNCH_HOOK_BYPASS=1` 으로 일회성 우회 허용 (이력 추적 Discord push).
 
 ### 2-2) wrapper self-check (레이어 b)
 
@@ -131,7 +131,7 @@ last_reviewed: 2026-05-28
 ## 7) 오픈 이슈
 
 - PreToolUse hook 의 false positive 처리 — `AGENT_LAUNCH_HOOK_BYPASS=1` 일회성
-  우회 시 자동 감사 trail Discord push 가 필요한가?
+  우회 시 자동 이력 추적 Discord push 가 필요한가?
 - nmae launcher (`~/.mobruji/nmae-launch.sh`) 신설 결정 — 현재 nmae 는 `claude`
   직접 호출. helper 와 같은 패턴으로 전환 시 운영 절차 변경 영향 평가 필요.
 - wrapper log 보존 정책 — `~/.mobruji/agent-launch-wrapper.log` 무한 grow 방지

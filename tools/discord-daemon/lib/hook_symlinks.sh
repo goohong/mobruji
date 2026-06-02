@@ -48,6 +48,29 @@ if [[ -z "${HOOK_NAMES:-}" ]]; then
       helper-turn-start.sh
       discord-reply.sh
       nmae-discord-push.sh
+      # PR E-2 (2026-05-28): helper launch system prompt SoT sync 강제.
+      # repo 의 helper-role.md = relay-only strict 룰 (코드 변경/분배 결정 금지).
+      # 기존엔 NCP runtime 의 옛 system prompt (덜 strict) 가 ~/.mobruji/helper-role.md
+      # 에 남아 있어 helper 가 분배 결정 (17:28 사고). symlink 강제로 repo 변경 즉시
+      # 반영 — 학습 의존 ↓, 코드 강제. spec: actors/sub-agent.md §2-helper / nmae §11-7.
+      helper-launch.sh
+      helper-role.md
+      # 2026-05-29 Phase D — nmae-role.md (repo SoT, NCP-only 였던 path 통합).
+      # 자동 위임 폐기 STRICT 룰 — 사용자 명시 적재 (events 'directive_approved') 만 처리.
+      nmae-role.md
+      # 2026-05-29: helper-tool-progress.sh — Claude Code PreToolUse hook.
+      # .claude/settings.json 의 hook command path 는 $HOME/.mobruji/helper-tool-progress.sh
+      # 고정 — repo 변경 즉시 반영을 위해 symlink 강제. spec: docs/features/helper-tool-visibility.md.
+      helper-tool-progress.sh
+      # 2026-05-30 (#1360): pr-register-rev.sh — Claude Code PostToolUse hook.
+      # gh pr create / gh pr merge 호출 시 rev directive 자동 등록.
+      # spec: docs/features/pr-webhook-rev-forum.md (옵션 D).
+      pr-register-rev.sh
+      # 2026-05-30 (#1376): mmae-launch.sh — mac mobruji 본 세션 시작 wrapper.
+      # 사용자 alias mmae='~/.mobruji/mmae-launch.sh' 박제 시 MOBRUJI_HOOK_ACTOR=mmae
+      # 자동 export → pr-register-rev.sh actor 가드 통과. spec: 옵션 D, mmae actor.
+      # NCP 환경에 박혀도 무해 (nmae 가 본 wrapper 호출 안 함).
+      mmae-launch.sh
     )
   fi
 fi

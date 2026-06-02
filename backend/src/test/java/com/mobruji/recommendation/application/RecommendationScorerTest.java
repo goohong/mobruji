@@ -47,13 +47,36 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit: 곡 키 음역 중심이 사용자 음역에 완전 포함되면 1.0")
-    void voiceRangeFit_fullyInside_returnsOne() {
-        // given: C major root=60. 곡 음역 53~67. 사용자 50~80 → 완전 포함
+    @DisplayName("voiceRangeFit: 곡 음역 완전 포함 + 곡 키 중심이 사용자 음역 중앙이면 1.0 (reachability·centeredness 모두 최대)")
+    void voiceRangeFit_fullyInsideAndCentered_returnsOne() {
+        // given: C major root=60. 곡 음역 53~67. 사용자 53~67 → reachability=1.0, center=60=root → centeredness=1.0
         // when
-        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 50, 80);
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 53, 67);
         // then
         assertThat(fit).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1452): 곡 음역을 완전 포함해도 곡 키 중심이 음역 중앙에서 벗어나면 1.0 미만 (포화 방지)")
+    void voiceRangeFit_fullyInsideButOffCenter_belowOne() {
+        // given: C major root=60. 사용자 50~80 → reachability=1.0, center=65, half=15, dist=5
+        // → centeredness = 1 - 5/15 = 0.66667
+        // when
+        final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 50, 80);
+        // then: reachability 포화(1.0)에도 centeredness 가 변별력을 유지 → 1.0 미만
+        assertThat(fit).isCloseTo(1.0 - 5.0 / 15.0, offset(1e-9));
+        assertThat(fit).isLessThan(1.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1452): 같은 음역폭이라도 곡 키 중심이 음역 중앙에 가까운 곡이 더 높은 fit")
+    void voiceRangeFit_higherForKeyNearerUserCenter() {
+        // given: 사용자 56~64 (center=60). C major(root=60)=중앙, D major(root=62)=중앙에서 +2
+        // when
+        final double centered = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 56, 64);
+        final double offCenter = RecommendationScorer.voiceRangeFit(MusicalKey.D_MAJOR, 56, 64);
+        // then: 음역폭이 같아도 키 중심이 사용자 음역 중앙에 가까운 C major 가 더 높다 → 음역대 변별력
+        assertThat(centered).isGreaterThan(offCenter);
     }
 
     @Test
@@ -153,17 +176,17 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("score: 음역 완전 일치 + mood 일치 + tempo 완전 일치 시 voiceFit*0.5 + mood*0.2 + popularity*0.1 + tempo*0.1 정확 = 0.9 (jitter=0)")
+    @DisplayName("score: 음역 완전 일치(중앙) + mood 일치 + tempo 완전 일치 시 voiceFit*0.5 + mood*0.2 + popularity*0.1 + tempo*0.1 정확 = 0.9 (jitter=0)")
     void score_perfectMatch_returnsExpected() {
-        // given: jitter=0 으로 가중 합산 정확값 검증 (느슨 단언 isBetween(0.89,0.91) 제거)
+        // given: jitter=0 으로 가중 합산 정확값 검증. C major root=60 을 음역 중앙(53~67)에 두어 rangeFit=1.0
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
         final RecommendationProperties propsNoJitter = new RecommendationProperties(
                 new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1),
                 DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
-        // when: UPBEAT mood + preferredBpm=128 → tempoMatch=1.0
+        // when: 음역 53~67 (root 중앙) + UPBEAT mood + preferredBpm=128 → tempoMatch=1.0
         final RecommendationScorer.Scored scored = scorer(propsNoJitter)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(42));
+                .score(song, 53, 67, Mood.UPBEAT, 128, new Random(42));
         // then: 0.5*1.0 + 0.2*0 + 0.2*1.0 + 0.1*1.0 + 0.1*1.0 = 0.9 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.voiceRangeFit()).isEqualTo(1.0);
         assertThat(scored.moodMatch()).isEqualTo(1.0);
@@ -370,9 +393,9 @@ class RecommendationScorerTest {
                 new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0),
                 DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
-        // when: 음역 완전 포함
+        // when: 음역 53~67 (root=60 중앙, 완전 포함) → rangeFit=1.0
         final RecommendationScorer.Scored scored = scorer(voiceOnly)
-                .score(song, 50, 80, null, null, new Random(0));
+                .score(song, 53, 67, null, null, new Random(0));
         // then: rangeFit=1.0 * 1.0 = 1.0
         assertThat(scored.total()).isEqualTo(1.0);
     }
@@ -434,9 +457,9 @@ class RecommendationScorerTest {
                 new RecommendationProperties.Weights(1.0, 1.0, 1.0, 1.0, 1.0),
                 DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
-        // when: UPBEAT mood + preferredBpm 128 → tempoMatch=1.0
+        // when: 음역 53~67 (root 중앙) → rangeFit=1.0. UPBEAT mood + preferredBpm 128 → tempoMatch=1.0
         final RecommendationScorer.Scored scored = scorer(allOnes)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0));
+                .score(song, 53, 67, Mood.UPBEAT, 128, new Random(0));
         // then: 1 + 0 + 1 + 1 + 1 = 4.0
         assertThat(scored.total()).isEqualTo(4.0);
     }
@@ -555,13 +578,14 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 부분 overlap — 사용자 음역이 곡 음역의 절반만 덮으면 0.5")
-    void voiceRangeFit_halfOverlap_returnsHalf() {
-        // given: C major 곡 음역 53~67 (songSpan=14). 사용자 60~67 → overlap=7
+    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 키 중심보다 위쪽이면 centeredness 0 → fit 0")
+    void voiceRangeFit_userAboveKeyCenter_returnsZero() {
+        // given: C major root=60. 사용자 60~67 (center=63.5, half=3.5). dist=|60-63.5|=3.5 == half
+        // → centeredness = 1 - 3.5/3.5 = 0 → reachability(7/14) 무관하게 fit 0
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 60, 67);
-        // then: 7 / 14 = 0.5
-        assertThat(fit).isEqualTo(0.5);
+        // then
+        assertThat(fit).isEqualTo(0.0);
     }
 
     @Test
@@ -575,13 +599,14 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 1 semitone overlap — 경계 직후 미세 매칭")
-    void voiceRangeFit_singleSemitoneOverlap_returnsSmallRatio() {
-        // given: C major 곡 53~67 (span 14). 사용자 40~54 → overlap=1
+    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 키 중심보다 한참 아래면 centeredness 0 → fit 0")
+    void voiceRangeFit_userFarBelowKeyCenter_returnsZero() {
+        // given: C major root=60. 사용자 40~54 (center=47, half=7). dist=|60-47|=13 > half=7
+        // → centeredness = max(0, 1 - 13/7) = 0 → fit 0
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 54);
-        // then: 1 / 14
-        assertThat(fit).isEqualTo(1.0 / 14.0);
+        // then
+        assertThat(fit).isEqualTo(0.0);
     }
 
     @Test
@@ -658,17 +683,18 @@ class RecommendationScorerTest {
                 new RecommendationProperties.Weights(0.4, 0.0, 0.3, 0.2, 0.1),
                 DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
-        // when
+        // when: 음역 53~67 (root 중앙) → rangeFit=1.0
         final RecommendationScorer.Scored scored = scorer(asymmetric)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0));
+                .score(song, 53, 67, Mood.UPBEAT, 128, new Random(0));
         // then: 0.4*1 + 0.0*0 + 0.3*1 + 0.2*1 + 0.1*1 = 1.0 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.total()).isCloseTo(1.0, offset(1e-9));
     }
 
     @Test
-    @DisplayName("score (정확 합산): 신호별 가중치 단독 곱 검증 — voiceFit 0.7 * rangeFit 0.5 = 0.35 (jitter=0)")
+    @DisplayName("score (정확 합산): 신호별 가중치 단독 곱 검증 — voiceFit 0.7 * rangeFit 0.7 = 0.49 (jitter=0)")
     void score_partialSignal_exactWeightedProduct() {
-        // given: voiceFit 가중치 0.7 단일, 나머지 가중치 0. 곡 음역 53~67, 사용자 60~67 → overlap 7/14 = 0.5
+        // given: voiceFit 가중치 0.7 단일, 나머지 0. C major root=60. 사용자 53~73 → reachability=1.0
+        // (곡 음역 53~67 완전 포함), center=63, half=10, dist=3 → centeredness=1-3/10=0.7 → rangeFit=0.7
         final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
         final RecommendationProperties voiceOnly = new RecommendationProperties(
                 new RecommendationProperties.Weights(0.7, 0.0, 0.0, 0.0, 0.0),
@@ -676,10 +702,10 @@ class RecommendationScorerTest {
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(voiceOnly)
-                .score(song, 60, 67, null, null, new Random(0));
-        // then: rangeFit=0.5 * 0.7 = 0.35 정확
-        assertThat(scored.voiceRangeFit()).isEqualTo(0.5);
-        assertThat(scored.total()).isEqualTo(0.35);
+                .score(song, 53, 73, null, null, new Random(0));
+        // then: rangeFit=0.7 * 가중치 0.7 = 0.49
+        assertThat(scored.voiceRangeFit()).isCloseTo(0.7, offset(1e-9));
+        assertThat(scored.total()).isCloseTo(0.49, offset(1e-9));
     }
 
     @Test
@@ -691,9 +717,9 @@ class RecommendationScorerTest {
                 new RecommendationProperties.Weights(0.6, 0.0, 0.3, 0.0, 0.0),
                 DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
-        // when
+        // when: 음역 53~67 (root 중앙) → rangeFit=1.0
         final RecommendationScorer.Scored scored = scorer(twoSignals)
-                .score(song, 50, 80, Mood.UPBEAT, null, new Random(0));
+                .score(song, 53, 67, Mood.UPBEAT, null, new Random(0));
         // then: 0.6*1.0 + 0.3*1.0 = 0.9 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.total()).isCloseTo(0.9, offset(1e-9));
     }
@@ -763,9 +789,9 @@ class RecommendationScorerTest {
                 new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0),
                 DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
-        // when / then: 100개 seed 반복. 모든 결과는 [0.99, 1.01] 안.
+        // when / then: 음역 53~67 (root 중앙) → 베이스 1.0. 100개 seed 반복. 모든 결과는 [0.99, 1.01] 안.
         for (int seed = 0; seed < 100; seed++) {
-            final double total = scorer(props).score(song, 50, 80, null, null, new Random(seed)).total();
+            final double total = scorer(props).score(song, 53, 67, null, null, new Random(seed)).total();
             assertThat(total).as("seed=%d", seed).isBetween(0.99, 1.01);
         }
     }

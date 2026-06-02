@@ -48,8 +48,8 @@ superseded_by: []
 | 8 | helper turn-start (target freeze + cycle-status 요약 + queue 표시) | `helper-turn-start.sh` 강제 (#1014) | **critical** | 🟢 적절 |
 | 9 | sub-agent thread_id 전달 (per-launch thread) | `last-launch-thread.txt` 파일 passthrough (#1021) | **critical** (hallucination 사고 박제) | 🟢 적절 |
 | 10 | `/clear` 직전 doc-check 4-way | CLAUDE.md §15 + helper LLM 기억 + clear pre-hook spec (PR #1066 미머지) | **critical** (lost handoff) | 🔴 clear pre-hook 미구현 — 메모리만 의존 |
-| 11 | rev 3단계 e2e (단계 1 머지 게이트) | `rev-gate.yml` workflow + rev sub-agent 매 사이클 `rev-queue.sh all` | **critical** | 🟢 적절 |
-| 12 | rev 단계 2 develop 후 audit | `rev_post_merge_audit_loop` (cron) + rev-queue 큐 | **critical** | 🟢 적절 |
+| 11 | rev 2단계 e2e (🟡 Pre-merge review, 단계 1 머지 게이트) | `rev-gate.yml` workflow + rev sub-agent 매 사이클 `rev-queue.sh all` | **critical** | 🟢 적절 |
+| 12 | rev 🔵 Post-merge audit (단계 2) develop 후 audit | `rev_post_merge_audit_loop` (cron) + rev-queue 큐 | **critical** | 🟢 적절 |
 | 13 | 보호 영역 변경 시 needs-human-review 라벨 | `.github/workflows/auto-label.yml` (보호 영역 grep) | **critical** | 🟢 적절 |
 | 14 | session:* 라벨 부착 | sub-agent LLM 기억 + auto-label.yml fallback (이슈 #1002) | 보조 | 🟢 (1002 후 자동화 충분) |
 | 15 | watchdog inject 시 nmae 4단계 대응 | CLAUDE.md §11-2 + nmae LLM 기억 | **critical** | 🔴 LLM 망각 시 무한 inject loop (사례: #970 6회 연속) |
