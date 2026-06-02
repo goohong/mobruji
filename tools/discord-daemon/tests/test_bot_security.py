@@ -194,6 +194,8 @@ class OnMessageDedupOrderTests(unittest.TestCase):
         class FakeClient:
             user = "fake-bot"
             loop = mock.MagicMock()
+            http = mock.MagicMock()
+            _connection = mock.MagicMock(_command_tree=None)
 
             def event(self, func):
                 registered[func.__name__] = func

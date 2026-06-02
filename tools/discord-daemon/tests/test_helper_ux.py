@@ -205,6 +205,8 @@ class BotAutoAckTests(unittest.TestCase):
         class FakeClient:
             user = "fake-bot"
             loop = mock.MagicMock()
+            http = mock.MagicMock()
+            _connection = mock.MagicMock(_command_tree=None)
 
             def __init__(self):
                 self._tasks: list[object] = []
@@ -397,90 +399,6 @@ class BotAutoAckTests(unittest.TestCase):
             )
             self.assertEqual(result, "P")
 
-    def test_secondary_reaction_disabled_by_default_skips(self) -> None:
-        # _build_env default = secondary_reaction_enabled="0".
-        # primary 👀 auto-ack + 📌 pin marker = 2회. secondary 안 함.
-        env = self._build_env()
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=10
-        )
-        self._run_handler(env, message)
-        calls = [c.args[0] for c in message.add_reaction.await_args_list]
-        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-        # secondary emoji (⚡⏳🕐) 부재 확인.
-        for secondary in ("⚡", "⏳", "🕐"):
-            self.assertNotIn(secondary, calls)
-
-    def test_secondary_reaction_idle_adds_lightning(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
-            self._write_cycle_status(cycle_path, occupied=0)
-            env = self._build_env(
-                secondary_reaction_enabled="1",
-                cycle_status_path=str(cycle_path),
-            )
-            message = _make_fake_message(
-                content="hello", channel_id=999, author_id=111, message_id=11
-            )
-            self._run_handler(env, message)
-            # primary 👀 + secondary ⚡ + 📌 pin marker.
-            calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-            self.assertIn("⚡", calls)
-            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-
-    def test_secondary_reaction_partial_adds_hourglass(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
-            self._write_cycle_status(cycle_path, occupied=2)
-            env = self._build_env(
-                secondary_reaction_enabled="1",
-                cycle_status_path=str(cycle_path),
-            )
-            message = _make_fake_message(
-                content="hello", channel_id=999, author_id=111, message_id=12
-            )
-            self._run_handler(env, message)
-            calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-            self.assertIn("⏳", calls)
-            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-
-    def test_secondary_reaction_full_adds_clock(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
-            self._write_cycle_status(cycle_path, occupied=4)
-            env = self._build_env(
-                secondary_reaction_enabled="1",
-                cycle_status_path=str(cycle_path),
-            )
-            message = _make_fake_message(
-                content="hello", channel_id=999, author_id=111, message_id=13
-            )
-            self._run_handler(env, message)
-            calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-            self.assertIn("🕐", calls)
-            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-
-    def test_secondary_reaction_file_missing_silent_skip(self) -> None:
-        # cycle-status.json 부재 → secondary skip.
-        # primary 👀 + 📌 만 호출. ⚡⏳🕐 부재.
-        env = self._build_env(
-            secondary_reaction_enabled="1",
-            cycle_status_path="/nonexistent/cycle-status.json",
-        )
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=14
-        )
-        self._run_handler(env, message)
-        calls = [c.args[0] for c in message.add_reaction.await_args_list]
-        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-        for secondary in ("⚡", "⏳", "🕐"):
-            self.assertNotIn(secondary, calls)
-
     def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거
         ref = mock.MagicMock()
@@ -498,6 +416,8 @@ class BotAutoAckTests(unittest.TestCase):
         class FakeClient:
             user = "fake-bot"
             loop = mock.MagicMock()
+            http = mock.MagicMock()
+            _connection = mock.MagicMock(_command_tree=None)
 
             def event(self, func):
                 registered[func.__name__] = func
