@@ -57,6 +57,9 @@
 | 채점된 추천 | ScoredRecommendation | `recommendation` | 추천 결과 1건 값 객체 (곡 + 점수 + 매칭 사유 + 랭킹 + `ScoreBreakdown`). 영속 엔티티 `Recommendation` 와 응답 DTO 를 잇는 중간 표현. 과거 추천 재조회 경로에서는 `breakdown` 이 null. 설명 가능성(#1484)용 파생값 `voiceFit`(0~1, = `rangeFit` 신호) + `voiceFitReason`(짧은 한국어 사유), 분위기 변별력(#1485)용 `moodFit`(0~1, = `moodMatch` 신호) + `moodFitReason` 노출 — breakdown null 경로에서는 모두 null |
 | 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 7종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`/`generationFit`). "Why this song?" 설명 가능성 확보용 (P2). `moodMatch` 는 #1485 에서 이진(1.0/0.0)에서 분위기 `(energy, brightness)` 좌표 거리 기반 연속 유사도로 확장 — 정확 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 0~1 |
 | 세대 적합도 | generationFit | `recommendation` | `ScoreBreakdown` raw 신호 — 곡 발매 연도와 요청 `ageGroup` 의 대표 시기 거리를 선형 감쇠(`1 - min(1, 거리/허용오차)`)로 환산 (#1487). ageGroup/발매연도 null 또는 미등재 세대면 0.0 (랭킹 무영향) |
+| 트렌딩 | TrendingSong | `recommendation` | 다른 사용자 추천 히스토리를 기간별 집계한 인기곡 1건 read-model (곡 + 순위 + 등장 횟수 + 인기도). 영속 엔티티 아님 — `Recommendation`×`RecommendationRequestEntity` 집계 view. 노래방 일반 차트와 달리 분위기/음역대 결합 조회 (#1488). trending-recommendation.md |
+| 인기도 | popularityScore (TrendingSong) | `recommendation` | 트렌딩 정렬 신호 — 곡이 추천 결과에 등장할 때마다 `1.0 / rankPosition` 을 더한 rank 감쇠 합. 상위 노출(rank 1)일수록 큰 가중. 추천 점수(`ScoreBreakdown.popularity`)와 별개 — 조회 전용 집계값으로 알고리즘 결정성 무관 |
+| 트렌딩 조회 조건 | TrendingQuery | `recommendation` | 트렌딩 집계 입력 커맨드 — 기간(`periodDays`)/분위기(`mood`, nullable)/음역대 overlap(`voiceRangeLow`,`voiceRangeHigh`, both-or-neither)/`limit`. api.dto 의존 없는 application 입력 모델 (ADR-0005 §A-7) |
 | 좋아요 | Like | `feedback` | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR). 엔티티 §5-4 |
 | 북마크 | Bookmark | `feedback` | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정). 엔티티 §5-4 |
 | 익명 세션 | AnonymousSession | `user` | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md. 엔티티 §5-6 |
