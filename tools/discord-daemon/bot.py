@@ -1665,7 +1665,7 @@ class PinDialogueView(discord.ui.View):
             content=f"✅ 등록 진행 중…\n\n**제목:** {self._polished_title}\n\n{self._polished}",
             view=None,
         )
-        await _do_register_directive(
+        forum_thread_id = await _do_register_directive(
             interaction.client,
             self._target_message_id,
             self._target_user_id,
@@ -1677,13 +1677,15 @@ class PinDialogueView(discord.ui.View):
         # Phase F (2026-05-29) — events 'directive_approved' INSERT → agent.py
         # handle_directive_approved 가 consume → cycle 위임 결정 → launch_subagent.
         # nmae 의 자동 위임 path 폐기 (Phase D), event-driven 만 trigger.
+        # (#1450) thread_id = directive forum thread (board/태그가 쓰는 thread).
+        # 미파싱 시 dialogue thread fallback. 위임 댓글·태그·완료를 같은 thread 에 일치.
         append_agent_event("directive_approved", {
             "directive_id": self._target_message_id,
             "summary": self._raw_summary,
             "description": self._polished,
             "user_id": str(self._target_user_id),
             "channel_id": str(getattr(self._register_channel, "id", "")),
-            "thread_id": str(getattr(self._thread, "id", "")),
+            "thread_id": forum_thread_id or str(getattr(self._thread, "id", "")),
             "revision_count": self._revision_count,
             # 사용자 명시 cycle hint (dropdown 선택 — "auto" 면 nmae LLM 자동 판단)
             "cycle_hint": self._cycle_hint,
@@ -1902,8 +1904,10 @@ async def _do_register_directive(
     summary: str | None = None,
     title: str | None = None,
     body: str | None = None,
-) -> None:
+) -> str | None:
     """실제 directive 등록 — directive_append.sh + helper-queue + ✅ reaction.
+
+    (#1450) 생성된 directive forum thread id 반환 (실패 시 None).
 
     caller 가 channel + summary 알면 인자로 전달 (cost 0). 미전달 시 client.guilds
     scan fallback (cold start 등 edge case).
@@ -1969,9 +1973,29 @@ async def _do_register_directive(
         logger.warning("📌 pin: directive_append 호출 실패: %r", exc)
         return
 
+    # (#1450) directive_append.sh 가 만든 directive forum thread id 를 stdout
+    # ("thread_id=<id>") 에서 파싱 — _approve 가 directive_approved 의 thread_id 로
+    # 넘겨 위임 댓글·태그·완료가 dialogue thread 가 아닌 forum thread(board/태그가
+    # 쓰는 thread)에 일치하게 한다.
+    # (#1450) directive_append.sh 는 "directive_append OK: ... thread_id=<id> ..." 를
+    # stderr 로 emit 한다 (rev #1451 지적 — stdout 만 보면 항상 미스). stdout+stderr
+    # 둘 다 합쳐서 파싱해 어느 스트림이든 잡는다.
+    forum_thread_id = ""
+    try:
+        _combined = (
+            (result.stdout or b"").decode("utf-8", "replace")
+            + "\n"
+            + (result.stderr or b"").decode("utf-8", "replace")
+        )
+        _m = re.search(r"thread_id=(\d+)", _combined)
+        if _m:
+            forum_thread_id = _m.group(1)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("📌 pin: forum thread_id 파싱 실패: %r", exc)
+
     logger.info(
-        "📌 pin registered: msg_id=%s user=%s summary=%r",
-        message_id, user_id, summary,
+        "📌 pin registered: msg_id=%s user=%s forum_thread=%s summary=%r",
+        message_id, user_id, forum_thread_id or "(미파싱)", summary,
     )
 
     # helper-queue polish task
@@ -1997,6 +2021,9 @@ async def _do_register_directive(
             await msg.add_reaction(PIN_REGISTERED_EMOJI)
         except Exception as exc:  # noqa: BLE001
             logger.warning("📌 pin: ✅ 부착 실패: %r", exc)
+
+    # (#1450) 위임 댓글·태그가 쓸 directive forum thread id 반환.
+    return forum_thread_id or None
 
 
 async def _handle_pin_reaction(
