@@ -49,3 +49,19 @@ export function difficultyLabel(difficulty: Difficulty): string {
       return "Hard";
   }
 }
+
+/**
+ * 난이도 배지의 톤 클래스(bg + text). 난이도가 높을수록 주의를 끄는 색으로 매핑한다 —
+ * EASY=emerald, NORMAL=amber, HARD=rose (SongCard/SongDetailContent 의 카드 표면 난이도
+ * 배지와 동일 팔레트). 설명가능성 패널의 "연습 난이도" 배지(#1550)가 같은 톤을 공유한다.
+ */
+export function difficultyTone(difficulty: Difficulty): string {
+  switch (difficulty) {
+    case "EASY":
+      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
+    case "NORMAL":
+      return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
+    case "HARD":
+      return "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
+  }
+}

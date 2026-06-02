@@ -129,8 +129,15 @@ export type SongResponse = {
  *   - `voiceFitReason`: 음역 적합도를 설명하는 짧은 한국어 사유 ("왜 이 곡?").
  *   - `moodFit` (0~1) / `moodFitReason`: 같은 패턴으로 분위기 적합도(#1485)를 노출.
  *
- * breakdown 이 없는 과거 추천 재조회 경로에서는 모두 `null`/생략 — fe 는 값이 있을 때만
- * 적합도 배지/사유를 노출하고, 없으면 종전대로 matchReason + 클라이언트 추정 breakdown 만 보여준다.
+ * 연습 지원 필드 (BE #1494 / 이슈 #1550, P-A 페르소나):
+ *   - `practiceDifficulty`: 곡 자체의 가창 난이도(EASY/NORMAL/HARD). 곡 음역에서 파생하므로
+ *     breakdown 없는 재조회 경로에서도 채워지며, 음역 미보유 곡은 `null`.
+ *   - `practiceDifficultyReason`: 최고음 + 난이도를 풀어 주는 짧은 한국어 사유. 음역 정보가
+ *     없는 곡도 "정보 없음" 사유를 돌려주므로 값이 있으면 항상 노출 가능.
+ *
+ * breakdown 이 없는 과거 추천 재조회 경로에서는 적합도 필드는 모두 `null`/생략 — fe 는 값이
+ * 있을 때만 적합도 배지/사유를 노출하고, 없으면 종전대로 matchReason + 클라이언트 추정
+ * breakdown 만 보여준다.
  */
 export type RecommendedSongResponse = {
   song: SongResponse;
@@ -140,6 +147,8 @@ export type RecommendedSongResponse = {
   voiceFitReason?: string | null;
   moodFit?: number | null;
   moodFitReason?: string | null;
+  practiceDifficulty?: "EASY" | "NORMAL" | "HARD" | null;
+  practiceDifficultyReason?: string | null;
   rankPosition: number;
 };
 
