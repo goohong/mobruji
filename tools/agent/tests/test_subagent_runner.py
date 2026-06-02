@@ -191,3 +191,44 @@ def test_ensure_pr_xrefs_adds_both_markers(monkeypatch):
     assert "directive: 1510610000000000002" in body
     assert "cycle-forum: plan:1510548826107154545" in body
     assert "기존 본문" in body  # 기존 보존
+
+
+def test_kill_process_group_noop_for_invalid_pgid(monkeypatch):
+    """#1481: pgid<=1 이면 killpg 호출 안 함 (잘못된 그룹/init 보호)."""
+    import asyncio
+    import subagent_runner as sr
+    calls = []
+    monkeypatch.setattr(sr.os, "killpg", lambda pg, sig: calls.append((pg, sig)))
+    asyncio.run(sr._kill_process_group(0, "be", reason="t"))
+    asyncio.run(sr._kill_process_group(1, "be", reason="t"))
+    assert calls == []
+
+
+def test_kill_process_group_term_then_kill(monkeypatch):
+    """#1481: 살아있는 그룹 → SIGTERM 후 (유예) SIGKILL 순서로 자식까지 정리."""
+    import asyncio
+    import signal
+    import subagent_runner as sr
+    sigs = []
+    monkeypatch.setattr(sr.os, "killpg", lambda pg, sig: sigs.append(sig))
+
+    async def _nosleep(_):
+        return None
+    monkeypatch.setattr(sr.asyncio, "sleep", _nosleep)
+    asyncio.run(sr._kill_process_group(12345, "rev", reason="t"))
+    assert sigs == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_kill_process_group_empty_graceful(monkeypatch):
+    """#1481: 그룹에 남은 프로세스 없음(ProcessLookupError) → SIGKILL 안 함, 예외 전파 X."""
+    import asyncio
+    import signal
+    import subagent_runner as sr
+    sigs = []
+
+    def _killpg(pg, sig):
+        sigs.append(sig)
+        raise ProcessLookupError
+    monkeypatch.setattr(sr.os, "killpg", _killpg)
+    asyncio.run(sr._kill_process_group(12345, "be", reason="t"))
+    assert sigs == [signal.SIGTERM]  # SIGTERM 에서 비어 있음 확인 → 즉시 return
