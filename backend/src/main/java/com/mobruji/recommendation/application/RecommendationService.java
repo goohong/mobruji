@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -25,6 +26,7 @@ import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
 import com.mobruji.recommendation.domain.RecommendationResult;
 import com.mobruji.recommendation.domain.ScoredRecommendation;
+import com.mobruji.recommendation.domain.SeedSongsNotFoundException;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
 
@@ -52,6 +54,40 @@ public class RecommendationService {
     private final RecommendationScorer recommendationScorer;
     private final DiversityPostProcessor diversityPostProcessor;
     private final RecommendationProperties recommendationProperties;
+    private final SeedSongProfiler seedSongProfiler;
+
+    /**
+     * "부른 곡 기반 다음곡 추천"(#1486). 사용자가 부른 곡({@code seedSongIds})에서 음역대·분위기·BPM 을
+     * 도출해 이어 부르기 좋은 다음 곡을 추천한다. 쇼츠식 스와이프 선곡(#1489)의 백엔드 진입점.
+     *
+     * <p>구현: seed 곡을 1쿼리로 조회 → {@link SeedSongProfiler} 로 추천 입력을 도출 → 부른 곡(seed)을
+     * 결과에서 자동 제외하도록 {@code excludeSongIds} 에 합친 뒤 {@link #create} 파이프라인을 그대로 재사용한다.
+     * 별도 점수 함수를 두지 않아 스코어링·다양성·영속·결정성 로직이 단일 경로로 유지된다.
+     *
+     * <p>요청한 {@code seedSongIds} 가 카탈로그에서 하나도 조회되지 않으면 추천을 만들 수 없으므로
+     * {@link SeedSongsNotFoundException}(422) 을 던진다.
+     */
+    public RecommendationResult createFromSeeds(final NextRecommendationCommand nextRecommendationCommand) {
+        final List<Long> seedSongIds = nextRecommendationCommand.seedSongIds();
+        final List<Song> seedSongs = songRepository.findAllById(seedSongIds);
+        if (seedSongs.isEmpty()) {
+            throw new SeedSongsNotFoundException(seedSongIds);
+        }
+
+        // 부른 곡(seed)은 결과에서 자동 제외 — 방금 부른 곡을 다시 추천하지 않는다.
+        // 명시 제외(스와이프 패스 등)와 seed 를 합쳐 중복 제거(순서 무관, 결정성은 SeedDeriver 가 정렬로 보존).
+        final List<Long> mergedExcludeIds = new ArrayList<>(
+                new LinkedHashSet<>(nextRecommendationCommand.excludeSongIds()));
+        for (final Long seedSongId : seedSongIds) {
+            if (!mergedExcludeIds.contains(seedSongId)) {
+                mergedExcludeIds.add(seedSongId);
+            }
+        }
+
+        final CreateRecommendationCommand derivedCommand = seedSongProfiler.profile(
+                nextRecommendationCommand.sessionId(), seedSongs, mergedExcludeIds);
+        return create(derivedCommand);
+    }
 
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
         final long startNanos = System.nanoTime();
