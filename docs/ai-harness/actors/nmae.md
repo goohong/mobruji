@@ -103,6 +103,31 @@ bash ~/.mobruji/directive_status.sh <id> in_progress "" plan "<사유>"
 
 6. **완료** = sub-agent PR body 에 `directive: <id>` 명시 → PR 머지 webhook → `directive_status.sh completed` 자동. cascade: 자식 완료 시 부모 🟢 자동.
 
+### 11-9) 온디맨드 infra 역할 launch 임계치 (ADR-0027 옵션 D)
+
+**infra 는 항시 가동 5번째 사이클이 아니다** — be/fe/rev/plan 4 사이클 고정(§11-1)은 불변. infra 는 백로그가 bursty 하므로 **온디맨드 sub-agent 역할**로만 launch 한다. 역할 정의 SoT = `actors/sub-agent.md §2-infra`.
+
+**⚠️ 자율 엔진 미지원 명시**: 자율 사이클 dispatcher 의 `CYCLES=(be,fe,rev,plan)` 에 infra 가 포함되지 않아 **자동 dispatch 되지 않는다**. 현재 infra 는 **nmae/mmae 가 `Agent` 도구로 온디맨드 직접 launch** 한다 (자율 self-dispatch 는 엔진의 `CYCLES` 확장 후속 이슈 — 본 룰 박제 시점엔 미구현).
+
+**launch 임계치 (둘 중 하나 충족 시 nmae/mmae 가 온디맨드 launch 판단)**:
+
+| trigger | 조건 | 동작 |
+|---|---|---|
+| **백로그 누적** | `scope:infra` 🟡 대기 directive 가 **2건 이상** 누적 (`backlog-scan.sh` 의 assigned/추정 infra entry) | ephemeral 워크트리 `infra` role launch — batch 처리 |
+| **보호 영역 변경 PR 발의** | `.github/workflows/**`·`tools/**`·root 설정·`bot.py` 변경이 필요한 백로그가 1건이라도 발의됨 (CLAUDE.md §4 보호 영역) | 즉시 온디맨드 `infra` role launch (be/fe 혼용·mmae 직접 처리 금지 — ADR-0027 옵션 B/C 거부 사유) |
+
+**launch 절차**:
+1. ephemeral 워크트리는 helper-launched 메커니즘 재사용 (`/home/mobruji/mobruji/.claude/worktrees/agent-<id>`) — `cycle-status.json` 5번째 slot 신설 X, 항시 가동 룰 변경 X.
+2. `Agent` 도구로 launch prompt 첫 줄 `공통 룰은 docs/ai-harness/actors/sub-agent.md 따른다. 역할은 infra.` + 이번 작업 한정 지시.
+3. 작업 완료 보고 수신 후 ephemeral 워크트리 teardown (디스크 잔존 가드).
+
+**repo 별 owner 분할 (ADR-0027 §66 — 두 repo span 해소)**:
+- mobruji repo infra (`.github`/`tools`/root 설정) → 온디맨드 `infra` 역할.
+- docs 성격 infra (`docs/ai-harness/**`·`scripts/**`) → 기존 **plan** 사이클 (이미 허용 경로, §2-plan).
+- `bot.py`·discord-daemon (mobruji-bridge repo, 운영 hot path) → mmae 또는 helper-launched sub-agent (신중도 가중).
+
+infra PR 도 다른 PR 과 동일하게 rev 사이클 통과 의무 ([[feedback-rev-e2e-always]]) — owner 명시로 rev 신중도 가중이 더 일관됨. 재평가 trigger (주간 volume 지속 高 → 상시화 등) 는 ADR-0027 Consequences 표.
+
 ---
 
 ## 부록) sub-agent launch quick-ref — 상세 SoT `docs/ai-harness/actors/sub-agent.md`
