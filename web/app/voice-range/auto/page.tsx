@@ -65,6 +65,29 @@ const STEP_STATUS_MESSAGES: Readonly<Record<WizardStep, string>> = {
 };
 
 /**
+ * 마이크 측정이 가능한 실행 환경인지 사전 점검한다.
+ *
+ * 브라우저는 secure context(HTTPS 또는 localhost) 가 아니면 `getUserMedia` 를
+ * 막는다. 이 경우 권한 프롬프트조차 뜨지 않으므로 일반적인 "마이크를 사용할 수
+ * 없습니다" 메시지로는 사용자가 HTTP 연결이 원인이라는 걸 알 수 없다.
+ *
+ * @returns 사용 불가 사유 안내(사용 가능하면 `null`).
+ */
+export function checkMicEnvironment(): string | null {
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    return "이 연결(HTTP)에선 브라우저가 마이크를 막습니다 — HTTPS 또는 localhost 가 필요합니다.";
+  }
+  const getUserMedia =
+    typeof navigator !== "undefined"
+      ? navigator.mediaDevices?.getUserMedia
+      : undefined;
+  if (typeof getUserMedia !== "function") {
+    return "이 브라우저에서는 마이크 측정을 지원하지 않습니다. 수동 입력을 이용해주세요.";
+  }
+  return null;
+}
+
+/**
  * 측정 의존성 주입 — 테스트에서 Web Audio API 호출 없이 흐름만 검증하기 위함.
  * 운영 코드는 `defaultAutoMeasureDeps`를 사용한다.
  *
@@ -73,6 +96,7 @@ const STEP_STATUS_MESSAGES: Readonly<Record<WizardStep, string>> = {
  * 가 잔존하며 unmounted setState 경고가 떴다.
  */
 export interface AutoMeasureDeps {
+  checkEnvironment: () => string | null;
   requestMic: () => Promise<MediaStream>;
   runPhase: (
     phase: MeasurementPhase,
@@ -83,6 +107,7 @@ export interface AutoMeasureDeps {
 }
 
 const defaultDeps: AutoMeasureDeps = {
+  checkEnvironment: checkMicEnvironment,
   requestMic: () =>
     navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
   runPhase: async (phase, stream, onSample, signal) => {
@@ -173,6 +198,14 @@ export default function AutoVoiceRangePage({
 
   const handleStart = useCallback(async () => {
     setPermissionError(null);
+    // insecure context(HTTP) / getUserMedia 미지원이면 권한 프롬프트조차 뜨지
+    // 않는다. requestMic 를 호출하기 전에 사유를 명확히 안내하고 멈춘다. 자동
+    // redirect 는 띄우지 않아 사용자가 메시지를 읽고 수동 입력을 선택할 수 있다.
+    const environmentError = deps.checkEnvironment();
+    if (environmentError !== null) {
+      setPermissionError(environmentError);
+      return;
+    }
     // 매 측정 시도마다 새 controller. 이전 시도가 진행 중이면 abort 로 sampler 종료.
     abortControllerRef.current?.abort();
     const controller = new AbortController();
