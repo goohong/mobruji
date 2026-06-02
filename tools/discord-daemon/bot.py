@@ -10,6 +10,11 @@
 helper 응답은 helper 측 신규 script `~/.mobruji/discord-reply.sh "<msg>"` 가
 직접 Discord REST API 로 push 합니다 (bot.py 안에서 응답 watcher 가동 안 함).
 
+배포: 본 bot.py 가 도는 전용 체크아웃(/home/mobruji/mobruji-bridge)은
+`mobruji-bridge-autodeploy.timer`(5분)가 develop 최신으로 자동 동기 + 본 파일 등
+bot 코드 변경 시 `mobruji-discord-bridge.service` 자동 재시작.
+spec: docs/features/bridge-auto-deploy.md (#1475).
+
 운영 가이드와 셋업 절차는 같은 디렉토리의 README.md 참고.
 spec: docs/features/discord-driven-mobruji.md
 """
@@ -4525,7 +4530,13 @@ def fetch_rev_post_merge_candidates(
     Returns:
         PR 번호 (int) 리스트. 호출 실패 시 빈 리스트.
     """
-    search_expr = f"{_merged_since_qualifier(search_window)} -label:{pass_label}"
+    # (#1509 후속) 머지 후 단계 2 = dev 배포본 E2E 검증. 배포 앱(backend/web) 표면을
+    # 안 건드리는 scope:infra PR(워크플로우·bot 코드·tools·docs)은 검증할 dev 런타임이
+    # 없어 rev 가 매번 no-op pass 만 한다. 단일 rev 워크트리가 사전 리뷰 + 머지 후 검증을
+    # 직렬 처리하는 병목에서, 이 no-op 들이 rev 시간을 잡아먹어 throughput 을 떨어뜨렸다.
+    # → scope:infra 는 후보에서 제외(검증 의미 없음). backend/web/recommendation 등 앱
+    # scope 만 dev 배포 E2E 대상.
+    search_expr = f"{_merged_since_qualifier(search_window)} -label:{pass_label} -label:scope:infra"
     cmd = [
         "gh",
         "pr",
@@ -4624,8 +4635,12 @@ def format_rev_post_merge_discord(pr_numbers: list[int]) -> str:
 # spec: docs/features/directive-board-template-and-tags.md §5-6 완료 자동화
 # PR B: PR 머지 webhook → directive_status.sh completed 자동 호출.
 # 사용자 정정 (2026-05-28): sub-agent PR body 에 `directive: <id>` 명시 → 머지 시 자동 status 전이.
+# (#1473) **줄 시작 앵커 필수** — 정식 trailer 줄(`directive: <id>` / `Closes directive <id>`)만
+# 매칭하고, PR 본문 **산문 중간**의 'directive <id>' 언급은 배제한다. 사고: #1451 이 다른
+# directive(1511193376639422656)를 자기 live-test 예시로 산문에 적었는데 `directive[:\s]+`(공백
+# 허용)가 이를 오매칭 → 머지 시 그 directive 를 #1451 로 잘못 완료·링크 (실제 fix #1454 가려짐).
 DIRECTIVE_PR_BODY_RE: Final = re.compile(
-    r"(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE
+    r"^[ \t]*(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE | re.MULTILINE
 )
 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT: Final[int] = 300  # 5분
 DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "24h"

@@ -4,6 +4,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
 import { BottomNav } from "@/components/nav/BottomNav";
+import { RouteTransition } from "@/components/layout/RouteTransition";
+import { HomeLink } from "@/components/nav/HomeLink";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
@@ -87,7 +89,10 @@ export default function RootLayout({
         nav 높이(h-14=56px) + safe-area 여유로 pb-20 (= 80px) 사용.
       */}
       <body className="min-h-full flex flex-col pb-20 md:pb-0">
-        <Providers>{children}</Providers>
+        <Providers>
+          <RouteTransition>{children}</RouteTransition>
+        </Providers>
+        <HomeLink />
         <ThemeToggle />
         <BottomNav />
         <ServiceWorkerRegistrar />

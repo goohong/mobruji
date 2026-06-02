@@ -9,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.song.domain.Mood;
 
 /**
@@ -41,9 +42,9 @@ class SeedDeriverTest {
         final List<Long> excludeSongIds = List.of(10L, 20L);
         // when
         final long first = SeedDeriver.derive(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds);
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, null, excludeSongIds);
         final long second = SeedDeriver.derive(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIds);
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, null, excludeSongIds);
         // then
         assertThat(first).isEqualTo(second);
     }
@@ -52,8 +53,8 @@ class SeedDeriverTest {
     @DisplayName("다른 sessionId는 다른 seed (entropy 보존)")
     void derive_differentSession_returnsDifferentSeed() {
         // when
-        final long a = SeedDeriver.derive("session-a", 55, 75, Mood.UPBEAT, null, List.of());
-        final long b = SeedDeriver.derive("session-b", 55, 75, Mood.UPBEAT, null, List.of());
+        final long a = SeedDeriver.derive("session-a", 55, 75, Mood.UPBEAT, null, null, List.of());
+        final long b = SeedDeriver.derive("session-b", 55, 75, Mood.UPBEAT, null, null, List.of());
         // then
         assertThat(a).isNotEqualTo(b);
     }
@@ -62,8 +63,8 @@ class SeedDeriverTest {
     @DisplayName("다른 음역대는 다른 seed")
     void derive_differentVoiceRange_returnsDifferentSeed() {
         // when
-        final long a = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
-        final long b = SeedDeriver.derive("s", 56, 75, Mood.UPBEAT, null, List.of());
+        final long a = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of());
+        final long b = SeedDeriver.derive("s", 56, 75, Mood.UPBEAT, null, null, List.of());
         // then
         assertThat(a).isNotEqualTo(b);
     }
@@ -72,9 +73,9 @@ class SeedDeriverTest {
     @DisplayName("다른 mood는 다른 seed (null vs 값 포함)")
     void derive_differentMood_returnsDifferentSeed() {
         // when
-        final long upbeat = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
-        final long calm = SeedDeriver.derive("s", 55, 75, Mood.CALM, null, List.of());
-        final long none = SeedDeriver.derive("s", 55, 75, null, null, List.of());
+        final long upbeat = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of());
+        final long calm = SeedDeriver.derive("s", 55, 75, Mood.CALM, null, null, List.of());
+        final long none = SeedDeriver.derive("s", 55, 75, null, null, null, List.of());
         // then
         assertThat(upbeat).isNotEqualTo(calm);
         assertThat(upbeat).isNotEqualTo(none);
@@ -85,8 +86,8 @@ class SeedDeriverTest {
     @DisplayName("mood=null도 일관된 seed (호출마다 흔들리지 않음)")
     void derive_nullMood_isStable() {
         // when
-        final long first = SeedDeriver.derive("s", 55, 75, null, null, List.of());
-        final long second = SeedDeriver.derive("s", 55, 75, null, null, List.of());
+        final long first = SeedDeriver.derive("s", 55, 75, null, null, null, List.of());
+        final long second = SeedDeriver.derive("s", 55, 75, null, null, null, List.of());
         // then
         assertThat(first).isEqualTo(second);
     }
@@ -102,9 +103,9 @@ class SeedDeriverTest {
         // given
         final String sessionId = "same-session";
         // when
-        final long emptyExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, List.of());
-        final long oneExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, List.of(10L));
-        final long twoExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, List.of(10L, 20L));
+        final long emptyExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, null, List.of());
+        final long oneExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, null, List.of(10L));
+        final long twoExclude = SeedDeriver.derive(sessionId, 55, 75, Mood.UPBEAT, null, null, List.of(10L, 20L));
         // then
         assertThat(emptyExclude).isNotEqualTo(oneExclude);
         assertThat(oneExclude).isNotEqualTo(twoExclude);
@@ -119,9 +120,10 @@ class SeedDeriverTest {
     @DisplayName("excludeSongIds 순서/중복 차이는 같은 seed (정규화)")
     void derive_excludeSongIds_orderAndDuplicates_normalized() {
         // when
-        final long ascending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of(10L, 20L, 30L));
-        final long descending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of(30L, 20L, 10L));
-        final long withDuplicate = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of(20L, 10L, 30L, 10L));
+        final long ascending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of(10L, 20L, 30L));
+        final long descending = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of(30L, 20L, 10L));
+        final long withDuplicate = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of(20L, 10L, 30L,
+                10L));
         // then
         assertThat(ascending).isEqualTo(descending);
         assertThat(ascending).isEqualTo(withDuplicate);
@@ -134,8 +136,8 @@ class SeedDeriverTest {
     @DisplayName("excludeSongIds null과 빈 리스트는 같은 seed (의미 동등)")
     void derive_excludeSongIds_nullEqualsEmpty() {
         // when
-        final long nullList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null);
-        final long emptyList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
+        final long nullList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, null);
+        final long emptyList = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of());
         // then
         assertThat(nullList).isEqualTo(emptyList);
     }
@@ -148,21 +150,48 @@ class SeedDeriverTest {
     @DisplayName("preferredBpm이 다르면 다른 seed (v2 #218)")
     void derive_differentPreferredBpm_returnsDifferentSeed() {
         // when
-        final long bpm120 = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, List.of());
-        final long bpm140 = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 140, List.of());
-        final long bpmNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, List.of());
+        final long bpm120 = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, null, List.of());
+        final long bpm140 = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 140, null, List.of());
+        final long bpmNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of());
         // then
         assertThat(bpm120).isNotEqualTo(bpm140);
         assertThat(bpm120).isNotEqualTo(bpmNull);
         assertThat(bpm140).isNotEqualTo(bpmNull);
     }
 
+    /**
+     * #1487 회귀 가드: 같은 음역/세션이라도 ageGroup이 다르면 다른 seed.
+     * 연령대 입력이 결과 변주에 영향을 주어야 한다.
+     */
+    @Test
+    @DisplayName("ageGroup이 다르면 다른 seed (#1487)")
+    void derive_differentAgeGroup_returnsDifferentSeed() {
+        // when
+        final long twenties = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, AgeGroup.TWENTIES, List.of());
+        final long forties = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, AgeGroup.FORTIES, List.of());
+        final long none = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, null, List.of());
+        // then
+        assertThat(twenties).isNotEqualTo(forties);
+        assertThat(twenties).isNotEqualTo(none);
+        assertThat(forties).isNotEqualTo(none);
+    }
+
+    @Test
+    @DisplayName("같은 ageGroup은 같은 seed (#1487 결정성)")
+    void derive_sameAgeGroup_isStable() {
+        // when
+        final long first = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, AgeGroup.THIRTIES, List.of());
+        final long second = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, null, AgeGroup.THIRTIES, List.of());
+        // then
+        assertThat(first).isEqualTo(second);
+    }
+
     @Test
     @DisplayName("같은 preferredBpm은 같은 seed (v2 결정성)")
     void derive_samePreferredBpm_isStable() {
         // when
-        final long first = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, List.of());
-        final long second = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        final long first = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, null, List.of());
+        final long second = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, null, List.of());
         // then
         assertThat(first).isEqualTo(second);
     }
@@ -177,8 +206,8 @@ class SeedDeriverTest {
     @DisplayName("hashHex16: 같은 입력은 같은 16자 hex hash")
     void hashHex16_sameInput_returnsSameHash() {
         // when
-        final String first = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L));
-        final String second = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L));
+        final String first = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of(10L));
+        final String second = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of(10L));
         // then
         assertThat(first).isEqualTo(second).hasSize(16).matches("[0-9a-f]{16}");
     }
@@ -192,7 +221,7 @@ class SeedDeriverTest {
     void derive_nullSessionId_throwsNpe() {
         // when / then
         assertThatNullPointerException()
-                .isThrownBy(() -> SeedDeriver.derive(null, 55, 75, Mood.UPBEAT, 120, List.of()))
+                .isThrownBy(() -> SeedDeriver.derive(null, 55, 75, Mood.UPBEAT, 120, null, List.of()))
                 .withMessageContaining("sessionId");
     }
 
@@ -201,7 +230,7 @@ class SeedDeriverTest {
     void hashHex16_nullSessionId_throwsNpe() {
         // when / then
         assertThatNullPointerException()
-                .isThrownBy(() -> SeedDeriver.hashHex16(null, 55, 75, Mood.UPBEAT, 120, List.of()))
+                .isThrownBy(() -> SeedDeriver.hashHex16(null, 55, 75, Mood.UPBEAT, 120, null, List.of()))
                 .withMessageContaining("sessionId");
     }
 
@@ -217,8 +246,8 @@ class SeedDeriverTest {
         final List<Long> withNull = Arrays.asList(10L, null, 20L);
         final List<Long> withoutNull = List.of(10L, 20L);
         // when
-        final long seedWithNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, withNull);
-        final long seedWithoutNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, withoutNull);
+        final long seedWithNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, null, withNull);
+        final long seedWithoutNull = SeedDeriver.derive("s", 55, 75, Mood.UPBEAT, 120, null, withoutNull);
         // then
         assertThat(seedWithNull).isEqualTo(seedWithoutNull);
     }
@@ -232,9 +261,10 @@ class SeedDeriverTest {
     @DisplayName("hashHex16: excludeSongIds 순서/중복 차이는 같은 hash (정규화)")
     void hashHex16_excludeSongIds_orderAndDuplicates_normalized() {
         // when
-        final String ascending = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(10L, 20L, 30L));
-        final String descending = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(30L, 20L, 10L));
-        final String withDuplicate = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(20L, 10L, 30L, 10L));
+        final String ascending = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of(10L, 20L, 30L));
+        final String descending = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of(30L, 20L, 10L));
+        final String withDuplicate = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of(20L, 10L, 30L,
+                10L));
         // then
         assertThat(ascending).isEqualTo(descending).isEqualTo(withDuplicate);
     }
@@ -247,8 +277,8 @@ class SeedDeriverTest {
     @DisplayName("hashHex16: excludeSongIds null과 빈 리스트는 같은 hash (의미 동등)")
     void hashHex16_excludeSongIds_nullEqualsEmpty() {
         // when
-        final String nullList = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null);
-        final String emptyList = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        final String nullList = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, null);
+        final String emptyList = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of());
         // then
         assertThat(nullList).isEqualTo(emptyList);
     }
@@ -257,13 +287,13 @@ class SeedDeriverTest {
     @DisplayName("hashHex16: 다른 입력은 다른 hash (sessionId/voiceRange/mood/bpm/exclude 모두)")
     void hashHex16_differentInputs_returnDifferentHashes() {
         // given
-        final String base = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of());
+        final String base = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of());
         // when
-        final String diffSession = SeedDeriver.hashHex16("t", 55, 75, Mood.UPBEAT, 120, List.of());
-        final String diffVoice = SeedDeriver.hashHex16("s", 56, 75, Mood.UPBEAT, 120, List.of());
-        final String diffMood = SeedDeriver.hashHex16("s", 55, 75, Mood.CALM, 120, List.of());
-        final String diffBpm = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 140, List.of());
-        final String diffExclude = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, List.of(1L));
+        final String diffSession = SeedDeriver.hashHex16("t", 55, 75, Mood.UPBEAT, 120, null, List.of());
+        final String diffVoice = SeedDeriver.hashHex16("s", 56, 75, Mood.UPBEAT, 120, null, List.of());
+        final String diffMood = SeedDeriver.hashHex16("s", 55, 75, Mood.CALM, 120, null, List.of());
+        final String diffBpm = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 140, null, List.of());
+        final String diffExclude = SeedDeriver.hashHex16("s", 55, 75, Mood.UPBEAT, 120, null, List.of(1L));
         // then
         assertThat(base)
                 .isNotEqualTo(diffSession)

@@ -49,7 +49,7 @@ class RecommendationHistoryResponseExcludeSongIdsTest {
     void jsonSerialization_omitsExcludeSongIdsKey() throws Exception {
         // given: entity 에는 excludeSongIds 가 보존된 상태.
         final RecommendationRequestEntity recommendationRequestEntity = RecommendationRequestEntity.create(
-                "session-omit", 48, 72, Mood.UPBEAT, null, List.of(101L, 202L));
+                "session-omit", 48, 72, Mood.UPBEAT, null, null, List.of(101L, 202L));
         final RecommendationResult recommendationResult = new RecommendationResult(50L, List.of());
         final RecommendationHistoryResponse recommendationHistoryResponse = RecommendationHistoryResponse.from(
                 recommendationRequestEntity, recommendationResult);

@@ -244,3 +244,9 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
     - **별 이슈 등록**: be / fe 각각 후속 이슈(scope:recommendation / scope:web).
   - **rev 🟡 M1/M4 (#406 묶음)**: 본 plan 결정은 M3 분기만 해소. M1(fe sessionId fallback entropy `crypto.getRandomValues`) / M4(history GET sessionId echo 제거) 은 spec 영향 없는 소규모 코드 수정 → be/fe 사이클 직접 처리 (별 spec 갱신 불필요).
   - **결정성 영향 없음**: 본 docs PR. 코드 변경 0. 후속 PR A 의 UUIDv7 전환은 `SeedDeriver` 입력에 영향 없음(`sessionId` / `voiceRange` 등 입력 필드 무변경).
+- 2026-06-02: **추천 설명 가능성 — 곡별 음역 적합도 + 한국어 사유 전면 노출 (closes #1484)**.
+  - **배경**: 음역 적합도 신호(`rangeFit`, 0~1)가 `breakdown` 안에 묻혀 있어 "왜 이 곡?"을 카드 전면에서 즉시 보여 줄 1차 신호가 없었다. fe 카드가 펼침 없이도 음역 적합도와 짧은 사유를 노출할 수 있도록 top-level 필드를 추가한다.
+  - **응답 필드 추가**: `RecommendedSongResponse` 에 `voiceFit: Double?`(= `breakdown.rangeFit` 신호, 0~1) + `voiceFitReason: String?`(짧은 한국어 사유). 도메인 파생값은 `ScoredRecommendation.voiceFit()` / `voiceFitReason()` 으로 노출 — breakdown 없는 재조회 경로에서는 둘 다 `null`(기존 `breakdown` null 정책과 동일).
+  - **사유 산정**: `rangeFit` 구간별 한국어 — `≥0.7` "아주 잘 맞아요" / `≥0.4` "무난하게 맞아요" / `>0.0` "다소 부담될 수 있어요" / `=0.0` "잘 맞지 않아요". 곡 키 UNKNOWN(`keyMatch < 1.0`)이면 "곡 키 정보가 없어 음역대 적합도를 정확히 알기 어려워요" — 적합도 산정 근거 부재를 그대로 알린다.
+  - **알고리즘 영향 없음**: score 산식·가중치·`SeedDeriver` 입력·다양성 후처리 모두 무변경. raw 신호(`rangeFit`)를 응답 표현으로 풀어 노출하는 범위에 그친다.
+  - **테스트**: `ScoredRecommendation` 단위(구간별 사유 / UNKNOWN 키 / breakdown null) + `RecommendedSongResponse.from` 매핑(voiceFit·사유 보존 / null 통과) + E2E(POST 응답 voiceFit [0,1]·사유 노출 / GET 재조회 null).

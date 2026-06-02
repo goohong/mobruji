@@ -13,6 +13,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -123,6 +126,17 @@ public class Song {
     private Difficulty difficulty;
 
     /**
+     * 곡의 음향 에너지/강렬함 정도 (0.0~1.0). nullable — 1차는 수기/시드 적재, 자동 산출은 후속
+     * (spec {@code song-analysis-data-and-consumers.md} §8 Q2). 미적재(null) 곡은 소비자
+     * (#1485 mood / #1486 next-song)가 graceful degrade — energy 가중 0 으로 다른 신호만 사용한다.
+     *
+     * <p>추천 점수 산식의 입력이 아니다 — 적재만으로 랭킹이 바뀌지 않는다 (결정성 회귀 없음).
+     */
+    @JdbcTypeCode(SqlTypes.DECIMAL)
+    @Column(precision = 3, scale = 2)
+    private Float energy;
+
+    /**
      * 곡 카드에 표시할 앨범 커버 이미지 URL. nullable — 외부 매칭 실패 시 null 로 두고 UI 에서
      * placeholder 로 처리한다.
      *
@@ -158,6 +172,7 @@ public class Song {
             final Integer lowMidi,
             final Integer highMidi,
             final Difficulty difficulty,
+            final Float energy,
             final String albumCoverUrl) {
         Objects.requireNonNull(title, "title must not be null");
         Objects.requireNonNull(artist, "artist must not be null");
@@ -180,6 +195,9 @@ public class Song {
             throw new IllegalArgumentException(
                     "metadataConfidence out of [0.0, 1.0]: " + metadataConfidence);
         }
+        if (energy != null && (energy < 0.0f || energy > 1.0f)) {
+            throw new IllegalArgumentException("energy out of [0.0, 1.0]: " + energy);
+        }
         // metadataConfidence 미명시 시 기본값 1.0 (MANUAL_SEED 수기 입력 신뢰도).
         final double resolvedConfidence = metadataConfidence != null ? metadataConfidence : 1.0;
         // difficulty가 명시되지 않으면 lowMidi/highMidi로 자동 분류 (둘 다 있을 때만).
@@ -190,7 +208,7 @@ public class Song {
         return new Song(
                 null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
                 tjNumber, kyNumber, metadataSource, isrc, resolvedConfidence,
-                lowMidi, highMidi, resolvedDifficulty, albumCoverUrl, now, now);
+                lowMidi, highMidi, resolvedDifficulty, energy, albumCoverUrl, now, now);
     }
 
     /**

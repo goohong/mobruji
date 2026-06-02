@@ -126,14 +126,26 @@ jobs:
                   }
                 }
               `;
+              // (#1509) GitHub 는 mergeable/mergeStateStatus 를 lazy 계산한다 — 다른 PR
+              // 머지로 base(develop)가 움직인 직후 첫 조회는 UNKNOWN 을 돌려준다. 한 번만
+              // 읽고 UNKNOWN 이면 skip 하면, base 가 자주 움직이는 자율 흐름에서 reviewed+
+              // CLEAN 인 PR 이 영영 안 머지되는 간헐 실패가 난다(#1504/#1505). 조회 자체가
+              // 계산을 trigger 하므로, UNKNOWN 이면 잠깐 대기 후 재조회(최대 5회)해 확정값을 받는다.
               let pr;
               try {
-                const result = await github.graphql(q, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  num,
-                });
-                pr = result.repository.pullRequest;
+                for (let attempt = 0; attempt < 5; attempt++) {
+                  const result = await github.graphql(q, {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    num,
+                  });
+                  pr = result.repository.pullRequest;
+                  if (!pr || (pr.mergeable !== 'UNKNOWN' && pr.mergeStateStatus !== 'UNKNOWN')) {
+                    break;
+                  }
+                  core.info(`PR #${num}: mergeable/mergeStateStatus UNKNOWN — 재조회 ${attempt + 1}/5`);
+                  await new Promise(res => setTimeout(res, 3000));
+                }
               } catch (e) {
                 core.warning(`PR #${num}: GraphQL 실패 — ${e.message}`);
                 skipped.push(`#${num} graphql_error`);

@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import com.mobruji.recommendation.application.CreateRecommendationCommand;
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.user.domain.AnonymousSession;
 import com.mobruji.user.domain.SessionIdPatterns;
@@ -28,6 +29,9 @@ import com.mobruji.user.domain.SessionIdPatterns;
  * <p>{@code preferredBpm}은 v2(#218)에서 추가된 사용자 선호 BPM 입력(옵션). null이면 mood 기반 default BPM 적용.
  * 결정성 보장을 위해 {@code SeedDeriver}의 입력에도 포함된다.
  *
+ * <p>{@code ageGroup}은 #1487에서 추가된 연령대 입력(옵션). 해당 세대의 대표 시기 곡(발매연도)에 가중을 준다.
+ * null이면 generationFit 신호가 0 이 되어 랭킹에 영향이 없다(하위호환). 결정성 seed 입력에도 포함된다.
+ *
  * <p>{@code sessionId} 는 client 가 발급한 UUIDv4 (ADR-0011).
  * {@link SessionIdPatterns#UUID_V4} 형식 강제 — {@code SessionRotateRequest} /
  * {@code VoiceRangeCreateRequest} 와 동일한 검증 일관성 유지 (#948 후속).
@@ -40,6 +44,7 @@ public record RecommendationCreateRequest(
         @NotNull @Min(12) @Max(119) Integer voiceRangeHigh,
         Mood mood,
         @Min(30) @Max(300) Integer preferredBpm,
+        AgeGroup ageGroup,
         List<Long> excludeSongIds
 ) {
 
@@ -52,6 +57,6 @@ public record RecommendationCreateRequest(
 
     public CreateRecommendationCommand toCommand() {
         return new CreateRecommendationCommand(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, excludeSongIdsOrEmpty());
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup, excludeSongIdsOrEmpty());
     }
 }

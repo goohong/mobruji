@@ -1,0 +1,12 @@
+[Unit]
+Description=mobruji bridge 자동 배포 (develop 최신 동기 + bot 코드 변경 시 재시작)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# root 실행 — systemctl restart mobruji-discord-bridge 권한 필요.
+# git 은 스크립트 내부에서 runuser -u mobruji 로 위임 (소유권 보존).
+ExecStart=/home/mobruji/mobruji-bridge/tools/discord-daemon/bridge-auto-deploy.sh
+# 네트워크/gh 지연 대비 — NCP 과부하(#1453) 시에도 무한 hang 방지.
+TimeoutStartSec=180

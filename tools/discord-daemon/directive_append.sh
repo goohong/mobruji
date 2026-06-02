@@ -6,7 +6,8 @@
 # spec: docs/features/directive-board-event-driven-redesign.md §3 (a)
 #
 # 사용:
-#   directive_append.sh <msg_id> "<title>" [pr_url] [body] [user_id]
+#   directive_append.sh <msg_id> "<title>" [pr_url] [body] [user_id] \
+#     [--source <s>] [--seed-issue <N>] [--assigned-cycle <c>] [--polished]
 #
 # args:
 #   <msg_id>   — 원본 사용자 메시지 message_id (멱등 key, 필수)
@@ -17,6 +18,13 @@
 #                (helper 정제 / nmae custom 등 override path).
 #   [user_id]  — 선택. 발화자 Discord user_id (template 의 👤 line 표시용).
 #                미명시 시 env `DIRECTIVE_USER_ID` fallback. 둘 다 부재 시 line 생략.
+#
+# seed 플래그 (spec: docs/features/roadmap-queue-autoseed.md §5-1 — autoseed.sh 호출):
+#   --source <s>          — entry provenance (예: "autoseed"). 부재 = 사람 등록.
+#   --seed-issue <N>      — 시드 원본 GitHub 이슈 번호 (중복 가드 dedup key).
+#   --assigned-cycle <c>  — scope→cycle 매핑 결과 (be|fe|rev|plan). 모호 시 생략.
+#   --polished            — entry 를 polished=true 로 박제 (정제 불요 — nmae 즉시 분배).
+#   위 플래그는 positional 인자 어디에 와도 추출되며, 미사용 시 기존 동작 불변.
 #
 # 동작:
 #   1. 멱등성 — JSONL 이미 같은 msg_id (또는 source_queue_msg_id) 존재 시 no-op
@@ -45,12 +53,52 @@ JSONL_PATH_DEFAULT="${HOME}/.mobruji/directive-board.jsonl"
 JSONL_PATH="${DIRECTIVE_BOARD_JSONL_PATH:-${JSONL_PATH_DEFAULT}}"
 
 usage() {
-  echo "usage: directive_append.sh <msg_id> \"<title>\" [pr_url] [body] [user_id]" >&2
+  echo "usage: directive_append.sh <msg_id> \"<title>\" [pr_url] [body] [user_id]" \
+    "[--source <s>] [--seed-issue <N>] [--assigned-cycle <c>] [--polished]" >&2
   exit 64
 }
 
+# seed 플래그를 positional 인자에서 분리 (spec roadmap-queue-autoseed §5-1).
+# --source/--seed-issue/--assigned-cycle/--polished 는 어느 위치에 와도 추출하고,
+# 나머지는 기존 positional 순서(msg_id title pr_url body user_id)로 보존한다.
+SOURCE=""
+SEED_ISSUE=""
+ASSIGNED_CYCLE=""
+POLISHED_FLAG=0
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source)
+      SOURCE="${2:-}"
+      shift 2
+      ;;
+    --seed-issue)
+      SEED_ISSUE="${2:-}"
+      shift 2
+      ;;
+    --assigned-cycle)
+      ASSIGNED_CYCLE="${2:-}"
+      shift 2
+      ;;
+    --polished)
+      POLISHED_FLAG=1
+      shift
+      ;;
+    *)
+      POSITIONAL+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
 if [[ $# -lt 2 ]]; then
   usage
+fi
+
+if [[ -n "${SEED_ISSUE}" && ! "${SEED_ISSUE}" =~ ^[0-9]+$ ]]; then
+  echo "directive_append: --seed-issue 는 정수만 (got: ${SEED_ISSUE})" >&2
+  exit 64
 fi
 
 MSG_ID="$1"
@@ -151,6 +199,25 @@ if [[ -n "${PR_URL}" ]]; then
   PR_URL_JSON_FIELD=$(jq -nc --arg url "${PR_URL}" '{related_pr: $url}')
 fi
 
+# seed 필드 — 명시된 것만 병합 (부재 = 사람 등록 기존 호환). --polished 시
+# polished=true 로 override (default false). spec roadmap-queue-autoseed §5-1.
+SEED_JSON_FIELDS="{}"
+if [[ -n "${SOURCE}" ]]; then
+  SEED_JSON_FIELDS=$(echo "${SEED_JSON_FIELDS}" \
+    | jq -c --arg s "${SOURCE}" '. + {source: $s}')
+fi
+if [[ -n "${SEED_ISSUE}" ]]; then
+  SEED_JSON_FIELDS=$(echo "${SEED_JSON_FIELDS}" \
+    | jq -c --argjson n "${SEED_ISSUE}" '. + {seed_issue: $n}')
+fi
+if [[ -n "${ASSIGNED_CYCLE}" ]]; then
+  SEED_JSON_FIELDS=$(echo "${SEED_JSON_FIELDS}" \
+    | jq -c --arg c "${ASSIGNED_CYCLE}" '. + {assigned_cycle: $c}')
+fi
+if [[ "${POLISHED_FLAG}" -eq 1 ]]; then
+  SEED_JSON_FIELDS=$(echo "${SEED_JSON_FIELDS}" | jq -c '. + {polished: true}')
+fi
+
 ENTRY_JSON=$(jq -nc \
   --arg ts "${TS_KST}" \
   --arg summary "${TITLE}" \
@@ -158,6 +225,7 @@ ENTRY_JSON=$(jq -nc \
   --arg last_updated "${TS_KST}" \
   --arg src_msg "${MSG_ID}" \
   --argjson pr "${PR_URL_JSON_FIELD:-null}" \
+  --argjson seed "${SEED_JSON_FIELDS}" \
   '{
     ts: $ts,
     summary: $summary,
@@ -166,7 +234,7 @@ ENTRY_JSON=$(jq -nc \
     message_id: $msg_id,
     last_updated_kst: $last_updated,
     source_queue_msg_id: $src_msg
-  } + (if $pr == null then {} else $pr end)')
+  } + (if $pr == null then {} else $pr end) + $seed')
 
 # Discord forum thread 생성 — graceful (실패해도 JSONL append 는 수행).
 THREAD_ID=""

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.mobruji.recommendation.api.dto.NextRecommendationRequest;
 import com.mobruji.recommendation.api.dto.RecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.RecommendationResponse;
 import com.mobruji.recommendation.domain.RecommendationResult;
@@ -30,6 +31,14 @@ public class RecommendationController {
             @Valid @RequestBody final RecommendationCreateRequest recommendationCreateRequest) {
         final RecommendationResult recommendationResult = recommendationService.create(
                 recommendationCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED).body(RecommendationResponse.from(recommendationResult));
+    }
+
+    @PostMapping("/next")
+    public ResponseEntity<RecommendationResponse> createFromSeeds(
+            @Valid @RequestBody final NextRecommendationRequest nextRecommendationRequest) {
+        final RecommendationResult recommendationResult = recommendationService.createFromSeeds(
+                nextRecommendationRequest.toCommand());
         return ResponseEntity.status(HttpStatus.CREATED).body(RecommendationResponse.from(recommendationResult));
     }
 

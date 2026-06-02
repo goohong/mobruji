@@ -4,6 +4,7 @@ import java.util.Random;
 
 import org.springframework.stereotype.Component;
 
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.recommendation.domain.ScoreBreakdown;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -17,17 +18,19 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * v1/v2 규칙 기반 점수 함수.
  *
  * <p>{@code score = w_voiceFit * rangeFit + w_genre * genreMatch + w_mood * moodMatch
- *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + jitter}
+ *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + w_generation * generationFit + jitter}
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
  * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=곡 음역(root±7)과 사용자 음역의 overlap 비율,
  * centeredness=곡 키 중심이 사용자 음역 중앙에 가까운 정도. 넓은 음역에서 overlap 이 포화돼도 음역대별 변별력 유지(#1452).</li>
  * <li>genreMatch: v1에서 입력 필드 없음 → 0 고정 (가중치만 보존).</li>
- * <li>moodMatch: 일치 1.0 / 미입력·불일치 0.0.</li>
+ * <li>moodMatch: 분위기 연속 유사도. 정확히 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 (energy,brightness) 좌표 거리 기반 유사도(#1485).</li>
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
  * <li>tempoMatch (v2 #218): {@code 1.0 - min(1.0, |songBpm - preferredBpm| / tolerance)}.
  * 곡 BPM이 null이거나 사용자 선호 BPM이 결정될 수 없으면 0.5(중립).</li>
+ * <li>generationFit (#1487): {@code 1.0 - min(1.0, |songReleaseYear - representativeYear| / toleranceYears)}.
+ * 연령대 미입력 또는 곡 발매연도 부재면 0.0(가중 없음) — 미입력 시 랭킹 영향 없음(하위호환).</li>
  * <li>jitter: 동순위 분산용. seed 고정으로 결정성 유지 가능.</li>
  * </ul>
  *
@@ -46,6 +49,12 @@ public class RecommendationScorer {
      */
     static final double TEMPO_MATCH_NEUTRAL = 0.5;
 
+    /**
+     * 분위기 좌표(energy, brightness ∈ [0,1]) 평면에서 가능한 최대 거리 = 대각선 {@code sqrt(2)}.
+     * moodSimilarity 를 [0,1] 로 정규화하는 분모.
+     */
+    static final double MOOD_MAX_DISTANCE = Math.sqrt(2.0);
+
     private final RecommendationProperties recommendationProperties;
 
     public Scored score(
@@ -54,15 +63,18 @@ public class RecommendationScorer {
             final int voiceRangeHigh,
             final Mood requestedMood,
             final Integer preferredBpm,
+            final AgeGroup ageGroup,
             final Random random) {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
         final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
+        final RecommendationProperties.Generation generation = recommendationProperties.generation();
         final double rangeFit = voiceRangeFit(song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
         final double genreMatch = genreMatch();
         final double moodMatch = moodMatch(song.getMood(), requestedMood);
         final double popularityPrior = popularityPrior(song);
         final double tempoMatch = tempoMatch(song.getBpm(), preferredBpm, requestedMood, tempo);
+        final double generationFit = generationFit(song.getReleaseYear(), ageGroup, generation);
         final double jitterMagnitude = recommendationProperties.jitterMagnitude();
         final double jitter = (random.nextDouble() * 2 - 1) * jitterMagnitude;
         final double total = weights.voiceFit() * rangeFit
@@ -70,9 +82,10 @@ public class RecommendationScorer {
                 + weights.mood() * moodMatch
                 + weights.popularity() * popularityPrior
                 + weights.tempoMatch() * tempoMatch
+                + weights.generation() * generationFit
                 + jitter;
         final ScoreBreakdown breakdown = new ScoreBreakdown(
-                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch);
+                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit);
         return new Scored(total, breakdown);
     }
 
@@ -111,14 +124,52 @@ public class RecommendationScorer {
         return 1.0;
     }
 
+    /**
+     * 분위기 적합도 신호 (0~1). 정확히 일치하면 1.0, 미입력·곡 mood 부재면 0.0, 그 외에는
+     * 분위기 간 유사도({@link #moodSimilarity})를 그대로 반환한다.
+     *
+     * <p>v1의 이진(1.0/0.0) 매칭은 같은 mood끼리만 가산점이 같고 그 외에는 모두 0.0 이라 슬픈 발라드↔록 발라드↔댄스
+     * 처럼 결이 다른 분위기 간 변별이 안 됐다(#1485). voiceRangeFit(#1454)이 연속 신호로 음역대 변별력을 살린 패턴을
+     * 따라 분위기도 연속 유사도로 바꿔, 요청 분위기와 가까운 곡이 또렷이 상위로 오도록 한다.
+     */
     static double moodMatch(final Mood songMood, final Mood requestedMood) {
-        if (requestedMood == null) {
+        if (requestedMood == null || songMood == null) {
             return 0.0;
         }
-        if (songMood == null) {
-            return 0.0;
+        return moodSimilarity(songMood, requestedMood);
+    }
+
+    /**
+     * 두 분위기의 유사도 (0~1). 각 분위기를 {@code (energy, brightness)} 2차원 좌표로 두고 유클리드 거리를
+     * {@link #MOOD_MAX_DISTANCE}로 정규화해 {@code 1.0 - distance/max} 로 환산한다. 같은 분위기는 1.0,
+     * 가장 먼 분위기 쌍(예: UPBEAT↔EMOTIONAL)도 0 이 아닌 양수가 나와 "결이 조금 다름"을 연속적으로 표현한다.
+     *
+     * <ul>
+     * <li>energy — 곡의 에너지/격렬함 (잔잔 0 ~ 격렬 1)</li>
+     * <li>brightness — 정서의 밝기 (어두움·슬픔 0 ~ 밝음·신남 1)</li>
+     * </ul>
+     */
+    static double moodSimilarity(final Mood songMood, final Mood requestedMood) {
+        if (songMood == requestedMood) {
+            return 1.0;
         }
-        return songMood == requestedMood ? 1.0 : 0.0;
+        final double[] songCoordinate = moodCoordinate(songMood);
+        final double[] requestedCoordinate = moodCoordinate(requestedMood);
+        final double energyDelta = songCoordinate[0] - requestedCoordinate[0];
+        final double brightnessDelta = songCoordinate[1] - requestedCoordinate[1];
+        final double distance = Math.sqrt(energyDelta * energyDelta + brightnessDelta * brightnessDelta);
+        return Math.max(0.0, 1.0 - distance / MOOD_MAX_DISTANCE);
+    }
+
+    private static double[] moodCoordinate(final Mood mood) {
+        return switch (mood) {
+            case UPBEAT -> new double[]{1.0, 1.0};
+            case GROOVY -> new double[]{0.8, 0.8};
+            case POWERFUL -> new double[]{1.0, 0.5};
+            case CALM -> new double[]{0.2, 0.6};
+            case EMOTIONAL -> new double[]{0.4, 0.2};
+            case NOSTALGIC -> new double[]{0.3, 0.3};
+        };
     }
 
     /**
@@ -177,6 +228,31 @@ public class RecommendationScorer {
             }
         }
         return tempo.fallbackBpm();
+    }
+
+    /**
+     * generationFit 신호 (#1487).
+     *
+     * <p>산식: {@code 1.0 - min(1.0, |songReleaseYear - representativeYear| / toleranceYears)} —
+     * representativeYear는 요청 연령대의 "대표 시기" 발매연도(properties 외부화). 연령대가 null이거나, 곡 발매연도가
+     * null이거나, 연령대가 표에 없으면 0.0(가중 없음) — 미입력 시 랭킹 영향 없음(하위호환).
+     *
+     * <p>가중 합산에는 weights.generation으로 들어가며, raw 신호는 ScoreBreakdown에 보존된다.
+     */
+    static double generationFit(
+            final Integer releaseYear,
+            final AgeGroup ageGroup,
+            final RecommendationProperties.Generation generation) {
+        if (ageGroup == null || releaseYear == null) {
+            return 0.0;
+        }
+        final Integer representativeYear = generation.representativeYear().get(ageGroup);
+        if (representativeYear == null) {
+            return 0.0;
+        }
+        final double distance = Math.abs((double) releaseYear - representativeYear);
+        final double normalized = Math.min(1.0, distance / generation.distanceToleranceYears());
+        return 1.0 - normalized;
     }
 
     /**

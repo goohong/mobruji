@@ -44,7 +44,7 @@ class ScoredRecommendationTest {
     void canonical_preservesBreakdown() {
         // given
         final Song song = sampleSong();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(0.9, 0.8, 0.7, 0.6, 0.5, 0.4);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.0);
 
         // when
         final ScoredRecommendation scored = new ScoredRecommendation(song, 0.75, "match", 3, breakdown);
@@ -65,6 +65,96 @@ class ScoredRecommendationTest {
 
         // then
         assertThat(scored.breakdown()).isNull();
+    }
+
+    @Test
+    @DisplayName("설명가능성(#1484): voiceFit은 breakdown.rangeFit을 그대로 노출하고 사유는 적합도 구간별 한국어")
+    void voiceFit_derivesFromRangeFit() {
+        // given: keyMatch=1.0(키 알려짐), rangeFit 구간별
+        final Song song = sampleSong();
+        final ScoredRecommendation high = new ScoredRecommendation(
+                song, 0.9, "match", 1, new ScoreBreakdown(1.0, 0.82, 0.0, 0.0, 1.0, 0.5, 0.0));
+        final ScoredRecommendation mid = new ScoredRecommendation(
+                song, 0.5, "match", 1, new ScoreBreakdown(1.0, 0.45, 0.0, 0.0, 1.0, 0.5, 0.0));
+        final ScoredRecommendation low = new ScoredRecommendation(
+                song, 0.3, "match", 1, new ScoreBreakdown(1.0, 0.2, 0.0, 0.0, 1.0, 0.5, 0.0));
+        final ScoredRecommendation none = new ScoredRecommendation(
+                song, 0.1, "match", 1, new ScoreBreakdown(1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.0));
+
+        // then
+        assertThat(high.voiceFit()).isEqualTo(0.82);
+        assertThat(high.voiceFitReason()).isEqualTo("원곡 키가 음역대에 아주 잘 맞아요");
+        assertThat(mid.voiceFitReason()).isEqualTo("원곡 키가 음역대에 무난하게 맞아요");
+        assertThat(low.voiceFitReason()).isEqualTo("원곡 키가 음역대에 다소 부담될 수 있어요");
+        assertThat(none.voiceFitReason()).isEqualTo("원곡 키가 음역대와 잘 맞지 않아요");
+    }
+
+    @Test
+    @DisplayName("설명가능성(#1484): 곡 키 UNKNOWN(keyMatch<1.0)이면 적합도 산정 불가 사유로 노출")
+    void voiceFit_unknownKey_reasonExplainsUncertainty() {
+        // given: voiceRangeFit이 UNKNOWN 키에 부여하는 중립값(keyMatch=0.5, rangeFit=0.5)
+        final ScoredRecommendation scored = new ScoredRecommendation(
+                sampleSong(), 0.5, "match", 1, new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0));
+
+        // then
+        assertThat(scored.voiceFit()).isEqualTo(0.5);
+        assertThat(scored.voiceFitReason()).isEqualTo("곡 키 정보가 없어 음역대 적합도를 정확히 알기 어려워요");
+    }
+
+    @Test
+    @DisplayName("설명가능성(#1484): breakdown 없는 재조회 경로면 voiceFit/voiceFitReason 모두 null")
+    void voiceFit_nullBreakdown_returnsNull() {
+        // when
+        final ScoredRecommendation scored = new ScoredRecommendation(sampleSong(), 0.5, "match", 1);
+
+        // then
+        assertThat(scored.voiceFit()).isNull();
+        assertThat(scored.voiceFitReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("분위기 변별력(#1485): moodFit은 breakdown.moodMatch를 그대로 노출하고 사유는 유사도 구간별 한국어")
+    void moodFit_derivesFromMoodMatch() {
+        // given: moodMatch 구간별 (keyMatch/rangeFit 등 나머지 신호는 사유에 영향 없음)
+        final Song song = sampleSong();
+        final ScoredRecommendation exact = new ScoredRecommendation(
+                song, 0.9, "match", 1, new ScoreBreakdown(1.0, 0.5, 0.0, 1.0, 1.0, 0.5, 0.0));
+        final ScoredRecommendation near = new ScoredRecommendation(
+                song, 0.7, "match", 1, new ScoreBreakdown(1.0, 0.5, 0.0, 0.7, 1.0, 0.5, 0.0));
+        final ScoredRecommendation some = new ScoredRecommendation(
+                song, 0.5, "match", 1, new ScoreBreakdown(1.0, 0.5, 0.0, 0.4, 1.0, 0.5, 0.0));
+        final ScoredRecommendation far = new ScoredRecommendation(
+                song, 0.3, "match", 1, new ScoreBreakdown(1.0, 0.5, 0.0, 0.2, 1.0, 0.5, 0.0));
+
+        // then
+        assertThat(exact.moodFit()).isEqualTo(1.0);
+        assertThat(exact.moodFitReason()).isEqualTo("요청하신 분위기와 딱 맞아요");
+        assertThat(near.moodFitReason()).isEqualTo("요청하신 분위기와 잘 어울려요");
+        assertThat(some.moodFitReason()).isEqualTo("요청하신 분위기와 어느 정도 비슷해요");
+        assertThat(far.moodFitReason()).isEqualTo("요청하신 분위기와는 결이 조금 달라요");
+    }
+
+    @Test
+    @DisplayName("분위기 변별력(#1485): 분위기 신호 0.0(미입력·곡 mood 부재)이면 moodFitReason은 null")
+    void moodFit_zeroSignal_reasonNull() {
+        // given: moodMatch=0.0 (분위기 미입력 또는 곡 mood 부재)
+        final ScoredRecommendation scored = new ScoredRecommendation(
+                sampleSong(), 0.5, "match", 1, new ScoreBreakdown(1.0, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0));
+
+        // then: 점수는 0.0 으로 노출하되 설명할 근거가 없으므로 사유는 null
+        assertThat(scored.moodFit()).isEqualTo(0.0);
+        assertThat(scored.moodFitReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("분위기 변별력(#1485): breakdown 없는 재조회 경로면 moodFit/moodFitReason 모두 null")
+    void moodFit_nullBreakdown_returnsNull() {
+        // when
+        final ScoredRecommendation scored = new ScoredRecommendation(sampleSong(), 0.5, "match", 1);
+
+        // then
+        assertThat(scored.moodFit()).isNull();
+        assertThat(scored.moodFitReason()).isNull();
     }
 
     @Test
@@ -99,7 +189,7 @@ class ScoredRecommendationTest {
     void equals_hashCode_invariant() {
         // given
         final Song song = sampleSong();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(0.9, 0.8, 0.7, 0.6, 0.5, 0.4);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.0);
         final ScoredRecommendation left = new ScoredRecommendation(song, 0.75, "match", 3, breakdown);
         final ScoredRecommendation right = new ScoredRecommendation(song, 0.75, "match", 3, breakdown);
 
@@ -113,7 +203,7 @@ class ScoredRecommendationTest {
     void equals_differsOnAnyField() {
         // given
         final Song song = sampleSong();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(0.9, 0.8, 0.7, 0.6, 0.5, 0.4);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.0);
         final ScoredRecommendation base = new ScoredRecommendation(song, 0.75, "match", 3, breakdown);
 
         // then

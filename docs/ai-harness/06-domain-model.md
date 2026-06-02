@@ -48,17 +48,25 @@
 | 음표명 | NoteName | `song` | MIDI note number의 과학적 음표 표기 (예: 60 → "C4"). fe `web/lib/notes.ts`와 동일 컨벤션 (sharp 표기) |
 | 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
 | 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
-| 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡). 영속 단위. 엔티티 §5-3 |
+| 에너지 | Energy (Song.energy) | `song` | 곡의 음향 에너지/강렬함 정도 0.0~1.0 (nullable). 추천 mood 변별·곡 유사도 신호로 소비. 산출 출처는 미정 — 1차는 수기/시드 적재, 자동화(Spotify valence·energy fallback 또는 librosa MFCC)는 후속 결정. song-analysis-data-and-consumers.md §5-1·§8 + song-self-analysis-pipeline.md §10-9 cross-ref |
+| 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
+| 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡, 선호 BPM, 연령대). 영속 단위. 엔티티 §5-3 |
+| 연령대 | AgeGroup | `recommendation` | 추천 요청 선택 입력 enum (`TEENS`/`TWENTIES`/`THIRTIES`/`FORTIES`/`FIFTIES`/`SIXTIES_PLUS`). 세대별 대표 발매 시기(`application.yml` `recommendation.generation.representative-year`)와의 거리로 `generationFit` 신호 산출 (#1487). null 이면 랭킹 무영향 (하위호환) |
 | 추천 | Recommendation | `recommendation` | 사용자 컨텍스트 기반 곡 매칭 결과 (영속 행). 요청 1 : N 행. 엔티티 §5-3 |
 | 추천 결과 | RecommendationResult | `recommendation` | 추천 요청 1건의 최종 결과 컨테이너 (요청 ID + 정렬·다양성 후처리 마친 `ScoredRecommendation` 리스트). application 이 `api.dto` 에 의존하지 않도록 domain 레이어에 둔 결과 표현 (ADR-0005 §A-7) |
-| 채점된 추천 | ScoredRecommendation | `recommendation` | 추천 결과 1건 값 객체 (곡 + 점수 + 매칭 사유 + 랭킹 + `ScoreBreakdown`). 영속 엔티티 `Recommendation` 와 응답 DTO 를 잇는 중간 표현. 과거 추천 재조회 경로에서는 `breakdown` 이 null |
-| 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 6종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`). "Why this song?" 설명 가능성 확보용 (P2). 점수 산식 비변경 — 결정성 영향 없음 |
+| 채점된 추천 | ScoredRecommendation | `recommendation` | 추천 결과 1건 값 객체 (곡 + 점수 + 매칭 사유 + 랭킹 + `ScoreBreakdown`). 영속 엔티티 `Recommendation` 와 응답 DTO 를 잇는 중간 표현. 과거 추천 재조회 경로에서는 `breakdown` 이 null. 설명 가능성(#1484)용 파생값 `voiceFit`(0~1, = `rangeFit` 신호) + `voiceFitReason`(짧은 한국어 사유), 분위기 변별력(#1485)용 `moodFit`(0~1, = `moodMatch` 신호) + `moodFitReason` 노출 — breakdown null 경로에서는 모두 null |
+| 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 7종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`/`generationFit`). "Why this song?" 설명 가능성 확보용 (P2). `moodMatch` 는 #1485 에서 이진(1.0/0.0)에서 분위기 `(energy, brightness)` 좌표 거리 기반 연속 유사도로 확장 — 정확 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 0~1 |
+| 세대 적합도 | generationFit | `recommendation` | `ScoreBreakdown` raw 신호 — 곡 발매 연도와 요청 `ageGroup` 의 대표 시기 거리를 선형 감쇠(`1 - min(1, 거리/허용오차)`)로 환산 (#1487). ageGroup/발매연도 null 또는 미등재 세대면 0.0 (랭킹 무영향) |
 | 좋아요 | Like | `feedback` | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR). 엔티티 §5-4 |
 | 북마크 | Bookmark | `feedback` | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정). 엔티티 §5-4 |
 | 익명 세션 | AnonymousSession | `user` | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md. 엔티티 §5-6 |
 | 세션 회수 | SessionRevocation (enum `RevokedReason`) | `user` | sessionId 를 revoke 처리한 사실(시점 + 사유). 사유 enum `RevokedReason`: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` (Micrometer 라벨은 lowercase) |
 | 세션 회전 | SessionRotation | `user` | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
 | 계정 머지 | AccountMerge | `user` | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
+| 사용자 | User | `user` | v0.4 정식 회원 — 소셜(카카오/구글) 또는 이메일 인증으로 식별되는 영속 계정. `(provider, providerUserId)` unique. 익명 sessionId 와 달리 디바이스 간 동기화 + 프로필 영속의 owner. 엔티티 §5-7. 인증 메커니즘 SoT = user-authentication-and-profile.md, 전환 정책/머지 = anonymous-to-account-conversion.md |
+| 인증 제공자 | OAuthProvider | `user` | 회원 인증 출처 enum — `KAKAO` / `GOOGLE` / `EMAIL`. `User.provider` 필드. OAuth 2종은 Authorization Code Flow, `EMAIL` 은 비밀번호 해시 + 이메일 인증 |
+| 사용자 프로필 | UserProfile | `user` | 회원의 재방문 prefill 용 선호 영속 (선호 장르 다중 / 선호 분위기 다중 `Mood` / 기본 성별 nullable). `User` 1:1. **음역대는 중복 저장하지 않고** 기존 `VoiceRange`/`VoiceRangeSnapshot` 을 userId owner 로 재사용. 추천 폼 prefill (`GET /users/me/profile`) 로 "재방문 시 재입력 불필요" 보장 (#1491). 엔티티 §5-8 |
+| 회원 인증 가드 | UserAuthGuard | `user` | 회원 전용 endpoint 의 토큰 인증 컴포넌트 (신설). 익명 sessionId 용 `SessionAuthGuard` (ADR-0011) 와 **별 트랙 공존** — 한 endpoint 가 두 인증을 동시에 요구하지 않음. 미인증 호출 시 401. user-authentication-and-profile.md §5-2 |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -153,6 +161,7 @@
 | `lowMidi` | Integer | nullable | 곡 보컬 멜로디 최저음 (MIDI). 시드부터 적재. PR #96 |
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
+| `energy` | Float | nullable, 0.0~1.0 | 곡 음향 에너지/강렬함. 1차 수기/시드 적재, 자동 산출 후속(§8 Q2). 추천 점수 입력 아님 — null 곡은 소비자 graceful degrade. song-analysis-data-and-consumers.md §5-1, #1490 |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
 - 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
@@ -169,6 +178,7 @@
 | `sessionId` | String(64) | not null | 익명 사용자 식별자 (VoiceRange와 동일) |
 | `voiceRangeLow`, `voiceRangeHigh` | int | not null | MIDI [12, 119] |
 | `mood` | enum `Mood` | nullable | 선택 |
+| `ageGroup` | enum `AgeGroup` | nullable | 선택 입력. `age_group VARCHAR(16)` 컬럼(V9 마이그레이션). null 이면 `generationFit` 신호 0.0 → 랭킹 무영향 (#1487) |
 | `excludeSongIds` | List&lt;Long&gt; | nullable→[] 정규화 | 사용자가 "이미 들었어요"로 제외한 곡 ID. 별 join table `recommendation_request_exclude_song(recommendation_request_id, song_id)`에 영속 (`@ElementCollection`) |
 | `createdAt` | LocalDateTime | not null | |
 
@@ -243,6 +253,41 @@
 - 회전: `SessionRotationService` 가 현재 sessionId 를 `USER_ROTATE` 로 revoke + cascade-delete + 새 sessionId 발급.
 - 머지 (v0.4): account merge 시 `ACCOUNT_MERGE` 로 revoke + 데이터를 user 로 owner 치환.
 
+### 5-7) `User` (v0.4, user-authentication-and-profile.md / anonymous-to-account-conversion.md)
+
+> **draft (v0.4 미구현)**. 정식 회원 계정. 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 전환 정책/머지 = `anonymous-to-account-conversion.md`. 머지 시 익명 sessionId 의 누적 데이터(`VoiceRange`/`VoiceRangeSnapshot`/`Like`/`Bookmark`/`Recommendation`)가 `userId` owner 로 치환된다 (FK 없이 application 레벨 owner 컬럼 — dual column 권장, `anonymous-to-account-conversion.md` §5-1).
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `userId` | Long | PK, autoIncrement | 내부 식별자 |
+| `provider` | enum `OAuthProvider` | not null | `KAKAO` / `GOOGLE` / `EMAIL` |
+| `providerUserId` | String(128) | not null, UK(`provider, provider_user_id`) | OAuth sub / 이메일이면 email |
+| `email` | String(255) | nullable (`EMAIL` 이면 not null), index | |
+| `passwordHash` | String(255) | nullable (`EMAIL` 한정) | BCrypt/Argon2 — 평문 저장 금지 |
+| `displayName` | String(64) | nullable | |
+| `emailVerified` | boolean | not null, default false | `EMAIL` 인증 상태 |
+| `createdAt` | LocalDateTime | not null | |
+| `lastLoginAt` | LocalDateTime | nullable | |
+| `revokedAt` | LocalDateTime | nullable | 탈퇴 시 (v0.4 후속) |
+
+- 불변식: `provider=EMAIL ↔ email not null`. `(provider, providerUserId)` 유일.
+- 시크릿(`passwordHash`)·토큰·email 원문은 로그/예외/응답 비노출 (ADR-0011 계승, `04-security-policy.md`).
+
+### 5-8) `UserProfile` (v0.4, user-authentication-and-profile.md)
+
+> **draft (v0.4 미구현)**. 회원의 재방문 prefill 용 선호 영속 (#1491 "재방문 시 재입력 불필요"). `User` 와 1:1. **음역대는 본 엔티티에 저장하지 않고** 기존 `VoiceRange`(현재값)/`VoiceRangeSnapshot`(시계열)을 `userId` owner 로 재사용한다.
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `userId` | Long | PK, FK → `User.userId` | 1:1 |
+| `preferredGenres` | List&lt;String&gt; | nullable→[] 정규화 | 선호 장르 다중. join table `user_preferred_genre` (`@ElementCollection`) |
+| `preferredMoods` | List&lt;enum `Mood`&gt; | nullable→[] 정규화 | 선호 분위기 다중. join table `user_preferred_mood` |
+| `defaultGender` | String(8) | nullable | 추천 입력 편의값 (추천이 gender 를 정식 입력으로 채택 시 활용 — §7 후보) |
+| `updatedAt` | LocalDateTime | not null | |
+
+- prefill: `GET /api/v1/users/me/profile` 가 최신 `VoiceRange(userId)` + `UserProfile(userId)` 를 합쳐 추천 폼에 채운다.
+- 도메인 메서드: `static empty(userId)`, `updatePreferences(genres, moods, gender)`.
+
 ## 6) Mermaid ERD
 
 ```mermaid
@@ -273,6 +318,7 @@ erDiagram
         int low_midi
         int high_midi
         varchar difficulty
+        decimal energy
         datetime created_at
         datetime updated_at
     }
@@ -332,6 +378,25 @@ erDiagram
         varchar revoked_reason
     }
 
+    USER {
+        bigint user_id PK
+        varchar provider
+        varchar provider_user_id UK
+        varchar email
+        varchar password_hash
+        varchar display_name
+        boolean email_verified
+        datetime created_at
+        datetime last_login_at
+        datetime revoked_at
+    }
+
+    USER_PROFILE {
+        bigint user_id PK
+        varchar default_gender
+        datetime updated_at
+    }
+
     SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION_REQUEST_EXCLUDE_SONG : "excludeSongIds (@ElementCollection)"
@@ -344,9 +409,16 @@ erDiagram
     ANONYMOUS_SESSION ||--o{ LIKE_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ BOOKMARK_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ RECOMMENDATION_REQUEST : "sessionId 라이프사이클 owner (FK 없음)"
+    USER ||--o| USER_PROFILE : "v0.4 draft — 1:1 선호 영속 (FK user_id)"
+    USER ||--o{ VOICE_RANGE : "v0.4 draft — 머지 후 user owner (sessionId→userId 치환)"
+    USER ||--o{ VOICE_RANGE_SNAPSHOT : "v0.4 draft — 머지 후 user owner"
+    USER ||--o{ LIKE_FEEDBACK : "v0.4 draft — 머지 후 user owner"
+    USER ||--o{ BOOKMARK_FEEDBACK : "v0.4 draft — 머지 후 user owner"
+    USER ||--o{ RECOMMENDATION : "v0.4 draft — 머지 후 user owner"
 ```
 
 - 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession` — 8개 엔티티.
+- v0.4 draft (미구현): `User`, `UserProfile` — 정식 회원 + 선호 프로필. 머지 시 sessionId-bound 엔티티의 owner 가 sessionId → userId 로 치환된다 (dual column 권장, FK 없이 application 레벨 owner). 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 전환 정책/머지 = `anonymous-to-account-conversion.md`.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join. `AnonymousSession` 이 sessionId 라이프사이클(TTL 만료 / 회전 / 머지) 의 단일 owner — cascade-delete 는 `AnonymousSessionTtlCleanup` / `SessionRotationService` 가 application 레벨에서 명시적 DELETE.
 
 ## 7) 오픈 이슈

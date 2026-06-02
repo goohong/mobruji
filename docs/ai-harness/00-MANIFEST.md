@@ -29,8 +29,11 @@ nmae 는 sub-agent launch 시 역할에 따라 아래 문서만 발췌 주입 (�
 | **FE** | `mobruji-fe` | Governance, Standards, `actors/sub-agent §2 fe` | - |
 | **Rev** | `mobruji-rev` | Governance, Standards, `rev-e2e-2-stages.md` | Architect (설계 의도) |
 | **Helper** | (mac `helper:0.0`) | `docs/ai-harness/actors/helper.md` (SoT) | Governance (말투) |
+| **Infra** (온디맨드) | ephemeral `agent-<id>` | Governance, `actors/sub-agent §2-infra` | Ops (tools/workflow) |
 
 > sub-agent 는 `docs/ai-harness/actors/sub-agent.md` 한 개만 로드하면 공통+역할 룰이 모두 들어옵니다 (CLAUDE.md §13 포인터와 동일).
+>
+> **infra 는 상시 가동 아님 (ADR-0027 옵션 D)**: be/fe/rev/plan 4 사이클과 달리 자율 엔진 dispatcher `CYCLES=(be,fe,rev,plan)` 에 미포함 — nmae/mmae 가 infra 백로그 누적 또는 보호 영역 변경 PR 발의 시 ephemeral 워크트리로 온디맨드 launch (자동 dispatch 미지원, 자율 self-dispatch 는 엔진 지원 후속 이슈). 임계치 룰 = `actors/nmae.md §11-9`.
 
 ## 3. 작업 트랙 (Triage)
 

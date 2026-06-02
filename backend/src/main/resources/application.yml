@@ -73,16 +73,17 @@ management:
 # spec: docs/features/recommendation-algorithm-v1.md §9
 # - voiceFit 0.5: 음역 적합이 1순위
 # - genre 0.2:    v1에서 입력 신호 없음(가중치만 보존)
-# - mood 0.2:     분위기 일치 가산
+# - mood 0.3:     분위기 연속 유사도 가산 (#1485 — 이진 0.2 → 변별력 강화 위해 가중 상향)
 # - popularity 0.1: 모든 곡 popularity=1.0 (시드에 컬럼 없음) → 동일 가산
 # - tempoMatch 0.1: v2(#218) 신규. 곡 BPM ↔ 사용자 선호(또는 mood default) BPM 거리 기반.
 recommendation:
   weights:
     voice-fit: 0.5
     genre: 0.2
-    mood: 0.2
+    mood: 0.3
     popularity: 0.1
     tempo-match: 0.1
+    generation: 0.15
   diversity:
     max-same-artist: 2
     max-same-genre: 4
@@ -100,6 +101,19 @@ recommendation:
       GROOVY: 110
       NOSTALGIC: 90
     fallback-bpm: 110
+  # #1487 generationFit 신호 설정.
+  # distance-tolerance-years: |songReleaseYear - representativeYear|가 이 값 이상이면 0, 미만이면 선형 감쇠.
+  # representative-year: 연령대별 "대표 시기"(그 세대가 즐겨 부르는 곡이 많이 나온 시기 추정값).
+  #   곡 발매연도가 이 값에 가까울수록 가산. 연령대 미입력 시 generationFit=0(랭킹 무영향).
+  generation:
+    distance-tolerance-years: 15
+    representative-year:
+      TEENS: 2022
+      TWENTIES: 2015
+      THIRTIES: 2005
+      FORTIES: 1995
+      FIFTIES: 1985
+      SIXTIES_PLUS: 1975
   result-count: 10
   jitter-magnitude: 0.01
   # spec §3 비기능 — 결정성: 같은 입력 → 같은 결과.

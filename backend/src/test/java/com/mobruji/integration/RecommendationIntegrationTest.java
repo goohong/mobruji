@@ -3,8 +3,10 @@ package com.mobruji.integration;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,6 +84,11 @@ class RecommendationIntegrationTest {
                 .body("recommendations.size()", lessThanOrEqualTo(10))
                 .body("recommendations[0].rankPosition", equalTo(1))
                 .body("recommendations[0].matchReason", notNullValue())
+                // 설명가능성(#1484): top-level voiceFit(0~1) + 짧은 한국어 사유 노출
+                .body("recommendations[0].voiceFit", notNullValue())
+                .body("recommendations[0].voiceFit", greaterThanOrEqualTo(0.0f))
+                .body("recommendations[0].voiceFit", lessThanOrEqualTo(1.0f))
+                .body("recommendations[0].voiceFitReason", notNullValue())
                 .body("recommendations[0].breakdown", notNullValue())
                 .body("recommendations[0].breakdown.keyMatch", notNullValue())
                 .body("recommendations[0].breakdown.rangeFit", notNullValue())
@@ -97,7 +104,10 @@ class RecommendationIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .body("requestId", equalTo(requestId))
-                .body("recommendations.size()", greaterThan(0));
+                .body("recommendations.size()", greaterThan(0))
+                // 재조회 경로는 breakdown 미영속 → voiceFit/voiceFitReason 도 null (#1484)
+                .body("recommendations[0].voiceFit", nullValue())
+                .body("recommendations[0].voiceFitReason", nullValue());
     }
 
     @Test
@@ -126,6 +136,55 @@ class RecommendationIntegrationTest {
                         org.hamcrest.Matchers.greaterThanOrEqualTo(0.0f))
                 .body("recommendations[0].breakdown.tempoMatch",
                         org.hamcrest.Matchers.lessThanOrEqualTo(1.0f));
+    }
+
+    @Test
+    @DisplayName("E2E (#1487): ageGroup 입력 시 201 + breakdown.generationFit가 (0,1] 범위로 노출된다")
+    void e2e_ageGroupGenerationFitInResponse() {
+        // given: 시드 곡 releaseYear=2020. ageGroup=TWENTIES 대표 시기=2015, tolerance=15
+        //        → 거리 5 → generationFit = 1 - 5/15 ≈ 0.667 (> 0)
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e04",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "ageGroup": "TWENTIES"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].breakdown.generationFit", notNullValue())
+                .body("recommendations[0].breakdown.generationFit", greaterThan(0.0f))
+                .body("recommendations[0].breakdown.generationFit", lessThanOrEqualTo(1.0f));
+    }
+
+    @Test
+    @DisplayName("E2E (#1487): ageGroup 미입력 시 generationFit=0.0 (랭킹 무영향, 하위호환)")
+    void e2e_noAgeGroupGenerationFitZero() {
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e05",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].breakdown.generationFit", equalTo(0.0f));
     }
 
     @Test

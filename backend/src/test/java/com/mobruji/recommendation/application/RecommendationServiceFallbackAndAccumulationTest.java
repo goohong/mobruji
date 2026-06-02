@@ -104,7 +104,7 @@ class RecommendationServiceFallbackAndAccumulationTest {
         stubFlow(3, /* mood */ null, List.of());
         recommendationService.create(command(null, List.of()));
         verify(recommendationScorer, atLeastOnce())
-                .score(any(Song.class), anyInt(), anyInt(), isNull(), any(), any());
+                .score(any(Song.class), anyInt(), anyInt(), isNull(), any(), any(), any());
     }
 
     @Test
@@ -155,7 +155,7 @@ class RecommendationServiceFallbackAndAccumulationTest {
 
         final ArgumentCaptor<Song> songCaptor = ArgumentCaptor.forClass(Song.class);
         verify(recommendationScorer, atLeastOnce())
-                .score(songCaptor.capture(), anyInt(), anyInt(), any(), any(), any());
+                .score(songCaptor.capture(), anyInt(), anyInt(), any(), any(), any(), any());
         assertThat(songCaptor.getAllValues()).extracting(Song::getId)
                 .doesNotContain(2L)
                 .containsExactlyInAnyOrder(1L, 3L);
@@ -176,8 +176,8 @@ class RecommendationServiceFallbackAndAccumulationTest {
         }
         given(songRepository.findAll()).willReturn(catalog);
 
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5);
-        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any()))
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0);
+        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any()))
                 .willReturn(new Scored(0.9, breakdown));
 
         final List<ScoredSong> diversified = new ArrayList<>();
@@ -196,7 +196,7 @@ class RecommendationServiceFallbackAndAccumulationTest {
 
     private static CreateRecommendationCommand command(final Mood mood, final List<Long> excludeSongIds) {
         return new CreateRecommendationCommand(
-                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, excludeSongIds);
+                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, excludeSongIds);
     }
 
     private static String extractToken(final String message, final String key) {
@@ -210,7 +210,7 @@ class RecommendationServiceFallbackAndAccumulationTest {
     private static RecommendationRequestEntity persistedRequestEntity(
             final Mood mood, final List<Long> excludeSongIds) throws Exception {
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, excludeSongIds);
+                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, excludeSongIds);
         final Field idField = RecommendationRequestEntity.class.getDeclaredField("id");
         idField.setAccessible(true);
         idField.set(entity, 100L);

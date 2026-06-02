@@ -118,6 +118,36 @@ def test_on_exec_success_no_pr_completes_and_notifies(monkeypatch):
     assert notes and "끝났" in notes[0]
 
 
+def test_on_exec_success_be_no_pr_does_not_complete(monkeypatch):
+    """#1455: be(구현 사이클)가 PR 없이 rc==0 종료 → 완료 전이 금지 + ⚠️ 미완 알림."""
+    import subagent_runner as sr, tools_cycle as tc
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: None)
+    comp, comments, notes = [], [], []
+    monkeypatch.setattr(tc, "set_directive_forum_status",
+                        lambda did, st, **k: comp.append((did, st)))
+    monkeypatch.setattr(sr, "_safe_comment",
+                        lambda tid, body: comments.append(body))
+    monkeypatch.setattr(sr, "_notify_user_done",
+                        lambda title, body, thread_id="", **k: notes.append(body))
+    sr._on_exec_success("be", "d1", "제목", "T1", "/tmp/wt")
+    assert comp == []  # 완료 전이 안 함
+    assert notes == []  # 완료 알림 안 함
+    assert comments and "미완" in comments[0]
+
+
+def test_on_exec_success_fe_no_pr_does_not_complete(monkeypatch):
+    """#1455: fe 도 구현 사이클 — PR 없이 종료는 미완."""
+    import subagent_runner as sr, tools_cycle as tc
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: None)
+    comp = []
+    monkeypatch.setattr(tc, "set_directive_forum_status",
+                        lambda did, st, **k: comp.append((did, st)))
+    monkeypatch.setattr(sr, "_safe_comment", lambda tid, body: None)
+    monkeypatch.setattr(sr, "_notify_user_done", lambda *a, **k: None)
+    sr._on_exec_success("fe", "d2", "제목", "T2", "/tmp/wt")
+    assert comp == []
+
+
 def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
     import subagent_runner as sr, tools_queue as tq
     monkeypatch.setattr(sr, "_find_pr_number", lambda wt: "9")
@@ -161,3 +191,44 @@ def test_ensure_pr_xrefs_adds_both_markers(monkeypatch):
     assert "directive: 1510610000000000002" in body
     assert "cycle-forum: plan:1510548826107154545" in body
     assert "기존 본문" in body  # 기존 보존
+
+
+def test_kill_process_group_noop_for_invalid_pgid(monkeypatch):
+    """#1481: pgid<=1 이면 killpg 호출 안 함 (잘못된 그룹/init 보호)."""
+    import asyncio
+    import subagent_runner as sr
+    calls = []
+    monkeypatch.setattr(sr.os, "killpg", lambda pg, sig: calls.append((pg, sig)))
+    asyncio.run(sr._kill_process_group(0, "be", reason="t"))
+    asyncio.run(sr._kill_process_group(1, "be", reason="t"))
+    assert calls == []
+
+
+def test_kill_process_group_term_then_kill(monkeypatch):
+    """#1481: 살아있는 그룹 → SIGTERM 후 (유예) SIGKILL 순서로 자식까지 정리."""
+    import asyncio
+    import signal
+    import subagent_runner as sr
+    sigs = []
+    monkeypatch.setattr(sr.os, "killpg", lambda pg, sig: sigs.append(sig))
+
+    async def _nosleep(_):
+        return None
+    monkeypatch.setattr(sr.asyncio, "sleep", _nosleep)
+    asyncio.run(sr._kill_process_group(12345, "rev", reason="t"))
+    assert sigs == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_kill_process_group_empty_graceful(monkeypatch):
+    """#1481: 그룹에 남은 프로세스 없음(ProcessLookupError) → SIGKILL 안 함, 예외 전파 X."""
+    import asyncio
+    import signal
+    import subagent_runner as sr
+    sigs = []
+
+    def _killpg(pg, sig):
+        sigs.append(sig)
+        raise ProcessLookupError
+    monkeypatch.setattr(sr.os, "killpg", _killpg)
+    asyncio.run(sr._kill_process_group(12345, "be", reason="t"))
+    assert sigs == [signal.SIGTERM]  # SIGTERM 에서 비어 있음 확인 → 즉시 return

@@ -68,8 +68,9 @@ export const Chip = forwardRef<HTMLElement, ChipProps>(function Chip(
   ref,
 ) {
   const { tone = "neutral", pressed, children, className } = props;
+  // 버튼 모드 chip 도 press 피드백(#1493). 정적 span chip 은 비대화형이라 제외.
   const base =
-    "inline-flex h-8 items-center rounded-full px-3 text-xs font-medium transition";
+    "inline-flex h-8 items-center rounded-full px-3 text-xs font-medium transition active:scale-[0.96]";
 
   // 버튼 모드: onClick이 있거나 pressed가 명시되면 button으로 렌더.
   if ("onClick" in props && props.onClick !== undefined) {

@@ -10,6 +10,7 @@ import java.util.Random;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.recommendation.domain.ScoreBreakdown;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
@@ -32,13 +33,25 @@ class RecommendationScorerTest {
         return new RecommendationProperties.Tempo(40.0, moodDefaults, 110);
     }
 
+    private static RecommendationProperties.Generation defaultGeneration() {
+        final Map<com.mobruji.recommendation.domain.AgeGroup, Integer> representativeYear = new EnumMap<>(
+                com.mobruji.recommendation.domain.AgeGroup.class);
+        representativeYear.put(com.mobruji.recommendation.domain.AgeGroup.TEENS, 2022);
+        representativeYear.put(com.mobruji.recommendation.domain.AgeGroup.TWENTIES, 2015);
+        representativeYear.put(com.mobruji.recommendation.domain.AgeGroup.THIRTIES, 2005);
+        representativeYear.put(com.mobruji.recommendation.domain.AgeGroup.FORTIES, 1995);
+        representativeYear.put(com.mobruji.recommendation.domain.AgeGroup.FIFTIES, 1985);
+        representativeYear.put(com.mobruji.recommendation.domain.AgeGroup.SIXTIES_PLUS, 1975);
+        return new RecommendationProperties.Generation(15.0, representativeYear);
+    }
+
     /**
      * spec §9 v2 가중치 (tempoMatch 0.1 추가).
      */
     private static RecommendationProperties defaultProperties() {
         return new RecommendationProperties(
-                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
     }
 
@@ -105,12 +118,34 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("moodMatch: 같으면 1, 다르면 0, 요청 null이면 0")
+    @DisplayName("moodMatch (#1485): 정확히 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 연속 유사도(0~1)")
     void moodMatch_cases() {
+        // 정확 일치 = 1.0 (기존 회귀 가드 유지)
         assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, Mood.UPBEAT)).isEqualTo(1.0);
-        assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, Mood.CALM)).isEqualTo(0.0);
+        // 미입력/곡 mood 부재 = 0.0 (신호 없음)
         assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, null)).isEqualTo(0.0);
         assertThat(RecommendationScorer.moodMatch(null, Mood.UPBEAT)).isEqualTo(0.0);
+        // 불일치는 더 이상 0.0 이 아니라 연속 유사도 — 가까운 분위기일수록 높다 (변별력).
+        final double upbeatGroovy = RecommendationScorer.moodMatch(Mood.GROOVY, Mood.UPBEAT);
+        final double upbeatEmotional = RecommendationScorer.moodMatch(Mood.EMOTIONAL, Mood.UPBEAT);
+        assertThat(upbeatGroovy).isStrictlyBetween(0.0, 1.0);
+        assertThat(upbeatEmotional).isStrictlyBetween(0.0, 1.0);
+        assertThat(upbeatGroovy).isGreaterThan(upbeatEmotional);
+    }
+
+    @Test
+    @DisplayName("moodSimilarity (#1485): 대칭이며 [0,1] 범위 — EMOTIONAL은 NOSTALGIC > CALM > UPBEAT 순으로 유사")
+    void moodSimilarity_gradient() {
+        // 대칭성
+        assertThat(RecommendationScorer.moodSimilarity(Mood.CALM, Mood.EMOTIONAL))
+                .isEqualTo(RecommendationScorer.moodSimilarity(Mood.EMOTIONAL, Mood.CALM));
+        // 슬픈 발라드(EMOTIONAL) 요청 기준 가까운 분위기 gradient
+        final double toNostalgic = RecommendationScorer.moodSimilarity(Mood.NOSTALGIC, Mood.EMOTIONAL);
+        final double toCalm = RecommendationScorer.moodSimilarity(Mood.CALM, Mood.EMOTIONAL);
+        final double toUpbeat = RecommendationScorer.moodSimilarity(Mood.UPBEAT, Mood.EMOTIONAL);
+        assertThat(toNostalgic).isGreaterThan(toCalm);
+        assertThat(toCalm).isGreaterThan(toUpbeat);
+        assertThat(toUpbeat).isStrictlyBetween(0.0, 1.0);
     }
 
     @Test
@@ -181,12 +216,12 @@ class RecommendationScorerTest {
         // given: jitter=0 으로 가중 합산 정확값 검증. C major root=60 을 음역 중앙(53~67)에 두어 rangeFit=1.0
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
         final RecommendationProperties propsNoJitter = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when: 음역 53~67 (root 중앙) + UPBEAT mood + preferredBpm=128 → tempoMatch=1.0
         final RecommendationScorer.Scored scored = scorer(propsNoJitter)
-                .score(song, 53, 67, Mood.UPBEAT, 128, new Random(42));
+                .score(song, 53, 67, Mood.UPBEAT, 128, null, new Random(42));
         // then: 0.5*1.0 + 0.2*0 + 0.2*1.0 + 0.1*1.0 + 0.1*1.0 = 0.9 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.voiceRangeFit()).isEqualTo(1.0);
         assertThat(scored.moodMatch()).isEqualTo(1.0);
@@ -199,7 +234,7 @@ class RecommendationScorerTest {
     void score_breakdownAllFieldsInUnitInterval() {
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         final RecommendationScorer.Scored scored = scorer(defaultProperties())
-                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+                .score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(0));
         final ScoreBreakdown breakdown = scored.breakdown();
         assertThat(breakdown.keyMatch()).isBetween(0.0, 1.0);
         assertThat(breakdown.rangeFit()).isBetween(0.0, 1.0);
@@ -214,7 +249,7 @@ class RecommendationScorerTest {
     void score_breakdownKnownKeyShape() {
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         final RecommendationScorer.Scored scored = scorer(defaultProperties())
-                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+                .score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(0));
         assertThat(scored.breakdown().keyMatch()).isEqualTo(1.0);
         assertThat(scored.breakdown().genreMatch()).isEqualTo(0.0);
         assertThat(scored.breakdown().popularity()).isEqualTo(1.0);
@@ -225,7 +260,7 @@ class RecommendationScorerTest {
     void score_breakdownUnknownKey() {
         final Song song = buildSong(MusicalKey.UNKNOWN, Mood.UPBEAT, 120);
         final RecommendationScorer.Scored scored = scorer(defaultProperties())
-                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+                .score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(0));
         assertThat(scored.breakdown().keyMatch()).isEqualTo(0.5);
     }
 
@@ -234,7 +269,7 @@ class RecommendationScorerTest {
     void toMatchReason_bothMatch() {
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         // total=0.7, breakdown: rangeFit=1.0, moodMatch=1.0, tempoMatch=1.0
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 1.0, 1.0, 1.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0);
         final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.7, breakdown);
         assertThat(scored.toMatchReason(song, Mood.UPBEAT)).contains("음역대").contains("분위기");
     }
@@ -244,7 +279,7 @@ class RecommendationScorerTest {
     void toMatchReason_rangeOnly_atBoundary() {
         // given: rangeFit=0.7 임계 inclusive, moodMatch=0.0 (분기 2)
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.7, 0.0, 0.0, 1.0, 0.5);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.7, 0.0, 0.0, 1.0, 0.5, 0.0);
         final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.5, breakdown);
         // when
         final String reason = scored.toMatchReason(song, Mood.UPBEAT);
@@ -257,7 +292,7 @@ class RecommendationScorerTest {
     void toMatchReason_moodOnly_belowRangeBoundary() {
         // given: rangeFit=0.69 (0.7 임계 바로 아래), moodMatch=1.0 (분기 3)
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.CALM, 120);
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.69, 0.0, 1.0, 1.0, 0.5);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.69, 0.0, 1.0, 1.0, 0.5, 0.0);
         final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.4, breakdown);
         // when: requestedMood는 UPBEAT지만 코드는 song.getMood() 사용 (라인 207L 회귀 가드)
         final String reason = scored.toMatchReason(song, Mood.UPBEAT);
@@ -271,7 +306,7 @@ class RecommendationScorerTest {
     void toMatchReason_neither_returnsFallback() {
         // given: rangeFit=0.6, moodMatch=0.0 (분기 4)
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.6, 0.0, 0.0, 1.0, 0.5);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.6, 0.0, 0.0, 1.0, 0.5, 0.0);
         final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.3, breakdown);
         // when
         final String reason = scored.toMatchReason(song, Mood.UPBEAT);
@@ -285,7 +320,7 @@ class RecommendationScorerTest {
         // given: song.mood와 requestedMood가 다른 상황에서도 moodMatch=1.0이면 분기 1 진입.
         // 통합 메시지는 코드 라인 201L에서 requestedMood를 사용하므로 회귀 가드.
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.CALM, 120);
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.7, 0.0, 1.0, 1.0, 1.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.7, 0.0, 1.0, 1.0, 1.0, 0.0);
         final RecommendationScorer.Scored scored = new RecommendationScorer.Scored(0.7, breakdown);
         // when
         final String reason = scored.toMatchReason(song, Mood.UPBEAT);
@@ -302,14 +337,14 @@ class RecommendationScorerTest {
         final Song voiceOnly = buildSong(MusicalKey.C_MAJOR, Mood.CALM, 120);
         final Song moodOnly = buildSong(MusicalKey.UNKNOWN, Mood.UPBEAT, 120); // voiceFit=0.5(중립)
         final RecommendationProperties voiceHeavy = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.8, 0.0, 0.1, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.8, 0.0, 0.1, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED); // jitter 0 → 결정적
         // when
         final double voiceScore = scorer(voiceHeavy)
-                .score(voiceOnly, 50, 80, Mood.UPBEAT, 120, new Random(0)).total();
+                .score(voiceOnly, 50, 80, Mood.UPBEAT, 120, null, new Random(0)).total();
         final double moodScore = scorer(voiceHeavy)
-                .score(moodOnly, 50, 80, Mood.UPBEAT, 120, new Random(0)).total();
+                .score(moodOnly, 50, 80, Mood.UPBEAT, 120, null, new Random(0)).total();
         // then: voiceFit 1.0 * 0.8 = 0.8 vs voiceFit 0.5 * 0.8 + mood 1.0 * 0.1 = 0.5 → voiceOnly 우세
         assertThat(voiceScore).isGreaterThan(moodScore);
     }
@@ -321,14 +356,14 @@ class RecommendationScorerTest {
         final Song voiceOnly = buildSong(MusicalKey.C_MAJOR, Mood.CALM, 120);
         final Song moodOnly = buildSong(MusicalKey.UNKNOWN, Mood.UPBEAT, 120);
         final RecommendationProperties moodHeavy = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.1, 0.0, 0.8, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.1, 0.0, 0.8, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final double voiceScore = scorer(moodHeavy)
-                .score(voiceOnly, 50, 80, Mood.UPBEAT, 120, new Random(0)).total();
+                .score(voiceOnly, 50, 80, Mood.UPBEAT, 120, null, new Random(0)).total();
         final double moodScore = scorer(moodHeavy)
-                .score(moodOnly, 50, 80, Mood.UPBEAT, 120, new Random(0)).total();
+                .score(moodOnly, 50, 80, Mood.UPBEAT, 120, null, new Random(0)).total();
         // then: voiceFit 1.0 * 0.1 = 0.1 vs voiceFit 0.5 * 0.1 + mood 1.0 * 0.8 = 0.85 → moodOnly 우세
         assertThat(moodScore).isGreaterThan(voiceScore);
     }
@@ -340,14 +375,14 @@ class RecommendationScorerTest {
         final Song fastSong = buildSong(MusicalKey.UNKNOWN, null, 130); // 음역중립 0.5
         final Song slowSong = buildSong(MusicalKey.UNKNOWN, null, 60);
         final RecommendationProperties tempoHeavy = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 1.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when: preferredBpm=130 → fast 곡이 정확 매칭, slow 곡은 distance=70 > tolerance(40) → 0.0
         final double fastScore = scorer(tempoHeavy)
-                .score(fastSong, 50, 80, null, 130, new Random(0)).total();
+                .score(fastSong, 50, 80, null, 130, null, new Random(0)).total();
         final double slowScore = scorer(tempoHeavy)
-                .score(slowSong, 50, 80, null, 130, new Random(0)).total();
+                .score(slowSong, 50, 80, null, 130, null, new Random(0)).total();
         // then
         assertThat(fastScore).isGreaterThan(slowScore);
     }
@@ -358,12 +393,12 @@ class RecommendationScorerTest {
         // given: 모든 가중치 0 + jitter 0.01
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         final RecommendationProperties allZero = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(allZero)
-                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(42));
+                .score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(42));
         // then: total은 [-0.01, 0.01] 내 (가중 합산이 0이라 jitter만 남는다)
         assertThat(scored.total()).isBetween(-0.01, 0.01);
     }
@@ -374,12 +409,12 @@ class RecommendationScorerTest {
         // given
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         final RecommendationProperties dead = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(dead)
-                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+                .score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(0));
         // then
         assertThat(scored.total()).isEqualTo(0.0);
     }
@@ -390,12 +425,12 @@ class RecommendationScorerTest {
         // given: voiceFit 1.0 단일 신호, 나머지 0
         final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
         final RecommendationProperties voiceOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when: 음역 53~67 (root=60 중앙, 완전 포함) → rangeFit=1.0
         final RecommendationScorer.Scored scored = scorer(voiceOnly)
-                .score(song, 53, 67, null, null, new Random(0));
+                .score(song, 53, 67, null, null, null, new Random(0));
         // then: rangeFit=1.0 * 1.0 = 1.0
         assertThat(scored.total()).isEqualTo(1.0);
     }
@@ -406,12 +441,12 @@ class RecommendationScorerTest {
         // given
         final Song song = buildSong(MusicalKey.UNKNOWN, Mood.CALM, null);
         final RecommendationProperties moodOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 1.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(moodOnly)
-                .score(song, 50, 80, Mood.CALM, null, new Random(0));
+                .score(song, 50, 80, Mood.CALM, null, null, new Random(0));
         // then: moodMatch=1.0 * 1.0
         assertThat(scored.total()).isEqualTo(1.0);
     }
@@ -422,12 +457,12 @@ class RecommendationScorerTest {
         // given
         final Song song = buildSong(MusicalKey.UNKNOWN, null, null);
         final RecommendationProperties popOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 1.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(popOnly)
-                .score(song, 50, 80, null, null, new Random(0));
+                .score(song, 50, 80, null, null, null, new Random(0));
         // then: popularity 신호=1.0 * 가중치 1.0
         assertThat(scored.total()).isEqualTo(1.0);
     }
@@ -438,12 +473,12 @@ class RecommendationScorerTest {
         // given
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         final RecommendationProperties genreOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 1.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(genreOnly)
-                .score(song, 50, 80, Mood.UPBEAT, 120, new Random(0));
+                .score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(0));
         // then: genre 신호=0.0 → 가중치 무관 항상 0.0
         assertThat(scored.total()).isEqualTo(0.0);
     }
@@ -454,12 +489,12 @@ class RecommendationScorerTest {
         // given: voiceFit=1, genre 신호=0(고정), mood=1, popularity=1, tempo=1 → 합 1+0+1+1+1 = 4
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
         final RecommendationProperties allOnes = new RecommendationProperties(
-                new RecommendationProperties.Weights(1.0, 1.0, 1.0, 1.0, 1.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(1.0, 1.0, 1.0, 1.0, 1.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when: 음역 53~67 (root 중앙) → rangeFit=1.0. UPBEAT mood + preferredBpm 128 → tempoMatch=1.0
         final RecommendationScorer.Scored scored = scorer(allOnes)
-                .score(song, 53, 67, Mood.UPBEAT, 128, new Random(0));
+                .score(song, 53, 67, Mood.UPBEAT, 128, null, new Random(0));
         // then: 1 + 0 + 1 + 1 + 1 = 4.0
         assertThat(scored.total()).isEqualTo(4.0);
     }
@@ -470,18 +505,18 @@ class RecommendationScorerTest {
         // given: 동일 입력, 가중치만 다른 두 properties
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
         final RecommendationProperties propsA = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         final RecommendationProperties propsB = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.1, 0.0, 0.9, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.1, 0.0, 0.9, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final ScoreBreakdown breakdownA = scorer(propsA)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0)).breakdown();
+                .score(song, 50, 80, Mood.UPBEAT, 128, null, new Random(0)).breakdown();
         final ScoreBreakdown breakdownB = scorer(propsB)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(0)).breakdown();
+                .score(song, 50, 80, Mood.UPBEAT, 128, null, new Random(0)).breakdown();
         // then: raw 신호는 가중치와 독립 — 동일해야 한다
         assertThat(breakdownA.keyMatch()).isEqualTo(breakdownB.keyMatch());
         assertThat(breakdownA.rangeFit()).isEqualTo(breakdownB.rangeFit());
@@ -497,12 +532,12 @@ class RecommendationScorerTest {
         // given
         final Song song = buildSong(MusicalKey.UNKNOWN, null, null);
         final RecommendationProperties tempoOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 1.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 1.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(tempoOnly)
-                .score(song, 50, 80, null, null, new Random(0));
+                .score(song, 50, 80, null, null, null, new Random(0));
         // then: tempoMatch 중립 0.5 * 가중치 1.0 = 0.5
         assertThat(scored.total()).isEqualTo(0.5);
     }
@@ -514,8 +549,8 @@ class RecommendationScorerTest {
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
         final RecommendationProperties props = defaultProperties();
         // when: 동일 seed 두 번
-        final RecommendationScorer.Scored a = scorer(props).score(song, 50, 80, Mood.UPBEAT, 120, new Random(7));
-        final RecommendationScorer.Scored b = scorer(props).score(song, 50, 80, Mood.UPBEAT, 120, new Random(7));
+        final RecommendationScorer.Scored a = scorer(props).score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(7));
+        final RecommendationScorer.Scored b = scorer(props).score(song, 50, 80, Mood.UPBEAT, 120, null, new Random(7));
         // then: 가중 합산과 raw 신호 모두 동일
         assertThat(a.total()).isEqualTo(b.total());
         assertThat(a.breakdown()).isEqualTo(b.breakdown());
@@ -680,12 +715,12 @@ class RecommendationScorerTest {
         // given: w=(0.4, 0.0, 0.3, 0.2, 0.1). 합 1.0. 신호값 voiceFit=1, genre=0(고정), mood=1, popularity=1, tempo=1
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
         final RecommendationProperties asymmetric = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.4, 0.0, 0.3, 0.2, 0.1),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.4, 0.0, 0.3, 0.2, 0.1, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when: 음역 53~67 (root 중앙) → rangeFit=1.0
         final RecommendationScorer.Scored scored = scorer(asymmetric)
-                .score(song, 53, 67, Mood.UPBEAT, 128, new Random(0));
+                .score(song, 53, 67, Mood.UPBEAT, 128, null, new Random(0));
         // then: 0.4*1 + 0.0*0 + 0.3*1 + 0.2*1 + 0.1*1 = 1.0 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.total()).isCloseTo(1.0, offset(1e-9));
     }
@@ -697,12 +732,12 @@ class RecommendationScorerTest {
         // (곡 음역 53~67 완전 포함), center=63, half=10, dist=3 → centeredness=1-3/10=0.7 → rangeFit=0.7
         final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
         final RecommendationProperties voiceOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.7, 0.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.7, 0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final RecommendationScorer.Scored scored = scorer(voiceOnly)
-                .score(song, 53, 73, null, null, new Random(0));
+                .score(song, 53, 73, null, null, null, new Random(0));
         // then: rangeFit=0.7 * 가중치 0.7 = 0.49
         assertThat(scored.voiceRangeFit()).isCloseTo(0.7, offset(1e-9));
         assertThat(scored.total()).isCloseTo(0.49, offset(1e-9));
@@ -714,12 +749,12 @@ class RecommendationScorerTest {
         // given: voiceFit 가중치 0.6 + mood 가중치 0.3. 나머지 0. 완전 매칭
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, null);
         final RecommendationProperties twoSignals = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.6, 0.0, 0.3, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.0,
+                new RecommendationProperties.Weights(0.6, 0.0, 0.3, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when: 음역 53~67 (root 중앙) → rangeFit=1.0
         final RecommendationScorer.Scored scored = scorer(twoSignals)
-                .score(song, 53, 67, Mood.UPBEAT, null, new Random(0));
+                .score(song, 53, 67, Mood.UPBEAT, null, null, new Random(0));
         // then: 0.6*1.0 + 0.3*1.0 = 0.9 (1 ULP 수준 부동소수점 허용)
         assertThat(scored.total()).isCloseTo(0.9, offset(1e-9));
     }
@@ -732,9 +767,9 @@ class RecommendationScorerTest {
         final RecommendationProperties withJitter = defaultProperties();
         // when: 동일 입력 + 동일 seed
         final double totalA = scorer(withJitter)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(1234)).total();
+                .score(song, 50, 80, Mood.UPBEAT, 128, null, new Random(1234)).total();
         final double totalB = scorer(withJitter)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(1234)).total();
+                .score(song, 50, 80, Mood.UPBEAT, 128, null, new Random(1234)).total();
         // then: 비트 동일 (jitter 흔들림이 있어도 seed가 같으면 결정적)
         assertThat(totalA).isEqualTo(totalB);
     }
@@ -745,14 +780,14 @@ class RecommendationScorerTest {
         // given: 동일 입력, 가중치 0 (가중 합산 0) + jitter 0.01 → total = jitter 그 자체
         final Song song = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 128);
         final RecommendationProperties jitterOnly = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when
         final double totalSeed1 = scorer(jitterOnly)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(1)).total();
+                .score(song, 50, 80, Mood.UPBEAT, 128, null, new Random(1)).total();
         final double totalSeed2 = scorer(jitterOnly)
-                .score(song, 50, 80, Mood.UPBEAT, 128, new Random(2)).total();
+                .score(song, 50, 80, Mood.UPBEAT, 128, null, new Random(2)).total();
         // then: 서로 다른 jitter 값 + 둘 다 [-0.01, 0.01] 범위 내
         assertThat(totalSeed1).isNotEqualTo(totalSeed2);
         assertThat(totalSeed1).isBetween(-0.01, 0.01);
@@ -767,11 +802,13 @@ class RecommendationScorerTest {
         final Song songB = buildSong(MusicalKey.G_MAJOR, Mood.CALM, 80);
         final RecommendationProperties props = defaultProperties();
         // when: 케이스 A 두 번
-        final RecommendationScorer.Scored a1 = scorer(props).score(songA, 50, 80, Mood.UPBEAT, 120, new Random(99));
-        final RecommendationScorer.Scored a2 = scorer(props).score(songA, 50, 80, Mood.UPBEAT, 120, new Random(99));
+        final RecommendationScorer.Scored a1 = scorer(props).score(songA, 50, 80, Mood.UPBEAT, 120, null, new Random(
+                99));
+        final RecommendationScorer.Scored a2 = scorer(props).score(songA, 50, 80, Mood.UPBEAT, 120, null, new Random(
+                99));
         // 케이스 B 두 번
-        final RecommendationScorer.Scored b1 = scorer(props).score(songB, 60, 74, Mood.CALM, 70, new Random(99));
-        final RecommendationScorer.Scored b2 = scorer(props).score(songB, 60, 74, Mood.CALM, 70, new Random(99));
+        final RecommendationScorer.Scored b1 = scorer(props).score(songB, 60, 74, Mood.CALM, 70, null, new Random(99));
+        final RecommendationScorer.Scored b2 = scorer(props).score(songB, 60, 74, Mood.CALM, 70, null, new Random(99));
         // then: 각 케이스는 호출 간 비트 동일. 케이스 간에는 서로 달라야 함 (다른 입력이면 다른 결과).
         assertThat(a1.total()).isEqualTo(a2.total());
         assertThat(a1.breakdown()).isEqualTo(a2.breakdown());
@@ -786,12 +823,12 @@ class RecommendationScorerTest {
         // given: voiceFit 가중치 1.0, 완전 매칭 → 가중 합산 베이스 1.0. jitter 0.01.
         final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
         final RecommendationProperties props = new RecommendationProperties(
-                new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0),
-                DEFAULT_DIVERSITY, defaultTempo(), 10, 0.01,
+                new RecommendationProperties.Weights(1.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
         // when / then: 음역 53~67 (root 중앙) → 베이스 1.0. 100개 seed 반복. 모든 결과는 [0.99, 1.01] 안.
         for (int seed = 0; seed < 100; seed++) {
-            final double total = scorer(props).score(song, 53, 67, null, null, new Random(seed)).total();
+            final double total = scorer(props).score(song, 53, 67, null, null, null, new Random(seed)).total();
             assertThat(total).as("seed=%d", seed).isBetween(0.99, 1.01);
         }
     }
@@ -804,5 +841,96 @@ class RecommendationScorerTest {
                 .mood(mood)
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();
+    }
+
+    private static Song buildSongWithYear(final Integer releaseYear) {
+        return Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .mood(Mood.UPBEAT)
+                .releaseYear(releaseYear)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+    }
+
+    @Test
+    @DisplayName("generationFit (#1487): 곡 발매연도 == 대표 시기면 1.0 (정확 매칭)")
+    void generationFit_exactMatch_returnsOne() {
+        // TWENTIES 대표 시기 = 2015 (defaultGeneration)
+        assertThat(RecommendationScorer.generationFit(2015, AgeGroup.TWENTIES, defaultGeneration()))
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("generationFit (#1487): 거리 == tolerance(15) 이면 0.0, 절반이면 0.5 (선형 감쇠)")
+    void generationFit_linearDecay() {
+        // TWENTIES=2015, tolerance=15
+        assertThat(RecommendationScorer.generationFit(2000, AgeGroup.TWENTIES, defaultGeneration())).isEqualTo(0.0);
+        assertThat(RecommendationScorer.generationFit(2030, AgeGroup.TWENTIES, defaultGeneration())).isEqualTo(0.0);
+        assertThat(RecommendationScorer.generationFit(2022, AgeGroup.TWENTIES, defaultGeneration()))
+                .isCloseTo(1.0 - 7.0 / 15.0, offset(1e-9));
+    }
+
+    @Test
+    @DisplayName("generationFit (#1487): tolerance 초과는 clamp 0.0")
+    void generationFit_beyondTolerance_clampedToZero() {
+        assertThat(RecommendationScorer.generationFit(1980, AgeGroup.TWENTIES, defaultGeneration())).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("generationFit (#1487): ageGroup null 이면 0.0 (가중 없음, 하위호환)")
+    void generationFit_nullAgeGroup_returnsZero() {
+        assertThat(RecommendationScorer.generationFit(2015, null, defaultGeneration())).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("generationFit (#1487): 곡 발매연도 null 이면 0.0 (정보 없음)")
+    void generationFit_nullReleaseYear_returnsZero() {
+        assertThat(RecommendationScorer.generationFit(null, AgeGroup.TWENTIES, defaultGeneration())).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("generationFit (#1487): 표에 없는 연령대면 0.0")
+    void generationFit_unknownAgeGroup_returnsZero() {
+        final RecommendationProperties.Generation emptyTable = new RecommendationProperties.Generation(15.0,
+                java.util.Map.of());
+        assertThat(RecommendationScorer.generationFit(2015, AgeGroup.TWENTIES, emptyTable)).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("score (#1487): ageGroup 입력 시 대표 시기에 가까운 곡이 더 높은 total (랭킹 반영)")
+    void score_ageGroupAffectsRanking() {
+        // given: generation 가중만 1.0, 나머지 0 → generationFit 단독 비교. jitter=0.
+        final RecommendationProperties generationOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        final Song nearSong = buildSongWithYear(2015); // TWENTIES 대표 시기
+        final Song farSong = buildSongWithYear(2000);
+        // when
+        final double near = scorer(generationOnly)
+                .score(nearSong, 50, 80, Mood.UPBEAT, 120, AgeGroup.TWENTIES, new Random(0)).total();
+        final double far = scorer(generationOnly)
+                .score(farSong, 50, 80, Mood.UPBEAT, 120, AgeGroup.TWENTIES, new Random(0)).total();
+        // then: 대표 시기에 가까운 곡이 더 높다
+        assertThat(near).isGreaterThan(far);
+    }
+
+    @Test
+    @DisplayName("score (#1487): ageGroup null 이면 generationFit=0 → 랭킹 무영향(하위호환)")
+    void score_nullAgeGroup_noGenerationImpact() {
+        final RecommendationProperties generationOnly = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        final Song nearSong = buildSongWithYear(2015);
+        final Song farSong = buildSongWithYear(2000);
+        // when: ageGroup=null → 두 곡 모두 generationFit=0
+        final double near = scorer(generationOnly)
+                .score(nearSong, 50, 80, Mood.UPBEAT, 120, null, new Random(0)).total();
+        final double far = scorer(generationOnly)
+                .score(farSong, 50, 80, Mood.UPBEAT, 120, null, new Random(0)).total();
+        // then: generationFit 가중이 0 가산이라 동일
+        assertThat(near).isEqualTo(far);
     }
 }

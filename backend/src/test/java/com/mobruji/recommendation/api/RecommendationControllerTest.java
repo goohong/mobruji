@@ -24,6 +24,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.mobruji.recommendation.application.CreateRecommendationCommand;
+import com.mobruji.recommendation.application.NextRecommendationCommand;
 import com.mobruji.recommendation.application.RecommendationService;
 import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationResult;
@@ -179,6 +180,52 @@ class RecommendationControllerTest {
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors[?(@.field == 'sessionId')].rejectedValue", hasItem("***")));
+    }
+
+    @Test
+    @DisplayName("POST /recommendations/next: 정상 입력 → 201 + requestId/recommendations 매핑")
+    void createFromSeeds_validRequest_returns201() throws Exception {
+        // given
+        final Song song = Song.builder()
+                .title("next-title")
+                .artist("next-artist")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+        final RecommendationResult recommendationResult = new RecommendationResult(
+                REQUEST_ID,
+                List.of(new ScoredRecommendation(song, 0.8, "이어 부르기 좋음", 1)));
+        given(recommendationService.createFromSeeds(any(NextRecommendationCommand.class)))
+                .willReturn(recommendationResult);
+
+        // when / then
+        mockMvc.perform(post("/api/v1/recommendations/next")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "sessionId": "%s",
+                          "seedSongIds": [1, 2]
+                        }
+                        """.formatted(SESSION_ID)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.requestId", is((int) REQUEST_ID)))
+                .andExpect(jsonPath("$.recommendations", hasSize(1)))
+                .andExpect(jsonPath("$.recommendations[0].song.title", is("next-title")));
+    }
+
+    @Test
+    @DisplayName("POST /recommendations/next: seedSongIds 빈 배열 → 400 + fieldErrors[].field=seedSongIds")
+    void createFromSeeds_emptySeedSongIds_returns400() throws Exception {
+        mockMvc.perform(post("/api/v1/recommendations/next")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "sessionId": "%s",
+                          "seedSongIds": []
+                        }
+                        """.formatted(SESSION_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'seedSongIds')]").exists());
     }
 
     @Test

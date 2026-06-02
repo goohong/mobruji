@@ -30,6 +30,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
@@ -298,6 +299,40 @@ describe("RecommendPage", () => {
       expect(screen.getByText("곡-1")).toBeInTheDocument();
     });
     expect(screen.getByText("곡-2")).toBeInTheDocument();
+  });
+
+  // ---------- 스와이프 뷰 토글 (#1489) ----------
+  it("'스와이프' 토글 시 한 곡씩 카드(덱)로 전환되고 진행 표시가 보인다", async () => {
+    const user = userEvent.setup();
+    sessionMock.set({ sessionId: "sess-swipe", voiceRangeId: 9 });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 9,
+      sessionId: "sess-swipe",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValueOnce(
+      buildResponseWithSongIds(200, [1, 2]),
+    );
+    // 스와이프 덱은 남은 카드가 적으면 다음 batch 를 프리페치한다. 두 번째 응답을
+    // 비워(seed 소진) 추가 페치가 깔끔히 멈추도록 한다.
+    createRecommendationMock.mockResolvedValue(buildResponseWithSongIds(201, []));
+
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("곡-1")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("radio", { name: "스와이프" }));
+
+    // 덱 진행 표시 + 첫 곡만 노출 (리스트의 두 번째 곡 카드는 사라진다).
+    expect(screen.getByTestId("swipe-progress")).toHaveTextContent("1 / 2");
+    expect(screen.getByTestId("swipe-card")).toBeInTheDocument();
   });
 
   // ---------- 무한 스크롤 자동 트리거 회귀 가드 ----------

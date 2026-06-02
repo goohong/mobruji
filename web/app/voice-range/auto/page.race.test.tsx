@@ -148,6 +148,7 @@ function buildDeps(overrides: Partial<AutoMeasureDeps> = {}): AutoMeasureDeps {
     totalSampleCount: 5,
   });
   return {
+    checkEnvironment: vi.fn().mockReturnValue(null),
     requestMic: vi.fn().mockResolvedValue(fakeStream()),
     runPhase: vi.fn().mockImplementation(async (phase, _stream, onSample) => {
       const sample: PitchSample = {
