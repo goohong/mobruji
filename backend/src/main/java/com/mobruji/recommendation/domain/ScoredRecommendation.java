@@ -13,8 +13,9 @@ import com.mobruji.song.domain.Song;
  * {@code readById} 경로(과거 추천 재조회)에서는 {@code null}이 들어온다. UI는 null이면 펼침 영역을 숨기는 식으로 동작한다.
  *
  * <p>{@link #voiceFit()} / {@link #voiceFitReason()}은 "왜 이 곡?"(설명 가능성, #1484) 전면 노출용으로,
- * breakdown 의 {@code rangeFit} 신호를 곡별 음역 적합도 점수(0~1)와 짧은 한국어 사유로 풀어 준다. breakdown 이
- * 없는(과거 추천 재조회) 경로에서는 둘 다 {@code null} — 응답 DTO 에서 그대로 통과시킨다.
+ * breakdown 의 {@code rangeFit} 신호를 곡별 음역 적합도 점수(0~1)와 짧은 한국어 사유로 풀어 준다.
+ * {@link #moodFit()} / {@link #moodFitReason()}은 같은 패턴으로 {@code moodMatch} 분위기 연속 유사도(#1485)를 노출한다.
+ * breakdown 이 없는(과거 추천 재조회) 경로에서는 모두 {@code null} — 응답 DTO 에서 그대로 통과시킨다.
  */
 public record ScoredRecommendation(
         Song song,
@@ -73,5 +74,40 @@ public record ScoredRecommendation(
             return "원곡 키가 음역대에 다소 부담될 수 있어요";
         }
         return "원곡 키가 음역대와 잘 맞지 않아요";
+    }
+
+    /**
+     * 곡별 분위기 적합도 점수(0~1). breakdown 의 {@code moodMatch} 연속 유사도(#1485)를 전면 노출한다.
+     * 과거 추천 재조회 경로(breakdown null)에서는 {@code null}.
+     */
+    public Double moodFit() {
+        return breakdown == null ? null : breakdown.moodMatch();
+    }
+
+    /**
+     * 분위기 적합도를 풀어 주는 짧은 한국어 사유. breakdown 이 없으면(과거 추천 재조회) {@code null}.
+     * 분위기 신호가 0.0(분위기 미입력 또는 곡 mood 부재)이면 설명할 근거가 없으므로 {@code null}.
+     */
+    public String moodFitReason() {
+        if (breakdown == null) {
+            return null;
+        }
+        return describeMoodFit(breakdown.moodMatch());
+    }
+
+    private static String describeMoodFit(final double moodMatch) {
+        if (moodMatch <= 0.0) {
+            return null;
+        }
+        if (moodMatch >= 1.0) {
+            return "요청하신 분위기와 딱 맞아요";
+        }
+        if (moodMatch >= 0.6) {
+            return "요청하신 분위기와 잘 어울려요";
+        }
+        if (moodMatch >= 0.3) {
+            return "요청하신 분위기와 어느 정도 비슷해요";
+        }
+        return "요청하신 분위기와는 결이 조금 달라요";
     }
 }

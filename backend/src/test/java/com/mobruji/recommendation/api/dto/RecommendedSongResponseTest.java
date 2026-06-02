@@ -35,6 +35,9 @@ class RecommendedSongResponseTest {
         // 설명가능성(#1484): voiceFit은 breakdown.rangeFit 노출, 사유는 적합도 구간별 한국어
         assertThat(recommendedSongResponse.voiceFit()).isEqualTo(0.92);
         assertThat(recommendedSongResponse.voiceFitReason()).isEqualTo("원곡 키가 음역대에 아주 잘 맞아요");
+        // 분위기 변별력(#1485): moodFit은 breakdown.moodMatch 노출, 사유는 유사도 구간별 한국어
+        assertThat(recommendedSongResponse.moodFit()).isEqualTo(0.6);
+        assertThat(recommendedSongResponse.moodFitReason()).isEqualTo("요청하신 분위기와 잘 어울려요");
         assertThat(recommendedSongResponse.rankPosition()).isEqualTo(2);
         assertThat(recommendedSongResponse.breakdown()).isNotNull();
         assertThat(recommendedSongResponse.breakdown().keyMatch()).isEqualTo(1.0);
@@ -59,9 +62,11 @@ class RecommendedSongResponseTest {
         final RecommendedSongResponse recommendedSongResponse = RecommendedSongResponse.from(scoredRecommendation);
 
         assertThat(recommendedSongResponse.breakdown()).isNull();
-        // 설명가능성(#1484): breakdown 없는 재조회 경로면 voiceFit/voiceFitReason 도 null
+        // 설명가능성(#1484/#1485): breakdown 없는 재조회 경로면 voiceFit/moodFit 도 모두 null
         assertThat(recommendedSongResponse.voiceFit()).isNull();
         assertThat(recommendedSongResponse.voiceFitReason()).isNull();
+        assertThat(recommendedSongResponse.moodFit()).isNull();
+        assertThat(recommendedSongResponse.moodFitReason()).isNull();
         assertThat(recommendedSongResponse.score()).isEqualTo(0.5);
         assertThat(recommendedSongResponse.matchReason()).isEqualTo("전반적 매칭");
         assertThat(recommendedSongResponse.rankPosition()).isEqualTo(1);
