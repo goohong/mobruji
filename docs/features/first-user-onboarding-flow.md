@@ -3,7 +3,7 @@ feature: 첫 사용자 온보딩 플로우 (3 페르소나 진입 경로)
 slug: first-user-onboarding-flow
 status: draft
 owner: @goohong
-scope: web
+scope: user
 related_issues: []
 related_prs: []
 last_reviewed: 2026-06-03
