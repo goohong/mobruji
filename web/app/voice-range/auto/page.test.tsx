@@ -28,6 +28,7 @@ import userEvent from "@testing-library/user-event";
 
 import AutoVoiceRangePage, {
   AutoMeasureDeps,
+  checkMicEnvironment,
 } from "./page";
 import { ApiError } from "@/lib/api/client";
 import { createVoiceRange } from "@/lib/api/voice-range";
@@ -105,6 +106,7 @@ function buildDeps(overrides: Partial<AutoMeasureDeps> = {}): AutoMeasureDeps {
     totalSampleCount: 5,
   });
   return {
+    checkEnvironment: vi.fn().mockReturnValue(null),
     requestMic: vi.fn().mockResolvedValue(fakeStream()),
     runPhase: vi.fn().mockImplementation(async (phase, _stream, onSample) => {
       const sample: PitchSample = {
@@ -191,6 +193,94 @@ describe("AutoVoiceRangePage 권한 / 안내", () => {
 
     // setTimeout(1.2s) 만료 전에 즉시 push 가 호출되었는지 확인.
     expect(pushMock).toHaveBeenCalledWith("/voice-range");
+  });
+});
+
+describe("AutoVoiceRangePage insecure context / 미지원 사전 점검", () => {
+  it("insecure context(HTTP) 면 HTTPS 안내를 노출하고 측정을 시작하지 않는다", async () => {
+    const user = userEvent.setup();
+    const requestMic = vi.fn();
+    const deps = buildDeps({
+      checkEnvironment: vi
+        .fn()
+        .mockReturnValue(
+          "이 연결(HTTP)에선 브라우저가 마이크를 막습니다 — HTTPS 또는 localhost 가 필요합니다.",
+        ),
+      requestMic,
+    });
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    // NotAllowedError 와 구분된, HTTP 원인을 명확히 알리는 메시지.
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /HTTPS 또는 localhost 가 필요합니다/,
+      );
+    });
+    expect(screen.getByRole("alert")).not.toHaveTextContent(
+      /권한이 거부되었습니다/,
+    );
+
+    // 환경이 막혀 있으면 getUserMedia 를 시도조차 하지 않는다.
+    expect(requestMic).not.toHaveBeenCalled();
+    // 자동 redirect 도 띄우지 않아 사용자가 사유를 읽을 수 있다.
+    expect(pushMock).not.toHaveBeenCalled();
+    // 단, 수동 입력 fallback 버튼은 제공된다.
+    expect(
+      screen.getByRole("button", { name: /지금 수동 입력으로 이동/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("getUserMedia 미지원 환경이면 미지원 안내를 노출한다", async () => {
+    const user = userEvent.setup();
+    const requestMic = vi.fn();
+    const deps = buildDeps({
+      checkEnvironment: vi
+        .fn()
+        .mockReturnValue(
+          "이 브라우저에서는 마이크 측정을 지원하지 않습니다. 수동 입력을 이용해주세요.",
+        ),
+      requestMic,
+    });
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /마이크 측정을 지원하지 않습니다/,
+      );
+    });
+    expect(requestMic).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkMicEnvironment (insecure context 사전 점검 함수)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("isSecureContext=false 면 HTTPS 안내 문구를 돌려준다", () => {
+    vi.stubGlobal("window", { isSecureContext: false });
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: () => Promise.resolve() },
+    });
+    expect(checkMicEnvironment()).toMatch(/HTTPS 또는 localhost/);
+  });
+
+  it("getUserMedia 가 없으면 미지원 안내를 돌려준다", () => {
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", {});
+    expect(checkMicEnvironment()).toMatch(/지원하지 않습니다/);
+  });
+
+  it("secure context + getUserMedia 지원이면 null 을 돌려준다", () => {
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: () => Promise.resolve() },
+    });
+    expect(checkMicEnvironment()).toBeNull();
   });
 });
 
