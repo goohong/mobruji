@@ -605,10 +605,17 @@ class DirectiveCompleteOnMergeTests(unittest.TestCase):
         self.assertEqual(bot.extract_directive_ids_from_body(None), [])  # type: ignore[arg-type]
 
     def test_extract_directive_id_case_insensitive(self) -> None:
-        body = "DIRECTIVE: 1234567890123 / closes Directive 1234567890124"
+        # #1473: 줄 시작 앵커 도입 — 줄 중간 prose 언급은 의도적으로 미매칭.
+        # 줄 시작 토큰만 대소문자 무관하게 추출.
+        body = (
+            "DIRECTIVE: 1234567890123\n"
+            "closes Directive 1234567890124\n"
+            "본문 중간 mentions directive 9999999999999 는 미매칭"
+        )
         ids = bot.extract_directive_ids_from_body(body)
         self.assertIn("1234567890123", ids)
         self.assertIn("1234567890124", ids)
+        self.assertNotIn("9999999999999", ids)
 
     def test_fetch_recent_merged_prs_graceful_on_gh_failure(self) -> None:
         # subprocess.run mock — rc=1 simulating gh fail.
