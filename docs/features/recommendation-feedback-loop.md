@@ -5,7 +5,7 @@ status: draft
 owner: @mobruji-maestro
 scope: recommendation
 related_issues: [1486, 1489]
-related_prs: []
+related_prs: [1545]
 last_reviewed: 2026-06-03
 ---
 
