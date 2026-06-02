@@ -38,6 +38,10 @@ class RecommendedSongResponseTest {
         // 분위기 변별력(#1485): moodFit은 breakdown.moodMatch 노출, 사유는 유사도 구간별 한국어
         assertThat(recommendedSongResponse.moodFit()).isEqualTo(0.6);
         assertThat(recommendedSongResponse.moodFitReason()).isEqualTo("요청하신 분위기와 잘 어울려요");
+        // 연습 지원(#1494): 곡 음역(57~81) → HARD + 최고음 A5 사유
+        assertThat(recommendedSongResponse.practiceDifficulty()).isEqualTo(com.mobruji.song.domain.Difficulty.HARD);
+        assertThat(recommendedSongResponse.practiceDifficultyReason())
+                .isEqualTo("최고음 A5, 고음·넓은 음역이라 도전적인 곡이에요");
         assertThat(recommendedSongResponse.rankPosition()).isEqualTo(2);
         assertThat(recommendedSongResponse.breakdown()).isNotNull();
         assertThat(recommendedSongResponse.breakdown().keyMatch()).isEqualTo(1.0);
@@ -67,6 +71,10 @@ class RecommendedSongResponseTest {
         assertThat(recommendedSongResponse.voiceFitReason()).isNull();
         assertThat(recommendedSongResponse.moodFit()).isNull();
         assertThat(recommendedSongResponse.moodFitReason()).isNull();
+        // 연습 지원(#1494): 곡 속성 파생이라 재조회 경로에서도 채워진다. 음역 미보유 → 난이도 null + graceful 사유
+        assertThat(recommendedSongResponse.practiceDifficulty()).isNull();
+        assertThat(recommendedSongResponse.practiceDifficultyReason())
+                .isEqualTo("아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요");
         assertThat(recommendedSongResponse.score()).isEqualTo(0.5);
         assertThat(recommendedSongResponse.matchReason()).isEqualTo("전반적 매칭");
         assertThat(recommendedSongResponse.rankPosition()).isEqualTo(1);
