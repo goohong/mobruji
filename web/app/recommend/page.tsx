@@ -46,7 +46,10 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
 import {
+  AgeGroup,
   createRecommendation,
+  Mood,
+  RecommendationCreateRequest,
   RecommendationResponse,
   RecommendedSongResponse,
 } from "@/lib/api/recommendation";
@@ -60,6 +63,7 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
+import { RecommendFilters } from "./components/RecommendFilters";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 import { SongDetailModal } from "./components/SongDetailModal";
 import { SongDetailContent } from "./components/SongDetailContent";
@@ -99,6 +103,14 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const appendExcluded = useSessionStore((state) => state.appendExcluded);
   const appendHistory = useHistoryStore((state) => state.appendRecommendation);
 
+  // 즉석 페르소나(P-C) 입력 — 분위기/나이대 (directive roadmap-mood-age-ui).
+  // 영속하지 않는 화면 로컬 상태. 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터
+  // 재발화된다. 미선택(null)은 createRecommendation 에서 필드를 생략 → 기존 동작 유지.
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [selectedAgeGroup, setSelectedAgeGroup] = useState<AgeGroup | null>(
+    null,
+  );
+
   const isVoiceRangeReady =
     voiceRangeQuery.isSuccess &&
     voiceRangeQuery.data !== undefined &&
@@ -129,20 +141,35 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     readonly unknown[],
     number
   >({
-    queryKey: ["recommendations", sessionId, voiceRangeIdFromStore],
+    queryKey: [
+      "recommendations",
+      sessionId,
+      voiceRangeIdFromStore,
+      selectedMood,
+      selectedAgeGroup,
+    ],
     enabled:
       isVoiceRangeReady &&
       voiceRangeLow !== undefined &&
       voiceRangeHigh !== undefined,
     initialPageParam: 0,
-    queryFn: () =>
-      createRecommendation({
+    queryFn: () => {
+      const request: RecommendationCreateRequest = {
         sessionId: voiceRangeSessionId!,
         voiceRangeLow: voiceRangeLow!,
         voiceRangeHigh: voiceRangeHigh!,
         // 호출 시점의 최신 누적 리스트를 BE 로 전달.
         excludeSongIds: useSessionStore.getState().excludedSongIds,
-      }),
+      };
+      // 미선택(null)이면 필드를 생략해 기존 호출 형태/하위호환을 유지한다.
+      if (selectedMood !== null) {
+        request.mood = selectedMood;
+      }
+      if (selectedAgeGroup !== null) {
+        request.ageGroup = selectedAgeGroup;
+      }
+      return createRecommendation(request);
+    },
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.recommendations.length === 0) {
         return undefined;
@@ -161,7 +188,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   // 0 으로 리셋한다.
   useEffect(() => {
     lastProcessedPageCountRef.current = 0;
-  }, [sessionId, voiceRangeIdFromStore]);
+  }, [sessionId, voiceRangeIdFromStore, selectedMood, selectedAgeGroup]);
 
   useEffect(() => {
     if (!pages || pages.length === 0) {
@@ -291,6 +318,13 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
             </Link>
           </div>
         </header>
+
+        <RecommendFilters
+          selectedMood={selectedMood}
+          selectedAgeGroup={selectedAgeGroup}
+          onMoodChange={setSelectedMood}
+          onAgeGroupChange={setSelectedAgeGroup}
+        />
 
         <RecommendationFeed
           query={recommendQuery}
