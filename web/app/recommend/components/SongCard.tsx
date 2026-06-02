@@ -69,6 +69,7 @@ import {
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
+import { FitBadge, FitReasons } from "./FitBadge";
 import { AlbumCoverThumbnail } from "./SongDetailContent";
 
 /**
@@ -198,7 +199,15 @@ export function SongCard(props: SongCardProps) {
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {/*
+           * closes #1484 — 음역 적합도 배지. BE 가 voiceFit 을 내려준 추천 컨텍스트에서만
+           * 노출하며, 카드 표면에서는 짧은 라벨("음역")로 폭을 아낀다. 모달 모드에서도
+           * 한눈에 보이는 핵심 신호라 그대로 유지한다.
+           */}
+          {item && typeof item.voiceFit === "number" ? (
+            <FitBadge label="음역" fit={item.voiceFit} />
+          ) : null}
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {/*
            * matchReason / score 는 모달 모드에서는 카드 표면이 아닌 상세 모달에서
@@ -510,8 +519,10 @@ function MatchReasonExpander({
       {expanded ? (
         <div
           id={panelId}
-          className="flex flex-col gap-2 rounded-xl bg-[var(--bg-subtle)] p-3 text-xs text-[var(--text-secondary)]"
+          className="flex flex-col gap-3 rounded-xl bg-[var(--bg-subtle)] p-3 text-xs text-[var(--text-secondary)]"
         >
+          {/* closes #1484 — BE 산출 음역/분위기 적합도 + 한국어 사유를 추정 breakdown 위에 노출. */}
+          <FitReasons item={item} />
           <dl className="flex flex-col gap-1.5">
             {breakdown.map((entry) => (
               <BreakdownRow key={entry.key} entry={entry} />

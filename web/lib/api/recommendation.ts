@@ -103,10 +103,23 @@ export type SongResponse = {
   albumCoverUrl?: string | null;
 };
 
+/**
+ * 설명가능성 필드 (BE PR #1502 / 이슈 #1484):
+ *   - `voiceFit` (0~1): 곡별 음역 적합도 점수. breakdown `rangeFit` 신호를 곡 단위로 노출.
+ *   - `voiceFitReason`: 음역 적합도를 설명하는 짧은 한국어 사유 ("왜 이 곡?").
+ *   - `moodFit` (0~1) / `moodFitReason`: 같은 패턴으로 분위기 적합도(#1485)를 노출.
+ *
+ * breakdown 이 없는 과거 추천 재조회 경로에서는 모두 `null`/생략 — fe 는 값이 있을 때만
+ * 적합도 배지/사유를 노출하고, 없으면 종전대로 matchReason + 클라이언트 추정 breakdown 만 보여준다.
+ */
 export type RecommendedSongResponse = {
   song: SongResponse;
   score: number;
   matchReason: string;
+  voiceFit?: number | null;
+  voiceFitReason?: string | null;
+  moodFit?: number | null;
+  moodFitReason?: string | null;
   rankPosition: number;
 };
 
