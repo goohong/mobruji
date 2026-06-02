@@ -4,7 +4,7 @@ slug: roadmap-queue-autoseed
 status: draft
 owner: @mobruji-maestro
 scope: infra
-related_issues: []
+related_issues: [1530]
 related_prs: []
 last_reviewed: 2026-06-03
 ---
@@ -207,10 +207,9 @@ bash tools/cycle-status/update.sh <cycle> set-idle \
 
 본 spec PR 은 docs only. impl 은 후속(infra 사이클):
 
-- [ ] **본 SPEC PR (plan, 현재)**: `docs/features/roadmap-queue-autoseed.md` + `docs/features/README.md` §9 인덱스 sync.
-- [ ] **impl PR 1 (be/infra)**: `tools/directive-board/autoseed.sh` (또는 bot.py `backlog_autoseed_loop`) 신설 — idle 감지 + 백로그 picking + G1~G5 가드 + `directive_append.sh` 호출. pytest/bats 가드 단위 테스트.
-- [ ] **impl PR 2 (be/infra)**: `directive_append.sh` 의 `--source` / `--seed-issue` / `--assigned-cycle` / `--polished` 인자 확장 + seeded template body(§5-5).
-- [ ] **impl PR 3 (be/infra)**: `backlog-scan.sh` 가 `source=autoseed` 구분 표시(운영 가시성) + DIGEST seed 알림 1줄.
+- [x] **본 SPEC PR (plan)**: `docs/features/roadmap-queue-autoseed.md` + `docs/features/README.md` §9 인덱스 sync. (#1523)
+- [x] **impl PR 1+2 (be/infra)**: `tools/directive-board/autoseed.sh` 신설 — idle 감지 + 백로그 picking + G1~G5 가드 + `directive_append.sh` 호출 + scope→cycle 매핑 + provenance template. `directive_append.sh` 의 `--source` / `--seed-issue` / `--assigned-cycle` / `--polished` 인자 확장. `tools/tests/test_directive_autoseed.sh` 가드 단위 테스트(13 시나리오). loop 위치(Q3)는 `--once` 패스 + cron/bot.py 주기 호출 모델 채택(shell 우선 — 단위 테스트 용이). (#1530)
+- [ ] **impl PR 3 (be/infra)**: `backlog-scan.sh` 가 `source=autoseed` 구분 표시(운영 가시성) + DIGEST seed 알림 1줄. (autoseed.sh 가 DIGEST push 는 `AUTOSEED_DIGEST_BIN` hook 으로 이미 지원 — backlog-scan 가시성만 후속)
 - [ ] **(사용자 결정 후, 선택)** priority 라벨 체계 신설 PR — §7 Q1 결정 시.
 
 ### 보호 영역 변경 여부 (필수 명시)
@@ -255,6 +254,7 @@ bash tools/cycle-status/update.sh <cycle> set-idle \
 - 2026-06-03: 5중 안전 가드(G1 pending cap / G2 rate limit / G3 high-stakes 제외 / G4 중복 방지 / G5 실패 격리) 정형화. G1 cap 이 seeded-only 카운트인 이유 — 사람 directive 우선순위를 밀어내지 않기 위함.
 - 2026-06-03: priority 라벨 부재 확인(`gh label list`) → 우선순위 source 를 §8 Q1 오픈으로 남기고, 라벨 부재 시 createdAt asc fallback 으로 동작하게 설계.
 - 2026-06-03: seeded entry 의 자동 구현·신규 이슈 발굴·stale close 는 OOS — 각각 nmae+sub-agent 기존 흐름 / [[autonomous-cycle-orchestration]] / [[directive-board-stale-close-policy]] cover.
+- 2026-06-03: impl PR 1+2 구현(#1530). Q3 loop 위치 = shell 스크립트(`autoseed.sh --once`) + cron/bot.py 주기 호출 채택 — bot.py async loop 보다 단위 테스트 격리가 쉬워 G1~G5 가드를 fake gh/append 로 검증. Q1 우선순위 source = priority 라벨 부재로 createdAt asc fallback(라벨 생기면 prank 정렬이 자동 우선). G4 cooldown(⑤) 은 seed_issue 영구 dedup(jsonl=SoT)으로 대체 — 한 번 시드된 이슈는 board entry 가 남아 재시드 0건(cooldown 보다 강한 보장).
 
 ## 10) References
 
