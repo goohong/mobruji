@@ -21,7 +21,8 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
- * <li>rangeFit: 곡 키 추정 보컬 음역(root±7 semitones)과 사용자 음역의 overlap 비율 (0~1).</li>
+ * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=곡 음역(root±7)과 사용자 음역의 overlap 비율,
+ * centeredness=곡 키 중심이 사용자 음역 중앙에 가까운 정도. 넓은 음역에서 overlap 이 포화돼도 음역대별 변별력 유지(#1452).</li>
  * <li>genreMatch: v1에서 입력 필드 없음 → 0 고정 (가중치만 보존).</li>
  * <li>moodMatch: 일치 1.0 / 미입력·불일치 0.0.</li>
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
@@ -82,12 +83,21 @@ public class RecommendationScorer {
         }
         final int songLow = rootMidi + MusicalKeyMidiResolver.LOW_OFFSET;
         final int songHigh = rootMidi + MusicalKeyMidiResolver.HIGH_OFFSET;
-        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
         final int songSpan = songHigh - songLow;
-        if (songSpan <= 0) {
+        final int userSpan = voiceHigh - voiceLow;
+        if (songSpan <= 0 || userSpan <= 0) {
             return 0.0;
         }
-        return Math.min(1.0, (double) overlap / songSpan);
+        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율.
+        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
+        final double reachability = Math.min(1.0, (double) overlap / songSpan);
+        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 가장자리·바깥이면 0.0.
+        // reachability 단독은 사용자 음역이 곡 음역을 완전히 포함하면(넓은 음역) 모든 곡이 1.0 으로 포화돼
+        // 음역대 입력이 순위에 반영되지 않는다(#1452). centeredness 를 곱해 음역대별 변별력을 회복한다.
+        final double userCenter = (voiceLow + voiceHigh) / 2.0;
+        final double centerDistance = Math.abs(rootMidi - userCenter);
+        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
+        return reachability * centeredness;
     }
 
     /**
