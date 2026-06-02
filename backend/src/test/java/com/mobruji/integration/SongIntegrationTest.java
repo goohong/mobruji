@@ -121,6 +121,38 @@ class SongIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E: energy 적재 곡은 응답에 round-trip, 미적재 곡은 null")
+    void e2e_responseIncludesEnergy() {
+        // given: energy 채운 곡 + 미적재 곡(graceful degrade 대상)
+        final Long withEnergyId = songRepository.save(Song.builder()
+                .title("Energy Song").artist("Energy Artist")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(72)
+                .energy(0.88f)
+                .build()).getId();
+        final Long nullEnergyId = songRepository.findAll().stream()
+                .filter(song -> "벚꽃 엔딩".equals(song.getTitle()))
+                .findFirst().orElseThrow().getId();
+
+        // when/then: 적재 곡은 round-trip
+        given()
+                .when()
+                .get("/api/v1/songs/" + withEnergyId)
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .body("energy", equalTo(0.88f));
+
+        // 미적재 곡은 null (소비자 graceful degrade)
+        given()
+                .when()
+                .get("/api/v1/songs/" + nullEnergyId)
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .body("energy", org.hamcrest.Matchers.nullValue());
+    }
+
+    @Test
     @DisplayName("Repository 라운드트립: lowMidi/highMidi/difficulty 영속")
     void persist_roundTrip_preservesDifficultyAndMidi() {
         // given

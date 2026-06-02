@@ -411,6 +411,44 @@ class SongTest {
     }
 
     @Test
+    @DisplayName("create: energy 명시 시 그대로 저장")
+    void create_withEnergy_isPersisted() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .energy(0.82f)
+                .build();
+
+        assertThat(song.getEnergy()).isEqualTo(0.82f);
+    }
+
+    @Test
+    @DisplayName("create: energy 미명시 시 null (graceful degrade 대상)")
+    void create_withoutEnergy_isNull() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThat(song.getEnergy()).isNull();
+    }
+
+    @Test
+    @DisplayName("create: energy 0.0~1.0 범위 밖이면 IllegalArgumentException")
+    void create_withEnergyOutOfRange_throws() {
+        assertThatThrownBy(() -> Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .energy(1.5f)
+                .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("energy");
+    }
+
+    @Test
     @DisplayName("create: albumCoverUrl 명시 시 그대로 저장")
     void create_withAlbumCoverUrl_isPersisted() {
         final Song song = Song.builder()

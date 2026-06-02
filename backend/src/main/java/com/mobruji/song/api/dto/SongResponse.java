@@ -25,6 +25,7 @@ public record SongResponse(
         Integer lowMidi,
         Integer highMidi,
         Difficulty difficulty,
+        Float energy,
         String lowestNoteName,
         String highestNoteName,
         String albumCoverUrl
@@ -51,6 +52,7 @@ public record SongResponse(
                 songLowMidi,
                 songHighMidi,
                 song.getDifficulty(),
+                song.getEnergy(),
                 songLowMidi != null ? NoteName.of(songLowMidi) : null,
                 songHighMidi != null ? NoteName.of(songHighMidi) : null,
                 song.getAlbumCoverUrl());

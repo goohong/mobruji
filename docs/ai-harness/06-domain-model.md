@@ -161,6 +161,7 @@
 | `lowMidi` | Integer | nullable | 곡 보컬 멜로디 최저음 (MIDI). 시드부터 적재. PR #96 |
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
+| `energy` | Float | nullable, 0.0~1.0 | 곡 음향 에너지/강렬함. 1차 수기/시드 적재, 자동 산출 후속(§8 Q2). 추천 점수 입력 아님 — null 곡은 소비자 graceful degrade. song-analysis-data-and-consumers.md §5-1, #1490 |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
 - 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
@@ -317,6 +318,7 @@ erDiagram
         int low_midi
         int high_midi
         varchar difficulty
+        decimal energy
         datetime created_at
         datetime updated_at
     }
