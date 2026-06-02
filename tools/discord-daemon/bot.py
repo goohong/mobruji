@@ -208,6 +208,14 @@ DEFAULT_CYCLE_STATUS_PATH: Final[str] = os.path.expanduser("~/.mobruji/cycle-sta
 DEFAULT_CYCLE_COUNTER_PATH: Final[str] = os.path.expanduser(
     "~/.mobruji/cycle-counter.json"
 )
+# 자동 배포 차단 상태 (#1495) — bridge-auto-deploy.sh 가 develop 갈라짐(ff-only
+# 가드) skip 시 서비스별 diverged 항목 기록. digest embed 가 read 해서 한 줄 노출.
+# 회복(ff pull / up-to-date) 시 항목 제거. 스키마:
+#   {"<service>": {"state": "diverged", "local": "abc12345", "remote": "def67890",
+#                  "ts": "2026-06-03T12:00:00+09:00"}}
+DEFAULT_AUTODEPLOY_STATUS_PATH: Final[str] = os.path.expanduser(
+    "~/.mobruji/autodeploy-status.json"
+)
 CYCLE_DIGEST_WORKSPACES: Final[tuple[str, ...]] = ("be", "fe", "rev", "plan")
 CYCLE_DIGEST_MAX_LINE_LEN: Final[int] = 200
 # digest 본문 timestamp — 사용자 요청 #811. Discord 가 보여주는 시각이 클라이언트
@@ -3041,6 +3049,34 @@ def _format_cycle_counter_line(counts: dict[str, int]) -> str:
     return " / ".join(parts)
 
 
+def read_autodeploy_status(path: str = DEFAULT_AUTODEPLOY_STATUS_PATH) -> dict | None:
+    """`~/.mobruji/autodeploy-status.json` 을 읽어 diverged 서비스 dict 로 반환 (#1495).
+
+    bridge-auto-deploy.sh 가 develop 갈라짐(ff-only 가드) skip 시 서비스별 항목을
+    기록, 회복 시 제거한다. digest embed 가 read 해서 차단 상태를 노출.
+
+    반환:
+        - 파일 부재 / JSON 깨짐 / dict 아님 → None (graceful skip).
+        - diverged 항목이 하나도 없으면 ``{}`` (회복 상태 — field 생략).
+        - 그 외 ``{service: {state, local, remote, ts}}`` 형태의 정상 항목만 필터.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("autodeploy-status.json 읽기 실패: path=%s err=%s", path, exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    diverged: dict[str, dict] = {}
+    for service, entry in data.items():
+        if isinstance(entry, dict) and entry.get("state") == "diverged":
+            diverged[service] = entry
+    return diverged
+
+
 def _format_in_progress(raw: object) -> str:
     """`in_progress` 필드를 한 줄 label 로 변환합니다.
 
@@ -3098,6 +3134,7 @@ def format_cycle_digest(
     interval_seconds: int | None = None,
     cycle_counts: dict | None = None,
     directive_summary: dict | None = None,
+    autodeploy_status: dict | None = None,
 ) -> tuple["discord.Embed", str]:
     """4 워크트리(be/fe/rev/plan) digest 를 Discord Embed 로 빌드합니다.
 
@@ -3158,11 +3195,14 @@ def format_cycle_digest(
         embed.color = CYCLE_DIGEST_COLOR_IDLE
         _maybe_add_cycle_counts_field(embed, cycle_counts)
         directive_sig = _maybe_add_directive_board_field(embed, directive_summary)
+        autodeploy_sig = _maybe_add_autodeploy_field(embed, autodeploy_status)
         if interval_seconds is not None:
             embed.set_footer(text=f"interval={interval_seconds}s")
         signature = "unavailable"
         if directive_sig:
             signature = f"{signature}||{directive_sig}"
+        if autodeploy_sig:
+            signature = f"{signature}||{autodeploy_sig}"
         return embed, signature
 
     sig_parts: list[str] = []
@@ -3221,6 +3261,7 @@ def format_cycle_digest(
     embed.color = CYCLE_DIGEST_COLOR_ACTIVE if any_active else CYCLE_DIGEST_COLOR_IDLE
     _maybe_add_cycle_counts_field(embed, cycle_counts)
     directive_sig = _maybe_add_directive_board_field(embed, directive_summary)
+    autodeploy_sig = _maybe_add_autodeploy_field(embed, autodeploy_status)
     if interval_seconds is not None:
         embed.set_footer(text=f"interval={interval_seconds}s")
 
@@ -3235,6 +3276,10 @@ def format_cycle_digest(
     # 시 즉시 사용자에게 가시화 push (P11 사용자 P0 사고 fix).
     if directive_sig:
         sig_parts.append(directive_sig)
+
+    # 자동 배포 차단(#1495) 도 signature 에 포함 — 갈라짐 발생/회복 즉시 delta push.
+    if autodeploy_sig:
+        sig_parts.append(autodeploy_sig)
 
     signature = "||".join(sig_parts)
     return embed, signature
@@ -3299,6 +3344,41 @@ def _maybe_add_directive_board_field(
     value = _truncate_field_line(value)
     embed.add_field(name=name, value=value, inline=False)
     return f"directives={ok_count}/{mismatch_count}/{total}"
+
+
+def _maybe_add_autodeploy_field(
+    embed: "discord.Embed", autodeploy_status: dict | None
+) -> str | None:
+    """``autodeploy_status`` 에 diverged 서비스가 있으면 경고 field 추가 (#1495).
+
+    Args:
+        embed: target embed.
+        autodeploy_status: ``read_autodeploy_status()`` 반환 dict
+            (``{service: {state, local, remote, ts}}``). None/빈 dict → skip.
+
+    Returns:
+        signature fragment (``"autodeploy=svc1,svc2"``, 서비스명 정렬) 또는 None.
+        signature 에 포함하면 갈라짐 발생/회복 시 즉시 delta push.
+    """
+    if not isinstance(autodeploy_status, dict) or not autodeploy_status:
+        return None
+    services = sorted(autodeploy_status)
+    lines: list[str] = []
+    for service in services:
+        entry = autodeploy_status[service]
+        local_short = entry.get("local") if isinstance(entry, dict) else None
+        remote_short = entry.get("remote") if isinstance(entry, dict) else None
+        if isinstance(local_short, str) and isinstance(remote_short, str):
+            lines.append(f"{service}: {local_short} ⇄ {remote_short}")
+        else:
+            lines.append(service)
+    value = _truncate_field_line("\n".join(lines))
+    embed.add_field(
+        name="🚨 자동 배포 차단 (develop 갈라짐)",
+        value=value,
+        inline=False,
+    )
+    return f"autodeploy={','.join(services)}"
 
 
 def resolve_digest_interval(env_value: str | None) -> int:
@@ -3424,6 +3504,7 @@ async def digest_loop(
     cycle_status_path: str = DEFAULT_CYCLE_STATUS_PATH,
     cycle_counter_path: str = DEFAULT_CYCLE_COUNTER_PATH,
     directive_board_state_path: Path | None = None,
+    autodeploy_status_path: str = DEFAULT_AUTODEPLOY_STATUS_PATH,
 ) -> None:
     """on_ready 직후 launch. interval 초 마다 cycle-status digest 를 push 합니다.
 
@@ -3461,11 +3542,13 @@ async def digest_loop(
                             exc,
                         )
                         directive_summary = None
+                autodeploy_status = read_autodeploy_status(autodeploy_status_path)
                 embed, signature = format_cycle_digest(
                     status,
                     interval_seconds=interval,
                     cycle_counts=cycle_counts,
                     directive_summary=directive_summary,
+                    autodeploy_status=autodeploy_status,
                 )
                 now_ts = time_source()
                 should_push = False

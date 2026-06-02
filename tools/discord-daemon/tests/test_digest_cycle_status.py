@@ -560,5 +560,129 @@ class FormatCycleDigestTest(unittest.TestCase):
             self.assertLess(in_progress_idx, recent_idx)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# read_autodeploy_status / 자동 배포 차단 digest field (#1495)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ReadAutodeployStatusTest(unittest.TestCase):
+    """autodeploy-status.json 파싱 + diverged 필터 검증."""
+
+    def _write(self, payload) -> str:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
+            json.dump(payload, handle)
+            return handle.name
+
+    def test_missing_file_returns_none(self) -> None:
+        self.assertIsNone(bot.read_autodeploy_status("/nonexistent/autodeploy.json"))
+
+    def test_malformed_json_returns_none(self) -> None:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write("{not json")
+            tmp_path = handle.name
+        try:
+            self.assertIsNone(bot.read_autodeploy_status(tmp_path))
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    def test_non_dict_returns_none(self) -> None:
+        tmp_path = self._write(["not", "a", "dict"])
+        try:
+            self.assertIsNone(bot.read_autodeploy_status(tmp_path))
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    def test_empty_dict_returns_empty(self) -> None:
+        tmp_path = self._write({})
+        try:
+            self.assertEqual(bot.read_autodeploy_status(tmp_path), {})
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    def test_diverged_entries_only(self) -> None:
+        tmp_path = self._write(
+            {
+                "mobruji-discord-bridge": {
+                    "state": "diverged",
+                    "local": "abc12345",
+                    "remote": "def67890",
+                    "ts": "2026-06-03T12:00:00+09:00",
+                },
+                "mobruji-agent": {"state": "ok"},
+            }
+        )
+        try:
+            result = bot.read_autodeploy_status(tmp_path)
+            self.assertEqual(list(result), ["mobruji-discord-bridge"])
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+class AutodeployDigestFieldTest(unittest.TestCase):
+    """format_cycle_digest 가 자동 배포 차단을 field + signature 로 노출하는지."""
+
+    def _status(self) -> dict:
+        return {
+            "be": {"in_progress": None, "last_completed": None},
+            "fe": {"in_progress": None, "last_completed": None},
+            "rev": {"in_progress": None, "last_completed": None},
+            "plan": {"in_progress": None, "last_completed": None},
+        }
+
+    def test_no_autodeploy_status_adds_no_field(self) -> None:
+        embed, signature = bot.format_cycle_digest(self._status())
+        self.assertNotIn("자동 배포 차단", [f.name for f in embed.fields])
+        self.assertNotIn("autodeploy=", signature)
+
+    def test_empty_autodeploy_status_adds_no_field(self) -> None:
+        embed, signature = bot.format_cycle_digest(self._status(), autodeploy_status={})
+        self.assertFalse(any("자동 배포 차단" in f.name for f in embed.fields))
+        self.assertNotIn("autodeploy=", signature)
+
+    def test_diverged_renders_warning_field_and_signature(self) -> None:
+        autodeploy = {
+            "mobruji-discord-bridge": {
+                "state": "diverged",
+                "local": "abc12345",
+                "remote": "def67890",
+                "ts": "2026-06-03T12:00:00+09:00",
+            }
+        }
+        embed, signature = bot.format_cycle_digest(
+            self._status(), autodeploy_status=autodeploy
+        )
+        warn_field = next(f for f in embed.fields if "자동 배포 차단" in f.name)
+        self.assertIn("mobruji-discord-bridge", warn_field.value)
+        self.assertIn("abc12345", warn_field.value)
+        self.assertIn("def67890", warn_field.value)
+        self.assertIn("autodeploy=mobruji-discord-bridge", signature)
+
+    def test_multiple_services_sorted_in_signature(self) -> None:
+        autodeploy = {
+            "mobruji-discord-bridge": {
+                "state": "diverged",
+                "local": "a1",
+                "remote": "b2",
+            },
+            "mobruji-agent": {"state": "diverged", "local": "c3", "remote": "d4"},
+        }
+        _embed, signature = bot.format_cycle_digest(
+            self._status(), autodeploy_status=autodeploy
+        )
+        self.assertIn("autodeploy=mobruji-agent,mobruji-discord-bridge", signature)
+
+    def test_diverged_shows_in_fallback_path(self) -> None:
+        autodeploy = {
+            "mobruji-agent": {"state": "diverged", "local": "a1", "remote": "b2"}
+        }
+        embed, signature = bot.format_cycle_digest(None, autodeploy_status=autodeploy)
+        self.assertTrue(any("자동 배포 차단" in f.name for f in embed.fields))
+        self.assertIn("autodeploy=mobruji-agent", signature)
+
+
 if __name__ == "__main__":
     unittest.main()
