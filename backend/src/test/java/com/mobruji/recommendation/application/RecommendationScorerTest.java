@@ -105,12 +105,34 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("moodMatch: 같으면 1, 다르면 0, 요청 null이면 0")
+    @DisplayName("moodMatch (#1485): 정확히 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 연속 유사도(0~1)")
     void moodMatch_cases() {
+        // 정확 일치 = 1.0 (기존 회귀 가드 유지)
         assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, Mood.UPBEAT)).isEqualTo(1.0);
-        assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, Mood.CALM)).isEqualTo(0.0);
+        // 미입력/곡 mood 부재 = 0.0 (신호 없음)
         assertThat(RecommendationScorer.moodMatch(Mood.UPBEAT, null)).isEqualTo(0.0);
         assertThat(RecommendationScorer.moodMatch(null, Mood.UPBEAT)).isEqualTo(0.0);
+        // 불일치는 더 이상 0.0 이 아니라 연속 유사도 — 가까운 분위기일수록 높다 (변별력).
+        final double upbeatGroovy = RecommendationScorer.moodMatch(Mood.GROOVY, Mood.UPBEAT);
+        final double upbeatEmotional = RecommendationScorer.moodMatch(Mood.EMOTIONAL, Mood.UPBEAT);
+        assertThat(upbeatGroovy).isStrictlyBetween(0.0, 1.0);
+        assertThat(upbeatEmotional).isStrictlyBetween(0.0, 1.0);
+        assertThat(upbeatGroovy).isGreaterThan(upbeatEmotional);
+    }
+
+    @Test
+    @DisplayName("moodSimilarity (#1485): 대칭이며 [0,1] 범위 — EMOTIONAL은 NOSTALGIC > CALM > UPBEAT 순으로 유사")
+    void moodSimilarity_gradient() {
+        // 대칭성
+        assertThat(RecommendationScorer.moodSimilarity(Mood.CALM, Mood.EMOTIONAL))
+                .isEqualTo(RecommendationScorer.moodSimilarity(Mood.EMOTIONAL, Mood.CALM));
+        // 슬픈 발라드(EMOTIONAL) 요청 기준 가까운 분위기 gradient
+        final double toNostalgic = RecommendationScorer.moodSimilarity(Mood.NOSTALGIC, Mood.EMOTIONAL);
+        final double toCalm = RecommendationScorer.moodSimilarity(Mood.CALM, Mood.EMOTIONAL);
+        final double toUpbeat = RecommendationScorer.moodSimilarity(Mood.UPBEAT, Mood.EMOTIONAL);
+        assertThat(toNostalgic).isGreaterThan(toCalm);
+        assertThat(toCalm).isGreaterThan(toUpbeat);
+        assertThat(toUpbeat).isStrictlyBetween(0.0, 1.0);
     }
 
     @Test

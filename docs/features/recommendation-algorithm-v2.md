@@ -68,7 +68,7 @@ recommendation:
   weights:
     voice-fit: 0.5     # v1 유지 — 음역 적합 1순위
     genre: 0.2         # v1 보존 — 입력 신호 없음(가중치만 유지)
-    mood: 0.2          # v1 유지 — 분위기 일치 가산
+    mood: 0.3          # #1485 — 이진 0.2 → 분위기 연속 유사도로 확장하며 변별력 위해 가중 상향
     popularity: 0.1    # v1 유지 — 모든 곡 popularity=1.0 → 동일 가산
     tempo-match: 0.1   # v2 신규 — 곡 BPM ↔ target BPM 거리 기반
   moodBpm:
@@ -76,7 +76,8 @@ recommendation:
     잔잔: 80
     감성: 95
 ```
-- 합 = **1.1** (정규화 룰 없음 — total = Σ(signal × weight) 가산만, 상대 순위에는 영향 없음).
+- 합 = **1.2** (정규화 룰 없음 — total = Σ(signal × weight) 가산만, 상대 순위에는 영향 없음).
+- `moodMatch` — #1485 에서 이진(1.0/0.0) → 분위기 `(energy, brightness)` 좌표 거리 기반 연속 유사도. 정확 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 0~1. 슬픈 발라드↔록 발라드↔댄스 등 분위기별 변별력 확보.
 - `keyMatch` — **메타 신호. 가중 합산 미포함 (v1 의도 유지)**. breakdown 응답 필드는 제공하나 total score 에는 0 기여. 활성화 결정은 별 사이클 (§9 Q2 후속).
 - 보호 영역(`application.yml`) 변경은 본 spec 범위 밖. 본 spec PR 은 docs only.
 
