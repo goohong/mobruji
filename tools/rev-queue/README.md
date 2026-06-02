@@ -39,7 +39,7 @@ bash tools/rev-queue/rev-queue.sh all      # 세 stage 모두
 | 라벨 | 의미 | 부착 시점 |
 |------|------|----------|
 | `reviewed:claude` | rev 단계 1 (머지 전) 통과 | PR 머지 전 — 머지 게이트 (CLAUDE.md §4 품질 게이트) |
-| `rev-post-merge-pass` | rev 단계 2 (사후) 통과 | develop 머지 1h+ 후 e2e 재실행 통과 |
+| `rev-post-merge-pass` | rev 단계 2 (dev 배포 E2E 검증) 통과 | develop dev 배포 후 배포본 대상 E2E 통과 |
 | `rev-prod-pass` | rev 단계 3 (production) 통과 | release 후 main deploy 환경 e2e 통과 |
 
 ## rev sub-agent 통합
@@ -49,7 +49,7 @@ rev sub-agent prompt (`docs/ai-harness/actors/sub-agent.md §2-rev`) 매 사이�
 ```
 1. bash /home/mobruji/mobruji/tools/rev-queue/rev-queue.sh all   # discovery
 2. stage1 후보 ≥ 1 → 단계 1 e2e 수행 (comment + reviewed:claude 라벨)
-3. stage2 후보 ≥ 1 → 단계 2 사후 audit (comment + rev-post-merge-pass 라벨)
+3. stage2 후보 ≥ 1 → 단계 2 dev 배포 E2E 검증 (comment + rev-post-merge-pass 라벨)
 4. stage3 후보 ≥ 1 → 단계 3 production 검증 (§E-2.3 절차 — comment + rev-prod-pass 라벨)
 5. 모두 빈 큐 → ADR audit / 도메인 audit / cross-ref 정리 등 기존 작업 (§E-1)
 ```

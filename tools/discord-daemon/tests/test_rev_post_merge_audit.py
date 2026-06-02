@@ -149,7 +149,9 @@ class FormatRevPostMergeTest(unittest.TestCase):
     def test_format_inject_joins_pr_numbers(self) -> None:
         text = bot.format_rev_post_merge_inject([100, 101])
         self.assertIn("#100,#101", text)
-        self.assertIn("rev e2e post-merge", text)
+        # (#1461) 단계 2 재정의 — "rev e2e post-merge" → "rev e2e 단계 2" / "dev 배포 E2E 검증"
+        self.assertIn("rev e2e 단계 2", text)
+        self.assertIn("dev 배포 E2E 검증", text)
         self.assertIn("rev-post-merge-pass", text)
 
     def test_format_discord_joins_pr_numbers(self) -> None:
@@ -157,7 +159,8 @@ class FormatRevPostMergeTest(unittest.TestCase):
         self.assertIn("#200", text)
         # (#1447) narrative + '감사' 금지 — 옛 로그형 "rev post-merge audit trigger" 폐기
         self.assertIn("머지됐으므로", text)
-        self.assertIn("코드 리뷰", text)
+        # (#1461) 단계 2 재정의 — "머지 후 코드 리뷰" → "dev 배포 E2E 검증"
+        self.assertIn("dev 배포 E2E 검증", text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
