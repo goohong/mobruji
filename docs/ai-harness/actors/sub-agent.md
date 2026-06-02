@@ -312,6 +312,18 @@ nmae watchdog inject 절차 자체는 `actors/nmae.md §11-2` SoT. sub-agent 본
 - **신규 spec frontmatter 의무** ([[feedback-spec-frontmatter-required]]) — `_template.md` 의 `---` ~ `---` 블록 복제 + 8 필드 (feature/slug/status/owner/scope/related_issues/related_prs/last_reviewed). push 전 `head -1 docs/features/<slug>.md` 가 `---` 인지 확인. `.github/workflows/spec-status-check.yml` 가 누락 시 fail → 머지 차단.
 - **starter 본문 PATCH 전 기존 본문 read 의무** (PR F, `docs/features/forum-starter-template-guard.md`): `forum_edit_starter` 호출 전 기존 starter body read → 6 marker (📌 또는 🛠️ / 💬 / 🆔 / 📋 / 🔖 / footer) 유지한 채 update. 양식 통째 덮어쓰기 시 bot.py 가 graceful reject (5/6 PASS_THRESHOLD).
 
+### 2-infra (온디맨드 ephemeral 워크트리 — 상시 가동 아님, ADR-0027 옵션 D)
+
+> **상시 가동 5번째 사이클이 아니다.** infra 백로그 누적 또는 보호 영역 변경 PR 발의 시 nmae/mmae 가 `Agent` 도구로 온디맨드 launch → 작업 후 ephemeral 워크트리 teardown. 자율 엔진 dispatcher `CYCLES=(be,fe,rev,plan)` 에 미포함 — **자동 dispatch 미지원** (자율 self-dispatch 는 엔진 지원 후속 이슈). 근거: ADR-0027 §86-92, §110-114.
+
+- 작업 디렉토리: helper-launched ephemeral 워크트리 `/home/mobruji/mobruji/.claude/worktrees/agent-<id>` (상시 워크트리 없음). prompt 첫 명령 `cd <워크트리 절대경로>`.
+- 작업 가능 (mobruji repo infra): `.github/workflows/**`, `.github/CODEOWNERS`, `tools/**` (비-docs), root 설정 (`*.yml`, `docker-compose*.yml`, `Dockerfile`, `backend/build.gradle*`·`settings.gradle*`·`gradle/**`, `web/next.config.*`·`package.json`·lockfile, `LICENSE`) + `mobruji-bridge` repo (`bot.py` / discord-daemon — 별 repo + 운영 hot path 라 신중도 가중)
+- 금지: `backend/**` / `web/**` 도메인 구현 코드 (be/fe 영역) / `docs/ai-harness/**`·`docs/features/**`·`docs/decisions/**` (plan 영역 — docs 성격 infra 는 plan 이 owner, ADR-0027 §66)
+- 품질 게이트: 변경 표면별 — workflow YAML = `actionlint` (가용 시) / shell = `shellcheck` (가용 시) / gradle·package.json 변경 시 해당 repo 빌드 sanity. lock 의존 shell test 는 `tools/rev-queue/flock-fallback.sh exec` wrapper 경유 (§2-rev 와 동일 가드).
+- 보호 영역 = 정보성 분류 (라벨 의무 폐지 2026-05-28, rev 가 review 대행). infra PR 도 다른 PR 과 동일하게 rev 사이클 통과 의무 ([[feedback-rev-e2e-always]]) — owner 명시로 rev 신중도 가중이 더 일관됨 (ADR-0027 §73).
+- PR 라벨: `scope:infra` + `session:infra` 명시 부착. `scope:infra → infra` Session 보드 자동 분류는 그대로 (`11-multi-session-runbook.md §478-486`), 실행 주체가 온디맨드 `infra` 역할임이 본 절로 명문화됨.
+- ephemeral 워크트리 teardown 누락 시 디스크 잔존 — helper-launched 와 동일한 정리 룰 적용 (작업 완료 보고 후 nmae 가 정리).
+
 ### 2-helper (sub-agent, helper 본체가 `Agent` 도구로 launch)
 
 - 작업 가능: helper 본체와 동일 — 사용자 응답 / helper 자체 수정 / discord-reply.sh / tools/discord-daemon 등
