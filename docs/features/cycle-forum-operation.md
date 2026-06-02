@@ -4,9 +4,9 @@ slug: cycle-forum-operation
 status: approved
 owner: @mobruji-maestro
 scope: infra
-related_issues: []
-related_prs: [1306]
-last_reviewed: 2026-05-29
+related_issues: [1514]
+related_prs: [1306, 1515]
+last_reviewed: 2026-06-03
 ---
 
 # Cycle forum 운영 모델
