@@ -5,7 +5,7 @@ status: implementing
 owner: @mobruji-maestro
 scope: recommendation
 related_issues: [1488]
-related_prs: []
+related_prs: [1538]
 last_reviewed: 2026-06-03
 ---
 
