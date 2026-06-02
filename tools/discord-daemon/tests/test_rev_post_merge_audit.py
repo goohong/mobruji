@@ -21,6 +21,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -155,7 +156,9 @@ class FormatRevPostMergeTest(unittest.TestCase):
     def test_format_discord_joins_pr_numbers(self) -> None:
         text = bot.format_rev_post_merge_discord([200])
         self.assertIn("#200", text)
-        self.assertIn("rev post-merge", text)
+        # (#1443) narrative 메시지 — 옛 로그형 "rev post-merge audit trigger" 폐기
+        self.assertIn("머지됐으므로", text)
+        self.assertIn("진행하겠습니다", text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -193,6 +196,17 @@ async def _run_loop_iters(loop_coro, iterations: int) -> None:
 
 
 class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self) -> None:
+        # (#1443) ledger 가 실제 운영 파일(~/.mobruji/...)을 만지지 않도록 임시 경로 격리.
+        # rev 검토 차단 사유 2 — 테스트 자가오염 + 사용자 파일 오염 fix.
+        self._led_tmp = tempfile.TemporaryDirectory()
+        self._led_orig = bot.REV_POST_MERGE_AUDIT_INJECTED_LEDGER
+        bot.REV_POST_MERGE_AUDIT_INJECTED_LEDGER = Path(self._led_tmp.name) / "injected.jsonl"
+
+    def tearDown(self) -> None:
+        bot.REV_POST_MERGE_AUDIT_INJECTED_LEDGER = self._led_orig
+        self._led_tmp.cleanup()
 
     async def test_zero_candidates_no_inject(self) -> None:
         channel = FakeChannel()
