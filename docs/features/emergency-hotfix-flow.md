@@ -97,7 +97,7 @@ emergency-hotfix 라벨 부착 PR 은 body 에 다음 섹션 의무 명시:
 
 본 섹션 부재 시 audit hook 의 issue body 가 "사유 부재" 로 박제 → 사후 회고 spec 강제.
 
-#### 3-5) 사용 빈도 추적 (감사 메트릭)
+#### 3-5) 사용 빈도 추적 (사용 이력 메트릭)
 
 - [ ] audit hook 이 자동 생성한 issue 의 수 / `audit:emergency-hotfix-followup` 라벨 수가 월간 메트릭
 - [ ] **§8 Q1**: 월 임계치 = (a) 1회 (경고만) / (b) 3회 (red dot) / (c) 무제한 (모든 사용을 issue 박제) — 미확정
@@ -236,7 +236,7 @@ gh label create "type:emergency-hotfix" \
 - **2026-05-29**: §5-4 시퀀스 — rev-gate skip + audit issue + DIGEST + 사후 rev 단계 2 의무 chain. CLAUDE.md §4 "모든 PR 은 rev 사이클 통과 의무" 룰을 사후 단계 2 로 만족.
 - **2026-05-29**: §6 본 PR 안에 `02-agent-workflow.md §4` cross-ref 추가까지 통합 — 검색 가능성 ↑ (예외 정책 → 본 spec 진입점).
 
-## 10) 사용 이력 (감사 메트릭)
+## 10) 사용 이력 (사용 이력 메트릭)
 
 > 라벨 사용 시마다 nmae 또는 plan 사이클 안에서 본 섹션에 한 줄씩 추가. audit issue 번호 / mergedAt / 사유 분류.
 
