@@ -1,3 +1,14 @@
+---
+feature: helper-current-target.txt bot.py 측 동시 갱신
+slug: helper-current-target-bot-side-write
+status: shipped
+owner: @goohong
+scope: infra
+related_issues: []
+related_prs: []
+last_reviewed: 2026-05-29
+---
+
 # Feature — helper-current-target.txt bot.py 측 동시 갱신
 
 - **status**: shipping (2026-05-29, PR fix/helper-current-target-bot-side-write)

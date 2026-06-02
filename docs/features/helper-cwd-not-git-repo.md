@@ -1,3 +1,14 @@
+---
+feature: Helper cwd 를 git repo 아닌 dir 로 변경 (relay-only 룰 강제)
+slug: helper-cwd-not-git-repo
+status: shipped
+owner: @goohong
+scope: infra
+related_issues: []
+related_prs: []
+last_reviewed: 2026-05-29
+---
+
 # Feature — Helper cwd 를 git repo 아닌 dir 로 변경 (relay-only 룰 강제)
 
 - **status**: shipping (2026-05-29, PR fix/helper-cwd-not-git-repo)
