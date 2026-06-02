@@ -333,7 +333,26 @@ def _on_exec_success(cycle: str, directive_id: str, title: str, thread_id: str, 
             pr_url=pr_url,
         )
         logger.info("exec 완료 cycle=%s → PR #%s", cycle, pr_num)
+    elif cycle in ("be", "fe"):
+        # (#1455) be/fe 는 **구현 사이클** — PR 이 결과물이다. rc==0 이어도 PR 이
+        # 없으면 작업이 끝난 게 아니라 미완이다 (claude -p 가 NCP thrash·내부 한도로
+        # PR 없이 빠져나온 사고, #1453). 과거엔 아래 else 분기가 cycle 무관하게
+        # `completed` 전이해 **미완 작업이 '완료' 로 둔갑**, 사용자가 안 된 걸 됐다고
+        # 오인했다 (2026-06-02 live 음역대 directive). 완료 전이 금지 — directive 는
+        # 'in_progress' 로 유지하고 ⚠️ 미완을 알려 재시도 대상임을 분명히 한다
+        # (자동 무한 재시도는 thrash 악순환 위험이라 사람/nmae 가 재트리거).
+        if thread_id:
+            _safe_comment(
+                thread_id,
+                f"⚠️ {cycle} sub-agent 가 PR 없이 종료했습니다 — 미완 (타임아웃·thrash 추정, #1453). "
+                f"directive 를 '진행 중' 으로 유지하며 완료 처리하지 않습니다. 재시도가 필요합니다.",
+            )
+        logger.warning(
+            "exec 종료 cycle=%s directive=%s — 구현 사이클인데 PR 없음 → 미완 (완료 전이 안 함)",
+            cycle, directive_id,
+        )
     else:
+        # plan/rev 등 비구현 사이클 — 보고·검토가 결과물이라 PR 없이 종료해도 정상 완료.
         try:
             tc.set_directive_forum_status(directive_id, "completed")
         except Exception as exc:  # noqa: BLE001
