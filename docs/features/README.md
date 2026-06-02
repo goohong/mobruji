@@ -147,6 +147,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [rev-fe-browser-qa-replacement](rev-fe-browser-qa-replacement.md) | rev 실 브라우저 FE QA 단계 — 기존 E2E 대체 정책 (replacement scope + 도구 결정) | draft | 2026-05-31 |
 | [rev-qa-protocol](rev-qa-protocol.md) | rev 세션 QA 실행 검증 프로토콜 | implementing | 2026-05-24 |
 | [spec-status-check-legacy-key-fail](spec-status-check-legacy-key-fail.md) | spec-status-check legacy key hard fail | draft | 2026-05-27 |
+| [stage2-dev-deploy-e2e](stage2-dev-deploy-e2e.md) | 단계 2 재정의 — dev 배포 E2E 검증 (배포본 E2E 점검) | draft | 2026-06-02 |
 | [systemd-restart-always](systemd-restart-always.md) | mobruji-helper.service Type=simple + Restart=always | draft | 2026-05-26 |
 | [user-decisions-pending-2026-05-26](user-decisions-pending-2026-05-26.md) | User Decisions Pending — 2026-05-26 권고안 | draft | 2026-05-26 |
 | [v03-roadmap](v03-roadmap.md) | v0.3 P1~P3 로드맵 (백로그 우선순위 정리) | draft | 2026-05-24 |
