@@ -1977,10 +1977,17 @@ async def _do_register_directive(
     # ("thread_id=<id>") 에서 파싱 — _approve 가 directive_approved 의 thread_id 로
     # 넘겨 위임 댓글·태그·완료가 dialogue thread 가 아닌 forum thread(board/태그가
     # 쓰는 thread)에 일치하게 한다.
+    # (#1450) directive_append.sh 는 "directive_append OK: ... thread_id=<id> ..." 를
+    # stderr 로 emit 한다 (rev #1451 지적 — stdout 만 보면 항상 미스). stdout+stderr
+    # 둘 다 합쳐서 파싱해 어느 스트림이든 잡는다.
     forum_thread_id = ""
     try:
-        _stdout = (result.stdout or b"").decode("utf-8", "replace")
-        _m = re.search(r"thread_id=(\d+)", _stdout)
+        _combined = (
+            (result.stdout or b"").decode("utf-8", "replace")
+            + "\n"
+            + (result.stderr or b"").decode("utf-8", "replace")
+        )
+        _m = re.search(r"thread_id=(\d+)", _combined)
         if _m:
             forum_thread_id = _m.group(1)
     except Exception as exc:  # noqa: BLE001
