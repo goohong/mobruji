@@ -24,6 +24,12 @@ def test_enqueues_rev_postmerge_directive(monkeypatch):
     assert calls["directive_id"] == "rev-postmerge-1434"
     assert "1434" in calls["task"]
     assert "rev-post-merge-pass" in calls["task"]  # 라벨 부여 지시 포함
+    # (#1457) 단계 2 재정의 — dev 배포본 E2E 검증으로 교체, 옛 "develop checkout + 시나리오 재실행" 절차 제거
+    assert "dev 배포 E2E 검증" in calls["task"]
+    assert "checkout" not in calls["task"]
+    assert "시나리오를 재실행" not in calls["task"]
+    assert "Playwright" in calls["task"]
+    assert "regression:dev" in calls["task"]  # 회귀 시 라벨 지시
 
 
 def test_missing_pr_number_skips(monkeypatch):
