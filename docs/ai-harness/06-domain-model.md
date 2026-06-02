@@ -59,6 +59,10 @@
 | 세션 회수 | SessionRevocation (enum `RevokedReason`) | `user` | sessionId 를 revoke 처리한 사실(시점 + 사유). 사유 enum `RevokedReason`: `TTL` / `USER_ROTATE` / `ACCOUNT_MERGE` (Micrometer 라벨은 lowercase) |
 | 세션 회전 | SessionRotation | `user` | 사용자가 명시적으로 현재 sessionId 를 폐기하고 새 sessionId 를 발급받는 행위. `POST /api/v1/sessions/rotate` |
 | 계정 머지 | AccountMerge | `user` | v0.4 OAuth 로그인 시 익명 sessionId 의 누적 데이터(좋아요/북마크/음역대)를 가입 user 로 owner 치환하는 트랜잭션 (v0.4 spec 에서 정식 명세) |
+| 사용자 | User | `user` | v0.4 정식 회원 — 소셜(카카오/구글) 또는 이메일 인증으로 식별되는 영속 계정. `(provider, providerUserId)` unique. 익명 sessionId 와 달리 디바이스 간 동기화 + 프로필 영속의 owner. 엔티티 §5-7. 인증 메커니즘 SoT = user-authentication-and-profile.md, 전환 정책/머지 = anonymous-to-account-conversion.md |
+| 인증 제공자 | OAuthProvider | `user` | 회원 인증 출처 enum — `KAKAO` / `GOOGLE` / `EMAIL`. `User.provider` 필드. OAuth 2종은 Authorization Code Flow, `EMAIL` 은 비밀번호 해시 + 이메일 인증 |
+| 사용자 프로필 | UserProfile | `user` | 회원의 재방문 prefill 용 선호 영속 (선호 장르 다중 / 선호 분위기 다중 `Mood` / 기본 성별 nullable). `User` 1:1. **음역대는 중복 저장하지 않고** 기존 `VoiceRange`/`VoiceRangeSnapshot` 을 userId owner 로 재사용. 추천 폼 prefill (`GET /users/me/profile`) 로 "재방문 시 재입력 불필요" 보장 (#1491). 엔티티 §5-8 |
+| 회원 인증 가드 | UserAuthGuard | `user` | 회원 전용 endpoint 의 토큰 인증 컴포넌트 (신설). 익명 sessionId 용 `SessionAuthGuard` (ADR-0011) 와 **별 트랙 공존** — 한 endpoint 가 두 인증을 동시에 요구하지 않음. 미인증 호출 시 401. user-authentication-and-profile.md §5-2 |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -243,6 +247,41 @@
 - 회전: `SessionRotationService` 가 현재 sessionId 를 `USER_ROTATE` 로 revoke + cascade-delete + 새 sessionId 발급.
 - 머지 (v0.4): account merge 시 `ACCOUNT_MERGE` 로 revoke + 데이터를 user 로 owner 치환.
 
+### 5-7) `User` (v0.4, user-authentication-and-profile.md / anonymous-to-account-conversion.md)
+
+> **draft (v0.4 미구현)**. 정식 회원 계정. 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 전환 정책/머지 = `anonymous-to-account-conversion.md`. 머지 시 익명 sessionId 의 누적 데이터(`VoiceRange`/`VoiceRangeSnapshot`/`Like`/`Bookmark`/`Recommendation`)가 `userId` owner 로 치환된다 (FK 없이 application 레벨 owner 컬럼 — dual column 권장, `anonymous-to-account-conversion.md` §5-1).
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `userId` | Long | PK, autoIncrement | 내부 식별자 |
+| `provider` | enum `OAuthProvider` | not null | `KAKAO` / `GOOGLE` / `EMAIL` |
+| `providerUserId` | String(128) | not null, UK(`provider, provider_user_id`) | OAuth sub / 이메일이면 email |
+| `email` | String(255) | nullable (`EMAIL` 이면 not null), index | |
+| `passwordHash` | String(255) | nullable (`EMAIL` 한정) | BCrypt/Argon2 — 평문 저장 금지 |
+| `displayName` | String(64) | nullable | |
+| `emailVerified` | boolean | not null, default false | `EMAIL` 인증 상태 |
+| `createdAt` | LocalDateTime | not null | |
+| `lastLoginAt` | LocalDateTime | nullable | |
+| `revokedAt` | LocalDateTime | nullable | 탈퇴 시 (v0.4 후속) |
+
+- 불변식: `provider=EMAIL ↔ email not null`. `(provider, providerUserId)` 유일.
+- 시크릿(`passwordHash`)·토큰·email 원문은 로그/예외/응답 비노출 (ADR-0011 계승, `04-security-policy.md`).
+
+### 5-8) `UserProfile` (v0.4, user-authentication-and-profile.md)
+
+> **draft (v0.4 미구현)**. 회원의 재방문 prefill 용 선호 영속 (#1491 "재방문 시 재입력 불필요"). `User` 와 1:1. **음역대는 본 엔티티에 저장하지 않고** 기존 `VoiceRange`(현재값)/`VoiceRangeSnapshot`(시계열)을 `userId` owner 로 재사용한다.
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `userId` | Long | PK, FK → `User.userId` | 1:1 |
+| `preferredGenres` | List&lt;String&gt; | nullable→[] 정규화 | 선호 장르 다중. join table `user_preferred_genre` (`@ElementCollection`) |
+| `preferredMoods` | List&lt;enum `Mood`&gt; | nullable→[] 정규화 | 선호 분위기 다중. join table `user_preferred_mood` |
+| `defaultGender` | String(8) | nullable | 추천 입력 편의값 (추천이 gender 를 정식 입력으로 채택 시 활용 — §7 후보) |
+| `updatedAt` | LocalDateTime | not null | |
+
+- prefill: `GET /api/v1/users/me/profile` 가 최신 `VoiceRange(userId)` + `UserProfile(userId)` 를 합쳐 추천 폼에 채운다.
+- 도메인 메서드: `static empty(userId)`, `updatePreferences(genres, moods, gender)`.
+
 ## 6) Mermaid ERD
 
 ```mermaid
@@ -332,6 +371,25 @@ erDiagram
         varchar revoked_reason
     }
 
+    USER {
+        bigint user_id PK
+        varchar provider
+        varchar provider_user_id UK
+        varchar email
+        varchar password_hash
+        varchar display_name
+        boolean email_verified
+        datetime created_at
+        datetime last_login_at
+        datetime revoked_at
+    }
+
+    USER_PROFILE {
+        bigint user_id PK
+        varchar default_gender
+        datetime updated_at
+    }
+
     SONG ||--o{ RECOMMENDATION : "song_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION : "request_id (FK 없음)"
     RECOMMENDATION_REQUEST ||--o{ RECOMMENDATION_REQUEST_EXCLUDE_SONG : "excludeSongIds (@ElementCollection)"
@@ -344,9 +402,16 @@ erDiagram
     ANONYMOUS_SESSION ||--o{ LIKE_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ BOOKMARK_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ RECOMMENDATION_REQUEST : "sessionId 라이프사이클 owner (FK 없음)"
+    USER ||--o| USER_PROFILE : "v0.4 draft — 1:1 선호 영속 (FK user_id)"
+    USER ||--o{ VOICE_RANGE : "v0.4 draft — 머지 후 user owner (sessionId→userId 치환)"
+    USER ||--o{ VOICE_RANGE_SNAPSHOT : "v0.4 draft — 머지 후 user owner"
+    USER ||--o{ LIKE_FEEDBACK : "v0.4 draft — 머지 후 user owner"
+    USER ||--o{ BOOKMARK_FEEDBACK : "v0.4 draft — 머지 후 user owner"
+    USER ||--o{ RECOMMENDATION : "v0.4 draft — 머지 후 user owner"
 ```
 
 - 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession` — 8개 엔티티.
+- v0.4 draft (미구현): `User`, `UserProfile` — 정식 회원 + 선호 프로필. 머지 시 sessionId-bound 엔티티의 owner 가 sessionId → userId 로 치환된다 (dual column 권장, FK 없이 application 레벨 owner). 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 전환 정책/머지 = `anonymous-to-account-conversion.md`.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join. `AnonymousSession` 이 sessionId 라이프사이클(TTL 만료 / 회전 / 머지) 의 단일 owner — cascade-delete 는 `AnonymousSessionTtlCleanup` / `SessionRotationService` 가 application 레벨에서 명시적 DELETE.
 
 ## 7) 오픈 이슈
