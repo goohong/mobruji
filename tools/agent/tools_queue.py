@@ -218,7 +218,14 @@ def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
             })
         enqueue_directive(
             "rev", did, f"rev 코드 리뷰 — PR #{num}",
-            f"PR #{num} (branch {branch}) 3단계 e2e 코드 리뷰 + 품질 검증 + reviewed:claude 판정/findings 블록. "
+            f"PR #{num} (branch {branch}) 3단계 e2e 코드 리뷰 + 품질 검증 후 통과 시 "
+            f"`gh pr edit {num} --add-label reviewed:claude`.\n"
+            f"**중요 — rev-gate 머지 게이트 (#1499)**: 이 PR 이 type:fix/feat + scope:web/backend 면 "
+            f"reviewed:claude 라벨만으로는 부족하고, PR 코멘트에 **정확히 다음 문자열 중 하나**가 있어야 머지된다 "
+            f"(rev-gate.yml 가 정규식으로 검사):\n"
+            f"  - e2e 를 실제 수행해 통과 → 코멘트에 `✅ rev e2e PR pass` 포함\n"
+            f"  - 변경이 사소하거나 e2e 불가능(환경 부재 등) → 코멘트에 `📝 rev no-op pass` 포함\n"
+            f"detail 리뷰 본문과 함께 이 문자열을 반드시 한 줄로 넣을 것 (없으면 scope:web/backend PR 영구 차단). "
             f"구현은 하지 말고 코드 리뷰·보고만.",
         )
         logger.info("rev auto-trigger: PR #%s (source=%s) → rev 큐 적재", num, source_cycle)
