@@ -118,6 +118,36 @@ def test_on_exec_success_no_pr_completes_and_notifies(monkeypatch):
     assert notes and "끝났" in notes[0]
 
 
+def test_on_exec_success_be_no_pr_does_not_complete(monkeypatch):
+    """#1455: be(구현 사이클)가 PR 없이 rc==0 종료 → 완료 전이 금지 + ⚠️ 미완 알림."""
+    import subagent_runner as sr, tools_cycle as tc
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: None)
+    comp, comments, notes = [], [], []
+    monkeypatch.setattr(tc, "set_directive_forum_status",
+                        lambda did, st, **k: comp.append((did, st)))
+    monkeypatch.setattr(sr, "_safe_comment",
+                        lambda tid, body: comments.append(body))
+    monkeypatch.setattr(sr, "_notify_user_done",
+                        lambda title, body, thread_id="", **k: notes.append(body))
+    sr._on_exec_success("be", "d1", "제목", "T1", "/tmp/wt")
+    assert comp == []  # 완료 전이 안 함
+    assert notes == []  # 완료 알림 안 함
+    assert comments and "미완" in comments[0]
+
+
+def test_on_exec_success_fe_no_pr_does_not_complete(monkeypatch):
+    """#1455: fe 도 구현 사이클 — PR 없이 종료는 미완."""
+    import subagent_runner as sr, tools_cycle as tc
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: None)
+    comp = []
+    monkeypatch.setattr(tc, "set_directive_forum_status",
+                        lambda did, st, **k: comp.append((did, st)))
+    monkeypatch.setattr(sr, "_safe_comment", lambda tid, body: None)
+    monkeypatch.setattr(sr, "_notify_user_done", lambda *a, **k: None)
+    sr._on_exec_success("fe", "d2", "제목", "T2", "/tmp/wt")
+    assert comp == []
+
+
 def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
     import subagent_runner as sr, tools_queue as tq
     monkeypatch.setattr(sr, "_find_pr_number", lambda wt: "9")
