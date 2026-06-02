@@ -15,6 +15,11 @@
 "use client";
 
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
+import {
+  difficultyLabel,
+  difficultyTone,
+  type Difficulty,
+} from "@/lib/difficulty";
 import { toFitDisplay } from "@/lib/recommendationFit";
 
 type FitBadgeProps = {
@@ -69,13 +74,48 @@ export function collectFitRows(item: RecommendedSongResponse): FitRow[] {
   return rows;
 }
 
+/**
+ * 연습 난이도 배지 (#1550, BE #1494 practiceDifficulty).
+ *
+ * 적합도 배지(`FitBadge`)와 같은 칩 형태를 따르되, 0~1 점수가 아니라 난이도 enum 을
+ * 라벨/톤으로 매핑한다(`@/lib/difficulty`). 난이도가 `null`(음역 미보유 곡)이면 "정보 없음"
+ * 으로 graceful 하게 노출하고 중립 톤을 쓴다 — BE 사유 문장도 같은 사실을 알려 준다.
+ */
+type PracticeDifficultyBadgeProps = {
+  difficulty: Difficulty | null;
+};
+
+const NEUTRAL_TONE = "bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-fg)]";
+
+export function PracticeDifficultyBadge({
+  difficulty,
+}: PracticeDifficultyBadgeProps) {
+  const valueLabel = difficulty ? difficultyLabel(difficulty) : "정보 없음";
+  const toneClass = difficulty ? difficultyTone(difficulty) : NEUTRAL_TONE;
+  return (
+    <span
+      aria-label={`연습 난이도 ${valueLabel}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${toneClass}`}
+    >
+      <span aria-hidden="true">연습 난이도</span>
+      <span aria-hidden="true">{valueLabel}</span>
+    </span>
+  );
+}
+
 type FitReasonsProps = {
   item: RecommendedSongResponse;
 };
 
 export function FitReasons({ item }: FitReasonsProps) {
   const rows = collectFitRows(item);
-  if (rows.length === 0) {
+  const practiceDifficulty = item.practiceDifficulty ?? null;
+  const practiceDifficultyReason = item.practiceDifficultyReason ?? null;
+  // 연습 난이도 행은 BE 가 난이도 또는 사유 중 하나라도 내려줬을 때 노출. 둘 다 없는
+  // (필드 미반영 과거 추천) 경로에서는 종전대로 적합도 행만 그린다.
+  const hasPracticeDifficulty =
+    practiceDifficulty !== null || practiceDifficultyReason !== null;
+  if (rows.length === 0 && !hasPracticeDifficulty) {
     return null;
   }
   return (
@@ -92,6 +132,18 @@ export function FitReasons({ item }: FitReasonsProps) {
           ) : null}
         </div>
       ))}
+      {hasPracticeDifficulty ? (
+        <div key="practice-difficulty" className="flex flex-col gap-1">
+          <dt>
+            <PracticeDifficultyBadge difficulty={practiceDifficulty} />
+          </dt>
+          {practiceDifficultyReason ? (
+            <dd className="text-xs text-[var(--text-secondary)]">
+              {practiceDifficultyReason}
+            </dd>
+          ) : null}
+        </div>
+      ) : null}
     </dl>
   );
 }
