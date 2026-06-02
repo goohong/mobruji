@@ -1,14 +1,3 @@
----
-feature: Helper 도구 호출 가시화 (PreToolUse Hook)
-slug: helper-tool-visibility
-status: shipped
-owner: @goohong
-scope: infra
-related_issues: []
-related_prs: [1230]
-last_reviewed: 2026-05-29
----
-
 # Feature Spec — Helper 도구 호출 가시화 (PreToolUse Hook)
 
 - **status**: shipping (2026-05-29, PR feat/helper-tool-visibility-hooks)

@@ -1,14 +1,3 @@
----
-feature: Directive 본문 polish (bot.py nmae 우회 helper sub-agent)
-slug: helper-subagent-directive-polish
-status: shipped
-owner: @goohong
-scope: infra
-related_issues: []
-related_prs: []
-last_reviewed: 2026-05-29
----
-
 # Feature Spec — Directive 본문 polish (bot.py nmae 우회 helper sub-agent)
 
 - **status**: shipping (2026-05-29, PR feat/directive-polish-bot-loop)
