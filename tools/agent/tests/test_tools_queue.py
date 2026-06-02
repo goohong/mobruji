@@ -132,7 +132,12 @@ def test_rev_autotrigger_enqueues_for_pr(isolated_db, monkeypatch):
 
     pr = tq.enqueue_rev_for_pr_if_any("be", "/tmp/wt")
     assert pr == "1234"
-    assert wq.peek_next("rev")["directive_id"] == "rev-pr-1234"
+    queued = wq.peek_next("rev")
+    assert queued["directive_id"] == "rev-pr-1234"
+    # (#1499) rev-gate 머지 게이트 계약 — 자동 rev task 는 scope:web/backend PR 머지에
+    # 필요한 정확한 통과 문자열 지시를 포함해야 한다 (없으면 영구 머지 차단 사고).
+    assert "rev e2e PR pass" in queued["task"]
+    assert "rev no-op pass" in queued["task"]
 
 
 def test_rev_autotrigger_skips_rev_source(isolated_db, monkeypatch):
