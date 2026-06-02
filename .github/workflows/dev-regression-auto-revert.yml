@@ -49,6 +49,11 @@ jobs:
         id: guard
         uses: actions/github-script@v7
         with:
+          # github-script 는 자체 github-token 입력(기본 GITHUB_TOKEN)으로 인증한다.
+          # GITHUB_TOKEN 은 repo 설정상 PR 생성 금지("not permitted to create PRs")라
+          # REVERT_PAT(사용자 토큰) 우선 — 이게 있어야 PR 생성 + 생성된 revert PR 의
+          # rev-gate 등 후속 workflow 도 정상 trigger 된다.
+          github-token: ${{ secrets.REVERT_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const labels = (context.payload.pull_request.labels || []).map(l => l.name);
             if (labels.includes('dev-revert-opened')) {
@@ -94,6 +99,11 @@ jobs:
         if: steps.guard.outputs.skip == 'false' && steps.revert.outputs.conflict == 'true'
         uses: actions/github-script@v7
         with:
+          # github-script 는 자체 github-token 입력(기본 GITHUB_TOKEN)으로 인증한다.
+          # GITHUB_TOKEN 은 repo 설정상 PR 생성 금지("not permitted to create PRs")라
+          # REVERT_PAT(사용자 토큰) 우선 — 이게 있어야 PR 생성 + 생성된 revert PR 의
+          # rev-gate 등 후속 workflow 도 정상 trigger 된다.
+          github-token: ${{ secrets.REVERT_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const n = Number(process.env.PR_NUMBER);
             await github.rest.issues.createComment({
@@ -112,6 +122,11 @@ jobs:
         env:
           REVERT_BRANCH: ${{ steps.revert.outputs.branch }}
         with:
+          # github-script 는 자체 github-token 입력(기본 GITHUB_TOKEN)으로 인증한다.
+          # GITHUB_TOKEN 은 repo 설정상 PR 생성 금지("not permitted to create PRs")라
+          # REVERT_PAT(사용자 토큰) 우선 — 이게 있어야 PR 생성 + 생성된 revert PR 의
+          # rev-gate 등 후속 workflow 도 정상 trigger 된다.
+          github-token: ${{ secrets.REVERT_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const n = Number(process.env.PR_NUMBER);
             const branch = process.env.REVERT_BRANCH || `auto-revert/pr-${n}-dev-regression`;
