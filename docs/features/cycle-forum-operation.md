@@ -71,7 +71,7 @@ cycle forum (BE/FE/REV/PLAN) thread 가 launch 시점에 1회 tag 부착 + 본�
 |---|---|---|---|
 | 🟡 대기 | nmae 가 작업 등록 (launch 전) | `wrapper --register-pending <cycle> "<title>"` | ✅ 코드 강제 |
 | ⏳ 진행 | sub-agent launch | `wrapper launch` 가 기존 🟡 thread retag → ⏳ | ✅ 코드 강제 |
-| ✅ 완료 | PR 머지 | `bot.py cycle_thread_complete_on_merge_loop` polling | ✅ 코드 강제 |
+| ✅ 완료 | be/fe/plan: PR 머지 / rev: 사이클 idle 진입 | be/fe/plan = `bot.py cycle_thread_complete_on_merge_loop` polling · rev = `update.sh rev set-idle` 가 active thread retag (§5-8) | ✅ 코드 강제 |
 | ❌ 실패 | rev ❌ 발견 / 사용자 HOLD | sub-agent / rev 가 `discord-reply.sh --forum-retag <id> <cycle> "실패" --reason "..."` 호출 | ⚠️ 학습 의존 + 사유 강제 |
 
 mutually exclusive. 한 thread = 한 tag.
@@ -176,6 +176,28 @@ discord-reply.sh --forum-retag <thread_id> <cycle> "실패" --reason "<사유>"
 - `tools/cycle-backlog/upsert.sh` 의 첫 줄에 deprecation warning stderr emit. exit 0 (호환).
 - `agent-launch-wrapper.sh --refresh-backlog` flag → warning + skip (호환).
 - 기존 `[BACKLOG] <cycle>` thread = history archive 로 남김 (Discord 채널에서 사용자 결정 시 삭제). bot.py 가 자동 삭제 X.
+
+### 5-8) rev 사이클 완료 retag (#1514)
+
+**문제 (evidence)**: §5-5 의 `cycle_thread_complete_on_merge_loop` 는 ✅ 완료 전이를
+머지된 PR 본문의 `cycle-forum: <cycle>:<thread_id>` 교차참조에만 의존한다. rev 사이클은
+be/fe 의 PR 을 리뷰·QA 할 뿐 `cycle-forum: rev:<thread_id>` 를 담은 자체 PR 을 머지하지
+않으므로, rev launch thread 의 thread_id 는 어떤 머지 PR 본문에도 등장하지 않아 ⏳ 진행에
+영구 고정된다. 추가로 `agent-launch-wrapper.sh` 는 launch 직후 pending cache 를 삭제하므로
+완료 시점에 thread 핸들조차 남지 않는다.
+
+**fix**:
+1. `agent-launch-wrapper.sh` launch retag(🟡→⏳) 시점에 active thread_id 를
+   `~/.mobruji/cycle-active-thread/<cycle>.txt` 로 atomic 기록 (모든 cycle 공통).
+2. `update.sh <cycle> set-idle` 후속 단계에서 `cycle == rev` 일 때만 위 파일을 읽어
+   `discord-reply.sh --forum-retag <thread_id> rev "완료"` 호출 + 파일 정리.
+
+**스코프 / 근거**:
+- rev 의 실제 완료 신호는 사이클 idle 진입(`set-idle`)이다 (PR 머지가 아님).
+- be/fe/plan 은 기존 PR 머지 retag(§5-5)를 유지한다 — set-idle 은 PR 머지 전에도
+  발생할 수 있어 조기 완료 오전이를 막기 위해 rev 로 한정.
+- graceful: retag 실패가 set-idle 자체(cycle-status 갱신)를 막지 않는다.
+- active thread 파일 부재 / 비-snowflake 시 silent skip.
 
 ## 6) rollback plan
 

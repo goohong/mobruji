@@ -500,6 +500,21 @@ if [[ -n "$PENDING_THREAD_ID" && "$PENDING_THREAD_ID" =~ ^[0-9]{17,20}$ ]]; then
       >/dev/null 2>&1; then
     echo "agent-launch-wrapper.sh: --pending-thread-id 본문 update 실패 thread=$PENDING_THREAD_ID — graceful" >&2
   fi
+  # active thread 기록 — pending cache 는 launch 직후 삭제(상단 참조)되므로
+  # 완료 시점(set-idle)에 launch thread 핸들이 남지 않는다. rev 는 자체 PR 을
+  # 머지하지 않아 cycle_thread_complete_on_merge_loop 가 ✅ 완료 retag 를 못 하므로
+  # 이 파일을 update.sh set-idle 이 읽어 완료 전이한다 (cycle-forum-operation.md §5-8).
+  ACTIVE_THREAD_DIR="${HOME:-/tmp}/.mobruji/cycle-active-thread"
+  mkdir -p "$ACTIVE_THREAD_DIR" 2>/dev/null || true
+  ACTIVE_THREAD_FILE="$ACTIVE_THREAD_DIR/${WORKTREE}.txt"
+  ACTIVE_THREAD_TMP="${ACTIVE_THREAD_FILE}.tmp.$$"
+  if printf '%s\n' "$PENDING_THREAD_ID" > "$ACTIVE_THREAD_TMP" 2>/dev/null \
+      && mv "$ACTIVE_THREAD_TMP" "$ACTIVE_THREAD_FILE" 2>/dev/null; then
+    :
+  else
+    rm -f "$ACTIVE_THREAD_TMP" 2>/dev/null || true
+    echo "agent-launch-wrapper.sh: active thread cache 작성 실패 thread=$PENDING_THREAD_ID — graceful (완료 retag 누락 가능)" >&2
+  fi
   # LAUNCH_THREAD_ID = pending thread (sub-agent inherit).
   printf 'LAUNCH_THREAD_ID=%s\n' "$PENDING_THREAD_ID"
   printf 'CYCLE_CHANNEL_MSG_ID=%s\n' "$PENDING_THREAD_ID"
