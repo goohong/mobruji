@@ -155,7 +155,9 @@ class FormatRevPostMergeTest(unittest.TestCase):
     def test_format_discord_joins_pr_numbers(self) -> None:
         text = bot.format_rev_post_merge_discord([200])
         self.assertIn("#200", text)
-        self.assertIn("rev post-merge", text)
+        # (#1447) narrative + '감사' 금지 — 옛 로그형 "rev post-merge audit trigger" 폐기
+        self.assertIn("머지됐으므로", text)
+        self.assertIn("코드 리뷰", text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,11 +213,11 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
         inject.assert_not_called()
         self.assertEqual(channel.sent, [])
 
-    async def test_candidates_trigger_inject_and_push(self) -> None:
+    async def test_candidates_emit_event_and_push(self) -> None:
+        # (#1447) tmux inject → post_merge_review_requested event 발행으로 전환.
         channel = FakeChannel()
         client = FakeClient(channel)
-        with mock.patch.object(bot, "tmux_has_session", return_value=True), \
-             mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+        with mock.patch.object(bot, "append_agent_event", return_value=1) as emit:
             coro = bot.rev_post_merge_audit_loop(
                 client,
                 digest_channel_id=222,
@@ -225,20 +227,18 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
                 candidate_fetcher=lambda: [851],
             )
             await _run_loop_iters(coro, iterations=5)
-        self.assertGreaterEqual(inject.call_count, 1)
-        first_args = inject.call_args_list[0].args
-        self.assertEqual(first_args[0], "mobruji:0.0")
-        self.assertIn("#851", first_args[1])
-        self.assertIn("rev e2e post-merge", first_args[1])
+        self.assertGreaterEqual(emit.call_count, 1)
+        kind, payload = emit.call_args_list[0].args
+        self.assertEqual(kind, "post_merge_review_requested")
+        self.assertEqual(payload["pr_number"], 851)
+        # Discord narrative push 에 PR 번호 포함.
         self.assertTrue(any("#851" in m for m in channel.sent))
 
-    async def test_debounce_prevents_repeat_inject_same_pr(self) -> None:
+    async def test_debounce_prevents_repeat_event_same_pr(self) -> None:
         channel = FakeChannel()
         client = FakeClient(channel)
-        # monotonic 고정 → 같은 PR 두 번째 iter 에서 debounce hit.
         fake_mono = [1000.0]
-        with mock.patch.object(bot, "tmux_has_session", return_value=True), \
-             mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
+        with mock.patch.object(bot, "append_agent_event", return_value=1) as emit:
             coro = bot.rev_post_merge_audit_loop(
                 client,
                 digest_channel_id=222,
@@ -250,31 +250,9 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
                 time_source=lambda: fake_mono[0],
             )
             await _run_loop_iters(coro, iterations=20)
-        # 같은 PR → inject 정확히 1회 (이후 iter 는 debounce 적중).
-        self.assertEqual(inject.call_count, 1)
-        # Discord push 도 1회.
-        self.assertEqual(
-            sum(1 for m in channel.sent if "#777" in m),
-            1,
-        )
-
-    async def test_tmux_session_absent_graceful_skip(self) -> None:
-        channel = FakeChannel()
-        client = FakeClient(channel)
-        with mock.patch.object(bot, "tmux_has_session", return_value=False), \
-             mock.patch.object(bot, "tmux_inject_text", return_value=True) as inject:
-            coro = bot.rev_post_merge_audit_loop(
-                client,
-                digest_channel_id=222,
-                inject_target="mobruji:0.0",
-                poll_interval=1,
-                initial_delay=0,
-                candidate_fetcher=lambda: [555],
-            )
-            await _run_loop_iters(coro, iterations=5)
-        inject.assert_not_called()
-        # Discord push 도 inject 차단됐으므로 안 감 (Discord push 는 inject 후에 진행).
-        self.assertEqual(channel.sent, [])
+        # 같은 PR → event 정확히 1회 (이후 iter 는 debounce 적중).
+        self.assertEqual(emit.call_count, 1)
+        self.assertEqual(sum(1 for m in channel.sent if "#777" in m), 1)
 
     async def test_poll_interval_zero_disables_loop(self) -> None:
         channel = FakeChannel()
