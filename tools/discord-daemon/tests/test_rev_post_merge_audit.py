@@ -72,6 +72,10 @@ class FetchRevPostMergeCandidatesTest(unittest.TestCase):
             self.assertIn("merged", cmd)
             self.assertIn("--base", cmd)
             self.assertIn("develop", cmd)
+            # (#1509 후속) scope:infra PR 은 dev 배포 표면이 없어 머지 후 E2E 검증
+            # 대상에서 제외 — rev 단일 워크트리 병목에서 no-op 부하 제거.
+            search = cmd[cmd.index("--search") + 1]
+            self.assertIn("-label:scope:infra", search)
             return _FakeProc(returncode=0, stdout=payload)
 
         result = bot.fetch_rev_post_merge_candidates(runner=fake_run)

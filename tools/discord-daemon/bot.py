@@ -4530,7 +4530,13 @@ def fetch_rev_post_merge_candidates(
     Returns:
         PR 번호 (int) 리스트. 호출 실패 시 빈 리스트.
     """
-    search_expr = f"{_merged_since_qualifier(search_window)} -label:{pass_label}"
+    # (#1509 후속) 머지 후 단계 2 = dev 배포본 E2E 검증. 배포 앱(backend/web) 표면을
+    # 안 건드리는 scope:infra PR(워크플로우·bot 코드·tools·docs)은 검증할 dev 런타임이
+    # 없어 rev 가 매번 no-op pass 만 한다. 단일 rev 워크트리가 사전 리뷰 + 머지 후 검증을
+    # 직렬 처리하는 병목에서, 이 no-op 들이 rev 시간을 잡아먹어 throughput 을 떨어뜨렸다.
+    # → scope:infra 는 후보에서 제외(검증 의미 없음). backend/web/recommendation 등 앱
+    # scope 만 dev 배포 E2E 대상.
+    search_expr = f"{_merged_since_qualifier(search_window)} -label:{pass_label} -label:scope:infra"
     cmd = [
         "gh",
         "pr",
