@@ -44,7 +44,7 @@ last_reviewed: 2026-06-02
 - [ ] **브라우저 가능** 항목 → Playwright 를 `PLAYWRIGHT_BASE_URL`=dev 로 실행 (`web-e2e-playwright.md` / `rev-browser-e2e-env.md` 스위트 재사용)
 - [ ] **브라우저 불가** 항목 → 프론트 호출 (API) E2E — `web/lib/api/` 클라이언트 호출 또는 직접 HTTP (`curl` / RestAssured) 를 dev endpoint 대상으로
 - [ ] dev 배포 완료 감지 — `cd-dev.yml` healthcheck green 확인 후 검증 시작 (배포 미완 상태 검증 = false negative 방지)
-- [ ] 통과 → `rev-post-merge-pass` 라벨 + PR 코멘트 `✅ dev 배포 E2E 검증 pass` / 실패 → `regression:dev` 라벨 + revert 후속 이슈 + Discord push (**항상 즉시 자동**) → 실제 dev 롤백은 Discord 사용자 확인 게이트 (Q4=(c), §9). rev 자체는 롤백을 수행하지 않음 (read-only)
+- [ ] 통과 → `rev-post-merge-pass` 라벨 + PR 코멘트 `✅ dev 배포 E2E 검증 pass` / 실패 → 머지된 원본 PR 에 **눈에 띄는 코멘트** `🔴 dev 배포 E2E 회귀 — <증상> / revert(자동) / 후속 이슈 #N` (나중에 PR 만 봐도 회귀·롤백 이력 파악) + `regression:dev` 라벨 + revert 후속 이슈 + Discord push (**항상 즉시 자동**) → dev 롤백 = **자동 revert** (자동화 계층이 develop revert 커밋/PR → cd-dev 재배포, Q4=(b), §9). rev 자체는 롤백을 수행하지 않음 (read-only)
 - [ ] e2e 불가능 PR (코드 변경 없음) 은 단계 2 후보에서 제외 (skip)
 - [ ] 용어 정정 propagation — "회귀 검토" / "Post-merge audit" → "dev 배포 E2E 검증" (§6 propagation)
 
@@ -74,7 +74,7 @@ last_reviewed: 2026-06-02
 - **`web/playwright.config.ts` / `PLAYWRIGHT_BASE_URL` env 분기 config 작성** — `web-e2e-playwright.md` / `rev-browser-e2e-env.md` 소관.
 - **rev 워크트리 브라우저 binary 셋업 절차** — `rev-browser-e2e-env.md` 소관. 본 spec 은 "무엇을 검증하는가" 를 정의하고, "어느 환경에서 어떻게 구동하는가" 는 그 spec 에 위임.
 - **dev 배포 메커니즘 (`cd-dev.yml`) 자체의 구축/수정** — 이미 실재 (§5-5). 본 spec 은 그 결과물을 검증 대상으로 삼을 뿐.
-- **E2E 실패 시 dev 자동 롤백** — `cd-dev.yml` 은 healthcheck 실패 시 직전 SHA 롤백을 이미 한다. rev 의 배포본 E2E 실패는 healthcheck green 이후 발견되는 **기능 회귀** 인데, 이 경우의 dev 롤백은 **자동이 아니라 사용자 확인 게이트** (Q4=(c), §9). rev 는 read-only 이므로 롤백을 직접 수행하지 않고, 알림/`regression:dev` 라벨/revert 후속 이슈만 즉시 자동 발행한다.
+- **E2E 실패 시 dev 자동 revert 의 배선 자체** — `cd-dev.yml` 은 healthcheck 실패 시 직전 SHA 롤백을 이미 한다. rev 의 배포본 E2E 실패는 healthcheck green 이후 발견되는 **기능 회귀** 라 별도 처리가 필요한데, 본 spec 의 결정 = **자동 revert** (Q4=(b), §9): 자동화 계층(bot.py / cd-dev workflow_dispatch)이 develop 에 revert 커밋/PR 을 만들어 정상 코드로 재배포한다 (단순 이전 SHA 재배포는 develop HEAD 에 깨진 커밋이 남아 다음 머지 때 도로 깨지므로 채택 안 함). rev 는 read-only 이므로 롤백을 직접 수행하지 않고, 가시화 신호(원본 PR 🔴 코멘트 / `regression:dev` 라벨 / revert 후속 이슈 / Discord push)만 즉시 발행한다. **자동 revert 의 실제 구현(배선)은 본 spec 범위 밖 — 별도 follow-up impl PR.**
 
 ## 5) 설계
 
@@ -126,8 +126,8 @@ dev 배포본 검증 대상 endpoint (예시):
    │    ├─ 브라우저 가능 → PLAYWRIGHT_BASE_URL=dev npx playwright test --grep @smoke
    │    └─ 브라우저 불가 → web/lib/api 호출 또는 curl dev endpoint + 응답 검증
    └─ 통과 → rev-post-merge-pass 라벨 + ✅ 코멘트 → bridge 검색 대상 제외 → loop 종료
-   └─ 실패 → regression:dev 라벨 + revert 후속 이슈 + Discord push (즉시 자동)
-              └─ dev 롤백? → Discord 사용자 확인 게이트 (Q4=(c)) — rev 직접 수행 X
+   └─ 실패 → 원본 PR 🔴 코멘트 + regression:dev 라벨 + revert 후속 이슈 + Discord push (즉시 자동)
+              └─ dev 롤백 → 자동 revert (자동화: develop revert 커밋/PR → cd-dev 재배포, Q4=(b)) — rev 직접 수행 X
 ```
 
 **현 `agent.py` task 본문 (교체 대상)**:
@@ -158,8 +158,9 @@ dev 배포 메커니즘은 **이미 실재** — 선행 구축 불요.
 
 - [x] **본 PR (type:docs scope:infra)**: `docs/features/stage2-dev-deploy-e2e.md` spec 신설 + 단계 2 재정의
 - [ ] **impl PR 1 (type:docs scope:infra)**: `rev-e2e-2-stages.md §3-2` 본문 — "머지 후 회귀 검토 / Post-merge audit / 테스트 재실행" → "dev 배포 E2E 검증 (배포본 E2E 점검)" + E2E 2분류 절차 + 본 spec cross-ref. §1-1 / 결정 로그 명명도 동기.
-- [ ] **impl PR 2 (type:feat scope:infra)**: `tools/agent/agent.py` `handle_post_merge_review_requested` task 본문 교체 (§5-4) — 단위 테스트 재실행 문구 제거, dev 배포본 E2E (Playwright dev / HTTP dev) 지시로. `directive_id` `rev-postmerge-{n}` 배선·라벨은 변경 없음. 관련 test (`test_post_merge_review_handler.py`) task 문구 assertion 갱신.
+- [x] **impl PR 2 (type:feat scope:infra)** — 이슈 #1457 / PR #1458: `tools/agent/agent.py` `handle_post_merge_review_requested` task 본문 교체 (§5-4) — 단위 테스트 재실행 문구 제거, dev 배포본 E2E (Playwright dev / HTTP dev) 지시로. `directive_id` `rev-postmerge-{n}` 배선·라벨은 변경 없음. 관련 test (`test_post_merge_review_handler.py`) task 문구 assertion 갱신.
 - [ ] **impl PR 3 (type:docs scope:infra)**: 용어 propagation — `tools/discord-daemon/bot.py` 주석·log·`available_tags` ("Post-merge audit" → "dev 배포 E2E 검증") / `tools/rev-queue/` (rev-queue.sh stage2 주석 / README) / `sub-agent.md §2-rev` / `11-multi-session-runbook.md` stage2 row / `06-domain-model.md` `rev-post-merge-pass` 설명 / `rev-e2e-2-stages.md` 잔여. 라벨 명 `rev-post-merge-pass` 는 **유지** (멱등성 표식 — rename 시 배선 대량 변경, Q5).
+- [ ] **impl PR 4 (type:feat scope:infra)** — Q4=(b) 자동 revert **배선**: E2E 회귀(`regression:dev`) 감지 → 자동화 계층(bot.py / cd-dev `workflow_dispatch`)이 develop 에 revert 커밋/PR 생성 → cd-dev 재배포로 dev green 복구. rev 는 read-only 유지(미수행). 원본 PR `🔴 dev 배포 E2E 회귀` 코멘트 + revert PR cross-link 으로 가시화. NCP VM 부하(#1453) 고려해 재배포 throttle.
 
 ### 보호 영역 변경 여부 (필수 명시)
 
@@ -184,7 +185,7 @@ dev 배포 메커니즘은 **이미 실재** — 선행 구축 불요.
 | Q1 | dev 배포 trigger / URL 의 canonical 값 | **(b) env 주입** (`PLAYWRIGHT_DEV_URL` / `DEV_BASE_URL`) — `ncp-dev-deployment.md` URL 과 동기, 하드코딩 회피 | 2026-06-02 §9 |
 | Q2 | 브라우저 가능 vs 브라우저 불가 **분류 기준** | **(a) rev sub-agent 가 diff 보고 매번 판단** (휴리스틱) | 2026-06-02 §9 |
 | Q3 | dev 배포 **완료 대기 방식** | **(b) dev healthcheck endpoint 직접 polling** (`curl .../actuator/health/liveness`) | 2026-06-02 §9 |
-| Q4 | dev 배포 E2E **실패 시 대응** | **(c) 사용자 확인 후 롤백** — 단, 알림/`regression:dev` 라벨/revert 후속 이슈는 **항상 즉시**, 실제 롤백만 사용자 확인 | 2026-06-02 §9 |
+| Q4 | dev 배포 E2E **실패 시 대응** | **(b) 자동 revert** — 자동화 계층이 develop revert 커밋/PR → cd-dev 재배포 (rev 는 read-only, 직접 수행 X). 가시화 신호(원본 PR 🔴 코멘트/`regression:dev` 라벨/revert 후속 이슈/Discord push)는 **항상 즉시 자동**. dev = 외부 사용자 없는 환경이라 자동 채택 (2026-06-02 사용자 재고) | 2026-06-02 §9 |
 | Q5 | 라벨 명 `rev-post-merge-pass` — 재정의 후 rename 여부 | **(a) 유지** (배선 대량 변경 회피, 멱등성 표식 의미 충분) | 2026-06-02 §9 |
 | Q6 | `web/playwright.config.ts` 미도입 동안 (브라우저 가능 항목) 처리 | **(a) 프론트 호출·HTTP fallback 으로 부분 검증** | 2026-06-02 §9 |
 
@@ -197,7 +198,7 @@ dev 배포 메커니즘은 **이미 실재** — 선행 구축 불요.
   - **Q1 = (b) env 주입** — dev URL 은 `PLAYWRIGHT_DEV_URL` / `DEV_BASE_URL` 환경 변수로 주입, `ncp-dev-deployment.md` canonical URL 과 동기. 하드코딩 회피.
   - **Q2 = (a) rev diff 휴리스틱** — 브라우저 가능/불가 분류는 rev sub-agent 가 PR diff 를 보고 매 사이클 판단. 사용자 판단 위임 (확신 부재 — rev 가 실제 변경 성격을 가장 정확히 본다는 점에 기댐). 휴리스틱이 흔들리면 추후 파일 경로 기반(Q2-c)으로 격상 가능.
   - **Q3 = (b) healthcheck polling** — dev 배포 완료는 `curl .../actuator/health/liveness` green 으로 확인 후 검증 시작. 고정 대기(false negative) 회피.
-  - **Q4 = (c) 사용자 확인 후 롤백** (사용자 "확신 없음 — 판단 위임", nmae 판단). 근거: (1) rev read-only 불변 원칙 (§3 비기능) 과 자동 롤백(b) 충돌, (2) NCP 소형 VM 과부하(#1453) — 무인 자동 롤백 = 추가 deploy thrash 위험, (3) dev = 외부 사용자 없는 dogfooding 환경이라 forward-fix(revert 후속 이슈 → 다음 사이클 자율 수정) 가 일차 경로. **메커니즘 분리**: `regression:dev` 라벨 + revert 후속 이슈 + Discord push 는 실패 시 **항상 즉시** 자동 실행, 실제 dev 롤백만 Discord 사용자 확인 게이트.
+  - **Q4 = (b) 자동 revert** (2026-06-02 사용자 재고 — "dev 인데 롤백도 알아서 해도 될 것 같다"). 초안 결정은 (c) 사용자 확인 게이트였으나, dev = 외부 사용자 없는 환경이라 자동 롤백의 blast radius 가 작다는 점에서 (b) 로 전환. **단, 두 가지 정밀화**: (1) "단순 이전 SHA 재배포" 가 아니라 **자동 revert** — 자동화 계층이 develop 에 revert 커밋/PR 을 만들어 cd-dev 가 정상 코드로 재배포 (단순 SHA 재배포는 develop HEAD 에 깨진 커밋이 남아 다음 머지 때 도로 깨지는 함정). (2) **롤백 실행 주체는 rev 가 아니라 자동화 계층** (bot.py / cd-dev) — rev read-only 불변 유지. 가시화 신호(원본 PR `🔴 dev 배포 E2E 회귀` 코멘트 + `regression:dev` 라벨 + revert 후속 이슈 + Discord push)는 실패 시 **항상 즉시** 자동 발행해, 나중에 PR 만 봐도 회귀·롤백 이력을 알 수 있게 한다 (사용자 명시 2026-06-02). NCP 소형 VM 과부하(#1453) 는 revert 재배포 부하로 남으나, dev 정상 복구 가치가 우선. 자동 revert 의 실제 **배선 구현은 별도 follow-up impl PR** (본 spec impl PR 2 #1457 범위 밖).
   - **Q5 = (a) 라벨명 유지** — `rev-post-merge-pass` 그대로. 배선(bot.py / rev-queue / agent.py / domain-model) 대량 변경 회피, 멱등성 표식 의미 충분.
   - **Q6 = (a) HTTP fallback** — `web/playwright.config.ts` 미도입 동안 브라우저 가능 항목은 프론트 호출·HTTP fallback 으로 부분 검증 (단계 2 자체 no-op pass 회피).
 
