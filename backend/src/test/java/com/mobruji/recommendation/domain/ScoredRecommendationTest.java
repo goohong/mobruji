@@ -68,6 +68,51 @@ class ScoredRecommendationTest {
     }
 
     @Test
+    @DisplayName("설명가능성(#1484): voiceFit은 breakdown.rangeFit을 그대로 노출하고 사유는 적합도 구간별 한국어")
+    void voiceFit_derivesFromRangeFit() {
+        // given: keyMatch=1.0(키 알려짐), rangeFit 구간별
+        final Song song = sampleSong();
+        final ScoredRecommendation high = new ScoredRecommendation(
+                song, 0.9, "match", 1, new ScoreBreakdown(1.0, 0.82, 0.0, 0.0, 1.0, 0.5));
+        final ScoredRecommendation mid = new ScoredRecommendation(
+                song, 0.5, "match", 1, new ScoreBreakdown(1.0, 0.45, 0.0, 0.0, 1.0, 0.5));
+        final ScoredRecommendation low = new ScoredRecommendation(
+                song, 0.3, "match", 1, new ScoreBreakdown(1.0, 0.2, 0.0, 0.0, 1.0, 0.5));
+        final ScoredRecommendation none = new ScoredRecommendation(
+                song, 0.1, "match", 1, new ScoreBreakdown(1.0, 0.0, 0.0, 0.0, 1.0, 0.5));
+
+        // then
+        assertThat(high.voiceFit()).isEqualTo(0.82);
+        assertThat(high.voiceFitReason()).isEqualTo("원곡 키가 음역대에 아주 잘 맞아요");
+        assertThat(mid.voiceFitReason()).isEqualTo("원곡 키가 음역대에 무난하게 맞아요");
+        assertThat(low.voiceFitReason()).isEqualTo("원곡 키가 음역대에 다소 부담될 수 있어요");
+        assertThat(none.voiceFitReason()).isEqualTo("원곡 키가 음역대와 잘 맞지 않아요");
+    }
+
+    @Test
+    @DisplayName("설명가능성(#1484): 곡 키 UNKNOWN(keyMatch<1.0)이면 적합도 산정 불가 사유로 노출")
+    void voiceFit_unknownKey_reasonExplainsUncertainty() {
+        // given: voiceRangeFit이 UNKNOWN 키에 부여하는 중립값(keyMatch=0.5, rangeFit=0.5)
+        final ScoredRecommendation scored = new ScoredRecommendation(
+                sampleSong(), 0.5, "match", 1, new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, 0.5));
+
+        // then
+        assertThat(scored.voiceFit()).isEqualTo(0.5);
+        assertThat(scored.voiceFitReason()).isEqualTo("곡 키 정보가 없어 음역대 적합도를 정확히 알기 어려워요");
+    }
+
+    @Test
+    @DisplayName("설명가능성(#1484): breakdown 없는 재조회 경로면 voiceFit/voiceFitReason 모두 null")
+    void voiceFit_nullBreakdown_returnsNull() {
+        // when
+        final ScoredRecommendation scored = new ScoredRecommendation(sampleSong(), 0.5, "match", 1);
+
+        // then
+        assertThat(scored.voiceFit()).isNull();
+        assertThat(scored.voiceFitReason()).isNull();
+    }
+
+    @Test
     @DisplayName("null guard: song이 null이면 NullPointerException")
     void create_nullSong_throws() {
         assertThatThrownBy(() -> new ScoredRecommendation(null, 0.5, "match", 1, null))
