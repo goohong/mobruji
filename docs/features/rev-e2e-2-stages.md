@@ -11,7 +11,9 @@ last_reviewed: 2026-05-30
 
 # rev 2 단계 e2e 자율 QA (Pre-merge / Post-merge)
 
-> **이전 spec rename / 재구조 (2026-05-30)**: 본 spec 은 `rev-e2e-3-stages.md` (단계 1 / 단계 2 / 단계 3) 의 후속 재구조판입니다. 단계 3 (release 후 production 검증) 은 production 환경 부재 사유로 **폐기**, 단계 1 / 단계 2 만 유지합니다. 폐기 evidence 와 사유는 §9 결정 로그 + §10 propagation cleanup 표 참조. 단계 명명은 **영어 짧은 표기** 채택: 🟡 **Pre-merge review** (단계 1) / 🔵 **Post-merge audit** (단계 2).
+> **이전 spec rename / 재구조 (2026-05-30)**: 본 spec 은 `rev-e2e-3-stages.md` (단계 1 / 단계 2 / 단계 3) 의 후속 재구조판입니다. 단계 3 (release 후 production 검증) 은 production 환경 부재 사유로 **폐기**, 단계 1 / 단계 2 만 유지합니다. 폐기 evidence 와 사유는 §9 결정 로그 + §10 propagation cleanup 표 참조.
+>
+> **단계 2 재정의 (2026-06-02)**: 단계 2 명칭을 🔵 **Post-merge audit** → 🔵 **dev 배포 E2E 검증** (짧게 "배포본 E2E 점검") 으로 정정하고, 의미를 "단계 1 시나리오 재실행" → "dev 배포본 대상 E2E" 로 재정의합니다. 단계 1 = 🟡 **Pre-merge review** 는 유지. 단계 2 의 정밀 절차 SoT 는 `docs/features/stage2-dev-deploy-e2e.md` (§3-2 위임). 사유·결정: §9 결정 로그.
 
 ## 1. 배경 (Why)
 
@@ -71,15 +73,17 @@ mmae evidence (사용자 인식 일부 정정):
 - 머지 게이트: **모든 PR** `reviewed:claude` 라벨 없으면 nmae 자율 머지 안 함
 - **SLA**: 정규 type:* = **30분** / `type:docs` (no-op pass) = **5분** / `type:release` = **면제** (사용자 명시 확인) / `type:emergency-hotfix` = **면제** (whitelist 머지). 측정 시작 (T0) = `rev-queue.sh register <PR>` 호출 시각 (또는 `cycle-status.json` `rev.in_progress.started_at` / PR `createdAt` fallback). 측정 종료 = `reviewed:claude` 라벨 부착 시각 + 통과 코멘트 (✅/📝/❌) 부착 시각 중 늦은 쪽. SLA 미달성 시 `watchdog_rev_sla_loop` 1분 polling 이 DIGEST push + nmae 별 rev sub-agent 추가 launch — **차단이 아니라 가시화 + 큐 race 해소**. 상세 SoT: `docs/features/rev-sla.md §3-1`(SLA 매트릭스) + §3-2(T0/완료 시점 정의) + §3-3(`watchdog_rev_sla_loop`).
 
-### 3-2. 🔵 Post-merge audit (단계 2) — develop 머지 후 dev 환경 회귀 검증
+### 3-2. 🔵 dev 배포 E2E 검증 (배포본 E2E 점검) (단계 2) — develop dev 배포 후 배포본 회귀 검증
 
-- **e2e 가능 PR 만 해당** — no-op pass PR 은 skip
+> **단계 2 의 무엇을·어떻게 SoT 는 `docs/features/stage2-dev-deploy-e2e.md`** (2026-06-02 재정의). 본 sub-section 은 단계 구조상의 위치만 정의하고, 정밀 절차(E2E 2분류·배포 완료 감지·실패 대응·Q1~Q6 결정)는 그 spec 에 위임한다. 핵심: 단계 2 는 **단위 테스트 재실행이 아니라**(그것은 단계 1 + CI 중복), dev 배포가 끝난 뒤 그 **배포본 자체** 를 대상으로 E2E 를 돌려 통합·배포 회귀(docker compose 구성·nginx 라우팅·환경 변수·컨테이너 연동·마이그레이션 반영 등 단위 테스트 사각지대)를 잡는다.
+
+- **e2e 가능 PR 만 해당** — no-op pass PR (docs/spec/chore — dev 배포 trigger 자체 없음) 은 skip
 - 후보 발굴: `gh pr list --state merged --base develop --search 'merged:>1h ago -label:rev-post-merge-pass -label:type:release'`
-- develop 머지 직후 NCP dev deploy 사이클 완료까지 대기 (~5분, `cd-dev.yml` healthcheck 통과 후)
-- **dev 환경 endpoint**: `http://101.79.20.94/` (web) + `http://101.79.20.94/api/v1/...` (backend) — `cd-dev.yml` 가 NCP VM 의 docker compose stack 5종 (`mobruji-web-dev` / `mobruji-backend-dev` / `mobruji-nginx-dev` / `mobruji-mysql-dev` / `mobruji-mysql-local`) 을 develop tip 으로 자동 갱신
-- rev 가 단계 1 시나리오 동일 재실행 — **실제 dev 환경** (local 3-tier 가 아니라 NCP VM live)
-- 통과 → PR 코멘트 `✅ rev e2e post-merge pass` + 라벨 `rev-post-merge-pass` (멱등성 표식)
-- 실패 → 즉시 revert 이슈 등록 + `regression:dev` 라벨 + Discord push
+- develop 머지 후 dev 배포 완료 대기 — `http://101.79.20.94/actuator/health/liveness` (nginx exact-match → backend:8081, **`/api/v1` 없음**) 가 green 일 때까지 polling 후 시작 (`cd-dev.yml` healthcheck 와 동일 경로). 고정 대기 아님 (false negative 회피, Q3=b)
+- **dev 환경 endpoint**: `http://101.79.20.94/` (web) + `http://101.79.20.94/api/v1/...` (backend) — `cd-dev.yml` 가 NCP VM 의 docker compose stack 5종 (`mobruji-web-dev` / `mobruji-backend-dev` / `mobruji-nginx-dev` / `mobruji-mysql-dev` / `mobruji-mysql-local`) 을 develop tip 으로 자동 갱신. dev URL 은 env(`PLAYWRIGHT_DEV_URL`/`DEV_BASE_URL`) 주입 (Q1=b)
+- **E2E 2분류 (rev 가 PR diff 보고 판정, Q2=a)**: 사용자 가시 화면(렌더/라우팅/CTA/스타일) 변경 → 브라우저 E2E (Playwright `PLAYWRIGHT_BASE_URL`=dev, config 미도입 동안 HTTP fallback) / API 계약·추천 로직·데이터 정합성 등 비가시 동작 → 프론트 호출(web/lib/api)·직접 HTTP(`curl …/api/v1/…`). 양쪽 다 건드리면 두 채널 모두
+- 통과 → PR 코멘트 `✅ dev 배포 E2E 검증 pass` + 라벨 `rev-post-merge-pass` (멱등성 표식, rename 안 함 Q5=a)
+- 실패 → 머지된 원본 PR 에 **눈에 띄는** `🔴 dev 배포 E2E 회귀` 코멘트(나중에 PR 만 봐도 이력) + `regression:dev` 라벨 + revert 후속 이슈 + Discord push (즉시 자동). dev 롤백 = **자동 revert** (자동화 계층이 develop revert 커밋/PR → cd-dev 재배포, rev 는 read-only 라 직접 수행 X, Q4=b)
 - **SLA**: 정규 type:* = **24시간** / `type:release` = **24시간** / `type:emergency-hotfix` (정규) = **30분** (정규 단계 1 등급) / `type:emergency-hotfix` + body `security` (🔴 critical-public) = **15분**. T0 = PR `mergedAt` (GitHub API). 측정 종료 = `rev-post-merge-pass` 또는 `regression:dev` 라벨 부착 시각. security 분류 미달성 시 DIGEST + Discord 본 채널 + 사용자 reply 3 채널 동시 push — 정규 분류는 DIGEST 1 채널만. SoT: `docs/features/rev-sla.md §3-1` + §3-2 + §3-4(escalation 매트릭스).
 
 ### 3-3. (폐기) release 후 production 검증 — 단계 3
@@ -88,7 +92,7 @@ mmae evidence (사용자 인식 일부 정정):
 >
 > 폐기 evidence: `.github/workflows/` 에 `cd-prod.yml` / `cd-release.yml` 부재. release tag (`v0.4.0` 등) 는 GitHub 마일스톤 표시만, deploy 대상 production endpoint 없음.
 >
-> 단계 3 의 의도 (release 후 사용자 실제 환경 검증) 는 단계 2 (`Post-merge audit`) 가 NCP dev 환경에서 사용자 dogfooding 환경과 동일 endpoint 검증으로 흡수.
+> 단계 3 의 의도 (release 후 사용자 실제 환경 검증) 는 단계 2 (`dev 배포 E2E 검증`) 가 NCP dev 환경에서 사용자 dogfooding 환경과 동일 endpoint 검증으로 흡수.
 
 ## 4. 비기능 요구사항
 
@@ -149,6 +153,7 @@ nmae tmux pane 에 audit launch 알림을 inject 한다.
 - 2026-05-24: phase 1 (단계 1) 즉시 적용 + #1008 단계 2 자동 trigger loop 도입.
 - 2026-05-28: phase 3 단계 3 (release 후) 룰 박제 — release v0.4.0 부터 시작.
 - **2026-05-30 (본 PR rev2s-1)**: **3 단계 → 2 단계 재구조** + spec rename (`rev-e2e-3-stages.md` → `rev-e2e-2-stages.md`). 사용자 evidence-based 결정: production 환경 부재 (`.github/workflows/cd-prod.yml` / `cd-release.yml` 부재 + release tag 는 마일스톤 표시만) 사유로 단계 3 폐기. 단계 1 / 단계 2 만 유지 + 영어 짧은 명명 (`Pre-merge review` / `Post-merge audit`) 채택. 사용자 표현: "영어 짧은 거 좋은데, 우리는 지금 dev 는 배포가 따로 안 되어 있어서. 2 랑 3 이 어떻게 다른 상황이지 지금?" — 사용자의 "dev 배포 부재" 인식은 mmae evidence (cd-dev.yml + NCP VM 5 컨테이너 19h healthy) 로 정정. 단계 2 = dev 환경 회귀 = 의미 있음 / 단계 3 = production 검증 = 무의미 결론. propagation cleanup 표는 §10 — 후속 PR rev2s-2 / rev2s-3 / rev2s-4 로 분할.
+- **2026-06-02 (#1459, spec impl PR 1)**: 단계 2 **재정의** — 명칭 🔵 `Post-merge audit` → 🔵 `dev 배포 E2E 검증` (배포본 E2E 점검), 의미 "단계 1 시나리오 재실행" → "dev 배포본 대상 E2E". 사유 (사용자 정정): (1) 'audit/회귀 검토' 용어 어색, (2) 단위 테스트 재실행 = 단계 1(pre-merge) + CI 중복 무의미. §3-2 본문을 dev 배포본 E2E(2분류: 브라우저=Playwright / 비가시=프론트 호출·HTTP) + healthcheck `/actuator/health/liveness` polling(/api/v1 없음) + 가시 마커로 교체. 단계 2 의 무엇을·어떻게 SoT = `docs/features/stage2-dev-deploy-e2e.md` 로 위임 (본 spec 은 단계 구조 SoT 유지). Q4(실패 대응)=자동 revert(자동화 수행, rev read-only). 배선 교체(`agent.py`)는 impl PR 2(#1457/#1458 머지). 용어 전파(bot.py/rev-queue/sub-agent.md/런북/domain-model)는 impl PR 3.
 
 ## 10. propagation cleanup 표 (PR rev2s-2 의무 갱신 대상)
 
