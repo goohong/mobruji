@@ -60,6 +60,9 @@
 | 트렌딩 | TrendingSong | `recommendation` | 다른 사용자 추천 히스토리를 기간별 집계한 인기곡 1건 read-model (곡 + 순위 + 등장 횟수 + 인기도). 영속 엔티티 아님 — `Recommendation`×`RecommendationRequestEntity` 집계 view. 노래방 일반 차트와 달리 분위기/음역대 결합 조회 (#1488). trending-recommendation.md |
 | 인기도 | popularityScore (TrendingSong) | `recommendation` | 트렌딩 정렬 신호 — 곡이 추천 결과에 등장할 때마다 `1.0 / rankPosition` 을 더한 rank 감쇠 합. 상위 노출(rank 1)일수록 큰 가중. 추천 점수(`ScoreBreakdown.popularity`)와 별개 — 조회 전용 집계값으로 알고리즘 결정성 무관 |
 | 트렌딩 조회 조건 | TrendingQuery | `recommendation` | 트렌딩 집계 입력 커맨드 — 기간(`periodDays`)/분위기(`mood`, nullable)/음역대 overlap(`voiceRangeLow`,`voiceRangeHigh`, both-or-neither)/`limit`. api.dto 의존 없는 application 입력 모델 (ADR-0005 §A-7) |
+| 스와이프 반응 | SwipeReaction / SessionFeedback | `recommendation` | 스와이프 덱에서 곡당 1건 남기는 like/pass 반응. songId당 최신 1건 upsert(재스와이프 시 덮어쓰기). 현재 클라이언트 localStorage(`web/store/swipeReactions.ts`)만, **설계 단계** 로 서버 영속(`session_feedback`) + 추천 결합 신호화 — recommendation-feedback-loop.md (#1489 UX / #1486 부른곡 모드 결합) |
+| 세션 선호 프로필 | SessionPreferenceProfile | `recommendation` | **설계 단계** 값 객체 — 세션 스와이프 좋아요 곡 + 부른곡 시드를 합친 선호 중심(음역대/분위기/BPM)과 패스 곡 회피 집합. `next` 추천 시 1회 도출해 재정렬에 사용. recommendation-feedback-loop.md |
+| 선호 적합도 / 회피 패널티 | preferenceFit / avoidancePenalty | `recommendation` | **설계 단계** `ScoreBreakdown` raw 신호 — `preferenceFit`(후보와 선호 중심 근접도 0~1, 가산) / `avoidancePenalty`(패스 곡 근접도 0~1, 감산). 콜드스타트(신호 0건)면 기여 0. recommendation-feedback-loop.md |
 | 좋아요 | Like | `feedback` | 사용자가 곡에 남긴 긍정 시그널. sessionId 단위 toggle. **v0.2에서는 추천 가중치 비영향** (가중치 도입은 v0.3+ 별도 ADR). 엔티티 §5-4 |
 | 북마크 | Bookmark | `feedback` | 사용자가 곡을 다시 찾고 싶어 별도 큐에 담은 행위. Like와 분리 유지 (spec Q1 결정). 엔티티 §5-4 |
 | 익명 세션 | AnonymousSession | `user` | 익명 사용자의 sessionId 라이프사이클(최초/최근 활동, TTL 만료, revoke) 을 관리하는 엔티티. ADR-0013 + anonymous-session-lifecycle.md. 엔티티 §5-6 |
