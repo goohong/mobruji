@@ -65,7 +65,7 @@ class RecommendationRequestRepositoryNplus1Test {
         final String sessionId = "n-plus-one-guard";
         for (int i = 0; i < 3; i++) {
             recommendationRequestRepository.save(RecommendationRequestEntity.create(
-                    sessionId, 50, 80, Mood.UPBEAT, null, List.of(10L + i, 20L + i)));
+                    sessionId, 50, 80, Mood.UPBEAT, null, null, List.of(10L + i, 20L + i)));
         }
         // 영속 컨텍스트 비워서 select-from-cache 회피
         entityManager.flush();

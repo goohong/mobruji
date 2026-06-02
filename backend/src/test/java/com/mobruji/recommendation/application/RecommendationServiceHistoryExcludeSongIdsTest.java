@@ -133,7 +133,7 @@ class RecommendationServiceHistoryExcludeSongIdsTest {
     private static RecommendationRequestEntity buildPersistedRequest(
             final long id, final String sessionId, final List<Long> excludeSongIds) throws Exception {
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                sessionId, 50, 75, Mood.UPBEAT, null, excludeSongIds);
+                sessionId, 50, 75, Mood.UPBEAT, null, null, excludeSongIds);
         final Field idField = RecommendationRequestEntity.class.getDeclaredField("id");
         idField.setAccessible(true);
         idField.set(entity, id);

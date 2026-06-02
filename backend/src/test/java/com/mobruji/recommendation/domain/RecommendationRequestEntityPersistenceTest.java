@@ -35,7 +35,7 @@ class RecommendationRequestEntityPersistenceTest {
         // given
         final List<Long> excludeSongIds = List.of(101L, 202L, 303L);
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "round-trip-session", 50, 80, Mood.UPBEAT, null, excludeSongIds);
+                "round-trip-session", 50, 80, Mood.UPBEAT, null, null, excludeSongIds);
 
         // when
         final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);
@@ -52,7 +52,7 @@ class RecommendationRequestEntityPersistenceTest {
     void preferredBpm_roundTrips() {
         // given
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "bpm-session", 50, 80, Mood.UPBEAT, 128, List.of());
+                "bpm-session", 50, 80, Mood.UPBEAT, 128, null, List.of());
 
         // when
         final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);
@@ -69,7 +69,7 @@ class RecommendationRequestEntityPersistenceTest {
     void preferredBpm_nullRoundTripsAsNull() {
         // given
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "bpm-null-session", 50, 80, Mood.UPBEAT, null, List.of());
+                "bpm-null-session", 50, 80, Mood.UPBEAT, null, null, List.of());
 
         // when
         final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);
@@ -86,7 +86,7 @@ class RecommendationRequestEntityPersistenceTest {
     void excludeSongIds_emptyListRoundTripsAsEmpty() {
         // given
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "empty-session", 50, 80, Mood.UPBEAT, null, List.of());
+                "empty-session", 50, 80, Mood.UPBEAT, null, null, List.of());
 
         // when
         final RecommendationRequestEntity saved = recommendationRequestRepository.save(entity);

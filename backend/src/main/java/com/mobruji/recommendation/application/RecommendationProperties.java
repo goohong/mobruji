@@ -7,10 +7,12 @@ import java.util.Objects;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.song.domain.Mood;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
@@ -27,6 +29,7 @@ import jakarta.validation.constraints.NotNull;
  * <li>{@code mood}: 분위기 일치 시 1, 아니면 0</li>
  * <li>{@code popularity}: 시드 데이터에 popularity 필드 부재 → 신호값 1.0 고정. 가중치는 가산점으로만 작용.</li>
  * <li>{@code tempoMatch}: v2 신규. 곡 BPM ↔ 사용자 선호 BPM(또는 mood→BPM default) 거리 기반 [0,1].</li>
+ * <li>{@code generation}: #1487 신규. 곡 발매연도 ↔ 요청 연령대 대표 시기 거리 기반 [0,1]. 연령대 미입력 시 신호값 0.</li>
  * </ul>
  *
  * <p>검증 정책: 모든 필드 검증을 Bean Validation으로 통일한다 (PR #54). 바인딩 시점에 fail-fast.
@@ -38,6 +41,7 @@ public record RecommendationProperties(
         @NotNull @Valid Weights weights,
         @NotNull @Valid Diversity diversity,
         @NotNull @Valid Tempo tempo,
+        @NotNull @Valid Generation generation,
         @Min(1) int resultCount,
         @DecimalMin("0.0") double jitterMagnitude,
         @NotNull SeedStrategy seedStrategy
@@ -62,7 +66,8 @@ public record RecommendationProperties(
             @DecimalMin("0.0") double genre,
             @DecimalMin("0.0") double mood,
             @DecimalMin("0.0") double popularity,
-            @DecimalMin("0.0") double tempoMatch
+            @DecimalMin("0.0") double tempoMatch,
+            @DecimalMin("0.0") double generation
     ) {
     }
 
@@ -101,6 +106,35 @@ public record RecommendationProperties(
             if (fallbackBpm != null && (fallbackBpm < 30 || fallbackBpm > 300)) {
                 throw new IllegalArgumentException("fallbackBpm out of [30, 300]: " + fallbackBpm);
             }
+        }
+    }
+
+    /**
+     * generationFit 신호 설정 (#1487).
+     *
+     * <ul>
+     * <li>{@code distanceToleranceYears}: |songReleaseYear - representativeYear| 가 이 값 이상이면 score=0,
+     * 그 미만이면 {@code 1.0 - distance/tolerance} 로 선형 감쇠.</li>
+     * <li>{@code representativeYear}: 연령대별 "대표 시기" 발매연도(=그 세대의 곡이 많이 나온 시기 추정값). 곡 발매연도가
+     * 이 값에 가까울수록 가산. 연령대가 표에 없으면 generationFit=0(가중 없음).</li>
+     * </ul>
+     *
+     * <p>대표 시기는 "지금 기준 formative 연도" 추정이라 코드에 박지 않고 yml 로 외부화한다 — 운영 측정 후 튜닝 가능.
+     * 결정성에는 영향 없음(설정 고정 시 같은 입력 → 같은 결과).
+     */
+    public record Generation(
+            @DecimalMin("1.0") double distanceToleranceYears,
+            @NotNull Map<AgeGroup, @Min(1900) @Max(2100) Integer> representativeYear
+    ) {
+
+        public Generation {
+            Objects.requireNonNull(representativeYear, "representativeYear must not be null");
+            // 빈 입력도 허용(빈 EnumMap 으로 정규화) — Tempo.moodDefaultBpm 과 동일 패턴.
+            // `new EnumMap<>(Map)` 은 입력이 비어 있으면 IllegalArgumentException 을 던지므로
+            // keyType 생성자로 빈 EnumMap 을 만든 뒤 putAll 한다.
+            final EnumMap<AgeGroup, Integer> defensive = new EnumMap<>(AgeGroup.class);
+            defensive.putAll(representativeYear);
+            representativeYear = Map.copyOf(defensive);
         }
     }
 }

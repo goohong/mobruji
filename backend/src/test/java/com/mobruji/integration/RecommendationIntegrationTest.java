@@ -139,6 +139,55 @@ class RecommendationIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E (#1487): ageGroup 입력 시 201 + breakdown.generationFit가 (0,1] 범위로 노출된다")
+    void e2e_ageGroupGenerationFitInResponse() {
+        // given: 시드 곡 releaseYear=2020. ageGroup=TWENTIES 대표 시기=2015, tolerance=15
+        //        → 거리 5 → generationFit = 1 - 5/15 ≈ 0.667 (> 0)
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e04",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT",
+                  "ageGroup": "TWENTIES"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].breakdown.generationFit", notNullValue())
+                .body("recommendations[0].breakdown.generationFit", greaterThan(0.0f))
+                .body("recommendations[0].breakdown.generationFit", lessThanOrEqualTo(1.0f));
+    }
+
+    @Test
+    @DisplayName("E2E (#1487): ageGroup 미입력 시 generationFit=0.0 (랭킹 무영향, 하위호환)")
+    void e2e_noAgeGroupGenerationFitZero() {
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e05",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].breakdown.generationFit", equalTo(0.0f));
+    }
+
+    @Test
     @DisplayName("E2E: 없는 추천 ID는 404")
     void e2e_notFound() {
         given()

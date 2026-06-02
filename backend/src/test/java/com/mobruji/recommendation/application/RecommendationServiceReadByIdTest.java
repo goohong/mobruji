@@ -205,7 +205,7 @@ class RecommendationServiceReadByIdTest {
 
     private static RecommendationRequestEntity persistedRequest(final Long id) throws Exception {
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                "session-read", 48, 72, Mood.UPBEAT, null, List.of());
+                "session-read", 48, 72, Mood.UPBEAT, null, null, List.of());
         final Field idField = RecommendationRequestEntity.class.getDeclaredField("id");
         idField.setAccessible(true);
         idField.set(entity, id);

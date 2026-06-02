@@ -4,6 +4,7 @@ import java.util.Random;
 
 import org.springframework.stereotype.Component;
 
+import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.recommendation.domain.ScoreBreakdown;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -17,7 +18,7 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * v1/v2 규칙 기반 점수 함수.
  *
  * <p>{@code score = w_voiceFit * rangeFit + w_genre * genreMatch + w_mood * moodMatch
- *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + jitter}
+ *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + w_generation * generationFit + jitter}
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
@@ -28,6 +29,8 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
  * <li>tempoMatch (v2 #218): {@code 1.0 - min(1.0, |songBpm - preferredBpm| / tolerance)}.
  * 곡 BPM이 null이거나 사용자 선호 BPM이 결정될 수 없으면 0.5(중립).</li>
+ * <li>generationFit (#1487): {@code 1.0 - min(1.0, |songReleaseYear - representativeYear| / toleranceYears)}.
+ * 연령대 미입력 또는 곡 발매연도 부재면 0.0(가중 없음) — 미입력 시 랭킹 영향 없음(하위호환).</li>
  * <li>jitter: 동순위 분산용. seed 고정으로 결정성 유지 가능.</li>
  * </ul>
  *
@@ -60,15 +63,18 @@ public class RecommendationScorer {
             final int voiceRangeHigh,
             final Mood requestedMood,
             final Integer preferredBpm,
+            final AgeGroup ageGroup,
             final Random random) {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
         final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
+        final RecommendationProperties.Generation generation = recommendationProperties.generation();
         final double rangeFit = voiceRangeFit(song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
         final double genreMatch = genreMatch();
         final double moodMatch = moodMatch(song.getMood(), requestedMood);
         final double popularityPrior = popularityPrior(song);
         final double tempoMatch = tempoMatch(song.getBpm(), preferredBpm, requestedMood, tempo);
+        final double generationFit = generationFit(song.getReleaseYear(), ageGroup, generation);
         final double jitterMagnitude = recommendationProperties.jitterMagnitude();
         final double jitter = (random.nextDouble() * 2 - 1) * jitterMagnitude;
         final double total = weights.voiceFit() * rangeFit
@@ -76,9 +82,10 @@ public class RecommendationScorer {
                 + weights.mood() * moodMatch
                 + weights.popularity() * popularityPrior
                 + weights.tempoMatch() * tempoMatch
+                + weights.generation() * generationFit
                 + jitter;
         final ScoreBreakdown breakdown = new ScoreBreakdown(
-                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch);
+                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit);
         return new Scored(total, breakdown);
     }
 
@@ -221,6 +228,31 @@ public class RecommendationScorer {
             }
         }
         return tempo.fallbackBpm();
+    }
+
+    /**
+     * generationFit 신호 (#1487).
+     *
+     * <p>산식: {@code 1.0 - min(1.0, |songReleaseYear - representativeYear| / toleranceYears)} —
+     * representativeYear는 요청 연령대의 "대표 시기" 발매연도(properties 외부화). 연령대가 null이거나, 곡 발매연도가
+     * null이거나, 연령대가 표에 없으면 0.0(가중 없음) — 미입력 시 랭킹 영향 없음(하위호환).
+     *
+     * <p>가중 합산에는 weights.generation으로 들어가며, raw 신호는 ScoreBreakdown에 보존된다.
+     */
+    static double generationFit(
+            final Integer releaseYear,
+            final AgeGroup ageGroup,
+            final RecommendationProperties.Generation generation) {
+        if (ageGroup == null || releaseYear == null) {
+            return 0.0;
+        }
+        final Integer representativeYear = generation.representativeYear().get(ageGroup);
+        if (representativeYear == null) {
+            return 0.0;
+        }
+        final double distance = Math.abs((double) releaseYear - representativeYear);
+        final double normalized = Math.min(1.0, distance / generation.distanceToleranceYears());
+        return 1.0 - normalized;
     }
 
     /**

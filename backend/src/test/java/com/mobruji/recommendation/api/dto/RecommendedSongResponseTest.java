@@ -22,7 +22,7 @@ class RecommendedSongResponseTest {
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .lowMidi(57).highMidi(81)
                 .build();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.92, 0.75, 0.6, 0.5, 0.85);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.92, 0.75, 0.6, 0.5, 0.85, 0.0);
         final ScoredRecommendation scoredRecommendation = new ScoredRecommendation(
                 song, 0.78, "음역 적합", 2, breakdown);
 

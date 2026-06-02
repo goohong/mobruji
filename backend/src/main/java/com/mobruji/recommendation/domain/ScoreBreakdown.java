@@ -4,7 +4,8 @@ package com.mobruji.recommendation.domain;
  * 추천 점수 신호 분해 — Spotify "Why this song?" UX 영감(P2). 사용자가 추천 이유를 펼쳐볼 때 각 신호의 raw 값(0~1)을
  * 그대로 노출해 설명 가능성을 확보한다.
  *
- * <p>v2(#218)에서 {@code tempoMatch} 신호가 추가되어 6개 신호로 확장됐다. 가중치 적용 전 raw 값(0~1).
+ * <p>v2(#218)에서 {@code tempoMatch} 신호가 추가되고, #1487에서 {@code generationFit} 신호가 추가되어 7개 신호로
+ * 확장됐다. 가중치 적용 전 raw 값(0~1).
  *
  * <ul>
  * <li>{@code keyMatch} — 곡 키가 알려져 있는지 여부(UNKNOWN=0.5 중립, 그 외 1.0). 사용자에게 "키 정보를 안다/모른다"의
@@ -15,6 +16,8 @@ package com.mobruji.recommendation.domain;
  * <li>{@code popularity} — v1에서는 시드 데이터에 popularity 컬럼 없음 → 1.0 고정.</li>
  * <li>{@code tempoMatch} — v2 신규. 곡 BPM과 사용자 선호 BPM(또는 mood 기반 default)의 거리 기반 [0,1] 점수.
  * 곡 BPM이 null이거나 사용자 선호 BPM이 결정될 수 없으면 0.5(중립).</li>
+ * <li>{@code generationFit} — #1487 신규. 곡 발매연도가 요청 연령대의 대표 시기에 가까울수록 [0,1]. 연령대 미입력 또는 곡
+ * 발매연도 부재면 0.0(가중 없음).</li>
  * </ul>
  *
  * <p>가중 합산된 최종 score는 별도 필드({@link ScoredRecommendation#score()})로 보존한다. 본 record는 사후 분석/설명용
@@ -28,7 +31,8 @@ public record ScoreBreakdown(
         double genreMatch,
         double moodMatch,
         double popularity,
-        double tempoMatch
+        double tempoMatch,
+        double generationFit
 ) {
 
     public ScoreBreakdown {
@@ -38,6 +42,7 @@ public record ScoreBreakdown(
         requireUnitInterval("moodMatch", moodMatch);
         requireUnitInterval("popularity", popularity);
         requireUnitInterval("tempoMatch", tempoMatch);
+        requireUnitInterval("generationFit", generationFit);
     }
 
     private static void requireUnitInterval(final String name, final double value) {
