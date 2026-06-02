@@ -188,6 +188,66 @@ class RecommendationIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E (#1494): 음역 보유 곡은 practiceDifficulty(난이도) + 최고음 사유가 응답에 노출된다")
+    void e2e_practiceDifficultyExposedForRangedSong() {
+        // given: 음역대를 가진 곡만 시드 (HARD: low 57 ~ high 81, span 24, 최고음 A5)
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(Song.builder()
+                .title("도전곡").artist("도전가수").releaseYear(2020)
+                .keyOriginal(MusicalKey.C_MAJOR).bpm(120).mood(Mood.UPBEAT)
+                .language("ko").genre("발라드")
+                .lowMidi(57).highMidi(81)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build());
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e06",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 82,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].practiceDifficulty", equalTo("HARD"))
+                .body("recommendations[0].practiceDifficultyReason", equalTo("최고음 A5, 고음·넓은 음역이라 도전적인 곡이에요"));
+    }
+
+    @Test
+    @DisplayName("E2E (#1494): 음역 미보유 곡은 practiceDifficulty=null + graceful 사유로 처리된다")
+    void e2e_practiceDifficultyGracefulForSongWithoutRange() {
+        // 기본 시드(buildSong)는 lowMidi/highMidi 미설정 → difficulty null
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e07",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].practiceDifficulty", nullValue())
+                .body("recommendations[0].practiceDifficultyReason",
+                        equalTo("아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요"));
+    }
+
+    @Test
     @DisplayName("E2E: 없는 추천 ID는 404")
     void e2e_notFound() {
         given()

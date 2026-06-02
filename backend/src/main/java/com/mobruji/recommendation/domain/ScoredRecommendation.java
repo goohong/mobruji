@@ -2,6 +2,8 @@ package com.mobruji.recommendation.domain;
 
 import java.util.Objects;
 
+import com.mobruji.song.domain.Difficulty;
+import com.mobruji.song.domain.NoteName;
 import com.mobruji.song.domain.Song;
 
 /**
@@ -16,6 +18,10 @@ import com.mobruji.song.domain.Song;
  * breakdown 의 {@code rangeFit} 신호를 곡별 음역 적합도 점수(0~1)와 짧은 한국어 사유로 풀어 준다.
  * {@link #moodFit()} / {@link #moodFitReason()}은 같은 패턴으로 {@code moodMatch} 분위기 연속 유사도(#1485)를 노출한다.
  * breakdown 이 없는(과거 추천 재조회) 경로에서는 모두 {@code null} — 응답 DTO 에서 그대로 통과시킨다.
+ *
+ * <p>{@link #practiceDifficulty()} / {@link #practiceDifficultyReason()}은 연습형 페르소나(P-A, #1494)용으로
+ * 곡 자체의 가창 난이도·최고음을 노출한다. breakdown 이 아니라 곡 속성에서 파생하므로 재조회 경로에서도 동작하며,
+ * 음역 미보유 곡은 graceful 하게 "정보 없음" 사유를 돌려준다.
  */
 public record ScoredRecommendation(
         Song song,
@@ -109,5 +115,35 @@ public record ScoredRecommendation(
             return "요청하신 분위기와 어느 정도 비슷해요";
         }
         return "요청하신 분위기와는 결이 조금 달라요";
+    }
+
+    /**
+     * 연습형 페르소나(P-A) 지원 — 곡의 가창 난이도(EASY/NORMAL/HARD)를 그대로 노출한다(#1494).
+     * 곡 음역({@code lowMidi}/{@code highMidi})으로 자동 분류된 {@link Song#getDifficulty()} 값이며,
+     * 음역 미보유 곡은 산출 근거가 없어 {@code null}. voiceFit 과 달리 곡 자체 속성에서 파생하므로
+     * breakdown 이 없는 과거 추천 재조회 경로에서도 동작한다.
+     */
+    public Difficulty practiceDifficulty() {
+        return song.getDifficulty();
+    }
+
+    /**
+     * 연습 난이도를 풀어 주는 짧은 한국어 사유 + 최고음 안내(#1494). 음역대 분석 정보가 없는 곡은
+     * 그 사실을 그대로 알린다(graceful) — 빈 응답 대신 "정보 없음" 을 노출해 P-A 가 항상 피드백을 받는다.
+     */
+    public String practiceDifficultyReason() {
+        return describePracticeDifficulty(song.getDifficulty(), song.getHighMidi());
+    }
+
+    private static String describePracticeDifficulty(final Difficulty difficulty, final Integer highMidi) {
+        if (difficulty == null || highMidi == null) {
+            return "아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요";
+        }
+        final String highestNote = NoteName.of(highMidi);
+        return switch (difficulty) {
+            case EASY -> "최고음 " + highestNote + ", 음역 폭이 넓지 않아 부담 없이 연습하기 좋아요";
+            case NORMAL -> "최고음 " + highestNote + ", 적당한 난이도라 연습용으로 무난해요";
+            case HARD -> "최고음 " + highestNote + ", 고음·넓은 음역이라 도전적인 곡이에요";
+        };
     }
 }
