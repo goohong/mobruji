@@ -156,7 +156,8 @@ public class RecommendationService {
                     scoredSong.scored.total(),
                     matchReason,
                     rankPosition,
-                    scoredSong.scored.breakdown()));
+                    scoredSong.scored.breakdown(),
+                    scoredSong.scored.suggestedTranspose()));
         }
         recommendationRepository.saveAll(recommendationsToPersist);
 
