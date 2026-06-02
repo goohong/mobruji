@@ -46,6 +46,8 @@ import {
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
+import { FitReasons } from "./FitBadge";
+
 type SongDetailContentProps =
   | {
       item: RecommendedSongResponse;
@@ -278,6 +280,8 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
       <p className="text-sm text-[var(--text-body-strong)]">
         {item.matchReason}
       </p>
+      {/* closes #1484 — BE 산출 음역/분위기 적합도 배지 + 한국어 사유. 추정 breakdown 보다 위. */}
+      <FitReasons item={item} />
       <dl className="flex flex-col gap-1.5">
         {breakdown.map((entry) => (
           <BreakdownRow key={entry.key} entry={entry} />
