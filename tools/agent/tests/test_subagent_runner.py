@@ -232,3 +232,68 @@ def test_kill_process_group_empty_graceful(monkeypatch):
     monkeypatch.setattr(sr.os, "killpg", _killpg)
     asyncio.run(sr._kill_process_group(12345, "be", reason="t"))
     assert sigs == [signal.SIGTERM]  # SIGTERM 에서 비어 있음 확인 → 즉시 return
+
+
+def test_ephemeral_worktree_add_calls_git_and_returns_path(monkeypatch):
+    """#1531: infra ephemeral 워크트리 — git worktree add origin/develop 호출 + 고유 경로 반환."""
+    import types
+    import subagent_runner as sr
+    calls = []
+
+    def fake_run(argv, **k):
+        calls.append(argv)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    wt = sr._ephemeral_worktree_add("roadmap-1524-fix")
+    assert "infra-roadmap-1524-fix" in str(wt)
+    # prune + remove(가드) + add 가 호출됨
+    assert any("add" in a and "origin/develop" in a for a in calls)
+
+
+def test_ephemeral_worktree_add_raises_on_failure(monkeypatch):
+    """#1531: worktree add 실패(rc!=0) → RuntimeError (호출부 finally 가 lock 해제)."""
+    import types
+    import subagent_runner as sr
+
+    def fake_run(argv, **k):
+        rc = 1 if "add" in argv else 0
+        return types.SimpleNamespace(returncode=rc, stdout="", stderr="fatal: exists")
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    try:
+        sr._ephemeral_worktree_add("d1")
+        assert False, "RuntimeError 기대"
+    except RuntimeError as exc:
+        assert "worktree add 실패" in str(exc)
+
+
+def test_ephemeral_worktree_remove_calls_remove_and_prune(monkeypatch):
+    """#1531: teardown — remove --force + prune."""
+    import types
+    import subagent_runner as sr
+    from pathlib import Path
+    calls = []
+    monkeypatch.setattr(sr.subprocess, "run",
+                        lambda argv, **k: calls.append(argv) or types.SimpleNamespace(returncode=0, stdout="", stderr=""))
+    sr._ephemeral_worktree_remove(Path("/home/mobruji/mobruji-infra-d1"))
+    assert any("remove" in a for a in calls) and any("prune" in a for a in calls)
+
+
+def test_exec_infra_teardowns_ephemeral_on_failure(isolated_db, monkeypatch):
+    """#1531: run_subagent_execution(infra) — ephemeral 생성 후, 실패해도 finally teardown + lock 해제."""
+    import asyncio
+    import subagent_runner as sr
+    import events as ev
+    from pathlib import Path
+
+    created = Path("/home/mobruji/mobruji-infra-d9")
+    removed = []
+    monkeypatch.setattr(sr, "_ephemeral_worktree_add", lambda did: created)
+    monkeypatch.setattr(sr, "_ephemeral_worktree_remove", lambda wt: removed.append(wt))
+    monkeypatch.setenv("CLAUDE_BIN", 'claude "unbalanced')  # argv ValueError → 실행 전 실패
+    ev.set_state("in_flight_agents", ["infra"])
+    ev.set_state("in_flight_started", {"infra": "2026-01-01T00:00:00+00:00"})
+
+    asyncio.run(sr.run_subagent_execution("infra", "d9", "t", "k", ""))
+
+    assert removed == [created]  # ephemeral teardown 됨
+    assert "infra" not in (ev.get_state("in_flight_agents") or [])  # lock 해제

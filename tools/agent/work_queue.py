@@ -20,7 +20,9 @@ import events as ev
 WORK_QUEUE_KEY: Final[str] = "work_queue"
 PRIORITY_URGENT: Final[int] = 10
 PRIORITY_NORMAL: Final[int] = 0
-VALID_CYCLES: Final[frozenset[str]] = frozenset({"be", "fe", "rev", "plan"})
+# (#1531) infra = 온디맨드 ephemeral 사이클 (ADR-0027 옵션 D). 상시 워크트리 없이
+# git worktree add/remove 로 처리 — subagent_runner 가 ephemeral lifecycle 담당.
+VALID_CYCLES: Final[frozenset[str]] = frozenset({"be", "fe", "rev", "plan", "infra"})
 
 
 def _load(path: Path | None = None) -> dict[str, list[dict[str, Any]]]:

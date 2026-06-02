@@ -99,3 +99,9 @@ def test_peek_skips_dispatched(isolated_db):
     queue["rev"][0]["status"] = "dispatched"
     events.set_state(wq.WORK_QUEUE_KEY, queue)
     assert wq.peek_next("rev") is None
+
+
+def test_valid_cycles_includes_infra():
+    """#1531: infra 사이클 enqueue 허용 (온디맨드 ephemeral)."""
+    import work_queue as wq
+    assert "infra" in wq.VALID_CYCLES

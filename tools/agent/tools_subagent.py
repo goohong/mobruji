@@ -75,50 +75,59 @@ def launch_subagent(
     # (#1401) cycle_thread_id 가 주어지면(자율 큐 경로 — 전용 cycle forum thread)
     # 그걸 wrapper 의 pending-thread-id 로 사용 → 📌 dialogue thread 재사용 폐지.
     # 미지정 시 기존대로 directive thread (register_directive_pending 경로 호환).
-    pending_thread_id = cycle_thread_id or directive.get("thread_id")
-    if not pending_thread_id:
+    pending_thread_id = cycle_thread_id or directive.get("thread_id") or ""
+    # (#1531) infra 는 전용 forum 채널이 없어 cycle thread 가 없다 — PR 코멘트로 보고하므로
+    # pending thread 요구를 면제. 표준 사이클(be/fe/rev/plan)은 기존대로 thread 필수.
+    if not pending_thread_id and cycle != "infra":
         raise ValueError(
             f"directive {directive_id} 의 pending thread 미등록 — "
             f"register_directive_pending 먼저 호출 필요"
         )
 
     # 4. wrapper subprocess (legacy infrastructure 재사용, Phase 2+ 에서 SDK 로 migration)
-    if not WRAPPER_PATH.exists():
-        raise FileNotFoundError(f"wrapper not found: {WRAPPER_PATH}")
+    # (#1531) infra 는 wrapper(set-active/per-cycle 채널 알림 — standing 워크트리/채널
+    # 가정)를 건너뛴다. infra 의 실제 실행은 subagent_runner 의 ephemeral 경로가 담당하고,
+    # 여기선 lock + event 부기만. (wrapper 가 infra 워크트리·채널 부재로 hard-fail 하는
+    # 사고 차단.)
+    wrapper_stdout = "(infra: wrapper skipped — ephemeral path)"
+    if cycle != "infra":
+        if not WRAPPER_PATH.exists():
+            raise FileNotFoundError(f"wrapper not found: {WRAPPER_PATH}")
 
-    result = subprocess.run(  # noqa: S603 — explicit path
-        [
-            "bash",
-            str(WRAPPER_PATH),
-            cycle,
-            "--title", title,
-            "--task", task,
-            "--directive-id", directive_id,
-            "--pending-thread-id", pending_thread_id,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=wrapper_timeout,
-        check=False,
-    )
+        result = subprocess.run(  # noqa: S603 — explicit path
+            [
+                "bash",
+                str(WRAPPER_PATH),
+                cycle,
+                "--title", title,
+                "--task", task,
+                "--directive-id", directive_id,
+                "--pending-thread-id", pending_thread_id,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=wrapper_timeout,
+            check=False,
+        )
 
-    if result.returncode != 0:
-        # wrapper 실패 시 lock 안 잡고 event emit
-        ev.append_event(
-            "subagent_launched",
-            {
-                "cycle": cycle,
-                "directive_id": directive_id,
-                "title": title,
-                "task": task,
-                "wrapper_rc": result.returncode,
-                "wrapper_stderr": result.stderr[:500],
-                "failed": True,
-            },
-        )
-        raise RuntimeError(
-            f"agent-launch-wrapper 실패 (rc={result.returncode}): {result.stderr[:200]}"
-        )
+        if result.returncode != 0:
+            # wrapper 실패 시 lock 안 잡고 event emit
+            ev.append_event(
+                "subagent_launched",
+                {
+                    "cycle": cycle,
+                    "directive_id": directive_id,
+                    "title": title,
+                    "task": task,
+                    "wrapper_rc": result.returncode,
+                    "wrapper_stderr": result.stderr[:500],
+                    "failed": True,
+                },
+            )
+            raise RuntimeError(
+                f"agent-launch-wrapper 실패 (rc={result.returncode}): {result.stderr[:200]}"
+            )
+        wrapper_stdout = result.stdout[:500]
 
     # 5. 성공 — lock 잡기 + event emit
     in_flight.append(cycle)
@@ -131,7 +140,7 @@ def launch_subagent(
             "title": title,
             "task": task,
             "pending_thread_id": pending_thread_id,
-            "wrapper_stdout": result.stdout[:500],
+            "wrapper_stdout": wrapper_stdout,
         },
     )
 

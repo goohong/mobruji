@@ -27,7 +27,10 @@ logger = logging.getLogger("agent.work_queue")
 
 IN_FLIGHT_STARTED_KEY = "in_flight_started"
 STALE_THRESHOLD = timedelta(hours=2)
-CYCLES = ("be", "fe", "rev", "plan")
+# (#1531) infra = 온디맨드 ephemeral 사이클. dispatch_once 가 매 tick 순회 — 큐 비면
+# no-op, in_flight lock 으로 동시 1 (cap=1, ADR-0027 제약). 실행은 subagent_runner
+# 의 ephemeral 워크트리 경로(git worktree add/remove)가 담당.
+CYCLES = ("be", "fe", "rev", "plan", "infra")
 GH_TIMEOUT_SECONDS = 25
 # (#1390) launch 연속 실패 N회 초과 시 큐에서 제외 — 무한 재시도 + head-of-line block 차단.
 MAX_LAUNCH_ATTEMPTS = 3
