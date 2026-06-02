@@ -63,6 +63,7 @@ import { useSessionStore } from "@/store/session";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 import { SongDetailModal } from "./components/SongDetailModal";
 import { SongDetailContent } from "./components/SongDetailContent";
+import { SwipeDeck } from "./components/SwipeDeck";
 
 const SKELETON_COUNT = 4;
 /**
@@ -338,6 +339,10 @@ function RecommendationFeed({
   // 훅 규칙 준수를 위해 early return 이전에 호출.
   const [selected, setSelected] = useState<RecommendedSongResponse | null>(null);
 
+  // closes #1489 — 리스트(무한 스크롤) ↔ 스와이프(한 곡씩 선곡) 뷰 토글.
+  // 기본은 기존 리스트 — 회귀 0. 스와이프는 같은 무한 쿼리를 한 곡씩 소비한다.
+  const [viewMode, setViewMode] = useState<"list" | "swipe">("list");
+
   // 모든 페이지의 추천 곡을 평탄화. 페이지 경계 정보는 사용자에게 노출하지 않는다.
   const allRecommendations = useMemo(() => {
     if (!data) {
@@ -493,8 +498,24 @@ function RecommendationFeed({
     highMidi: userVoiceRangeHigh,
   };
 
+  if (viewMode === "swipe") {
+    return (
+      <div className="flex flex-col gap-4">
+        <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+        <SwipeDeck
+          recommendations={allRecommendations}
+          userVoiceRange={userRange}
+          hasMore={hasNextPage}
+          isFetchingMore={isFetchingNextPage}
+          onNeedMore={fetchNextPage}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
       {/*
         (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
         시각적으로는 `sr-only` 로 숨기지만 SR 은 polite 큐로 안내 메시지를 읽는다.
@@ -577,6 +598,51 @@ function RecommendationFeed({
           </Link>
         </div>
       )}
+    </div>
+  );
+}
+
+type ViewModeToggleProps = {
+  viewMode: "list" | "swipe";
+  onChange: (mode: "list" | "swipe") => void;
+};
+
+/**
+ * 리스트 ↔ 스와이프 뷰 전환 세그먼트 토글 (closes #1489).
+ *
+ * `role="radiogroup"` + 각 버튼 `aria-checked` 로 스크린 리더가 현재 뷰를 읽게 한다.
+ */
+function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="추천 보기 방식"
+      className="flex items-center gap-1 self-start rounded-full bg-[var(--bg-subtle)] p-1"
+    >
+      {(
+        [
+          { mode: "list", label: "리스트" },
+          { mode: "swipe", label: "스와이프" },
+        ] as const
+      ).map(({ mode, label }) => {
+        const active = viewMode === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(mode)}
+            className={`min-h-9 rounded-full px-4 text-sm font-medium transition-colors duration-[var(--duration-base)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] ${
+              active
+                ? "bg-[var(--bg-base)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }
