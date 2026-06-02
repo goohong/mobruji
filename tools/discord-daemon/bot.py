@@ -4624,8 +4624,12 @@ def format_rev_post_merge_discord(pr_numbers: list[int]) -> str:
 # spec: docs/features/directive-board-template-and-tags.md §5-6 완료 자동화
 # PR B: PR 머지 webhook → directive_status.sh completed 자동 호출.
 # 사용자 정정 (2026-05-28): sub-agent PR body 에 `directive: <id>` 명시 → 머지 시 자동 status 전이.
+# (#1473) **줄 시작 앵커 필수** — 정식 trailer 줄(`directive: <id>` / `Closes directive <id>`)만
+# 매칭하고, PR 본문 **산문 중간**의 'directive <id>' 언급은 배제한다. 사고: #1451 이 다른
+# directive(1511193376639422656)를 자기 live-test 예시로 산문에 적었는데 `directive[:\s]+`(공백
+# 허용)가 이를 오매칭 → 머지 시 그 directive 를 #1451 로 잘못 완료·링크 (실제 fix #1454 가려짐).
 DIRECTIVE_PR_BODY_RE: Final = re.compile(
-    r"(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE
+    r"^[ \t]*(?:closes\s+)?directive[:\s]+\s*(\d{6,30})", re.IGNORECASE | re.MULTILINE
 )
 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT: Final[int] = 300  # 5분
 DIRECTIVE_COMPLETE_SEARCH_WINDOW: Final[str] = "24h"
