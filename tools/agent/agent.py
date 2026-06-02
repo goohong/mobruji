@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from typing import Any
 
@@ -363,13 +364,17 @@ async def handle_pr_merged(payload: dict[str, Any]) -> None:
 
 
 async def handle_post_merge_review_requested(payload: dict[str, Any]) -> None:
-    """(#1447) bridge 의 merge 감지 loop 가 요청한 post-merge 코드 리뷰(단계 2)를
-    rev 큐에 적재 — dispatcher 가 rev sub-agent 를 실행한다.
+    """(#1447) bridge 의 merge 감지 loop 가 요청한 단계 2 — **dev 배포 E2E 검증**
+    (배포본 E2E 점검) 을 rev 큐에 적재. dispatcher 가 rev sub-agent 를 실행한다.
 
-    이전엔 nmae tmux pane 에 inject 했으나 nmae STRICT 룰상 무시됐고, 리뷰가
+    이전엔 nmae tmux pane 에 inject 했으나 nmae STRICT 룰상 무시됐고, 검증이
     영영 안 돌아 15분마다 무한 재알림하던 사고 fix (사용자 정정 2026-06-02:
-    "review 가 안 됐으면 review 를 실행하게 고쳐야지"). rev 가 dev 회귀 검토 후
+    "review 가 안 됐으면 review 를 실행하게 고쳐야지"). rev 가 dev 배포 E2E 검증 후
     `rev-post-merge-pass` 라벨을 부여하면 bridge 검색 대상에서 빠져 loop 자연 종료.
+
+    (#1457) task 본문 재정의 — 단위 테스트 재실행(단계 1 + CI 중복)이 아니라,
+    develop dev 배포가 끝난 뒤 그 **배포본(NCP live)** 을 대상으로 E2E 를 돌려
+    통합·배포 회귀를 잡는다. spec: docs/features/stage2-dev-deploy-e2e.md §5-4.
     """
     pr_number = payload.get("pr_number")
     if not pr_number:
@@ -378,19 +383,33 @@ async def handle_post_merge_review_requested(payload: dict[str, Any]) -> None:
     pr_url = payload.get("pr_url", "")
     pr_title = payload.get("pr_title", "")
     directive_id = f"rev-postmerge-{pr_number}"
+    dev_base_url = os.environ.get("PLAYWRIGHT_DEV_URL") or os.environ.get(
+        "DEV_BASE_URL", "http://101.79.20.94",
+    )
     task = (
-        f"PR #{pr_number} ({pr_title}) 이(가) develop 에 머지됐습니다 — 머지 후 회귀 검토(단계 2).\n"
-        f"절차: 최신 develop 을 checkout 해 이 PR 관련 테스트/시나리오를 재실행하고 dev 환경 회귀가 없는지 확인.\n"
-        f"검토 완료 후 **반드시** `gh pr edit {pr_number} -R goohong/mobruji --add-label rev-post-merge-pass` 로 라벨 부여 "
-        f"(이 라벨이 붙어야 재알림 loop 가 멈춥니다). 회귀 발견 시: 후속 이슈 등록 + 코멘트로 명시하되 라벨은 부여(검토 완료 표시).\n"
-        f"구현(코드 수정) 금지 — 검토만. PR URL: {pr_url}"
+        f"PR #{pr_number} ({pr_title}) 이(가) develop 에 머지됐습니다 — 단계 2 **dev 배포 E2E 검증**(배포본 E2E 점검).\n"
+        f"목적: 단위 테스트 재실행(단계 1·CI 중복)이 아니라, dev 배포본 자체를 대상으로 통합·배포 회귀를 잡습니다.\n"
+        f"1) dev 배포 완료 대기 — `{dev_base_url}/actuator/health/liveness` 가 green 일 때까지 polling 후 시작 "
+        f"(배포 미완 상태 검증 금지 — false negative 방지).\n"
+        f"2) E2E 범위 2분류 (PR diff 보고 판정): "
+        f"사용자 가시 화면(렌더/라우팅/CTA/스타일) 변경 → 브라우저 E2E — Playwright `PLAYWRIGHT_BASE_URL={dev_base_url}` "
+        f"(`web/playwright.config.ts` 미도입 동안은 프론트 호출·HTTP fallback) / "
+        f"API 계약·추천 로직·데이터 정합성 등 비가시 동작 → 프론트 호출(web/lib/api) 또는 직접 HTTP "
+        f"(`curl {dev_base_url}/api/v1/...` + 응답 검증). 양쪽 다 건드리면 두 채널 모두 실행.\n"
+        f"3) 통과 시 **반드시** `gh pr edit {pr_number} -R goohong/mobruji --add-label rev-post-merge-pass` 로 라벨 부여 "
+        f"(이 라벨이 붙어야 재알림 loop 가 멈춥니다) + `✅ dev 배포 E2E 검증 pass` 코멘트.\n"
+        f"4) 회귀 발견 시: 이 PR(#{pr_number}) 에 **눈에 띄는 코멘트** `🔴 dev 배포 E2E 회귀 — <증상> / revert 예정(자동) / 후속 이슈 #N` 를 남겨 "
+        f"나중에 PR 만 봐도 회귀·롤백 이력을 알 수 있게 할 것 + `regression:dev` 라벨 + revert 후속 이슈 등록 + Discord push (즉시). "
+        f"단, 라벨 `rev-post-merge-pass` 도 부여(검증 완료 표시). "
+        f"dev 롤백(자동 revert)은 자동화 계층이 수행하므로 rev 가 직접 하지 말 것 — rev 는 read-only.\n"
+        f"구현(코드 수정) 금지 — 검증만. PR URL: {pr_url}"
     )
     try:
         import tools_queue as tq
         result = tq.enqueue_directive(
             cycle="rev",
             directive_id=directive_id,
-            title=f"머지 후 회귀 검토 — PR #{pr_number}",
+            title=f"dev 배포 E2E 검증 — PR #{pr_number}",
             task=task,
             thread_id="",
         )
