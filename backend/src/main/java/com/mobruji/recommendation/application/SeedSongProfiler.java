@@ -73,6 +73,7 @@ public class SeedSongProfiler {
                 voiceRange[1],
                 mood,
                 preferredBpm,
+                null,
                 excludeSongIds);
     }
 
