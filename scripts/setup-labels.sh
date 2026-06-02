@@ -51,4 +51,10 @@ create "session:review"   "9467BD" "리뷰 세션의 산출물 (코멘트로 진
 create "session:plan"     "FF7F0E" "기획 세션(docs/ADR/spec)이 진행 중인 PR"
 create "reviewed:claude"  "BCBD22" "Claude 리뷰 세션이 검토 완료한 PR"
 
+# 자동 재작업 고리 (pr-rework-auto-loop.md)
+create "rev:changes-requested" "D93F0B" "rev 가 결함 발견 — 자동 재작업 대상 (rev:hold 와 구분)"
+create "ci:failed"             "B60205" "required check FAIL 멱등 가시화 마커"
+create "rework:in-progress"    "FBCA04" "fix 모드 재작업 directive 적재됨 (중복 적재 가드)"
+create "rework:exhausted"      "5319E7" "자동 재작업 상한 소진 — 사람 개입 필요"
+
 echo "완료."
