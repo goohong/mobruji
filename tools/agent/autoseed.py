@@ -134,29 +134,41 @@ def _seeded_for_cycle(cycle: str) -> bool:
 
 
 def _fetch_backlog(cycle: str, runner: Callable[..., Any]) -> list[dict[str, Any]]:
-    """cycle scope 매칭 open 이슈 (created_at asc — 백로그 소진 방향)."""
+    """cycle scope 매칭 open 이슈 (created_at asc — 백로그 소진 방향).
+
+    ⚠️ gh 의 다중 `--label` 은 **AND** 다 (모든 라벨을 동시에 가진 이슈만 매칭). be 는
+    5개 도메인 scope 에서 매핑되는데 한 이슈가 5개 scope 를 동시에 갖는 일은 없어, 단일
+    쿼리로는 항상 0건 → be 가 영영 시드 안 되던 버그 (#1586). scope 마다 **따로** 질의해
+    union(OR) 한다. plan 은 scope 없이 전체 open 이슈에서 (type:docs 등) 추린다.
+    """
     scopes = [s for s, c in _SCOPE_CYCLE.items() if c == cycle]
     if not scopes and cycle != "plan":
         return []
-    cmd = [
-        "gh", "issue", "list", "--state", "open",
-        "--json", "number,title,labels,createdAt,assignees,body",
-        "--limit", "60",
-    ]
-    for s in scopes:
-        cmd += ["--label", s]
-    try:
-        result = runner(cmd, capture_output=True, text=True, timeout=GH_TIMEOUT, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("autoseed: gh issue list 실패 cycle=%s: %r", cycle, exc)
-        return []
-    if result.returncode != 0:
-        logger.warning("autoseed: gh issue list rc=%d cycle=%s", result.returncode, cycle)
-        return []
-    try:
-        issues = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError:
-        return []
+    # scope 별 1쿼리 (OR union). plan(scope 없음) 은 라벨 필터 없는 단일 쿼리.
+    label_queries: list[list[str]] = [[s] for s in scopes] if scopes else [[]]
+    merged: dict[Any, dict[str, Any]] = {}
+    for labels in label_queries:
+        cmd = [
+            "gh", "issue", "list", "--state", "open",
+            "--json", "number,title,labels,createdAt,assignees,body",
+            "--limit", "60",
+        ]
+        for s in labels:
+            cmd += ["--label", s]
+        try:
+            result = runner(cmd, capture_output=True, text=True, timeout=GH_TIMEOUT, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("autoseed: gh issue list 실패 cycle=%s labels=%s: %r", cycle, labels, exc)
+            continue
+        if result.returncode != 0:
+            logger.warning("autoseed: gh issue list rc=%d cycle=%s labels=%s", result.returncode, cycle, labels)
+            continue
+        try:
+            for iss in json.loads(result.stdout or "[]"):
+                merged[iss.get("number")] = iss  # number 로 dedup (scope 중복 매칭)
+        except json.JSONDecodeError:
+            continue
+    issues = list(merged.values())
     # 라벨 정규화 + created_at asc 정렬 (오래된 것부터 — 백로그 소진).
     for iss in issues:
         iss["_labels"] = [lbl.get("name", "") for lbl in iss.get("labels", [])]

@@ -106,6 +106,37 @@ def test_seeds_be_issue(isolated_db, monkeypatch):
     assert state["source"] == "autoseed" and state["seed_issue"] == 42
 
 
+# ── be 다중 scope OR (#1586 회귀 가드) ────────────────────────────────────────
+def _label_aware_runner(issues_by_label: dict):
+    """cmd 의 --label 을 보고 해당 라벨 이슈만 반환 (gh AND 의미 모방).
+
+    autoseed 가 be 의 scope 마다 따로 질의(OR union)하지 않으면, 단일 다중-label
+    쿼리는 어떤 이슈도 못 찾아(AND) be 가 영영 시드 안 됨 → 본 runner 로 그 회귀를 잡음.
+    """
+    def _run(cmd, capture_output=True, text=True, timeout=None, check=False):
+        labels = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--label"]
+        if len(labels) == 1:  # 단일 scope 쿼리만 결과 반환 (OR union 전제)
+            out = issues_by_label.get(labels[0], [])
+        elif not labels:
+            out = [i for v in issues_by_label.values() for i in v]
+        else:  # 다중 label = AND → 교집합 없음 (gh 실제 동작)
+            out = []
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(out), stderr="")
+    return _run
+
+
+def test_be_multi_scope_or_seeds(isolated_db, monkeypatch):
+    monkeypatch.setenv("AUTOSEED_ENABLED", "1")
+    recorded = []
+    _stub_enqueue(monkeypatch, recorded)
+    # scope:recommendation 이슈 1건만 존재 → be 가 scope 별 OR 질의로 찾아야 함.
+    runner = _label_aware_runner({
+        "scope:recommendation": [_issue(85, labels=["scope:recommendation"], title="mood 변별력")],
+    })
+    seeded = autoseed.autoseed_once(runner=runner)
+    assert {"issue": 85, "cycle": "be"} in seeded, "be 다중 scope OR 시드 실패 (#1586 회귀)"
+
+
 # ── G4 dedup — 이미 시드된 이슈 skip ──────────────────────────────────────────
 def test_dedup_already_seeded(isolated_db, monkeypatch):
     monkeypatch.setenv("AUTOSEED_ENABLED", "1")
