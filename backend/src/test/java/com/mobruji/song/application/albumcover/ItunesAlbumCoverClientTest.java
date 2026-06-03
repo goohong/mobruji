@@ -55,7 +55,12 @@ class ItunesAlbumCoverClientTest {
                     "KR",
                     Duration.ofSeconds(5),
                     Duration.ZERO,
-                    "600x600"));
+                    "600x600"),
+            new AlbumCoverProperties.CoverArtArchive(
+                    "https://musicbrainz.org/ws/2",
+                    "https://coverartarchive.org",
+                    "mobruji-backend/0.1 (+test)",
+                    Duration.ofSeconds(5)));
 
     @Test
     @DisplayName("lookupAlbumCoverUrl: 성공 응답이면 artworkUrl100 의 100x100 을 600x600 으로 치환한 URL 반환")
