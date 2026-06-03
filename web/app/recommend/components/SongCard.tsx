@@ -70,7 +70,7 @@ import {
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { Chip } from "@/components/ui";
+import { Chip, HeartPop } from "@/components/ui";
 
 import { FitBadge, FitReasons } from "./FitBadge";
 import { AlbumCoverThumbnail } from "./SongDetailContent";
@@ -395,35 +395,22 @@ type LikeButtonProps = {
 
 function LikeButton({ songId, songTitle }: LikeButtonProps) {
   // closes #846 — mutation 라이프사이클(낙관 토글 + BE 호출 + 응답 보정 + 롤백 + safeLog +
-  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화. 본 컴포넌트는 className/
-  // 라벨 등 표면 표현만 책임진다.
+  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화.
+  // closes #1685 — 표면 표현(heart pop + sparkle + 햅틱)은 `HeartPop` 으로 분리.
+  // 이벤트 격리(카드 Link/모달 trigger 비전파)도 HeartPop.handleClick 이 담당한다.
   const { liked, toggle, isPending, errorMessage } =
     useLikeToggleMutation(songId);
 
-  function handleClick(event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    toggle();
-  }
-
   return (
     <div className="flex flex-col gap-1">
-      <button
-        type="button"
-        onClick={handleClick}
+      <HeartPop
+        active={liked}
+        onToggle={toggle}
         disabled={isPending}
-        aria-pressed={liked}
-        aria-busy={isPending}
-        aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
-          liked
-            ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-            : "text-[var(--text-secondary)] hover:bg-[var(--cta-secondary-bg-hover)]"
-        }`}
-      >
-        <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
-        <span>{liked ? "좋아요 취소" : "좋아요"}</span>
-      </button>
+        busy={isPending}
+        label={liked ? "좋아요 취소" : "좋아요"}
+        ariaLabel={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+      />
       {errorMessage ? (
         <p
           role="alert"
