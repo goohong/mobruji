@@ -5,7 +5,7 @@ status: draft
 owner: "@goohong"
 scope: song
 related_issues: [1496, 1490, 71, 68]
-related_prs: []
+related_prs: [1572]
 last_reviewed: 2026-06-03
 ---
 
