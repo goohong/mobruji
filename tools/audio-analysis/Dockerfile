@@ -15,9 +15,17 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# 기본은 경량 경로(yt-dlp+librosa). vocal stem 분리(Spleeter/TensorFlow)는
+# --build-arg WITH_VOCAL_SEPARATION=true 로만 설치한다 (spec §10-2 CI/이미지 무게).
+ARG WITH_VOCAL_SEPARATION=false
+
 COPY requirements.txt /app/requirements.txt
+COPY requirements-vocal.txt /app/requirements-vocal.txt
 RUN pip install --upgrade pip \
- && pip install -r requirements.txt
+ && pip install -r requirements.txt \
+ && if [ "$WITH_VOCAL_SEPARATION" = "true" ]; then \
+      pip install -r requirements-vocal.txt; \
+    fi
 
 COPY analyze.py /app/analyze.py
 COPY test_analyze.py /app/test_analyze.py

@@ -9,6 +9,9 @@ import math
 import pytest
 
 from analyze import (
+    METHOD_SPLEETER_2STEMS,
+    METHOD_VOCAL_SKIP,
+    analysis_method_label,
     confidence_score,
     extract_range,
     frequency_to_midi,
@@ -109,7 +112,33 @@ class TestMaskUrl:
         assert "secret" not in masked
 
 
+class TestAnalysisMethodLabel:
+    def test_vocal_skip_when_disabled(self) -> None:
+        assert analysis_method_label(False) == METHOD_VOCAL_SKIP
+
+    def test_spleeter_when_enabled(self) -> None:
+        assert analysis_method_label(True) == METHOD_SPLEETER_2STEMS
+
+    def test_labels_are_distinct(self) -> None:
+        assert METHOD_VOCAL_SKIP != METHOD_SPLEETER_2STEMS
+
+
 def test_module_has_tooling_version() -> None:
     from analyze import TOOLING_VERSION
 
     assert TOOLING_VERSION.startswith("analyze-py-")
+
+
+def test_result_defaults_to_vocal_skip_method() -> None:
+    from analyze import AnalysisResult
+
+    result = AnalysisResult(
+        songMeta={},
+        lowMidi=55,
+        highMidi=71,
+        key="C",
+        tempo=120.0,
+        durationSec=45.0,
+        confidence=0.8,
+    )
+    assert result.analysisMethod == METHOD_VOCAL_SKIP
