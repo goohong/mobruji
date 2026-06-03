@@ -49,6 +49,7 @@
 | 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
 | 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
 | 에너지 | Energy (Song.energy) | `song` | 곡의 음향 에너지/강렬함 정도 0.0~1.0 (nullable). 추천 mood 변별·곡 유사도 신호로 소비. 산출 출처는 미정 — 1차는 수기/시드 적재, 자동화(Spotify valence·energy fallback 또는 librosa MFCC)는 후속 결정. song-analysis-data-and-consumers.md §5-1·§8 + song-self-analysis-pipeline.md §10-9 cross-ref |
+| 앨범 커버 | AlbumCover (Song.albumCoverUrl) | `song` | 곡 카드/모달에 표시할 외부 앨범 커버 이미지 URL (nullable). 외부 출처(iTunes Search 1차 → Cover Art Archive 폴백) backfill 결과를 **이미지 바이트 미저장·URL 문자열만** 캐싱한 표시 속성 (라이선스 준수). 추천 결정성 무영향 (UX 표시 전용). 매칭 실패 곡은 null → FE placeholder. 출처 결정 SoT = ADR-0029, 적용 plan = album-cover-art.md. §5-2 |
 | 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
 | 곡 후보 풀 | SongCandidatePool | `song` | 추천/검색/카탈로그가 매칭 대상으로 삼는 곡 집합 — 큐레이션 곡(`MANUAL_SEED`) + 임포트 곡(`EXTERNAL_API`) 합집합. 규모 확장(30→100→수백)의 단위. 영속 엔티티 아님 — `Song` 행 전체의 개념 라벨. song-catalog-expansion.md §5-1 |
 | 메타-only 임포트 | MetadataOnlyImport | `song` | 외부 CC0 출처(MusicBrainz)에서 메타데이터(제목/아티스트/연도/장르/식별자)만 가져와 `Song` 으로 upsert 하는 배치(`MetadataOnlyImportCommand`, `--mobruji.import-catalog`). 음역대/key/tempo 미설정 — 자체 분석(#1490)이 후속. `metadataSource=EXTERNAL_API` + 낮은 confidence. (title, artist)·ISRC 멱등. song-catalog-expansion.md §5-1 |
@@ -187,12 +188,14 @@
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
 | `energy` | Float | nullable, 0.0~1.0 | 곡 음향 에너지/강렬함. 1차 수기/시드 적재, 자동 산출 후속(§8 Q2). 추천 점수 입력 아님 — null 곡은 소비자 graceful degrade. song-analysis-data-and-consumers.md §5-1, #1490 |
+| `albumCoverUrl` | String(512) | nullable | 곡 카드/모달 표시용 외부 앨범 커버 URL. iTunes(1차)→Cover Art Archive(폴백) backfill 결과를 캐싱(이미지 미저장, URL 만). 비-조회키라 인덱스 없음. 추천 결정성 무영향. V7 마이그레이션(`V7__song_album_cover_url.sql`). 이슈 #322 / ADR-0029 / album-cover-art.md |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
 - 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
 - `Song.deriveDifficulty(int lowMidi, int highMidi)` static — fe `web/lib/difficulty.ts`와 1:1 룰 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
 - 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재. 시드 각 곡에 `lowMidi`/`highMidi`가 채워져 있어 적재 시 difficulty 자동 분류된다.
 - `SongRange`는 별 VO로 두지 않고 `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전).
+- `Song.backfillAlbumCoverUrl(url)` — 외부 backfill 결과 적용. **기존 `albumCoverUrl` 이 null 일 때 + 비-blank URL 일 때만** 채우고 변경 여부를 boolean 반환(큐레이터 수정값을 자동 backfill 이 덮어쓰는 사고 방지, no-overwrite 가드). 출처 chain(iTunes→CAA)·정기 배치·라이선스(이미지 미저장)는 album-cover-art.md §5 / ADR-0029 SoT.
 
 ### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
 
@@ -344,6 +347,7 @@ erDiagram
         int high_midi
         varchar difficulty
         decimal energy
+        varchar album_cover_url
         datetime created_at
         datetime updated_at
     }
