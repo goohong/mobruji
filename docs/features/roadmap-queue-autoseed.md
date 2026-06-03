@@ -107,8 +107,8 @@ GitHub `scope:*` 라벨 → 워크트리 배정:
 |---|---|---|
 | `scope:web` | `fe` | frontend |
 | `scope:recommendation` `scope:song` `scope:user` `scope:voice` `scope:feedback` | `be` | backend 도메인 |
-| `scope:infra` | `null` (nmae 결정) | infra 는 be/plan 모호 — nmae 동사×대상 휴리스틱 |
-| 라벨 복수 / scope 라벨 없음 | `null` (nmae 결정) | 모호 — nmae 가 분배 |
+| `scope:infra` | `infra` | infra = ADR-0027/#1531 ephemeral 온디맨드 사이클 (구 표 `null` 은 stale — 코드는 `infra` 매핑) |
+| 라벨 복수 / scope 라벨 없음 | `null` (nmae 결정) | 모호 — autoseed 는 제외, nmae 가 분배 |
 
 - `assigned_cycle != null` → idle 그 cycle 에 우선 inject([[directive-board-template-and-tags]] §5-6 cycle-specific auto-inject).
 - `assigned_cycle == null` → 일반 🟡 대기 큐로만 등록. nmae 가 backlog-scan 후 휴리스틱으로 분배(모호 시 plan).
