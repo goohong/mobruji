@@ -7,7 +7,7 @@
  * 곡 카드를 노출하고, "한 곡 부른 뒤 다음(고조)로 흐름 진행"(이슈 요구사항)을 위한 진행
  * 버튼을 둔다. 단계 점프는 상단 SeatStageToggle 로도 가능하다.
  *
- * 카드 상호작용은 기존 추천 화면과 동일하게 요약 카드 + 상세 모달(SongDetailModal) 패턴을
+ * 카드 상호작용은 기존 추천 화면과 동일하게 요약 카드 + 상세 시트(SongDetailSheet) 패턴을
  * 재사용한다.
  */
 
@@ -23,7 +23,7 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import type { UserVoiceRange } from "@/lib/scoreBreakdown";
 
 import { SongCard } from "../../components/SongCard";
-import { SongDetailModal } from "../../components/SongDetailModal";
+import { SongDetailSheet } from "../../components/SongDetailSheet";
 import { SongDetailContent } from "../../components/SongDetailContent";
 import { SeatStageToggle } from "./SeatStageToggle";
 
@@ -94,7 +94,7 @@ export function SequenceView({ stages, userVoiceRange }: SequenceViewProps) {
         </p>
       )}
 
-      <SongDetailModal
+      <SongDetailSheet
         open={selected !== null}
         onClose={() => setSelected(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
@@ -102,7 +102,7 @@ export function SequenceView({ stages, userVoiceRange }: SequenceViewProps) {
         {selected ? (
           <SongDetailContent item={selected} userVoiceRange={userVoiceRange} />
         ) : null}
-      </SongDetailModal>
+      </SongDetailSheet>
     </div>
   );
 }

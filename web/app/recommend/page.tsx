@@ -68,7 +68,7 @@ import { useSessionStore } from "@/store/session";
 import { IntentModeToggle } from "./components/IntentModeToggle";
 import { RecommendFilters } from "./components/RecommendFilters";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
-import { SongDetailModal } from "./components/SongDetailModal";
+import { SongDetailSheet } from "./components/SongDetailSheet";
 import { SongDetailContent } from "./components/SongDetailContent";
 import { SwipeDeck } from "./components/SwipeDeck";
 
@@ -623,7 +623,7 @@ function RecommendationFeed({
           />
         ))}
       </ul>
-      <SongDetailModal
+      <SongDetailSheet
         open={selected !== null}
         onClose={() => setSelected(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
@@ -631,7 +631,7 @@ function RecommendationFeed({
         {selected ? (
           <SongDetailContent item={selected} userVoiceRange={userRange} />
         ) : null}
-      </SongDetailModal>
+      </SongDetailSheet>
       {/*
         Footer 영역:
           - hasNextPage 가 true 면 sentinel + skeleton(로딩 중일 때) 노출.
