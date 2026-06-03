@@ -6,7 +6,8 @@
  * 검증:
  *  1. `/` 페이지 HTTP 200 응답
  *  2. 헤더 카피 "오늘 노래방, 뭐 부르지?" 가 화면에 렌더
- *  3. 신규(미측정) 사용자용 primary CTA "음역대 측정하기" 가 화면에 노출되고 클릭 가능
+ *  3. 신규(미측정) 사용자용 진입 경로 — 페르소나 카드(측정 wizard `/voice-range/auto`)와
+ *     "직접 입력으로 시작"(`/voice-range`) 보조 경로가 노출되고 클릭 가능
  *  4. 페이지 로드 중 console error 0건
  *
  * 가정 (서버 기동):
@@ -16,13 +17,17 @@
  *
  * 비고:
  *  - SSR snapshot 시점에 zustand persist 가 hydrate 되지 않아 항상 NewUserPanel 이 렌더된다.
- *    따라서 localStorage seed 없이도 신규 사용자 CTA 검증이 안정적.
+ *    따라서 localStorage seed 없이도 신규 사용자 진입 경로 검증이 안정적.
+ *  - #1571(OnboardingIntentPicker) 이후 신규 사용자 진입은 단일 "음역대 측정하기" CTA 대신
+ *    3 페르소나 카드 + "직접 입력으로 시작" 보조 경로로 대체됐다. 단언 SoT 는 단위 테스트
+ *    `web/app/page.test.tsx`(NewUserPanel 분기) 와 일치한다. 페르소나 카드는 자식 경로
+ *    미구현이라 전부 `/voice-range/auto` 로 fallback 한다(OnboardingIntentPicker `PATH_DESTINATION`).
  *  - 후속 impl PR 2 에서 S2 (returning user — localStorage seed) 추가 예정.
  */
 import { expect, test } from "@playwright/test";
 
 test.describe("S1: 홈 페이지 신규 사용자 smoke", () => {
-  test("페이지 로드 + 헤더 카피 + 음역대 측정 CTA + 콘솔 에러 0건", async ({ page }) => {
+  test("페이지 로드 + 헤더 카피 + 진입 경로 카드 + 콘솔 에러 0건", async ({ page }) => {
     // 콘솔 에러를 수집 — Next.js dev / build 모드에서 hydration mismatch, network 4xx 등 잡기 위함.
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
@@ -40,15 +45,16 @@ test.describe("S1: 홈 페이지 신규 사용자 smoke", () => {
       page.getByRole("heading", { level: 1, name: "오늘 노래방, 뭐 부르지?" }),
     ).toBeVisible();
 
-    // 신규(미측정) 사용자 primary CTA — `<Link href="/voice-range/auto">음역대 측정하기</Link>`.
-    const measureCta = page.getByRole("link", { name: "음역대 측정하기" });
-    await expect(measureCta).toBeVisible();
-    await expect(measureCta).toHaveAttribute("href", "/voice-range/auto");
+    // 신규(미측정) 사용자 진입 경로 — 페르소나 카드(OnboardingIntentPicker).
+    // 자식 경로 미구현이라 측정 wizard `/voice-range/auto` 로 fallback 한다.
+    const beginnerCard = page.getByRole("link", { name: "내 목소리부터 알아보기" });
+    await expect(beginnerCard).toBeVisible();
+    await expect(beginnerCard).toHaveAttribute("href", "/voice-range/auto");
 
-    // 신규 사용자 secondary CTA — 직접 입력 진입.
-    await expect(
-      page.getByRole("link", { name: "직접 입력으로 시작" }),
-    ).toBeVisible();
+    // 신규 사용자 secondary CTA — 직접 입력 진입(`/voice-range`).
+    const manualCta = page.getByRole("link", { name: "직접 입력으로 시작" });
+    await expect(manualCta).toBeVisible();
+    await expect(manualCta).toHaveAttribute("href", "/voice-range");
 
     // 콘솔 에러 0건. 에러 발생 시 디버깅 용이를 위해 본문에 포함.
     expect(
