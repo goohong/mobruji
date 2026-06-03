@@ -266,7 +266,8 @@ GitHub repo settings 에 다음 protection 도입을 권고 (별도 인프라 PR
 1. **Spec 초안 PR** — `docs/features/<slug>.md` 신설. `type:docs` 라벨.
 2. **리뷰/합의** — PR 코멘트로 논의, 결정은 spec의 "결정 로그"에, 대기 항목은 "오픈 질문"에 기록.
 3. **머지** — status = `approved`. 구현 착수 가능.
-4. **구현 PR들** — PR 본문에 `참고: docs/features/<slug>.md` 백링크. 첫 구현 PR 머지 시 status = `implementing`.
+   - **구현 이슈 자동 시드 (#1595)**: `approved`/`implementing` spec 머지 시 `.github/workflows/spec-impl-issue-seed.yml` 이 §6 작업 분할의 미체크 `- [ ]` 항목을 항목별 구현 이슈로 자동 등록한다 (멱등 — `<!-- autospec:<slug>#<hash> -->` marker). 등록된 이슈는 `autoseed`(`tools/agent/autoseed.py`)가 scope 라벨 기준으로 be/fe/plan cycle 큐에 자동 시드 → 구현으로 이어진다. §6 가 표/산문 형식이면 tracking 이슈 1건만 등록되니 사람/nmae 가 분할을 이어받는다. **사람이 구현 이슈를 수동 등록할 필요 없음.**
+4. **구현 PR들** — PR 본문에 `참고: docs/features/<slug>.md` 백링크. 첫 구현 PR 머지 시 status = `implementing`. 구현 PR 머지 시 §6 의 해당 항목을 `- [x]` 로 체크해 재시드 중복을 막는다.
 5. **요구사항 변경** — spec을 `type:docs` 갱신 PR로 먼저 업데이트 후 구현.
 6. **도메인 모델 promote (`shipped` 직전)** — spec `§5-1 잠정 필드`에 남아있는 것들이 코드에 실제 들어갔으면, `docs/ai-harness/06-domain-model.md §5 엔티티 표`로 옮기고(promote) ERD §6도 갱신. 잠정 → 확정 전이는 같은 PR에서 처리. spec과 도메인 모델이 drift된 채 `shipped`로 가지 않도록.
 7. **완료** — 마지막 구현 머지 시 status = `shipped`. 6번 promote가 끝났음을 확인하고 전이.
