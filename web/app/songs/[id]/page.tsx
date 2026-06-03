@@ -141,8 +141,10 @@ function SongDetailView({ song }: SongDetailViewProps) {
 
       <header className="flex flex-col gap-2">
         {/* closes #1666 — 단건 상세 페이지에도 앨범 커버 노출. 모달과 동일한 large 커버 +
-            placeholder/onError fallback 을 SongDetailContent 에서 재사용한다. */}
-        <AlbumCover song={song} />
+            placeholder/onError fallback 을 SongDetailContent 에서 재사용한다.
+            closes #1687 (PR7) — 카드 thumbnail 과 같은 view-transition-name 을 줘서
+            /history → /songs/[id] 라우트 전환 시 hero morph 한다. */}
+        <AlbumCover song={song} viewTransitionName={`album-${song.id}`} />
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
           Song detail
         </p>

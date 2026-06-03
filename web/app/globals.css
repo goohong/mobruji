@@ -262,4 +262,31 @@ body {
     background-image: none;
     background-color: var(--skeleton-base);
   }
+
+  /*
+   * View transitions (#1687, PR7) — tokens.css 전역 가드(`*`)는 originating
+   * element 만 잡아 `::view-transition-*` pseudo 트리에는 닿지 않는다. motion
+   * sensitive 사용자에게 라우트 전환 crossfade/morph 를 즉시(0s) 전환으로 끈다.
+   */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/*
+ * ───────── Route view transitions (#1687, PR7) ─────────
+ *
+ * next.config.ts 의 `experimental.viewTransition` 가 라우트 이동을
+ * document.startViewTransition 으로 감싼다. 아래는 브랜드 모션 토큰으로 기본 root
+ * crossfade 를 다듬는다(미지원 브라우저는 즉시 전환 — graceful). hero morph(앨범
+ * 커버)는 SongCard/상세 페이지가 공유하는 `view-transition-name` 으로 브라우저가
+ * 자동 처리하므로 별도 keyframe 이 필요 없다.
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--duration-slower);
+  animation-timing-function: var(--ease-emphasized);
 }

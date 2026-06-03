@@ -964,4 +964,39 @@ describe("SongCard", () => {
       expect(screen.queryByText("안심 포인트")).not.toBeInTheDocument();
     });
   });
+
+  describe("hero morph view-transition-name (closes #1687, PR7)", () => {
+    it("href 모드(라우트 이동)에서는 thumbnail 에 album-{id} 이름이 붙는다", () => {
+      const item = buildItem();
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} href="/songs/1" />
+        </ul>,
+      );
+      const cover = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
+      expect((cover as HTMLElement).style.viewTransitionName).toBe("album-1");
+    });
+
+    it("모달 모드에서는 thumbnail 에 view-transition-name 을 붙이지 않는다", () => {
+      const item = buildItem();
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={() => {}} />
+        </ul>,
+      );
+      const cover = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
+      expect((cover as HTMLElement).style.viewTransitionName).toBeFalsy();
+    });
+
+    it("plain 모드(href/모달 모두 없음)에서도 이름을 붙이지 않는다", () => {
+      const item = buildItem();
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const cover = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
+      expect((cover as HTMLElement).style.viewTransitionName).toBeFalsy();
+    });
+  });
 });
