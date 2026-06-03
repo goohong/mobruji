@@ -85,7 +85,18 @@ else
     echo "    .env.dev 이미 존재 — skip (수정은 직접)"
 fi
 
-echo "==> 5) 부트스트랩 완료"
+echo "==> 5) HTTPS (ADR-0028) 사전 작업 안내"
+cat <<'EOF'
+    dev HTTPS(nip.io + Let's Encrypt) 활성화 전 다음을 확인하세요:
+      1) NCP ACG inbound 에 443/TCP 추가 (현재 80 만 — 콘솔에서 1회 설정).
+         80 은 ACME challenge·리다이렉트용으로 유지.
+      2) .env.dev 입력 후 최초 인증서 1회 발급:
+           bash tools/deploy/dev-tls-init.sh
+         (이후 갱신은 certbot container 가 자동 수행)
+EOF
+
+echo "==> 6) 부트스트랩 완료"
 echo "    가동 명령: docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build"
+echo "    HTTPS 발급: bash tools/deploy/dev-tls-init.sh  (최초 1회)"
 echo "    상태:     docker compose -f docker-compose.dev.yml ps"
 echo "    로그:     docker compose -f docker-compose.dev.yml logs -f backend"

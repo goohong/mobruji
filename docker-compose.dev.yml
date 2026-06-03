@@ -6,7 +6,11 @@
 #   docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
 #
 # 메모리 매트릭스 (NCP 4GB 합산 2.8GB):
-#   mysql 512M + backend 600M + web 256M + nginx 64M = 1.43GB
+#   mysql 512M + backend 600M + web 256M + nginx 64M + certbot 32M = 1.46GB
+#
+# HTTPS (ADR-0028): nip.io + Let's Encrypt. 최초 인증서 발급은 tools/deploy/dev-tls-init.sh
+# 를 1회 실행해야 nginx 443 이 booting 가능 (certbot-certs volume 채움). 그 뒤 certbot
+# container 가 12시간 주기로 자동 갱신, nginx 는 6시간 주기로 reload 하여 갱신본을 흡수.
 
 services:
   mysql:
@@ -95,8 +99,17 @@ services:
       - web
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Let's Encrypt 인증서 (certbot 가 write, nginx 는 read) + ACME webroot.
+      - certbot-certs:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
+    # 6시간 주기 reload 로 certbot 가 갱신한 인증서를 무중단 흡수 (docker socket 공유 회피).
+    command:
+      - /bin/sh
+      - -c
+      - while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'
     healthcheck:
       test: ["CMD", "wget", "--spider", "--quiet", "http://localhost/_nginx_health"]
       interval: 15s
@@ -106,9 +119,31 @@ services:
     networks:
       - mobruji-dev
 
+  # Let's Encrypt 인증서 자동 갱신 (ADR-0028). 최초 발급은 tools/deploy/dev-tls-init.sh.
+  # 12시간 주기 `certbot renew` — 만료 30일 전 자동 갱신 (Let's Encrypt 90일 만료).
+  # nginx 는 별도 6시간 reload loop 로 갱신본을 흡수하므로 deploy-hook reload 불요.
+  certbot:
+    image: certbot/certbot:latest
+    container_name: mobruji-certbot-dev
+    restart: unless-stopped
+    mem_limit: 32m
+    volumes:
+      - certbot-certs:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint:
+      - /bin/sh
+      - -c
+      - trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done
+    networks:
+      - mobruji-dev
+
 volumes:
   mobruji-mysql-dev:
     name: mobruji-mysql-dev
+  certbot-certs:
+    name: mobruji-certbot-certs
+  certbot-webroot:
+    name: mobruji-certbot-webroot
 
 networks:
   mobruji-dev:
