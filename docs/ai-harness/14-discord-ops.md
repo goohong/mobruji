@@ -279,7 +279,7 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 
 > **REV_FORUM_ID vs PR_REVIEW_FORUM_ID 혼동 주의 (2026-06-03 plan #1592 후속 명확화)**: 두
 > forum 은 이름이 비슷하나 **추적 단위가 다른 별도 채널** 입니다 — 통합하지 않고 역할
-> 분리를 유지합니다. 상세 구분은 §8-5.
+> 분리를 유지합니다. 상세 구분은 §8-9.
 
 > **2026-05-28 정리 (이슈 #1190, directive 1508005814928019550)**: 구 텍스트 채널
 > `DIRECTIVE_BOARD_CHANNEL_ID` env 는 PR #1129 event-driven 전환으로 폐기 — `.env.example`
