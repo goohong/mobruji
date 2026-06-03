@@ -227,6 +227,22 @@ describe("SongDetailPage", () => {
         screen.getByLabelText(/Hello 앨범 커버 \(이미지 없음\)/),
       ).toBeInTheDocument();
     });
+
+    // closes #1687 (PR7) — 카드 thumbnail 과 같은 album-{id} 이름을 cover 에 줘서
+    // /history → /songs/[id] 라우트 전환 시 hero morph 한다.
+    it("cover 에 album-{id} view-transition-name 이 적용된다 (hero morph)", async () => {
+      useParamsMock.mockReturnValue({ id: "1" });
+      readSongByIdMock.mockResolvedValueOnce(
+        buildSong({ albumCoverUrl: "https://example.com/cover.jpg" }),
+      );
+
+      renderWithQueryClient(<SongDetailPage />);
+
+      const img = (await screen.findByAltText(
+        "Hello 앨범 커버",
+      )) as HTMLImageElement;
+      expect(img.style.viewTransitionName).toBe("album-1");
+    });
   });
 
   // closes #107 — 곡 상세 페이지의 정상 응답/404 두 상태에 대해 a11y 검사.

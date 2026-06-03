@@ -25,6 +25,7 @@ import { midiToKoreanNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
 import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
+import { BrandWordmark } from "@/components/brand/BrandWordmark";
 
 /**
  * zustand persist hydration 완료 여부를 React에 구독시킨다.
@@ -75,10 +76,8 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col items-center gap-8">
-        <header className="space-y-3 text-center">
-          <p className="text-sm font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            mobruji
-          </p>
+        <header className="flex flex-col items-center space-y-3 text-center">
+          <BrandWordmark lang="ko" size="md" theme="auto" />
           <h1 className="text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl">
             오늘 노래방, 뭐 부르지?
           </h1>

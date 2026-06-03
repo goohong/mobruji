@@ -138,10 +138,11 @@ function BookmarkSongListWithModal({ songs }: BookmarkSongListWithModalProps) {
   return (
     <>
       <ul aria-label="북마크한 곡 목록" className="flex flex-col gap-2">
-        {songs.map((song) => (
+        {songs.map((song, index) => (
           <SongCard
             key={song.id}
             song={song}
+            index={index}
             onShowDetail={() => setSelected(song)}
           />
         ))}

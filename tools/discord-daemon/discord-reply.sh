@@ -101,7 +101,7 @@
 #       discord-reply.sh --forum-comment <thread_id> "<body>"
 #       discord-reply.sh --forum-edit <thread_id> "<new_body>"
 #       discord-reply.sh --forum-retag <thread_id> <forum_env> "<new_tag_name>"
-#         → forum_env: directive | be | fe | rev | plan → 해당 *_FORUM_ID env lookup.
+#         → forum_env: directive | be | fe | rev | plan | infra → 해당 *_FORUM_ID env lookup.
 #         → tag_name: 해당 forum 의 available_tags name (예: "대기" / "진행" / "완료").
 #           GET /channels/{forum_id} 응답의 available_tags 에서 name → id 변환.
 #         → --forum-post: POST /channels/{forum_id}/threads (name + applied_tags +
@@ -286,7 +286,7 @@ PLAN_CHANNEL_VALUE=$(read_env_value PLAN_CHANNEL_ID || true)
 
 # Forum 채널 env (#17 사용자 forum 전환 wave, 2026-05-24) — `--forum-post`,
 # `--forum-comment`, `--forum-edit`, `--forum-retag` mode 의 forum_env 인자가
-# 참조. directive-board / be / fe / rev / plan 5 forum 채널.
+# 참조. directive-board / be / fe / rev / plan / infra 6 forum 채널.
 # 미설정 시 명시 에러 (silent fallback 금지 — forum 전환 의도 무력화 방지).
 # Discord forum 채널 = GUILD_FORUM type (15). 각 forum 안에 thread 가 post 단위로
 # 생성되며 thread 안에 messages + applied_tags 가 붙는다.
@@ -295,6 +295,7 @@ BE_FORUM_VALUE=$(read_env_value BE_FORUM_ID || true)
 FE_FORUM_VALUE=$(read_env_value FE_FORUM_ID || true)
 REV_FORUM_VALUE=$(read_env_value REV_FORUM_ID || true)
 PLAN_FORUM_VALUE=$(read_env_value PLAN_FORUM_ID || true)
+INFRA_FORUM_VALUE=$(read_env_value INFRA_FORUM_ID || true)
 
 # guild_id — forum thread 검색 시 GET /guilds/{guild_id}/threads/active 호출에 필요.
 # DISCORD_GUILD_ID env 우선, 없으면 forum_find_active_thread_by_name 함수가 forum
@@ -539,7 +540,7 @@ CYCLE_CHANNEL=""
 #   호출로 type 확인 → forum (15) 또는 media (16) 시 1.
 CYCLE_FORUM_FALLBACK=0
 # Forum mode 인자 (#17, 2026-05-24).
-# --forum-post / --forum-retag 의 forum_env: directive | be | fe | rev | plan.
+# --forum-post / --forum-retag 의 forum_env: directive | be | fe | rev | plan | infra.
 # --forum-post 의 title (thread name) + tag (available_tags name).
 FORUM_ENV=""
 FORUM_TITLE=""
@@ -553,13 +554,13 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
-  echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan> \"<title>\" \"<tag>\" \"<body>\"" >&2
-  echo "  discord-reply.sh --forum-post-auto-tag <directive|be|fe|rev|plan> \"<title>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan|infra> \"<title>\" \"<tag>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-post-auto-tag <directive|be|fe|rev|plan|infra> \"<title>\" \"<body>\"" >&2
   echo "  discord-reply.sh --forum-comment <thread_id> \"<body>\"" >&2
   echo "  discord-reply.sh --forum-edit <thread_id> \"<new_body>\"" >&2
-  echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan> \"<new_tag>\"" >&2
+  echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan|infra> \"<new_tag>\"" >&2
   echo "  discord-reply.sh --update-status <thread_id> \"<status>\" [pr_url]" >&2
-  echo "  discord-reply.sh --forum-state-dump <directive|be|fe|rev|plan>" >&2
+  echo "  discord-reply.sh --forum-state-dump <directive|be|fe|rev|plan|infra>" >&2
   echo "  discord-reply.sh --writing-marker <user_msg_id>" >&2
   echo "  discord-reply.sh --writing-done <user_msg_id>" >&2
   exit 1
@@ -711,7 +712,7 @@ case "$1" in
   --forum-post)
     # #17 forum 전환 wave (2026-05-24).
     # --forum-post <forum_env> "<title>" "<tag_name>" "<body>"
-    # forum_env: directive | be | fe | rev | plan → *_FORUM_ID lookup.
+    # forum_env: directive | be | fe | rev | plan | infra → *_FORUM_ID lookup.
     # tag_name: 해당 forum 의 available_tags name → tag_id 변환.
     MODE="forum-post"
     if [[ $# -lt 5 ]]; then
@@ -808,14 +809,14 @@ case "$1" in
     # wrapper (helper-turn-start.sh / agent-launch-wrapper.sh) 가 jsonl entry status
     # 와 forum tag 비교해 mismatch detect.
     #
-    # 형식: --forum-state-dump <directive|be|fe|rev|plan>
+    # 형식: --forum-state-dump <directive|be|fe|rev|plan|infra>
     # 출력 (jsonl, 1 줄 per thread):
     #   {"thread_id":"<id>","name":"<thread name>","tags":["<tag name>", ...]}
     # 한계: GET /guilds/{guild_id}/threads/active 가 active thread 만 반환 — archive
     #       된 thread 는 누락 (의도된 동작 — 누락 detect 는 최근 N=20 active entry 만 대상).
     MODE="forum-state-dump"
     if [[ $# -lt 2 ]]; then
-      echo "discord-reply.sh: --forum-state-dump <directive|be|fe|rev|plan> 형태로 입력해주세요" >&2
+      echo "discord-reply.sh: --forum-state-dump <directive|be|fe|rev|plan|infra> 형태로 입력해주세요" >&2
       exit 1
     fi
     FORUM_ENV="$2"
@@ -1402,8 +1403,9 @@ resolve_forum_id() {
     fe)        forum_id="$FE_FORUM_VALUE" ;;
     rev)       forum_id="$REV_FORUM_VALUE" ;;
     plan)      forum_id="$PLAN_FORUM_VALUE" ;;
+    infra)     forum_id="$INFRA_FORUM_VALUE" ;;
     *)
-      echo "discord-reply.sh: 알 수 없는 forum_env \"$forum_env\" — directive|be|fe|rev|plan 중 하나여야 합니다" >&2
+      echo "discord-reply.sh: 알 수 없는 forum_env \"$forum_env\" — directive|be|fe|rev|plan|infra 중 하나여야 합니다" >&2
       return 1
       ;;
   esac

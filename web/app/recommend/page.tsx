@@ -612,10 +612,11 @@ function RecommendationFeed({
         {liveMessage}
       </div>
       <ul className="flex flex-col gap-3">
-        {allRecommendations.map((item) => (
+        {allRecommendations.map((item, index) => (
           <SongCard
             key={item.song.id}
             item={item}
+            index={index}
             userVoiceRange={userRange}
             activePersona={activePersona}
             onShowDetail={() => setSelected(item)}

@@ -4,10 +4,10 @@
  * 페이지마다 같은 모양의 Tailwind 유틸 클래스가 반복되는 것을 한곳으로 모은다.
  *
  * variant:
- *   - primary: 가장 강한 강조 (zinc-900 / dark zinc-50).
+ *   - primary: 가장 강한 강조 (brand-500, hover brand-600, active brand-700).
  *   - secondary: ring 기반 보조 액션.
  *   - ghost: 배경 없음, 텍스트만. 다이얼로그 닫기/취소 같은 약한 액션.
- *   - danger: 파괴적 액션. rose-600 톤.
+ *   - danger: 파괴적 액션. danger-500 톤 (hover 600, active 700).
  *
  * size: sm/md/lg — 높이와 패딩만 바뀐다 (`h-8`/`h-10`/`h-12`).
  *
@@ -40,13 +40,13 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    "bg-[var(--cta-neutral-bg)] text-[var(--cta-neutral-fg)] hover:bg-[var(--cta-neutral-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50",
+    "bg-[var(--brand-500)] text-white hover:bg-[var(--brand-600)] active:bg-[var(--brand-700)] disabled:cursor-not-allowed disabled:opacity-50",
   secondary:
     "bg-[var(--cta-secondary-bg)] text-[var(--text-primary)] ring-1 ring-[var(--surface-card-ring)] hover:bg-[var(--cta-secondary-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50",
   ghost:
     "bg-transparent text-[var(--text-body-strong)] hover:bg-[var(--cta-secondary-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50",
   danger:
-    "bg-rose-600 text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-rose-500 dark:hover:bg-rose-600",
+    "bg-[var(--danger-500)] text-white hover:bg-[var(--danger-600)] active:bg-[var(--danger-700)] disabled:cursor-not-allowed disabled:opacity-50",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
@@ -76,11 +76,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   // (ThemeToggle / BottomNav) 와 동일 패턴으로 `--cta-secondary-ring` 토큰으로
   // 통일한다 (tokens.css 가 light=zinc-500 / dark=zinc-500 균일 outline 으로
   // 정의해 OS 다크 환경에서도 가시성 유지).
-  // 마이크로 인터랙션(#1493): press 시 살짝 눌리는 scale 피드백. transform 도
-  // 함께 transition 되도록 `transition-colors` 대신 `transition` 으로 확장한다.
-  // disabled/loading 상태에선 press scale 을 끈다(눌림 착시 방지).
+  // 마이크로 인터랙션(#1681, ui-ux PR 2): press 시 눌리는 scale-95 피드백 +
+  // spring easing(--ease-spring) + duration-base(200ms). transform/color 둘 다
+  // transition 되도록 `transition` (all) 을 유지한다. disabled/loading 상태에선
+  // press scale 을 끈다(눌림 착시 방지). prefers-reduced-motion 사용자는
+  // tokens.css §6 전역 가드가 duration 을 10ms 로 축소하고, 추가로
+  // `motion-reduce:active:scale-100` 으로 press scale 자체를 비활성화한다.
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] active:scale-[0.97] disabled:active:scale-100";
+    "inline-flex items-center justify-center gap-2 rounded-full font-medium transition duration-[var(--duration-base)] ease-[var(--ease-spring)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] active:scale-95 disabled:active:scale-100 motion-reduce:active:scale-100";
   const widthClass = fullWidth ? "w-full" : "";
   const merged = [
     base,

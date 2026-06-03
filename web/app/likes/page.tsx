@@ -150,10 +150,11 @@ function SongListWithModal({ songs }: SongListWithModalProps) {
   return (
     <>
       <ul aria-label="좋아한 곡 목록" className="flex flex-col gap-2">
-        {songs.map((song) => (
+        {songs.map((song, index) => (
           <SongCard
             key={song.id}
             song={song}
+            index={index}
             onShowDetail={() => setSelected(song)}
           />
         ))}

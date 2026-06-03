@@ -163,31 +163,44 @@ describe("design tokens (ADR-0018)", () => {
   });
 
   /*
-   * ADR-0018 단계 4 PR 2 — Pretendard Variable 자체 호스팅 회귀 가드.
-   * 본 PR 부터 폰트 가 `web/public/fonts/PretendardVariable.woff2` 에 위치 +
-   * globals.css 가 `@font-face` 로 등록 + body / Tailwind utility 가 Pretendard
-   * 우선 stack 을 사용하도록 swap. 토큰 측 SoT (`--font-family-sans`) 가 별칭
-   * 으로 살아있는지 검증해 자기참조 무한 fallback 회귀를 차단한다.
+   * ADR-0018 단계 4 PR 9 (#1692) — Pretendard/Geist next/font 이관 회귀 가드.
+   *
+   * 폰트 로딩이 globals.css 수동 `@font-face` 에서 `app/layout.tsx` 의 next/font
+   * 로 이관됐다 (자동 self-host + size-adjust fallback 로 CLS↓). 따라서 tokens.css
+   * stack 은 리터럴 family 명이 아니라 next/font 가 노출하는 CSS 변수
+   * (`--font-pretendard` / `--font-geist-sans` / `--font-geist-mono`) 를 가리켜야
+   * 한다. globals.css 에는 중복 self-host 를 막기 위해 수동 woff2 `@font-face` 가
+   * 남아있으면 안 된다.
    */
-  it("Pretendard Variable @font-face 가 globals.css 에 등록된다 (PR 2)", () => {
-    // `/s` (dotAll) flag 는 ES2018+ 필요. tsconfig target 호환 위해 `[\s\S]` 사용.
-    expect(globals).toMatch(
-      /@font-face\s*{[\s\S]*?font-family:\s*["']Pretendard Variable["'][\s\S]*?}/,
+  it("font-family stack 이 next/font 변수를 가리킨다 (PR 9, 리터럴 폐기)", () => {
+    // sans/display 1순위 = Pretendard, 2순위 = Geist (둘 다 next/font 변수).
+    expect(tokens).toMatch(
+      /--font-family-sans:\s*var\(--font-pretendard\),\s*var\(--font-geist-sans\)/,
     );
-    expect(globals).toMatch(
-      /src:\s*url\(["']\/fonts\/PretendardVariable\.woff2["']\)\s*format\(["']woff2-variations["']\)/,
+    expect(tokens).toMatch(
+      /--font-family-display:\s*var\(--font-pretendard\),\s*var\(--font-geist-sans\)/,
     );
-    // FOIT 회피 — swap 의무.
-    expect(globals).toMatch(/font-display:\s*swap/);
-    // variable axis 전체 범위 — Pretendard v1.3 weight 45-920.
-    expect(globals).toMatch(/font-weight:\s*45\s+920/);
+    // mono 1순위 = Geist Mono 변수.
+    expect(tokens).toMatch(/--font-family-mono:\s*var\(--font-geist-mono\)/);
+    // 리터럴 family 명 잔존 0 — next/font 가 obfuscate 된 family 를 쓰므로
+    // 리터럴은 더 이상 해석되지 않는다.
+    expect(tokens).not.toMatch(/"Pretendard Variable"/);
+    expect(tokens).not.toMatch(/"Geist"/);
+    expect(tokens).not.toMatch(/"Geist Mono"/);
+  });
+
+  it("globals.css 에 수동 Pretendard @font-face 가 없다 (next/font 로 이관, PR 9)", () => {
+    // next/font 가 self-host 하므로 수동 woff2 url 이 남으면 이중 로드 + size-adjust
+    // fallback 중복. 잔존 0 을 강제한다.
+    expect(globals).not.toMatch(/PretendardVariable\.woff2/);
+    expect(globals).not.toMatch(/@font-face/);
   });
 
   it("font-family 별칭 (`--font-family-*`) 이 SoT 로 정의된다 (자기참조 회귀 가드)", () => {
     // Tailwind v4 `@theme inline { --font-sans: var(--font-sans) }` 자기참조 무한
     // fallback 방지: SoT 가 별 이름 (`--font-family-*`) 을 가져야 한다.
     expect(tokens).toMatch(
-      /--font-family-sans:\s*"Pretendard Variable"/,
+      /--font-family-sans:\s*var\(--font-pretendard\)/,
     );
     expect(tokens).toMatch(/--font-family-display:/);
     expect(tokens).toMatch(/--font-family-mono:/);

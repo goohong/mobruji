@@ -43,6 +43,7 @@ import Link from "next/link";
 import {
   useId,
   useState,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -69,7 +70,7 @@ import {
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { Chip } from "@/components/ui";
+import { Chip, HeartPop } from "@/components/ui";
 
 import { FitBadge, FitReasons } from "./FitBadge";
 import { AlbumCoverThumbnail } from "./SongDetailContent";
@@ -96,6 +97,11 @@ import { AlbumCoverThumbnail } from "./SongDetailContent";
  * 두 경로를 모두 노출하고 싶을 때를 위해 빌드 에러는 띄우지 않는다 — 단, 카드 본문
  * 클릭은 모달로 흘러간다.
  */
+/**
+ * `index`는 리스트 내 카드 위치(0,1,2…)로, stagger 진입 애니메이션의 delay 계산에만
+ * 쓰인다 — `--card-index` 인라인 변수로 흘려 `animate-card-enter` 가 50ms 씩 늦춘다.
+ * 미지정이면 0(즉시 진입). 단일 카드 렌더에서는 생략해도 무방하다.
+ */
 type SongCardProps =
   | {
       item: RecommendedSongResponse;
@@ -103,6 +109,7 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
       onShowDetail?: () => void;
+      index?: number;
       /**
        * 사용자가 추천 화면에서 고른 의도 페르소나(P-E 안전곡 등). BE 응답에 아직
        * `persona`/`personaReason` 이 없을 때 결과 카드의 페르소나 사유 fallback 근거가
@@ -116,6 +123,7 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: never;
       onShowDetail?: () => void;
+      index?: number;
       activePersona?: never;
     };
 
@@ -129,12 +137,32 @@ export function SongCard(props: SongCardProps) {
   const activePersona: RecommendationPersona | null =
     "item" in props && props.activePersona ? props.activePersona : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  const index: number = typeof props.index === "number" ? props.index : 0;
+  // closes #1683 — stagger 진입 delay(--card-index) + 곡별 deterministic accent hue(--song-hue).
+  const cardStyle = {
+    "--card-index": index,
+    "--song-hue": getSongHue(song.id),
+  } as CSSProperties;
+  // 좌측 4px accent stripe. rounded-l 로 카드 모서리를 따라가 overflow-hidden 없이도
+  // 둥근 코너 밖으로 삐져나오지 않는다(내부 포커스 ring clip 회피).
+  const accentStripe: ReactNode = (
+    <span
+      aria-hidden="true"
+      className="song-accent-stripe pointer-events-none absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)]"
+    />
+  );
   // closes #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트")를 카드 표면에 노출.
   // BE personaReason 우선, 없으면 활성 페르소나 + 곡 난이도 기반 client fallback.
   const personaReason = item ? resolvePersonaReason(item, activePersona) : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
+  // closes #1687 (PR7) — hero morph. 카드가 실제로 /songs/[id] 로 라우트 이동하는
+  // href 모드에서만 thumbnail 에 view-transition-name 을 부여해 상세 페이지의 큰
+  // cover 와 morph 시킨다. 모달 모드(라우트 이동 없음)나 plain 모드에서는 부여하지
+  // 않는다 — 같은 곡 cover 가 두 곳에 같은 이름으로 동시에 존재하면 전환이 무시된다.
+  const albumViewTransitionName =
+    href && !isModalMode ? `album-${song.id}` : undefined;
   // closes #1284 — 한국 곡의 한국어 표시 우선 (lib/songTitle.formatSongDisplayTitle SoT).
   // 카드 표면 / aria-label / 자식 컴포넌트 prop 까지 동일한 표시명을 사용해 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -159,7 +187,10 @@ export function SongCard(props: SongCardProps) {
          * 유지.
          */}
         <div className="shrink-0">
-          <AlbumCoverThumbnail song={song} />
+          <AlbumCoverThumbnail
+            song={song}
+            viewTransitionName={albumViewTransitionName}
+          />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {item ? (
@@ -287,13 +318,17 @@ export function SongCard(props: SongCardProps) {
   // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
   if (isModalMode) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]">
+      <li
+        style={cardStyle}
+        className="group relative flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]"
+      >
+        {accentStripe}
         <button
           type="button"
           onClick={onShowDetail}
           aria-label={`${displayTitle} 상세 보기`}
           aria-haspopup="dialog"
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </button>
@@ -309,11 +344,15 @@ export function SongCard(props: SongCardProps) {
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]">
+      <li
+        style={cardStyle}
+        className="group relative flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]"
+      >
+        {accentStripe}
         <Link
           href={href}
           aria-label={`${displayTitle} 상세 보기`}
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </Link>
@@ -328,8 +367,10 @@ export function SongCard(props: SongCardProps) {
   return (
     <li
       tabIndex={0}
-      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)] focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)]"
+      style={cardStyle}
+      className="group relative flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)] focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)]"
     >
+      {accentStripe}
       {body}
       {breakdownPanel}
       {feedbackPanel}
@@ -363,35 +404,22 @@ type LikeButtonProps = {
 
 function LikeButton({ songId, songTitle }: LikeButtonProps) {
   // closes #846 — mutation 라이프사이클(낙관 토글 + BE 호출 + 응답 보정 + 롤백 + safeLog +
-  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화. 본 컴포넌트는 className/
-  // 라벨 등 표면 표현만 책임진다.
+  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화.
+  // closes #1685 — 표면 표현(heart pop + sparkle + 햅틱)은 `HeartPop` 으로 분리.
+  // 이벤트 격리(카드 Link/모달 trigger 비전파)도 HeartPop.handleClick 이 담당한다.
   const { liked, toggle, isPending, errorMessage } =
     useLikeToggleMutation(songId);
 
-  function handleClick(event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    toggle();
-  }
-
   return (
     <div className="flex flex-col gap-1">
-      <button
-        type="button"
-        onClick={handleClick}
+      <HeartPop
+        active={liked}
+        onToggle={toggle}
         disabled={isPending}
-        aria-pressed={liked}
-        aria-busy={isPending}
-        aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
-          liked
-            ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-            : "text-[var(--text-secondary)] hover:bg-[var(--cta-secondary-bg-hover)]"
-        }`}
-      >
-        <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
-        <span>{liked ? "좋아요 취소" : "좋아요"}</span>
-      </button>
+        busy={isPending}
+        label={liked ? "좋아요 취소" : "좋아요"}
+        ariaLabel={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+      />
       {errorMessage ? (
         <p
           role="alert"
@@ -677,6 +705,19 @@ export function formatMusicalKey(key: string): string {
     .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
       return `${head}${tail.toLowerCase()}`;
     });
+}
+
+/**
+ * 곡 id → 좌측 accent stripe 의 hue(0–359). 같은 곡은 항상 같은 색이 되도록
+ * id 문자열의 char code 합을 360 으로 나눈 나머지를 쓴다(외부 색 추출 없이 hash
+ * 기반 분산). closes #1683.
+ *
+ * 회귀 가드: 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
+ */
+export function getSongHue(songId: number): number {
+  return String(songId)
+    .split("")
+    .reduce((accumulated, character) => accumulated + character.charCodeAt(0), 0) % 360;
 }
 
 /**

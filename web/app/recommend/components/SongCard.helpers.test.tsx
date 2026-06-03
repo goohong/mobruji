@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatMusicalKey, resolveDifficulty } from "./SongCard";
+import { formatMusicalKey, getSongHue, resolveDifficulty } from "./SongCard";
 import type { SongResponse } from "@/lib/api/recommendation";
 
 function buildSong(overrides: Partial<SongResponse>): SongResponse {
@@ -62,5 +62,30 @@ describe("resolveDifficulty", () => {
   it("difficulty 도 음역도 없으면 null 을 돌려준다 (legacy 응답 안전)", () => {
     const song = buildSong({});
     expect(resolveDifficulty(song)).toBeNull();
+  });
+});
+
+// closes #1683 — 좌측 accent stripe hue 결정성. 같은 songId → 항상 같은 hue 라야
+// 곡 색이 렌더마다 흔들리지 않는다.
+describe("getSongHue", () => {
+  it("같은 songId 는 항상 같은 hue 를 돌려준다 (결정성)", () => {
+    expect(getSongHue(12345)).toBe(getSongHue(12345));
+    expect(getSongHue(7)).toBe(getSongHue(7));
+  });
+
+  it("hue 는 항상 0 이상 360 미만 정수다", () => {
+    for (const id of [0, 1, 9, 42, 12345, 987654]) {
+      const hue = getSongHue(id);
+      expect(Number.isInteger(hue)).toBe(true);
+      expect(hue).toBeGreaterThanOrEqual(0);
+      expect(hue).toBeLessThan(360);
+    }
+  });
+
+  it("char code 합 % 360 으로 산출한다 (분산 확인)", () => {
+    // "12" → '1'(49) + '2'(50) = 99
+    expect(getSongHue(12)).toBe(99);
+    // 서로 다른 id 는 (일반적으로) 다른 hue — 회귀 시 상수 반환을 잡는다.
+    expect(getSongHue(12)).not.toBe(getSongHue(99));
   });
 });
