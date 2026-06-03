@@ -136,6 +136,16 @@ album-cover:
     request-timeout: 5s
     throttle: 1s
     thumb-resolution: 600x600
+  # 폴백 출처 (ADR 0029) — iTunes 무매칭 시 MusicBrainz release 검색 → MBID → Cover Art Archive front cover.
+  # - music-brainz-base-url: release 검색 webservice 기준. 테스트는 stub 으로 override.
+  # - cover-art-archive-base-url: 커버 아트 조회 기준.
+  # - user-agent: MusicBrainz/CAA 약관상 contact 포함 식별 User-Agent 의무 — 환경변수로 운영 contact 주입 권장.
+  # - request-timeout: 단계별 호출 timeout (MusicBrainz rate limit 보수적 고려).
+  cover-art-archive:
+    music-brainz-base-url: ${MUSICBRAINZ_BASE_URL:https://musicbrainz.org/ws/2}
+    cover-art-archive-base-url: ${COVER_ART_ARCHIVE_BASE_URL:https://coverartarchive.org}
+    user-agent: ${ALBUM_COVER_USER_AGENT:mobruji-backend/0.1 (+https://github.com/goohong/mobruji)}
+    request-timeout: 5s
 
 # Python audio analysis tool (tools/audio-analysis/analyze.py) 호출 설정.
 # spec: docs/features/audio-tooling-bootstrap.md §3
