@@ -236,6 +236,24 @@
 - **v0.2 비영향 약속**: 추천 알고리즘 입력에 포함되지 않는다 (`RecommendationService` 어떤 코드도 `LikeRepository`/`BookmarkRepository`를 의존하지 않음).
 - **조회 응답 형태** (PR F, #256): `GET /api/v1/sessions/{id}/likes`, `/bookmarks` 는 곡 메타데이터 join + offset 페이지네이션 + `SessionAuthGuard` 적용. application 레이어가 `SongRepository.findAllById(songIds)` batch lookup 으로 N+1 회피, 컨트롤러는 `LikeWithSongResponse(id, song, likedAt)` / `BookmarkWithSongResponse` 로 합쳐 `LikeListResponse(responses, page, size, totalCount, hasNext)` wrapper 로 응답 (Spring Data `Page<>` 직접 노출은 직렬화 안정성 위해 피함). 곡이 삭제된 orphan songId 는 응답에서 제외하되 `totalCount` 는 count 기준이라 차이날 수 있다.
 
+### 5-4-1) `SessionFeedback` (#1545, recommendation-feedback-loop.md PR B)
+
+`recommendation` BC. 스와이프 세션 반응 1건. `feedback` BC 의 `Like`/`Bookmark`(toggle, 추천 비영향)와 달리 **추천 결합 신호로 환류**된다 — `LIKE` 는 부른곡 시드와 함께 선호 집합, `PASS` 는 회피/제외 집합. Song aggregate 참조는 ID-only(ADR-0005 §A-7).
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | |
+| `sessionId` | String(64) | not null, UK(`session_id, song_id`) | 익명 사용자 식별자 |
+| `songId` | Long | not null, UK | FK 없음(application 레벨) |
+| `reaction` | enum `FeedbackReaction` | not null, `STRING`(8) | `LIKE` / `PASS` |
+| `createdAt` | LocalDateTime | not null | 최신 반응 시각(재스와이프 시 갱신) |
+
+- 테이블명: `session_feedback`. 인덱스 `(session_id, created_at)` — 세션별 최신순 조회 + 결합 신호 도출용.
+- **upsert**(toggle 아님): 같은 `(sessionId, songId)` 재스와이프 시 `reaction`/`createdAt` 을 덮어쓴다(현재 상태 설정 의미). 도메인 메서드: `static create(sessionId, songId, reaction)`, `overwriteReaction(reaction)`.
+- **결합 약속**: `RecommendationService.createFromSeeds` 가 `useSessionFeedback`(기본 true) 시 `SessionFeedbackRepository` 로 세션 `LIKE` 곡을 시드에, `PASS` 곡을 제외에 합친다. 반응 0건이면 기여 0(콜드스타트 하위호환).
+- **조회**: `GET /api/v1/sessions/{id}/feedback` — `SessionAuthGuard` + offset 페이지네이션. `SessionFeedbackResponse(id, songId, reaction, reactedAt)` → `SessionFeedbackListResponse(responses, page, size, totalCount, hasNext)` wrapper.
+- ADR-0013 cascade-delete 대상(sessionId revoke 시 함께 삭제).
+
 ### 5-5) `VoiceRangeSnapshot` (PR #231, voice-range-progress.md PR A)
 
 음역 측정 시계열. `VoiceRange` 가 "현재 값"을 담당하는 반면 본 엔티티는 "변경 이력"을 담당하는 CQRS-라이트 분리. **insert-only / immutable**. `VoiceRangeService.createOrReplace` / `updateBySessionId` 흐름에서 동일 트랜잭션에 1행씩 누적된다. 추천 입력에 영향 없음(결정성 회귀 가드).
@@ -381,6 +399,14 @@ erDiagram
         datetime created_at
     }
 
+    SESSION_FEEDBACK {
+        bigint id PK
+        varchar session_id UK
+        bigint song_id UK
+        varchar reaction
+        datetime created_at
+    }
+
     VOICE_RANGE_SNAPSHOT {
         bigint id PK
         varchar session_id
@@ -423,11 +449,13 @@ erDiagram
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
     SONG ||--o{ LIKE_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
     SONG ||--o{ BOOKMARK_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
+    SONG ||--o{ SESSION_FEEDBACK : "song_id (FK 없음, 추천 결합 신호)"
     VOICE_RANGE ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId로 join (FK 없음, insert-only 시계열)"
     ANONYMOUS_SESSION ||--o{ VOICE_RANGE : "sessionId 라이프사이클 owner (FK 없음, cascade-delete app 레벨)"
     ANONYMOUS_SESSION ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ LIKE_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ BOOKMARK_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
+    ANONYMOUS_SESSION ||--o{ SESSION_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ RECOMMENDATION_REQUEST : "sessionId 라이프사이클 owner (FK 없음)"
     USER ||--o| USER_PROFILE : "v0.4 draft — 1:1 선호 영속 (FK user_id)"
     USER ||--o{ VOICE_RANGE : "v0.4 draft — 머지 후 user owner (sessionId→userId 치환)"
@@ -437,7 +465,7 @@ erDiagram
     USER ||--o{ RECOMMENDATION : "v0.4 draft — 머지 후 user owner"
 ```
 
-- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession` — 8개 엔티티.
+- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession`, `SessionFeedback` — 9개 엔티티.
 - v0.4 draft (미구현): `User`, `UserProfile` — 정식 회원 + 선호 프로필. 머지 시 sessionId-bound 엔티티의 owner 가 sessionId → userId 로 치환된다 (dual column 권장, FK 없이 application 레벨 owner). 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 전환 정책/머지 = `anonymous-to-account-conversion.md`.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join. `AnonymousSession` 이 sessionId 라이프사이클(TTL 만료 / 회전 / 머지) 의 단일 owner — cascade-delete 는 `AnonymousSessionTtlCleanup` / `SessionRotationService` 가 application 레벨에서 명시적 DELETE.
 
