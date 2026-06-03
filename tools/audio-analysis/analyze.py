@@ -30,10 +30,15 @@ from typing import Optional
 
 LOG = logging.getLogger("analyze")
 
-TOOLING_VERSION = "analyze-py-0.1.0"
+TOOLING_VERSION = "analyze-py-0.2.0"
 DEFAULT_CLIP_SECONDS = 45
 PITCH_LOW_PERCENTILE = 5.0
 PITCH_HIGH_PERCENTILE = 95.0
+
+METHOD_VOCAL_SKIP = "vocal-skip"
+METHOD_SPLEETER_2STEMS = "spleeter-2stems"
+# Spleeter pretrained model 캐시 경로 (NCP /data 등 영속 볼륨으로 지정 가능).
+SPLEETER_MODEL_ENV = "AUDIO_ANALYSIS_MODEL_DIR"
 
 
 @dataclass
@@ -53,6 +58,7 @@ class AnalysisResult:
     tempo: Optional[float]
     durationSec: Optional[float]
     confidence: float
+    analysisMethod: str = METHOD_VOCAL_SKIP
     toolingVersion: str = TOOLING_VERSION
 
 
@@ -113,6 +119,11 @@ def confidence_score(voiced_ratio: float, sample_count: int) -> float:
     return round(max(0.0, min(1.0, voiced_ratio * 0.7 + sample_bonus * 0.3)), 3)
 
 
+def analysis_method_label(vocal_separation: bool) -> str:
+    """분석 입력이 분리된 vocal stem인지 곡 전체 audio인지 라벨링."""
+    return METHOD_SPLEETER_2STEMS if vocal_separation else METHOD_VOCAL_SKIP
+
+
 def mask_url(url: Optional[str]) -> str:
     """로깅용 URL 마스킹 (videoId 일부만 노출)."""
     if not url:
@@ -161,6 +172,31 @@ def _build_youtube_search_url(title: str, artist: Optional[str]) -> str:
     """ytsearch 쿼리로 변환 (yt-dlp 내부 검색 핸들러)."""
     query = title if not artist else f"{artist} {title}"
     return f"ytsearch1:{query}"
+
+
+def _separate_vocals(audio_path: Path, out_dir: Path) -> Path:
+    """Spleeter 2stems로 vocal stem을 분리해 vocal wav 경로를 반환.
+
+    - spec docs/features/song-self-analysis-pipeline.md §10-2: 반주 harmonics가
+      pyin pitch contour를 오염시키는 회귀를 줄이기 위한 opt-in 단계.
+    - default는 vocal-skip이며 본 함수는 --vocal-separation 시에만 호출된다.
+    - pretrained model 캐시는 AUDIO_ANALYSIS_MODEL_DIR(예: NCP /data)로 외부화한다.
+    """
+    from spleeter.separator import Separator  # type: ignore
+
+    model_dir = os.environ.get(SPLEETER_MODEL_ENV)
+    if model_dir:
+        # spleeter는 MODEL_PATH 환경변수로 pretrained model 캐시 위치를 읽는다.
+        os.environ.setdefault("MODEL_PATH", model_dir)
+
+    separator = Separator("spleeter:2stems")
+    separator.separate_to_file(str(audio_path), str(out_dir))
+
+    # spleeter는 <out_dir>/<audio stem>/vocals.wav 로 출력한다.
+    vocal_path = out_dir / audio_path.stem / "vocals.wav"
+    if not vocal_path.exists():
+        raise RuntimeError("spleeter 분리 후 vocals.wav 없음")
+    return vocal_path
 
 
 def _analyze_audio_file(audio_path: Path) -> dict:
@@ -212,19 +248,29 @@ def run_analysis(
     song_title: Optional[str],
     artist: Optional[str],
     clip_seconds: int = DEFAULT_CLIP_SECONDS,
+    vocal_separation: bool = False,
 ) -> AnalysisResult:
     """엔드 투 엔드 분석. 임시 audio 파일은 finally에서 무조건 삭제."""
     if not youtube_url and not song_title:
         raise ValueError("--youtube-url 또는 --song-title 중 하나는 필수")
 
     target_url = youtube_url or _build_youtube_search_url(song_title or "", artist)
+    method = analysis_method_label(vocal_separation)
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="audio-analysis-"))
     started = time.time()
-    LOG.info("analysis start url=%s tmp=%s", mask_url(target_url), tmp_dir)
+    LOG.info(
+        "analysis start url=%s method=%s tmp=%s",
+        mask_url(target_url),
+        method,
+        tmp_dir,
+    )
     try:
         audio_path = _download_youtube_audio(target_url, tmp_dir, clip_seconds)
-        features = _analyze_audio_file(audio_path)
+        pitch_source = audio_path
+        if vocal_separation:
+            pitch_source = _separate_vocals(audio_path, tmp_dir / "stems")
+        features = _analyze_audio_file(pitch_source)
     finally:
         # 저작권 회피 — audio 임시 파일 즉시 삭제
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -244,6 +290,7 @@ def run_analysis(
         tempo=features.get("tempo"),
         durationSec=features.get("durationSec"),
         confidence=features.get("confidence", 0.0),
+        analysisMethod=method,
     )
 
 
@@ -258,6 +305,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=DEFAULT_CLIP_SECONDS,
         help="추출할 clip 길이(초). 30~60 권장.",
+    )
+    parser.add_argument(
+        "--vocal-separation",
+        dest="vocal_separation",
+        action="store_true",
+        help="Spleeter 2stems로 vocal stem 분리 후 분석 (default: vocal-skip). "
+        "spleeter 의존성(requirements-vocal.txt) 필요.",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="DEBUG 레벨 로깅"
@@ -278,6 +332,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             song_title=args.song_title,
             artist=args.artist,
             clip_seconds=args.clip_seconds,
+            vocal_separation=args.vocal_separation,
         )
     except Exception as exc:  # noqa: BLE001 — CLI surface
         LOG.error("analysis failed: %s", exc)

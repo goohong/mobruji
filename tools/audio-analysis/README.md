@@ -58,6 +58,9 @@ python analyze.py --song-title "Yesterday" --artist "The Beatles"
 
 # 3) clip 길이 조정 (기본 45초)
 python analyze.py --youtube-url "..." --clip-seconds 30 --verbose
+
+# 4) Spleeter vocal stem 분리 후 분석 (opt-in)
+python analyze.py --youtube-url "..." --vocal-separation
 ```
 
 stdout에 JSON 한 줄을 출력한다.
@@ -71,9 +74,40 @@ stdout에 JSON 한 줄을 출력한다.
   "tempo": 120.5,
   "durationSec": 45.0,
   "confidence": 0.78,
-  "toolingVersion": "analyze-py-0.1.0"
+  "analysisMethod": "vocal-skip",
+  "toolingVersion": "analyze-py-0.2.0"
 }
 ```
+
+`analysisMethod` 는 pitch 추출 입력을 나타낸다 — `vocal-skip`(곡 전체 audio) 또는
+`spleeter-2stems`(분리된 vocal stem). Spring 측 `AudioAnalysisRunner` 는 JSON 을
+필드명 기준으로 파싱하므로 본 필드 추가는 하위 호환이다.
+
+## Spleeter vocal stem 분리 (opt-in)
+
+`--vocal-separation` 플래그는 yt-dlp 추출 audio 를 Spleeter 2stems 로 분리한 뒤
+vocal stem 에만 librosa pyin 을 적용한다. 반주·드럼 harmonics 가 pitch contour 를
+오염시켜 lowMidi/highMidi 가 양쪽으로 늘어나는 회귀를 줄이기 위함이다
+(spec [`song-self-analysis-pipeline.md`](../../docs/features/song-self-analysis-pipeline.md) §10-2).
+
+- **default 는 vocal-skip** — spec §13 의 `audio.analysis.vocal-separation.enabled`
+  default false 와 정합. Spleeter 정식 도입 여부는 ADR-0015 트리거 충족 시 결정한다.
+- Spleeter 는 TensorFlow 의존이 무거워 메인 `requirements.txt` 와 분리한다. 별도 설치:
+
+  ```bash
+  pip install -r requirements.txt -r requirements-vocal.txt
+  ```
+
+- pretrained model 캐시는 `AUDIO_ANALYSIS_MODEL_DIR` 환경변수로 외부화한다.
+  **NCP 운영에서는 `/data` 등 영속 볼륨** 을 지정해 매 실행 재다운로드를 방지한다:
+
+  ```bash
+  export AUDIO_ANALYSIS_MODEL_DIR=/data/spleeter-models
+  python analyze.py --youtube-url "..." --vocal-separation
+  ```
+
+- 분리된 vocal stem 도 임시 캐시(`tmpdir/stems`)에만 두고 분석 직후 삭제한다
+  (저작권 — §3 비기능, 원본/stem 모두 영속 금지).
 
 실패 시 exit code 1 + stdout JSON `{"error": "...", "toolingVersion": "..."}`.
 
@@ -131,6 +165,6 @@ AUDIO_ANALYSIS_PYTHON_CMD="$(pwd)/../tools/audio-analysis/.venv/bin/python" \
 
 ## 알려진 한계
 
-- `spleeter` (보컬 stem 분리)는 본 PR에 포함하지 않았다. Python 3.10 의존성 + TensorFlow 무게 문제로 PR B에서 도입 여부를 결정한다 (대안: demucs).
+- `spleeter` (보컬 stem 분리)는 `--vocal-separation` opt-in 으로 지원하나 **default 는 vocal-skip** 이다. TensorFlow 무게 + CI 빌드 시간 회귀(spec §10-2) 때문에 메인 의존성과 분리(`requirements-vocal.txt`)했고, 정식 도입(default 전환)은 ADR-0015 트리거 충족 시 결정한다 (대안: demucs).
 - `key` 추정은 chroma 평균 기반 단순 휴리스틱. 정확도 향상은 별도 spec.
 - 단일 코어 기준 곡당 30초 목표는 PR B 통합 후 측정.
