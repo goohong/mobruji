@@ -130,10 +130,10 @@ describe("SongCard", () => {
     expect(
       screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = 파5 (F5) (#318 한국어 (SPN) 병기)
-    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = 솔3 (G3)
-    expect(screen.getByText("솔3 (G3)")).toBeInTheDocument();
+    // 최고음 음표명 노출 — MIDI 77 = 파5 (한국어 단독, #1310 사용자 정정 2026-06-03)
+    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 솔3
+    expect(screen.getByText("솔3")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
@@ -354,10 +354,10 @@ describe("SongCard", () => {
       expect(screen.getByText("키 매칭")).toBeInTheDocument();
       expect(screen.getByText("장르")).toBeInTheDocument();
       expect(screen.getByText("음역 적합")).toBeInTheDocument();
-      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (#318: 한국어 (SPN) 병기)
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (한국어 단독, #1310 사용자 정정 2026-06-03)
       expect(
         screen.getByText(
-          "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+          "사용자 도3-솔4 vs 곡 솔3-파5",
         ),
       ).toBeInTheDocument();
       // 추정값 안내 footnote
@@ -738,6 +738,8 @@ describe("SongCard", () => {
 
     it("buildYouTubeSearchUrl: 한글 제목/아티스트도 안전하게 인코딩한다", () => {
       const url = buildYouTubeSearchUrl("밤편지", "아이유");
+      // 직전 PR (#1310) 무차별 한국어 치환이 percent-encoding hex (%A4 → %라4 등)
+      // 까지 깨먹은 회귀 복구. percent-encoded 바이트는 한국어 음명 치환과 무관.
       expect(url).toBe(
         "https://www.youtube.com/results?search_query=%EB%B0%A4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%B4%EC%9C%A0",
       );

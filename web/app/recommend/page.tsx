@@ -59,7 +59,7 @@ import {
   VoiceRangeResponse,
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
@@ -311,8 +311,8 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           </h1>
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm text-[var(--text-secondary)]">
-              내 음역대: {midiToCombinedNoteName(voiceRange.lowestNoteMidi)} ~{" "}
-              {midiToCombinedNoteName(voiceRange.highestNoteMidi)}
+              내 음역대: {midiToKoreanNoteName(voiceRange.lowestNoteMidi)} ~{" "}
+              {midiToKoreanNoteName(voiceRange.highestNoteMidi)}
             </p>
             <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
           </div>

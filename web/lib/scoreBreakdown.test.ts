@@ -95,9 +95,9 @@ describe("buildScoreBreakdown", () => {
     ]);
     const rangeFit = breakdown.find((b) => b.key === "rangeFit");
     expect(rangeFit?.score).toBeCloseTo(0.55, 1);
-    // 이슈 #318: 한국어 (SPN) 병기.
+    // 한국어 단독 표기 (#1310 사용자 정정 2026-06-03 — SPN 병기 #318 폐지).
     expect(rangeFit?.detail).toBe(
-      "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+      "사용자 도3-솔4 vs 곡 솔3-파5",
     );
     // 모든 추정 항목은 estimated=true
     expect(breakdown.every((b) => b.estimated)).toBe(true);

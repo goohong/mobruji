@@ -199,12 +199,12 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     ).toHaveAttribute("href", "/voice-range");
   });
 
-  it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (C3 ~ A4)", async () => {
+  it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (도3 ~ 라4)", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
       sessionId: "00000000-0000-4000-8000-000000000001",
-      lowestNoteMidi: 48, // C3
-      highestNoteMidi: 69, // A4
+      lowestNoteMidi: 48, // 도3
+      highestNoteMidi: 69, // 라4
       sourceMethod: "OCTAVE_PICK",
       createdAt: "2026-05-22T00:00:00Z",
       updatedAt: "2026-05-22T00:00:00Z",
@@ -213,9 +213,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     renderWithQueryClient(<Home />);
 
     await waitFor(() => {
-      // 이슈 #318: 한국어 (SPN) 병기.
+      // 한국어 단독 표기 (#1310 사용자 정정 2026-06-03 — SPN 병기 #318 폐지).
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 ~ 라4/,
       );
     });
     expect(readVoiceRangeMock).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001");
@@ -250,9 +250,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
 
     const { container } = renderWithQueryClient(<Home />);
     await waitFor(() => {
-      // 이슈 #318: 한국어 (SPN) 병기.
+      // 한국어 단독 표기 (#1310 사용자 정정 2026-06-03).
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 ~ 라4/,
       );
     });
     await expectNoA11yViolations(container);
