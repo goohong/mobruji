@@ -34,8 +34,19 @@
 #   - tools/discord-daemon/discord-reply.sh --cycle-backlog-upsert
 #   - tools/agent-launch-wrapper.sh (launch 직전 본 wrapper 호출)
 #   - docs/features/work-cycle-simplification.md (plan 사이클 spec)
+#
+# DEPRECATED (2026-06-03) — `[BACKLOG] <cycle>` 단일 스레드 방식 폐기
+# (cycle-forum-operation.md §3·§5-7). 현 표준은 "작업마다 개별 thread + 4태그".
+# 본 스크립트는 더 이상 [BACKLOG] 스레드를 신설/갱신하지 않는다 (회귀 차단). 호출은
+# deprecation warning stderr emit 후 no-op exit 0 (호출자 호환). 실제 thread-creating
+# tool (discord-reply.sh --cycle-backlog-upsert) 도 동일하게 no-op 으로 차단된다.
 
 set -euo pipefail
+
+if [[ "${CYCLE_BACKLOG_FORCE:-0}" != "1" ]]; then
+  echo "tools/cycle-backlog/upsert.sh: [DEPRECATED] [BACKLOG] 단일 스레드 방식 폐기됨 — no-op (cycle-forum-operation.md §5-7). 개별 스레드 + 4태그 사용." >&2
+  exit 0
+fi
 
 usage() {
   cat >&2 <<'USAGE'

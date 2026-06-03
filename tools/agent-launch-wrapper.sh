@@ -346,26 +346,15 @@ if [[ -x "$DIFF_SH" ]]; then
   "$DIFF_SH" --limit 20 >&2 2>&1 || true
 fi
 
-# ─── (선택) cycle 백로그 refresh — 2026-05-26 사용자 정정 박제 ───────────────
+# ─── cycle 백로그 refresh — DEPRECATED (2026-06-03) ─────────────────────────
 #
-# 사용자: "각 agent 가 자기 계획이 있어야지. 백로그 보면서 작업 안 까먹고 다
-# 진행하고." → launch 직전 backlog forum thread 를 GitHub 상태 기반으로 upsert.
-# sub-agent 가 launch 즉시 자기 cycle 의 backlog thread 를 보고 시작.
-#
-# graceful: backlog upsert 실패는 wrapper fail 시키지 않음 — Agent launch 가 우선.
+# 폐기: `[BACKLOG] <cycle>` 단일 스레드 방식은 옛 양식이며 폐기 대상
+# (cycle-forum-operation.md §3·§5-7). 현 표준은 "작업마다 개별 thread + 4태그".
+# launch 직전 backlog upsert 는 사용자 directive 마다 옛 양식 스레드를 재생성하는
+# 회귀 원인이었으므로 호출을 제거한다. --refresh-backlog / CYCLE_BACKLOG_REFRESH_DEFAULT
+# 는 호환을 위해 인자 파싱은 유지하되, 활성화돼도 warning 만 emit 하고 skip 한다.
 if [[ "$REFRESH_BACKLOG" -eq 1 ]]; then
-  BACKLOG_SH="$SCRIPT_DIR/cycle-backlog/upsert.sh"
-  if [[ -x "$BACKLOG_SH" ]]; then
-    if BACKLOG_THREAD_ID=$("$BACKLOG_SH" "$WORKTREE" 2>/dev/null); then
-      if [[ -n "$BACKLOG_THREAD_ID" ]]; then
-        echo "agent-launch-wrapper.sh: backlog upsert OK (worktree=$WORKTREE, thread=$BACKLOG_THREAD_ID)" >&2
-      fi
-    else
-      echo "agent-launch-wrapper.sh: backlog upsert 실패 (graceful — Agent launch 진행)" >&2
-    fi
-  else
-    echo "agent-launch-wrapper.sh: $BACKLOG_SH 실행 불가 — backlog refresh skip" >&2
-  fi
+  echo "agent-launch-wrapper.sh: [DEPRECATED] --refresh-backlog / CYCLE_BACKLOG_REFRESH_DEFAULT 폐기됨 — [BACKLOG] 단일 스레드 미사용. backlog upsert skip." >&2
 fi
 
 # ─── stdout: prompt / confirm 한 줄 (기존 호환) ─────────────────────────────
