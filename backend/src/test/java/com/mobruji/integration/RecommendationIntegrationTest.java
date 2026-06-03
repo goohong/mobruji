@@ -189,9 +189,9 @@ class RecommendationIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E (#1494): 음역 보유 곡은 practiceDifficulty(난이도) + 최고음 사유가 응답에 노출된다")
+    @DisplayName("E2E (#1494): 음역 보유 곡은 practiceDifficulty(난이도) + 음역 범위(최저~최고음) 사유가 응답에 노출된다")
     void e2e_practiceDifficultyExposedForRangedSong() {
-        // given: 음역대를 가진 곡만 시드 (HARD: low 57 ~ high 81, span 24, 최고음 A5)
+        // given: 음역대를 가진 곡만 시드 (HARD: low 57 ~ high 81, span 24, 음역 A3~A5)
         recommendationRepository.deleteAll();
         recommendationRequestRepository.deleteAll();
         songRepository.deleteAll();
@@ -220,7 +220,7 @@ class RecommendationIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.CREATED.value())
                 .body("recommendations[0].practiceDifficulty", equalTo("HARD"))
-                .body("recommendations[0].practiceDifficultyReason", equalTo("최고음 A5, 고음·넓은 음역이라 도전적인 곡이에요"));
+                .body("recommendations[0].practiceDifficultyReason", equalTo("음역 A3~A5, 고음·넓은 음역이라 도전적인 곡이에요"));
     }
 
     @Test
