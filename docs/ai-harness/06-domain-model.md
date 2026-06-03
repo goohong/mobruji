@@ -89,6 +89,8 @@
 | 음역 분류 | VocalRegister | `voice` | **설계 단계** 음역대(low/high MIDI)를 절대 음역 밴드로 분류한 라벨. 비전문 사용자 친화 — 1차는 정식 성악 명칭(테너/소프라노 등) 대신 일상어 밴드(낮은/중간/높은/넓은 음역). 영속 엔티티 아님(`VoiceRange` 파생). 추천 결정성 무영향. voice-range-intuitive-display.md §5-1 |
 | 음역 벤치마크 | VoiceRangeBenchmark | `voice` | **설계 단계** 상대 음역 설명·시각화 비교 기준이 되는 평균 음역 reference. 성별 중립 기본(일반 성인 A2~C4 시드) + 선택적 성별 분기(성별 신호 확보 시 — 현재 미수집). 시드값, 검증·튜닝 대상. voice-range-intuitive-display.md §5-1 |
 | 상대 음역 설명 | RelativeRangeDescriptor | `voice` | **설계 단계** 사용자 음역대를 `VoiceRangeBenchmark` 와 비교해 생성하는 짧은 한국어 설명("고음이 평균보다 약간 높아요"). 고음/저음/음역폭 3축 차이를 버킷(≤2 비슷 / 3~5 약간 / ≥6 훨씬)으로 환산. 1차 FE 파생, BE enrichment 는 재사용 수요 확정 시 후속. voice-range-intuitive-display.md §5-1 |
+| 음역 미입력 추천 피드 | VoiceRangeOptionalFeed | `recommendation` | **설계 단계** 음역대 미입력 사용자에게 음역 측정 전 노출하는 fallback 추천 표면. 본 추천(`POST /recommendations`, voiceRange `@NotNull`)·점수식·결정성을 건드리지 않고 기존 트렌딩(`GET /recommendations/trending`, 음역 옵션)·분위기 필터·곡 카탈로그 큐레이션을 graceful chain 으로 묶은 read-model. 신규 엔티티·마이그레이션 없음. 측정 완료 시 기존 개인화 경로로 전환. voice-range-optional-recommendation-entry.md §5-1 |
+| 음역 입력 유도 | VoiceRangeNudge | `recommendation` (web) | **설계 단계** `VoiceRangeOptionalFeed` 위에서 "더 정확한 맞춤 추천을 원하면 음역대를 알려 주세요" 로 음역 측정을 비강제·점진적으로 유도하는 클라이언트 UX 트리거. 피드를 막지 않음(opt-in) + dismiss/세션 노출 빈도 가드. 측정 완료 시 본 추천(`POST /recommendations`) 개인화 경로로 전환. 신규 BE 엔티티 없음(클라이언트 상태). voice-range-optional-recommendation-entry.md §5-6 |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
