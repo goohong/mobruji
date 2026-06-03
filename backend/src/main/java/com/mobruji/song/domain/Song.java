@@ -311,6 +311,24 @@ public class Song {
     }
 
     /**
+     * 시드 재적재 시 큐레이션 장르 재분류를 기존 row 에 반영한다. {@code genre} 는 spec
+     * {@code song-curation-seed-100.md} §5-5 화이트리스트로 통제되는 시드 전용 권위 필드라
+     * 운영/분석 경로가 건드리지 않는다 — {@code songs-seed.json} 이 단일 출처다. 따라서 기존
+     * row 의 {@code genre} 가 시드와 다르면 시드 값으로 갱신한다(이슈 #1675 — #1672 의 R&B → 발라드
+     * 재분류가 기존 row 에 미반영되던 회귀).
+     *
+     * @return 실제로 갱신됐는지 여부 — 호출 측 로깅에 사용
+     */
+    public boolean reconcileSeedGenre(final String newGenre) {
+        if (newGenre == null || Objects.equals(this.genre, newGenre)) {
+            return false;
+        }
+        this.genre = newGenre;
+        this.updatedAt = LocalDateTime.now();
+        return true;
+    }
+
+    /**
      * Python audio analysis tool 산출값으로 lowMidi/highMidi 를 **갱신** 한다. {@link #backfillMissingFields}
      * 가 "null 만 채움" 이라면 본 메서드는 "신뢰도 충족 시 기존 값을 덮어쓰기".
      *
