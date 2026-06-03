@@ -185,6 +185,40 @@ body {
   }
 }
 
+/*
+ * PitchWaveRing sparkle — progress milestone(25/50/75/100%) 도달 시 ✅ 가 톡 튀어
+ * 오르는 축하(ui-ux-redesign-pr-5-pitch-wave.md §3). scale 0.3 → 1.15 → 1 + opacity.
+ */
+@keyframes mobruji-pitch-sparkle {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/*
+ * PitchWaveRing 100% 도달 brand gradient flash(§3) — opacity 0 → 1 → 0 600ms.
+ */
+@keyframes mobruji-brand-flash {
+  0% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .animate-fade-in {
   animation: mobruji-fade-in var(--duration-slow) var(--ease-out) both;
 }
@@ -213,6 +247,15 @@ body {
 /* Heart pop — 좋아요 토글 강조 (#1685). 400ms 는 base/slow 사이라 토큰 대신 직접 명시. */
 .animate-heart-pop {
   animation: mobruji-heart-pop 400ms var(--ease-emphasized);
+}
+
+/* PitchWaveRing sparkle / brand flash (PR5). */
+.animate-pitch-sparkle {
+  animation: mobruji-pitch-sparkle 400ms var(--ease-spring) both;
+}
+
+.animate-brand-flash {
+  animation: mobruji-brand-flash 600ms var(--ease-out) both;
 }
 
 /*
@@ -288,6 +331,8 @@ body {
   .animate-heart-pop,
   .animate-sheet-in,
   .animate-sheet-out,
+  .animate-pitch-sparkle,
+  .animate-brand-flash,
   .heart-sparkle {
     animation: none;
   }
