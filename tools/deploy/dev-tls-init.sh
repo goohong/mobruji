@@ -5,6 +5,13 @@
 # 호출 (1회):
 #   bash tools/deploy/dev-tls-init.sh
 #
+# ⚠️ 전제: NCP ACG inbound 에 TCP **80 + 443 둘 다** 열려 있어야 한다 (ADR-0028 §5).
+#   80 만 열려 있으면: HTTP-01 발급은 되나, 외부에서 :443 접근 불가 → :80 의 301
+#   리다이렉트가 닿지 못하는 :443 으로 보내 dev 전체가 외부에서 먹통이 된다. ACG 443
+#   inbound 추가는 NCP 콘솔 작업(본 스크립트 범위 밖) — 발급 후 외부에서
+#   `nc -z 101.79.20.94 443` 으로 개방 확인할 것 (호스트 자기 자신은 hairpin NAT 로
+#   막혀 보일 수 있으니 외부 호스트에서 확인).
+#
 # 멱등성: 실제 인증서가 이미 발급돼 있으면 skip. 재발급은 FORCE=1 로 강제.
 # 옵션 env:
 #   LETSENCRYPT_EMAIL — 갱신 만료 알림 수신 메일 (없으면 무등록 발급).
@@ -48,7 +55,10 @@ $COMPOSE run --rm --entrypoint sh certbot -c "\
       -subj '/CN=${DOMAIN}'"
 
 echo "[dev-tls] 2) nginx (+ 의존 서비스) 기동 — 80 ACME challenge 서빙"
-$COMPOSE up -d nginx
+# --force-recreate: nginx 가 이전 인증서 부재로 crash-loop(Restarting) 중이면 plain
+# `up -d` 는 "이미 떠 있음"으로 보고 재기동을 건너뛴다 → dummy 인증서를 못 집어 계속
+# crash. force-recreate 로 새 컨테이너를 띄워 방금 심은 dummy 인증서로 boot 시킨다.
+$COMPOSE up -d --force-recreate nginx
 
 echo "[dev-tls] 3) dummy 제거 후 Let's Encrypt 실제 인증서 발급"
 $COMPOSE run --rm --entrypoint sh certbot -c "rm -rf ${LIVE_PATH} /etc/letsencrypt/archive/${DOMAIN} /etc/letsencrypt/renewal/${DOMAIN}.conf"
@@ -62,7 +72,12 @@ if [ "${STAGING:-0}" = "1" ]; then
     STAGING_ARG="--staging"
 fi
 
-$COMPOSE run --rm certbot certonly --webroot -w /var/www/certbot \
+# --entrypoint certbot: docker-compose.dev.yml 의 certbot 서비스 entrypoint 는
+# "while :; do certbot renew ...; done" 갱신 루프다. `run certbot certonly ...` 는
+# command 만 덮고 entrypoint 는 그대로라, certonly 인자가 갱신 루프 sh -c 의 위치
+# 인자로 먹혀 무시되고 `certbot renew` 만 무한 반복(행). entrypoint 를 certbot 바이너리로
+# 명시 override 해야 certonly 가 실제 실행된다 (#1579 — dev TLS 최초 발급 불능 근본 원인).
+$COMPOSE run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot \
     -d "${DOMAIN}" \
     ${EMAIL_ARG} ${STAGING_ARG} \
     --agree-tos --no-eff-email --non-interactive
