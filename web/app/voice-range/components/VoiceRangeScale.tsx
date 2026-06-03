@@ -12,7 +12,7 @@
  *   - 외부 차트 라이브러리 없이 SVG 직접 렌더 (번들 부담 회피).
  *   - 가로축 = 음높이(왼쪽 낮은음 → 오른쪽 높은음). 옥타브 기준선(C-노트) + 계이름 라벨.
  *   - 벤치마크 밴드(옅게) 위에 사용자 밴드(강조)를 겹쳐 같은 음높이 축에서 비교.
- *   - 양 끝에 사용자 최저음/최고음 음표명(계이름 병기, 좁으면 SPN 단독은 호출 측 정책).
+ *   - 양 끝에 사용자 최저음/최고음 음표명(한국어 음명).
  *
  * 접근성:
  *   - SVG 에 role="img" + 요약 aria-label (시각화 없이도 이해 가능).
@@ -22,8 +22,7 @@
 
 import {
   INVALID_MIDI_A11Y_FALLBACK,
-  midiToCombinedNoteName,
-  midiToNoteName,
+  midiToKoreanNoteName,
 } from "@/lib/notes";
 import {
   NEUTRAL_BENCHMARK,
@@ -87,9 +86,9 @@ export function VoiceRangeScale({
 
   const octaveAnchors = pickOctaveAnchors(rangeLow, rangeHigh);
 
-  const lowCombined = midiToCombinedNoteName(lowMidi);
-  const highCombined = midiToCombinedNoteName(highMidi);
-  const ariaLabel = `내 음역대 ${midiToNoteName(lowMidi)}부터 ${midiToNoteName(highMidi)}까지. 평균 음역대 ${midiToNoteName(benchmark.lowMidi)}부터 ${midiToNoteName(benchmark.highMidi)}까지와 비교한 막대.`;
+  const lowNote = midiToKoreanNoteName(lowMidi);
+  const highNote = midiToKoreanNoteName(highMidi);
+  const ariaLabel = `내 음역대 ${lowNote}부터 ${highNote}까지. 평균 음역대 ${midiToKoreanNoteName(benchmark.lowMidi)}부터 ${midiToKoreanNoteName(benchmark.highMidi)}까지와 비교한 막대.`;
 
   return (
     <figure className="flex flex-col gap-2">
@@ -135,7 +134,7 @@ export function VoiceRangeScale({
                 textAnchor="middle"
                 className="fill-[var(--text-tertiary)] text-[9px]"
               >
-                {midiToCombinedNoteName(midi)}
+                {midiToKoreanNoteName(midi)}
               </text>
             </g>
           );
@@ -153,8 +152,8 @@ export function VoiceRangeScale({
           opacity={0.45}
         >
           <title>
-            평균 음역대 {midiToCombinedNoteName(benchmark.lowMidi)} ~{" "}
-            {midiToCombinedNoteName(benchmark.highMidi)}
+            평균 음역대 {midiToKoreanNoteName(benchmark.lowMidi)} ~{" "}
+            {midiToKoreanNoteName(benchmark.highMidi)}
           </title>
         </rect>
 
@@ -169,18 +168,18 @@ export function VoiceRangeScale({
           className="fill-[var(--chart-bar-active-bg)]"
         >
           <title>
-            내 음역대 {lowCombined} ~ {highCombined}
+            내 음역대 {lowNote} ~ {highNote}
           </title>
         </rect>
 
-        {/* 사용자 양 끝 음표명(계이름 병기) */}
+        {/* 사용자 양 끝 음표명(한국어 음명) */}
         <text
           x={userX1}
           y={benchLaneY - 5}
           textAnchor="middle"
           className="fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
         >
-          {lowCombined}
+          {lowNote}
         </text>
         <text
           x={userX2}
@@ -188,7 +187,7 @@ export function VoiceRangeScale({
           textAnchor="middle"
           className="fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
         >
-          {highCombined}
+          {highNote}
         </text>
       </svg>
     </figure>

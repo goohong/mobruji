@@ -29,7 +29,7 @@ import { ApiError } from "@/lib/api/client";
 import {
   MAX_MIDI,
   MIN_MIDI,
-  midiToCombinedNoteName,
+  midiToKoreanNoteName,
 } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
@@ -503,7 +503,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         <div className="flex items-baseline justify-between">
           <span className="text-2xl font-semibold tabular-nums">
             {sample?.midi !== null && sample?.midi !== undefined
-              ? midiToCombinedNoteName(sample.midi)
+              ? midiToKoreanNoteName(sample.midi)
               : "—"}
           </span>
           <span className="text-sm text-[var(--text-caption)]">
@@ -710,7 +710,7 @@ function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
       <div className="flex items-center justify-between">
         <span className="font-medium text-[var(--text-label)]">{label}</span>
         <span className="tabular-nums text-[var(--text-primary)]">
-          {midiToCombinedNoteName(value)} · MIDI {value}
+          {midiToKoreanNoteName(value)} · MIDI {value}
         </span>
       </div>
       <input
