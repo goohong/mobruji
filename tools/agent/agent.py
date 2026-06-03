@@ -295,9 +295,11 @@ async def handle_user_message(payload: dict[str, Any]) -> None:
         allowed_tools=_get_allowed_tools(),
     )
 
+    # 2026-06-03 (#1631) — quote-reply 제거. thread 있으면 그 안에 push, 없으면
+    # 채널에 plain 메시지 push (옛 reply_to_msg_id 안내 폐기 — stale target 사고).
     thread_directive = (
         f"답 push 시 thread_id='{thread_id}' 사용." if thread_id
-        else f"답 push 시 reply_to_msg_id='{message_id}' 사용 (thread 미생성)."
+        else "답 push 시 thread_id 없이 채널에 직접 push (quote-reply 미사용)."
     )
     # E2 (2026-05-29) — forum thread 안 메시지면 context 명시.
     forum_kind = payload.get("forum_kind", "main")
