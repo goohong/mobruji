@@ -7,7 +7,7 @@
  *  - 측정 안 한 사용자(`voiceRangeId == null`): 4단계 흐름 안내 + "음역대 측정하기"
  *    primary CTA. 왜 측정이 필요한지 한 줄 부연.
  *  - 측정 한 사용자: "추천 받기" primary CTA + 음역대 요약(저음~고음, 음표명) +
- *    "다시 측정" 보조 + 좋아요/북마크/이력 빠른 진입.
+ *    "다시 측정"(자동)·"직접 다시 설정"(수동) 보조 + 좋아요/북마크/이력 빠른 진입.
  *
  * SSR/hydration:
  *  - `useSessionStore`는 localStorage에서 hydrate 되므로 SSR/CSR mismatch를 피하려고
@@ -157,7 +157,8 @@ function NewUserPanel() {
  * - primary CTA를 "추천 받기"로 바꿔 측정 단계를 다시 거치지 않도록 한다.
  * - 측정한 음역대를 음표명(C3 ~ A4 등)으로 보여줘 사용자가 "내가 입력한 값이 맞나"
  *   확인 가능하게 한다. BE fetch 실패 시 음역대 ID 만 노출하는 fallback 유지.
- * - "다시 측정"은 secondary로 두어 잘못 입력했거나 시간이 흘러 조정하고 싶을 때 진입.
+ * - "다시 측정"(자동)과 "직접 다시 설정"(수동 입력)을 secondary로 나란히 두어 잘못
+ *   입력했거나 시간이 흘러 조정하고 싶을 때 두 경로 모두로 재진입할 수 있게 한다.
  */
 function ReturningUserPanel() {
   const voiceRangeId = useSessionStore((state) => state.voiceRangeId);
@@ -207,6 +208,12 @@ function ReturningUserPanel() {
           className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] px-6 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           음역대 다시 측정
+        </Link>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] px-6 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+        >
+          직접 다시 설정
         </Link>
       </div>
     </section>
