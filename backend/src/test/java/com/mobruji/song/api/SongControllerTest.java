@@ -69,7 +69,11 @@ class SongControllerTest {
                 .andExpect(jsonPath("$.artist", is("a")))
                 .andExpect(jsonPath("$.difficulty", is("HARD")))
                 .andExpect(jsonPath("$.lowestNoteName", is("C4")))
-                .andExpect(jsonPath("$.highestNoteName", is("E5")));
+                .andExpect(jsonPath("$.highestNoteName", is("E5")))
+                .andExpect(jsonPath("$.analysisProfile.lowMidi", is(60)))
+                .andExpect(jsonPath("$.analysisProfile.highMidi", is(76)))
+                .andExpect(jsonPath("$.analysisProfile.difficulty", is("HARD")))
+                .andExpect(jsonPath("$.analysisProfile.mood", is("UPBEAT")));
     }
 
     @Test
