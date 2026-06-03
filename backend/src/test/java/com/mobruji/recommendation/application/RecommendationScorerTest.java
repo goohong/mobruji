@@ -70,14 +70,15 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit (#1452): 곡 음역을 완전 포함해도 곡 키 중심이 음역 중앙에서 벗어나면 1.0 미만 (포화 방지)")
+    @DisplayName("voiceRangeFit (#1452/#1513): 곡 음역을 완전 포함해도 곡 키 중심이 음역 중앙에서 벗어나면 1.0 미만 (포화 방지)")
     void voiceRangeFit_fullyInsideButOffCenter_belowOne() {
-        // given: C major root=60. 사용자 50~80 → reachability=1.0, center=65, half=15, dist=5
-        // → centeredness = 1 - 5/15 = 0.66667
+        // given: C major root=60 (folded 그대로 60). 사용자 50~80 → reachability=1.0, center=65, sigma=15, dist=5
+        // → centeredness = exp(-0.5*(5/15)^2) (가우시안 감쇠, #1513)
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 50, 80);
         // then: reachability 포화(1.0)에도 centeredness 가 변별력을 유지 → 1.0 미만
-        assertThat(fit).isCloseTo(1.0 - 5.0 / 15.0, offset(1e-9));
+        final double expectedCenteredness = Math.exp(-0.5 * Math.pow(5.0 / 15.0, 2));
+        assertThat(fit).isCloseTo(expectedCenteredness, offset(1e-9));
         assertThat(fit).isLessThan(1.0);
     }
 
@@ -93,13 +94,15 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit: 곡 음역과 사용자 음역이 전혀 겹치지 않으면 0.0")
-    void voiceRangeFit_noOverlap_returnsZero() {
-        // given: C major 53~67, 사용자 100~119 (벗어남)
+    @DisplayName("voiceRangeFit (#1513): 사용자 음역이 곡 root 보다 옥타브 위면 옥타브 폴딩으로 매칭 → 0 이 아님")
+    void voiceRangeFit_userOctaveAbove_octaveFoldMatches() {
+        // given: C major root=60, 사용자 100~119 (옥타브 위). 과거엔 overlap 0 → 0.0.
+        // #1513: root 60 을 center 109.5 인근으로 폴딩(60→108) → 곡 음역 101~115, 사용자 100~119 와 겹침 → 양수.
+        // 곡을 옥타브 올려 부를 수 있다는 가정과 일치.
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 100, 119);
         // then
-        assertThat(fit).isEqualTo(0.0);
+        assertThat(fit).isGreaterThan(0.0);
     }
 
     @Test
@@ -613,35 +616,38 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 키 중심보다 위쪽이면 centeredness 0 → fit 0")
-    void voiceRangeFit_userAboveKeyCenter_returnsZero() {
-        // given: C major root=60. 사용자 60~67 (center=63.5, half=3.5). dist=|60-63.5|=3.5 == half
-        // → centeredness = 1 - 3.5/3.5 = 0 → reachability(7/14) 무관하게 fit 0
+    @DisplayName("voiceRangeFit (#1513): 곡 키 중심이 음역 중앙에서 벗어나면 감쇠하되 0 으로 붕괴하지 않는다")
+    void voiceRangeFit_offCenterDecaysButStaysPositive() {
+        // given: C major root=60 (folded 그대로 60). 사용자 60~67 (center=63.5, sigma=3.5). dist=|60-63.5|=3.5
+        // → centeredness = exp(-0.5*(3.5/3.5)^2) = exp(-0.5) ≈ 0.6065 (과거 선형식은 0 으로 잘렸다)
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 60, 67);
-        // then
-        assertThat(fit).isEqualTo(0.0);
+        // then: 가우시안 감쇠로 0 붕괴 없이 양수 유지
+        assertThat(fit).isGreaterThan(0.0);
+        assertThat(fit).isLessThan(1.0);
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 정확 경계 — 사용자 high == 곡 low → overlap 0 → 0.0")
-    void voiceRangeFit_touchingBoundary_returnsZero() {
-        // given: C major 곡 53~67. 사용자 40~53 (high == 곡 low) → max-min = 53-53 = 0
+    @DisplayName("voiceRangeFit (#1513): 저음역 사용자는 옥타브 폴딩으로 곡 음역과 겹친다 → 0 이 아님")
+    void voiceRangeFit_lowVoiceFoldsIntoOverlap() {
+        // given: C major root=60. 저음역 사용자 40~53 (center=46.5). 과거엔 폴딩 없이 곡 53~67 과 겹침 0 → 0.0.
+        // #1513: root 60 을 center 46.5 인근으로 폴딩(60→48) → 곡 음역 41~55, 사용자 40~53 과 강하게 겹침 → 양수.
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 53);
-        // then: overlap 0 → 0.0
-        assertThat(fit).isEqualTo(0.0);
+        // then: 옥타브 폴딩으로 겹침 발생 → 양수
+        assertThat(fit).isGreaterThan(0.0);
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 키 중심보다 한참 아래면 centeredness 0 → fit 0")
-    void voiceRangeFit_userFarBelowKeyCenter_returnsZero() {
-        // given: C major root=60. 사용자 40~54 (center=47, half=7). dist=|60-47|=13 > half=7
-        // → centeredness = max(0, 1 - 13/7) = 0 → fit 0
+    @DisplayName("voiceRangeFit (#1513 근본 fix): 저음역 사용자도 곡을 옥타브 폴딩으로 매칭 — 0 붕괴 없이 높은 fit")
+    void voiceRangeFit_lowVoiceOctaveFold_staysHigh() {
+        // given: C major root=60. 저음역 사용자 40~54 (center=47). 과거: dist=13 > half=7 → centeredness=0 → 전 곡 0
+        // (라이브 버그 재현 대역). #1513: root 60 을 center 47 인근으로 옥타브 폴딩 → 48 → 곡 음역 41~55, 사용자 40~54 와
+        // 거의 일치 → 높은 fit. "음역대 무관하게 다 뜬다"의 근본 원인 제거.
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 54);
-        // then
-        assertThat(fit).isEqualTo(0.0);
+        // then: 0 붕괴 없이 강하게 양수 (옥타브 아래로 부를 수 있는 곡)
+        assertThat(fit).isGreaterThan(0.5);
     }
 
     @Test
@@ -699,6 +705,39 @@ class RecommendationScorerTest {
     }
 
     @Test
+    @DisplayName("voiceRangeFit (#1513 라이브 버그 회귀): 저·중·고 음역 모두 catalog 전 키에서 voiceFit > 0 (0 붕괴 차단)")
+    void voiceRangeFit_allVoiceBandsNonZeroAcrossKeys() {
+        // given: 라이브 dev 에서 저음역(40~52)·중음역(55~59) 이 전 곡 voiceFit=0 이 되던 회귀(#1513).
+        // 곡 키 root 가 모두 옥타브 4(MIDI 60~71)에 몰려 있어 발생. 옥타브 폴딩 + 가우시안 감쇠로 근본 차단.
+        final MusicalKey[] allKeys = {
+                MusicalKey.C_MAJOR, MusicalKey.D_MAJOR, MusicalKey.E_MAJOR, MusicalKey.F_MAJOR,
+                MusicalKey.G_MAJOR, MusicalKey.A_MAJOR, MusicalKey.B_MAJOR
+        };
+        final int[][] bands = {{40, 52}, {55, 59}, {64, 76}};
+        // when / then: 모든 (대역, 키) 조합에서 voiceFit > 0
+        for (final int[] band : bands) {
+            for (final MusicalKey key : allKeys) {
+                final double fit = RecommendationScorer.voiceRangeFit(key, band[0], band[1]);
+                assertThat(fit)
+                        .as("band %d~%d, key %s 의 voiceFit 은 0 이 아니어야 한다", band[0], band[1], key)
+                        .isGreaterThan(0.0);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1513 변별력): 서로 다른 음역대 입력은 같은 곡에 서로 다른 fit 을 만든다")
+    void voiceRangeFit_differentBandsDiscriminateDifferently() {
+        // given: 라이브 dev 의 저음역(40~52, center 46, span 12)과 중음역(55~59, center 57, span 4) 사용자.
+        // 음역대가 결과를 바꾸려면 같은 곡에 대해 두 사용자의 fit 이 유의미하게 달라야 한다.
+        final double lowVoiceCMajor = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 52);
+        final double midVoiceCMajor = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 55, 59);
+        // when / then: 같은 곡이라도 음역대에 따라 fit 이 유의미하게 달라진다 (음역대 변별력 회복)
+        assertThat(lowVoiceCMajor).isNotEqualTo(midVoiceCMajor);
+        assertThat(Math.abs(lowVoiceCMajor - midVoiceCMajor)).isGreaterThan(0.1);
+    }
+
+    @Test
     @DisplayName("voiceRangeFit (회귀 가드): clamp invariant — overlap > songSpan 가능성 없음 → 항상 [0,1]")
     void voiceRangeFit_alwaysInUnitInterval() {
         // given: 여러 키/사용자 범위 조합. 어떤 입력에서도 결과는 [0,1] 안.
@@ -726,10 +765,10 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("score (정확 합산): 신호별 가중치 단독 곱 검증 — voiceFit 0.7 * rangeFit 0.7 = 0.49 (jitter=0)")
+    @DisplayName("score (정확 합산, #1513): 신호별 가중치 단독 곱 검증 — voiceFit 0.7 * rangeFit(가우시안) (jitter=0)")
     void score_partialSignal_exactWeightedProduct() {
-        // given: voiceFit 가중치 0.7 단일, 나머지 0. C major root=60. 사용자 53~73 → reachability=1.0
-        // (곡 음역 53~67 완전 포함), center=63, half=10, dist=3 → centeredness=1-3/10=0.7 → rangeFit=0.7
+        // given: voiceFit 가중치 0.7 단일, 나머지 0. C major root=60 (folded 그대로). 사용자 53~73 → reachability=1.0
+        // (곡 음역 53~67 완전 포함), center=63, sigma=10, dist=3 → centeredness=exp(-0.5*(3/10)^2) → rangeFit 동일
         final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
         final RecommendationProperties voiceOnly = new RecommendationProperties(
                 new RecommendationProperties.Weights(0.7, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -738,9 +777,10 @@ class RecommendationScorerTest {
         // when
         final RecommendationScorer.Scored scored = scorer(voiceOnly)
                 .score(song, 53, 73, null, null, null, new Random(0));
-        // then: rangeFit=0.7 * 가중치 0.7 = 0.49
-        assertThat(scored.voiceRangeFit()).isCloseTo(0.7, offset(1e-9));
-        assertThat(scored.total()).isCloseTo(0.49, offset(1e-9));
+        // then: rangeFit = 가우시안 centeredness * 0.7 가중
+        final double expectedRangeFit = Math.exp(-0.5 * Math.pow(3.0 / 10.0, 2));
+        assertThat(scored.voiceRangeFit()).isCloseTo(expectedRangeFit, offset(1e-9));
+        assertThat(scored.total()).isCloseTo(0.7 * expectedRangeFit, offset(1e-9));
     }
 
     @Test

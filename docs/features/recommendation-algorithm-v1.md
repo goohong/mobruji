@@ -250,3 +250,10 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **사유 산정**: `rangeFit` 구간별 한국어 — `≥0.7` "아주 잘 맞아요" / `≥0.4` "무난하게 맞아요" / `>0.0` "다소 부담될 수 있어요" / `=0.0` "잘 맞지 않아요". 곡 키 UNKNOWN(`keyMatch < 1.0`)이면 "곡 키 정보가 없어 음역대 적합도를 정확히 알기 어려워요" — 적합도 산정 근거 부재를 그대로 알린다.
   - **알고리즘 영향 없음**: score 산식·가중치·`SeedDeriver` 입력·다양성 후처리 모두 무변경. raw 신호(`rangeFit`)를 응답 표현으로 풀어 노출하는 범위에 그친다.
   - **테스트**: `ScoredRecommendation` 단위(구간별 사유 / UNKNOWN 키 / breakdown null) + `RecommendedSongResponse.from` 매핑(voiceFit·사유 보존 / null 통과) + E2E(POST 응답 voiceFit [0,1]·사유 노출 / GET 재조회 null).
+
+- 2026-06-03: **음역대 변별력 근본 fix — 옥타브 폴딩 + 가우시안 centeredness (closes #1513)**.
+  - **버그(라이브 dev 실측)**: 저음역(40~52)·중음역(55~59) 입력 시 추천 상위 곡의 voiceFit 이 모두 0.0 으로 떨어지고, 다른 신호의 기본 정렬만 반복돼 음역대가 달라도 거의 같은 곡 세트가 떴다. 고음역(64~76)만 정상.
+  - **근본 원인**: `voiceRangeFit` 의 `centeredness` 가 선형식 `1 - dist/(userSpan/2)` 라 곡 키 중심이 사용자 음역 반폭 밖이면 즉시 0 으로 잘렸다. 곡 키 root MIDI 가 모두 옥타브 4(60~71)에 몰려 있어, 음역 중앙이 곡 root 보다 한 옥타브 이상 아래인 저·중음역 사용자는 `reachability × centeredness` 의 `centeredness` 가 0 → 전 곡 rangeFit=0 → voiceFit 신호가 순위에 기여하지 못했다. (단위 mismatch 아님 — 요청·곡 모두 MIDI.)
+  - **fix(TO-BE)**: (1) **옥타브 폴딩** — 곡 root 를 사용자 음역 중앙과 같은 옥타브(중앙 기준 ±6 반음 안)로 접는다. 음정 클래스 보존(12 반음 단위 이동) = 노래방 키 조절로 옥타브를 옮겨 부를 수 있다는 가정. (2) **가우시안 centeredness** — `exp(-0.5*(dist/sigma)^2)`, `sigma = userSpan/2`. 중앙에서 멀어질수록 완만히 감쇠하되 절대 급격히 0 으로 붕괴하지 않는다. #1452 의 "넓은 음역 포화 방지" 의도는 그대로 유지.
+  - **하위호환·결정성**: score 산식 7신호 가중 체계·`SeedDeriver` 입력·다양성 후처리 무변경. 결정성([0,1] 범위·동일 입력 동일 결과) 유지. UNKNOWN 키 중립(0.5) 유지. 키 중심이 음역 중앙과 정확히 일치하면 여전히 1.0.
+  - **테스트**: `RecommendationScorerTest` 단위(옥타브 폴딩으로 저음역 0 붕괴 차단 / 전 키·전 대역 voiceFit>0 / 대역별 변별 / 가우시안 정확값) + `RecommendationVoiceRangeSensitivityTest` E2E(#1452 음역 중심 저↔고 1위 곡 뒤바뀜 회귀 유지 + 저음역 전 곡 voiceFit>0 신규).

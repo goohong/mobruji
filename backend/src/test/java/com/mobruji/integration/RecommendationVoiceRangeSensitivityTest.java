@@ -34,6 +34,11 @@ import io.restassured.RestAssured;
  * <p>fix: reachability × centeredness 로 산정해 곡 키 중심이 사용자 음역 중앙에 가까울수록 높게 평가.
  * 본 테스트는 mood/BPM 이 동일하고 키만 다른 두 곡으로, 음역대 중심을 낮게/높게 바꾸면 1위 곡이
  * 뒤바뀌는지를 RestAssured E2E 로 검증한다.
+ *
+ * <p>후속 회귀(#1513): #1452 의 centeredness 선형식 {@code 1 - dist/(userSpan/2)} 이 곡 키 중심이 음역 반폭 밖이면
+ * 곧장 0 으로 잘려, 곡 root 가 모두 옥타브 4(MIDI 60~71)에 몰린 상황에서 저·중음역 사용자는 전 곡 voiceFit=0 →
+ * 음역대 입력이 순위에 반영되지 못했다(라이브 dev 실측). 옥타브 폴딩 + 가우시안 감쇠로 근본 차단했고, 본 테스트에
+ * 저음역 0 붕괴 차단 회귀를 추가한다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -94,6 +99,32 @@ class RecommendationVoiceRangeSensitivityTest {
         assertThat(lowOrder.get(0)).isEqualTo((int) lowKeySongId);
         assertThat(highOrder.get(0)).isEqualTo((int) highKeySongId);
         assertThat(lowOrder).isNotEqualTo(highOrder);
+    }
+
+    @Test
+    @DisplayName("#1513 근본 fix: 저음역(40~52) 입력에서도 모든 곡의 voiceFit 이 0 보다 크다 (0 붕괴 차단)")
+    void lowVoiceRange_allSongsHavePositiveVoiceFit() {
+        // given: 라이브 dev 에서 전 곡 voiceFit=0 이 되던 저음역(40~52). 곡 root(C=60, B=71)가 모두 음역 중앙(46)보다
+        // 한 옥타브 이상 위라, 과거 선형 centeredness 는 0 으로 잘렸다.
+        final String lowPayload = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-1513deadce01",
+                  "voiceRangeLow": 40,
+                  "voiceRangeHigh": 52,
+                  "mood": "UPBEAT"
+                }
+                """;
+        // when / then: 옥타브 폴딩(root 를 음역 중앙 옥타브로 접음) + 가우시안 감쇠로 모든 곡 voiceFit > 0.
+        final List<Float> voiceFits = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(lowPayload)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .extract().jsonPath().getList("recommendations.voiceFit", Float.class);
+        assertThat(voiceFits).isNotEmpty();
+        assertThat(voiceFits).allSatisfy(voiceFit -> assertThat(voiceFit).isGreaterThan(0.0f));
     }
 
     private List<Integer> postAndExtractSongIds(final String payload) {

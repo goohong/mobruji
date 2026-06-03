@@ -89,28 +89,57 @@ public class RecommendationScorer {
         return new Scored(total, breakdown);
     }
 
+    /**
+     * centeredness 가우시안 감쇠의 폭을 사용자 음역 반폭(userSpan/2)의 배수로 정한다. 값이 클수록 음역 중앙에서
+     * 벗어난 곡의 점수가 완만하게 떨어져, 좁은 음역(반폭이 작은) 사용자에게도 곡 간 변별을 유지하면서
+     * 광범위한 0 붕괴를 막는다.
+     */
+    static final double CENTEREDNESS_SIGMA_FACTOR = 1.0;
+
     static double voiceRangeFit(final MusicalKey keyOriginal, final int voiceLow, final int voiceHigh) {
         final int rootMidi = MusicalKeyMidiResolver.rootMidi(keyOriginal);
         if (rootMidi < 0) {
             return 0.5; // UNKNOWN key — neutral
         }
-        final int songLow = rootMidi + MusicalKeyMidiResolver.LOW_OFFSET;
-        final int songHigh = rootMidi + MusicalKeyMidiResolver.HIGH_OFFSET;
-        final int songSpan = songHigh - songLow;
         final int userSpan = voiceHigh - voiceLow;
-        if (songSpan <= 0 || userSpan <= 0) {
+        if (userSpan <= 0) {
             return 0.0;
         }
-        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율.
+        final double userCenter = (voiceLow + voiceHigh) / 2.0;
+        // (0) 옥타브 폴딩: 곡 키 root 를 사용자 음역 중앙과 같은 옥타브로 접는다. 곡의 보컬 음역 중심은 옥타브 위/아래로
+        // 옮겨도 같은 음정 클래스라 노래방에서 키 조절(옥타브 이동)로 부를 수 있다. 곡 root 가 모두 옥타브 4(MIDI 60~71)에
+        // 몰려 있어 저·중음역 사용자의 음역 중앙(예 46)과 1옥타브 이상 벌어지면 기존 식은 모든 곡을 0 으로 떨어뜨렸다(회귀).
+        final int foldedRoot = octaveFoldTowardCenter(rootMidi, userCenter);
+        final int songLow = foldedRoot + MusicalKeyMidiResolver.LOW_OFFSET;
+        final int songHigh = foldedRoot + MusicalKeyMidiResolver.HIGH_OFFSET;
+        final int songSpan = songHigh - songLow;
+        // (1) reachability: 사용자가 곡 음역(folded root±7) 중 실제 닿을 수 있는 비율.
         final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
         final double reachability = Math.min(1.0, (double) overlap / songSpan);
-        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 가장자리·바깥이면 0.0.
+        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0 에 가깝고 멀수록 완만히 감쇠한다.
         // reachability 단독은 사용자 음역이 곡 음역을 완전히 포함하면(넓은 음역) 모든 곡이 1.0 으로 포화돼
-        // 음역대 입력이 순위에 반영되지 않는다(#1452). centeredness 를 곱해 음역대별 변별력을 회복한다.
-        final double userCenter = (voiceLow + voiceHigh) / 2.0;
-        final double centerDistance = Math.abs(rootMidi - userCenter);
-        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
+        // 음역대 입력이 순위에 반영되지 않는다(#1452). 과거 선형식 {@code 1 - dist/(userSpan/2)} 은 반폭 밖이면
+        // 곧장 0 으로 잘려, 곡 root 가 음역 밖인 흔한 경우(저·중음역) 전 곡이 0 이 돼 변별력이 사라졌다.
+        // 가우시안 감쇠로 바꿔 절대 급격히 0 이 되지 않게 하면서도 중앙에 가까운 곡을 또렷이 우선한다.
+        final double sigma = (userSpan / 2.0) * CENTEREDNESS_SIGMA_FACTOR;
+        final double normalizedDistance = Math.abs(foldedRoot - userCenter) / sigma;
+        final double centeredness = Math.exp(-0.5 * normalizedDistance * normalizedDistance);
         return reachability * centeredness;
+    }
+
+    /**
+     * 곡 키 root MIDI 를 사용자 음역 중앙과 같은 옥타브 인근(중앙 기준 ±6 반음 안)으로 접는다. 음정 클래스는 보존되며
+     * (12 반음 = 1옥타브 단위로만 이동), 노래방 키 조절로 옥타브를 옮겨 부를 수 있다는 가정과 일치한다.
+     */
+    private static int octaveFoldTowardCenter(final int rootMidi, final double userCenter) {
+        int foldedRoot = rootMidi;
+        while (foldedRoot - userCenter > 6.0) {
+            foldedRoot -= 12;
+        }
+        while (userCenter - foldedRoot > 6.0) {
+            foldedRoot += 12;
+        }
+        return foldedRoot;
     }
 
     /**
