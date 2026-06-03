@@ -96,12 +96,17 @@ export function SongDetailSheet({
   const [isRendered, setIsRendered] = useState(open);
   const [isLeaving, setIsLeaving] = useState(false);
   const [prevOpen, setPrevOpen] = useState(open);
+  // 이번 open 세션에서 드래그가 한 번이라도 일어났는지. spring-back(translateY→0) 직후
+  // enter 키프레임(translateY 100%→0)이 재적용돼 화면 밖 점프→재진입하는 글리치를 막기
+  // 위해, 드래그 이후에는 enter 애니메이션 대신 인라인 transform transition 으로 복귀시킨다.
+  const [hasDragged, setHasDragged] = useState(false);
 
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
       setIsRendered(true);
       setIsLeaving(false);
+      setHasDragged(false);
     } else if (isRendered && !prefersReducedMotion) {
       // 모션 허용 — exit 슬라이드 동안 mount 유지.
       setIsLeaving(true);
@@ -109,6 +114,12 @@ export function SongDetailSheet({
       // 모션 비활성 또는 이미 unmount — 즉시 unmount.
       setIsRendered(false);
     }
+  }
+
+  // 드래그 시작을 감지해 latch — 이후 spring-back 시 enter 애니메이션 재시작을 막는다.
+  // effect 대신 렌더 중 setState (open 전환 패턴과 동일) — set-state-in-effect 회피.
+  if (isDragging && !hasDragged) {
+    setHasDragged(true);
   }
 
   // exit 애니메이션 종료 후 unmount. setState 는 timer 콜백(비동기) 안 — 동기 effect 본문 아님.
@@ -251,12 +262,16 @@ export function SongDetailSheet({
     ? "none"
     : "transform 200ms var(--ease-emphasized)";
   // enter/exit 애니메이션은 드래그/translateY 가 0 일 때만 — 드래그 inline transform 과 충돌 방지.
+  // 드래그가 발생한 세션(hasDragged)에서는 enter 키프레임을 억제 — spring-back 은 인라인
+  // transform transition 으로 처리해 화면 밖 점프→재진입 글리치를 막는다.
   const sheetAnimationClass =
     translateY > 0
       ? ""
       : isLeaving
         ? "animate-sheet-out"
-        : "animate-sheet-in";
+        : hasDragged
+          ? ""
+          : "animate-sheet-in";
 
   return (
     <div
