@@ -126,7 +126,17 @@ GitHub `scope:*` 라벨 → 워크트리 배정:
 
 **G1 cap 이 사람 directive 미포함인 이유**: 사람이 등록한 directive 가 많아도 백로그 시드는 별개로 워크트리당 1건씩만 보충 — 사람 우선순위를 밀어내지 않고, 사람 directive 가 비었을 때만 백로그가 idle cycle 을 채운다. seeded 가 큐를 점령하는 것을 방지.
 
-### 5-4) seed loop 시퀀스 (bot.py 확장)
+### 5-4) seed loop 시퀀스
+
+> **⚠️ 구현 정합 (2026-06-03, #1523 impl) — 라이브 경로는 agent work_queue 다**
+>
+> 본 §5-4 의 원안(아래 ASCII)은 `directive-board.jsonl` + `directive_append.sh` + `mark-polished.sh`(tmux maestro inject)를 큐로 가정한다. 그러나 NCP 운영 실측 결과 **실제 실행기는 `mobruji-agent.service`(Claude Agent SDK)이며 `~/.mobruji/agent.sqlite` 의 work_queue 를 직접 dispatch** 한다 (사용자 ⭕ → bot.py `append_agent_event("directive_approved")` → agent `handle_directive_approved` → `enqueue_work` → `dispatch_once`). `mark-polished.sh` 의 tmux inject 는 별도 레거시 nmae(`mobruji-maestro.service`)를 찌를 뿐 work_queue 로 직접 이어지지 않는다.
+>
+> 따라서 **canonical autoseed 구현은 `tools/agent/autoseed.py`** — `cycle idle + work_queue 비음` 감지 후 `tools_queue.enqueue_directive` 로 work_queue 를 직접 보충한다(scope→cycle 결정적 매핑이라 SDK 호출 불요, 예산 0). agent 루프가 `AUTOSEED_INTERVAL`(기본 600초) 주기로 `autoseed_once()` 호출, `AUTOSEED_ENABLED=1` 일 때만 동작(기본 off → 안전 단계적 활성). 가드 G1~G5 는 §5-3 동일.
+>
+> 이전 shell 구현(`tools/directive-board/autoseed.sh`, #1533)은 directive-board/tmux 경로 대상이라 라이브 실행기에 직접 닿지 않고 스케줄러에도 미연결(휴면). work_queue 경로가 정식. shell 버전은 directive-board 가시화가 필요해질 때 보조로만 검토.
+
+원안 시퀀스(directive-board 기준, 위 정합 노트 참조):
 
 idle 감지는 기존 `cycle_idle_watch_loop`([[nmae-cycle-watchdog]] §5-7 layer 1)과 같은 데몬에 **백로그 보충 책임**을 추가하거나, 별도 `backlog_autoseed_loop` 로 분리(§7 Q3). 시퀀스:
 

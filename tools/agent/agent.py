@@ -25,6 +25,7 @@ import asyncio
 import logging
 import os
 import signal
+import time
 from typing import Any
 
 import events as ev
@@ -41,6 +42,13 @@ POLL_INTERVAL_SECONDS = 1.0
 # task 를 weak ref 로만 유지해 고부하 시 중도 GC 취소되는 사고 차단. done 시 자동 제거.
 _EXEC_TASKS: set = set()
 EVENTS_BATCH_SIZE = 10
+
+# (#1523) 유휴 백로그 자동 시드 — gh 호출 폭주 방지 위해 INTERVAL 주기로만 실행.
+try:
+    AUTOSEED_INTERVAL = int(os.environ.get("AUTOSEED_INTERVAL", "600"))
+except ValueError:
+    AUTOSEED_INTERVAL = 600
+_last_autoseed_mono: list[float] = [0.0]
 
 
 _MCP_SERVER_CACHE: object | None = None
@@ -611,6 +619,20 @@ async def agent_loop(stop_event: asyncio.Event) -> None:
                         _t.add_done_callback(_EXEC_TASKS.discard)
         except Exception as exc:  # noqa: BLE001
             logger.warning("work-queue dispatch_once 실패: %r", exc)
+
+        # (#1523) 유휴 백로그 자동 시드 — flag on + INTERVAL 경과 시에만 큐 보충.
+        # plan→be/fe 인계 자동화: idle 사이클 큐가 비면 GitHub 백로그에서 1건 enqueue.
+        try:
+            import autoseed
+            if autoseed.autoseed_enabled():
+                now_mono = time.monotonic()
+                if now_mono - _last_autoseed_mono[0] >= AUTOSEED_INTERVAL:
+                    _last_autoseed_mono[0] = now_mono
+                    seeded = await asyncio.to_thread(autoseed.autoseed_once)
+                    if seeded:
+                        logger.info("autoseed: 큐 보충 %s", seeded)
+        except Exception as exc:  # noqa: BLE001 — autoseed 실패는 loop 차단 X
+            logger.warning("autoseed 실패: %r", exc)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_SECONDS)
