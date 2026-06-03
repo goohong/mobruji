@@ -216,6 +216,12 @@ export const useSessionStore = create<SessionState>()(
     {
       name: "mobruji-session",
       storage: createJSONStorage(() => localStorage),
+      // #1105 root cause: version/migrate 부재로 옛 shape 의 localStorage 가 그대로
+      // hydrate 되어 구형 seed 사용자가 회귀했다. version 을 명시해 스키마 버전을
+      // 박는다. migrate 는 v1 baseline passthrough — sessionId 형식 정정은 아래
+      // onRehydrateStorage 가 계속 담당하고, version bump 시 shape 변환 hook 으로 쓴다.
+      version: 1,
+      migrate: (persisted) => persisted as SessionState,
       /**
        * persist hydration 시점에 legacy / invalid sessionId 를 폐기 (closes #1255 후속,
        * be PR #1255 GlobalExceptionHandler 회귀 가드).
