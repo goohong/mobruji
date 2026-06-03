@@ -30,20 +30,20 @@ afterEach(() => {
 });
 
 describe("OnboardingIntentPicker", () => {
-  it("3 페르소나 카드는 측정 wizard 로, 직접 입력은 /voice-range 로 연결한다", () => {
+  it("3 페르소나 카드·둘러보기는 측정 방식 선택 화면으로, 직접 입력은 /voice-range 로 연결한다", () => {
     render(<OnboardingIntentPicker />);
     expect(
       screen.getByRole("link", { name: /내 목소리부터 알아보기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /발성·고음 연습할 곡 찾기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /분위기 띄울 곡 찾기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /그냥 둘러보기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /직접 입력으로 시작/ }),
     ).toHaveAttribute("href", "/voice-range");
