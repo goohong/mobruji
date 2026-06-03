@@ -44,6 +44,7 @@ import {
 import { midiToKoreanNoteName } from "@/lib/notes";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useLikesStore } from "@/store/likes";
+import { AlbumCover } from "@/app/recommend/components/SongDetailContent";
 
 export default function SongDetailPage() {
   const params = useParams<{ id: string }>();
@@ -139,6 +140,9 @@ function SongDetailView({ song }: SongDetailViewProps) {
       </nav>
 
       <header className="flex flex-col gap-2">
+        {/* closes #1666 — 단건 상세 페이지에도 앨범 커버 노출. 모달과 동일한 large 커버 +
+            placeholder/onError fallback 을 SongDetailContent 에서 재사용한다. */}
+        <AlbumCover song={song} />
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
           Song detail
         </p>
