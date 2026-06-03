@@ -117,22 +117,23 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     expect(items[3]).toHaveTextContent(/좋아요/);
   });
 
-  it("진입 분기 카드는 /voice-range/auto, '직접 입력으로 시작'은 /voice-range", async () => {
+  it("진입 분기 카드는 측정 방식 선택 화면으로, '직접 입력으로 시작'은 /voice-range", async () => {
     renderWithQueryClient(<Home />);
-    // 3 페르소나 카드 모두 측정 wizard 로 연결(F1/F2/F3 미연결 graceful fallback).
+    // 3 페르소나 카드·둘러보기 모두 측정 방식 선택 화면(/voice-range/method)으로 연결
+    // — 진입만으로 마이크 측정을 강제하지 않는다 (directive #1511).
     expect(
       screen.getByRole("link", { name: /내 목소리부터 알아보기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /발성·고음 연습할 곡 찾기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /분위기 띄울 곡 찾기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     // 보조 경로.
     expect(
       screen.getByRole("link", { name: /그냥 둘러보기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /직접 입력으로 시작/ }),
     ).toHaveAttribute("href", "/voice-range");
