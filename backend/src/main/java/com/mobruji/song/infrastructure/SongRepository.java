@@ -4,13 +4,14 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Song;
 
-public interface SongRepository extends JpaRepository<Song, Long> {
+public interface SongRepository extends JpaRepository<Song, Long>, JpaSpecificationExecutor<Song> {
 
     /**
      * {@code MetadataSource} 별 곡 수 집계 row — admin 통계 API 용. JPQL group by 결과를 그대로 매핑한다.
@@ -43,6 +44,13 @@ public interface SongRepository extends JpaRepository<Song, Long> {
      * 사실상 유일하다고 가정한다. 동명이곡(예: 다른 가수 동명) 가능성은 시드 큐레이션 단계에서 회피.
      */
     Optional<Song> findByTitleAndArtist(String title, String artist);
+
+    /**
+     * 메타-only 임포트 멱등성 보조 lookup — {@code isrc} 글로벌 유일 식별자로 기존 곡을 찾는다 (spec
+     * {@code song-catalog-expansion.md} §3). 외부 출처가 ISRC 를 제공하면 (title, artist) 표기 차이와
+     * 무관하게 중복 import 를 막고, DB UNIQUE(isrc) 제약 위반을 사전에 회피한다.
+     */
+    Optional<Song> findByIsrc(String isrc);
 
     /**
      * 정기 audio analysis backfill 후보 selective query (rev 15 #226).

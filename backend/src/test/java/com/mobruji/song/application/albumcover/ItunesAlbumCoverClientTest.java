@@ -55,7 +55,12 @@ class ItunesAlbumCoverClientTest {
                     "KR",
                     Duration.ofSeconds(5),
                     Duration.ZERO,
-                    "600x600"));
+                    "600x600"),
+            new AlbumCoverProperties.CoverArtArchive(
+                    "https://musicbrainz.org/ws/2",
+                    "https://coverartarchive.org",
+                    "mobruji-backend/0.1 (+test)",
+                    Duration.ofSeconds(5)));
 
     @Test
     @DisplayName("lookupAlbumCoverUrl: 성공 응답이면 artworkUrl100 의 100x100 을 600x600 으로 치환한 URL 반환")
@@ -293,6 +298,27 @@ class ItunesAlbumCoverClientTest {
         final Optional<String> result = client.lookupAlbumCoverUrl("cherry blossom", "busker");
 
         // then — term 결합 검증이 핵심, 응답은 비어 있어 empty.
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: term 은 괄호/feat. 노이즈를 제거한 정규화 값으로 결합 (ADR 0029 매칭율 보강)")
+    void lookup_termQueryParam_usesNormalizedTerms() {
+        // given — title 의 (Live) 와 artist 의 feat. 절이 검색 전에 제거돼야 한다.
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(MockRestRequestMatchers.queryParam("term", "cherry%20blossom%20busker"))
+                .andRespond(withSuccess("{\"resultCount\":0,\"results\":[]}", MediaType.APPLICATION_JSON));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl(
+                "cherry blossom (Live)", "busker feat. friend");
+
+        // then
         assertThat(result).isEmpty();
         server.verify();
     }

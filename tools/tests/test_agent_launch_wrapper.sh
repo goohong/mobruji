@@ -133,20 +133,22 @@ RC=$?
 assert_exit "update.sh 실패 시 wrapper exit 4" 4 $RC
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7) --refresh-backlog (2026-05-26) — backlog upsert.sh 가 호출되는지 검증
+# 7) --refresh-backlog DEPRECATED (2026-06-03) — backlog upsert 호출 안 함
 # ─────────────────────────────────────────────────────────────────────────────
-# wrapper 는 cycle-backlog/upsert.sh 를 호출 시도. discord push 가 fail 해도
-# wrapper exit 0 (graceful). 검증: cycle-status.json set-active 는 정상 + backlog
-# 단계는 errors swallow.
+# [BACKLOG] 단일 스레드 폐기 (cycle-forum-operation.md §5-7). --refresh-backlog 가
+# 주어져도 wrapper 는 cycle-backlog/upsert.sh 를 호출하지 않고 deprecation warning
+# 만 emit 한 뒤 skip. 인자 파싱 호환은 유지 → exit 0 + set-active 정상.
+# 검증: wrapper 가 upsert.sh 의 gh 를 통해 GitHub 를 건드리지 않음(mock gh 미호출)
+# + cycle-status.json set-active 정상 + exit 0.
 TMP=$(make_tmp)
 export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
-# upsert.sh 가 호출되더라도 GitHub 인증 없을 수 있어 mock gh 를 PATH 에 prepend.
-# 빈 JSON 배열 반환 → 백로그 본문이 빈 셈션 + discord 호출은 CYCLE_BACKLOG_NO_DISCORD=1
-# 로 skip → dry-run mode → stdout 본문 print 하고 exit 0.
+# upsert.sh 가 (잘못) 호출되면 gh 가 실행되며 mock 이 marker 파일을 남긴다 → 호출 안 됨 검증.
 MOCK_BIN="$TMP/bin"
 mkdir -p "$MOCK_BIN"
-cat > "$MOCK_BIN/gh" <<'EOF'
+GH_CALLED_MARKER="$TMP/gh-called.marker"
+cat > "$MOCK_BIN/gh" <<EOF
 #!/usr/bin/env bash
+touch "$GH_CALLED_MARKER"
 echo "[]"
 EOF
 chmod +x "$MOCK_BIN/gh"
@@ -154,11 +156,19 @@ PATH="$MOCK_BIN:$PATH" CYCLE_BACKLOG_NO_DISCORD=1 \
   "$WRAPPER" plan --title "backlog refresh test" --refresh-backlog \
   >/dev/null 2>&1
 RC=$?
-assert_exit "--refresh-backlog graceful (exit 0)" 0 $RC
+assert_exit "--refresh-backlog deprecated skip (exit 0)" 0 $RC
+if [[ -f "$GH_CALLED_MARKER" ]]; then
+  FAIL=$((FAIL + 1))
+  FAILURES+=("--refresh-backlog 가 deprecated 인데 upsert.sh(gh) 를 호출함")
+  echo "FAIL: --refresh-backlog deprecated 인데 gh 호출됨 (backlog upsert 미차단)"
+else
+  PASS=$((PASS + 1))
+  echo "PASS: --refresh-backlog deprecated — upsert.sh/gh 호출 안 함"
+fi
 # cycle-status.json 은 정상 set-active 됐어야 함.
 if [[ -f "$CYCLE_STATUS_PATH" ]]; then
   CONTENT="$(cat "$CYCLE_STATUS_PATH")"
-  assert_contains "--refresh-backlog + set-active 동시 수행" "$CONTENT" "backlog refresh test"
+  assert_contains "--refresh-backlog 무시 + set-active 정상 수행" "$CONTENT" "backlog refresh test"
 else
   FAIL=$((FAIL + 1))
   FAILURES+=("--refresh-backlog 케이스에서 cycle-status.json 없음")
@@ -167,16 +177,16 @@ fi
 rm -rf "$TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8) --no-refresh-backlog — CYCLE_BACKLOG_REFRESH_DEFAULT=1 에서 skip 검증
+# 8) --no-refresh-backlog — CYCLE_BACKLOG_REFRESH_DEFAULT=1 에서도 exit 0
 # ─────────────────────────────────────────────────────────────────────────────
-# default 가 ON 일 때 --no-refresh-backlog 가 강제 OFF 시키는지 확인.
+# backlog 자체가 deprecated 이므로 default ON 이어도 no-op. override flag 호환 유지.
 TMP=$(make_tmp)
 export CYCLE_STATUS_PATH="$TMP/cycle-status.json"
 CYCLE_BACKLOG_REFRESH_DEFAULT=1 \
   "$WRAPPER" rev --title "no refresh test" --no-refresh-backlog \
   >/dev/null 2>&1
 RC=$?
-assert_exit "--no-refresh-backlog default ON override (exit 0)" 0 $RC
+assert_exit "--no-refresh-backlog (deprecated backlog) exit 0" 0 $RC
 rm -rf "$TMP"
 
 # ─────────────────────────────────────────────────────────────────────────────

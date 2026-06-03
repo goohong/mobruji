@@ -29,11 +29,12 @@ import { ApiError } from "@/lib/api/client";
 import {
   MAX_MIDI,
   MIN_MIDI,
-  midiToCombinedNoteName,
+  midiToKoreanNoteName,
 } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
 import { Button } from "@/components/ui";
+import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import {
   MEASUREMENT_DURATION_MS,
   MeasurementPhase,
@@ -502,7 +503,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         <div className="flex items-baseline justify-between">
           <span className="text-2xl font-semibold tabular-nums">
             {sample?.midi !== null && sample?.midi !== undefined
-              ? midiToCombinedNoteName(sample.midi)
+              ? midiToKoreanNoteName(sample.midi)
               : "—"}
           </span>
           <span className="text-sm text-[var(--text-caption)]">
@@ -631,6 +632,14 @@ function ResultStep({
         testId="high-midi-slider"
       />
 
+      {validationError === null ? (
+        <VoiceRangeIntuition
+          lowMidi={lowMidi}
+          highMidi={highMidi}
+          caption="내 음역대를 평균과 비교하면"
+        />
+      ) : null}
+
       {validationError ? (
         <p className="text-sm text-[var(--danger-fg-soft)]">{validationError}</p>
       ) : null}
@@ -701,7 +710,7 @@ function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
       <div className="flex items-center justify-between">
         <span className="font-medium text-[var(--text-label)]">{label}</span>
         <span className="tabular-nums text-[var(--text-primary)]">
-          {midiToCombinedNoteName(value)} · MIDI {value}
+          {midiToKoreanNoteName(value)} · MIDI {value}
         </span>
       </div>
       <input

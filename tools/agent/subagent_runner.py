@@ -32,6 +32,9 @@ logger = logging.getLogger("agent.subagent_runner")
 
 WORKTREE_ROOT = Path("/home/mobruji")
 WORKTREE_PREFIX = "mobruji-"
+# (#1531) 표준 사이클(be/fe/rev/plan)은 상시 워크트리. infra 는 온디맨드 ephemeral —
+# 아래 MAIN_CHECKOUT 에서 git worktree add 로 생성, 작업 후 teardown (ADR-0027 옵션 D).
+MAIN_CHECKOUT = WORKTREE_ROOT / "mobruji"
 # sub-agent 1 task 최대 실행 시간 — 초과 시 kill + 실패 보고 + lock 해제.
 EXEC_TIMEOUT_SECONDS = 45 * 60
 DEFAULT_MODEL = "claude-opus-4-8"
@@ -39,8 +42,12 @@ DEFAULT_MODEL = "claude-opus-4-8"
 # (#1413) sub-agent 작업 보고 양식 — Discord 마크다운, AS-IS/TO-BE (나열 금지,
 # 제목/내용 구분, 줄바꿈). 사용자 정정 2026-05-31: "정리라기보다 나열 — AS-IS/TO-BE
 # 같은 가독성 양식 필요 + Discord 마크다운으로 제목·내용 구분".
+# 상태 문구 주의 (#1586): sub-agent 의 "작업 완료" 는 **구현 끝 + PR 제출(머지 대기)**
+# 를 뜻한다. forum **태그**의 "완료"(머지 시 loop 가 자동 전이)와 다른 의미라, 같은
+# 단어 "완료" 를 쓰면 댓글(작업 완료)과 태그(진행=미머지)가 어긋나 사용자가 혼란
+# (2026-06-03 사용자 정정). 따라서 보고 상태에 "(머지 대기)" 를 명시해 구분한다.
 REPORT_TEMPLATE = """\
-## <제목> · <✅ 완료 | 🟡 진행 | ⛔ 차단>
+## <제목> · <✅ 작업 완료(PR 제출 · 머지 대기) | 🟡 진행 | ⛔ 차단>
 
 **AS-IS** — 원래
 - <변경 전 상태 / 무엇이 문제였나>
@@ -51,7 +58,7 @@ REPORT_TEMPLATE = """\
 **다음** *(진행·차단 시만)*
 - <다음 액션 / 차단 사유>
 
-🔗 PR #<N>"""
+🔗 PR #<N>  *(머지되면 위 forum 태그가 자동으로 '완료' 로 바뀝니다)*"""
 
 
 def exec_enabled() -> bool:
@@ -61,6 +68,39 @@ def exec_enabled() -> bool:
 
 def worktree_path(cycle: str) -> Path:
     return WORKTREE_ROOT / f"{WORKTREE_PREFIX}{cycle}"
+
+
+def _ephemeral_worktree_add(directive_id: str) -> Path:
+    """(#1531) infra 온디맨드 ephemeral 워크트리 생성 — `git worktree add origin/develop`.
+
+    spec: docs/features/on-demand-infra-dispatch.md. directive 별 고유 경로
+    (standing 워크트리/develop 점유와 충돌 없음). 생성 전 stale prune + 동일 경로
+    제거(재사용/crash 잔존 가드). 실패 시 RuntimeError → 호출부 finally 가 lock 해제.
+    """
+    safe = "".join(ch for ch in str(directive_id) if ch.isalnum() or ch in "-_")[:40]
+    wt = WORKTREE_ROOT / f"{WORKTREE_PREFIX}infra-{safe}"
+    g = ["git", "-C", str(MAIN_CHECKOUT), "worktree"]
+    subprocess.run([*g, "prune"], capture_output=True, text=True, timeout=30, check=False)
+    subprocess.run([*g, "remove", "--force", str(wt)], capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(
+        [*g, "add", "--detach", str(wt), "origin/develop"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ephemeral worktree add 실패: {(result.stderr or '')[:200]}")
+    logger.info("infra ephemeral worktree 생성: %s", wt)
+    return wt
+
+
+def _ephemeral_worktree_remove(wt: Path) -> None:
+    """(#1531) infra ephemeral 워크트리 teardown — graceful. 성공/실패/타임아웃 무관 호출."""
+    g = ["git", "-C", str(MAIN_CHECKOUT), "worktree"]
+    try:
+        subprocess.run([*g, "remove", "--force", str(wt)], capture_output=True, text=True, timeout=30, check=False)
+        subprocess.run([*g, "prune"], capture_output=True, text=True, timeout=30, check=False)
+        logger.info("infra ephemeral worktree teardown: %s", wt)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("ephemeral worktree teardown 실패 wt=%s exc=%r", wt, exc)
 
 
 def role_prompt(cycle: str, worktree: Path | None = None) -> str:
@@ -144,9 +184,17 @@ async def run_subagent_execution(
     fire-and-forget asyncio task 로 호출 (agent_loop). 예외/타임아웃 graceful —
     어떤 경우에도 `mark_subagent_completed` 로 lock 해제 (영구 점유 방지).
     """
+    ephemeral_infra = cycle == "infra"
     wt = worktree_path(cycle)
-    logger.info("subagent exec 시작: cycle=%s directive=%s wt=%s", cycle, directive_id, wt)
+    logger.info(
+        "subagent exec 시작: cycle=%s directive=%s wt=%s%s",
+        cycle, directive_id, wt, " (ephemeral infra)" if ephemeral_infra else "",
+    )
     try:
+        # (#1531) infra 는 상시 워크트리가 없다 — ephemeral 생성(git worktree add
+        # origin/develop). 생성 실패 시 예외 → 아래 except + finally(lock 해제) 경로.
+        if ephemeral_infra:
+            wt = await asyncio.to_thread(_ephemeral_worktree_add, directive_id)
         # (#1398 rev 🟡-1) argv 빌드(shlex.split CLAUDE_BIN)도 try 안에서 — unbalanced
         # quote 등 ValueError 가 finally 밖으로 탈출해 lock 미해제되는 사고 차단.
         prompt = build_task_prompt(cycle, directive_id, title, task, thread_id)
@@ -204,6 +252,13 @@ async def run_subagent_execution(
         if thread_id:
             _safe_comment(thread_id, f"❌ {cycle} sub-agent 실행 실패: {str(exc)[:150]}")
     finally:
+        # (#1531) infra ephemeral 워크트리 teardown — 성공/실패/타임아웃 무관. claude
+        # 프로세스 그룹은 위에서 이미 kill 됐으므로 워크트리 제거 안전. lock 해제와 동일하게 보장.
+        if ephemeral_infra:
+            try:
+                await asyncio.to_thread(_ephemeral_worktree_remove, wt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("infra ephemeral teardown 실패 wt=%s exc=%r", wt, exc)
         # 어떤 경우에도 lock 해제 — dispatcher 가 큐 다음 항목 진행.
         try:
             ts.mark_subagent_completed(cycle)
@@ -269,6 +324,34 @@ def _find_pr_number(worktree) -> str | None:  # noqa: ANN001
         return None
 
 
+def _persist_pr_cycle_thread(pr_num: str, cycle: str, cycle_thread_id: str) -> None:
+    """(#7) PR 번호 → cycle forum thread 매핑을 agent_state 에 영속 저장.
+
+    bot.py 의 ``cycle_thread_complete_on_merge_loop`` 가 머지 감지 시 PR 본문 파싱이
+    아니라 이 매핑(``pr_cycle_thread:<N>``)을 1순위로 조회해 thread 를 ``완료`` 로 전이한다.
+    본문 xref 주입이 실패(placeholder 박힘 / 줄-시작 앵커 미스 / cycle_thread_id 누락)해도
+    완료 태그가 붙도록 보장하는 신뢰 가능한 매핑 채널 — 영구 정체 구멍(예: PR #1593) 차단.
+
+    cycle 이 be/fe/rev/plan 이고 thread_id 가 snowflake 일 때만 저장. graceful — 저장
+    실패는 warning 만(머지 loop 가 본문 ref fallback 으로 여전히 동작).
+    """
+    if cycle not in ("be", "fe", "rev", "plan"):
+        return
+    if not (cycle_thread_id and str(cycle_thread_id).isdigit()):
+        return
+    try:
+        ev.set_state(
+            f"pr_cycle_thread:{pr_num}",
+            {"cycle": cycle, "thread_id": str(cycle_thread_id)},
+        )
+        logger.info(
+            "pr_cycle_thread 매핑 저장: PR #%s → cycle=%s thread=%s",
+            pr_num, cycle, cycle_thread_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pr_cycle_thread 매핑 저장 실패 pr=#%s exc=%r", pr_num, exc)
+
+
 def _ensure_pr_xrefs(
     pr_num: str,
     directive_id: str,
@@ -318,13 +401,21 @@ def _notify_user_done(
     pr_url: str = "",
     cta: str = "",
 ) -> None:
-    """#모부르지 채널에 작업 알림 (#1417, 문구 정정 #1427). graceful.
+    """digest 채널에 sub-agent 작업 완료 알림 (#1417, 문구 정정 #1427, 채널 이전 #7). graceful.
 
     사용자 정정 2026-05-31: 알림이 '검토 후 머지됩니다 / 확인 부탁' 처럼 모호하면 안 됨.
     (1) rev 를 모호어로 부르지 말 것 — 'rev(코드 리뷰)' 로 풀이.
     (2) develop 자동 머지는 사용자 할 일 없음을 분명히 (확인 필요한 건 release 뿐).
     (3) PR 링크 포함 (pr_url).
     (4) 행동 요청(cta)은 정말 필요할 때만 — 불필요한 '확인 부탁' 금지.
+
+    채널 이전 (#7, 2026-06-03 사용자 요청): sub-agent 완료/진행 류 알림이
+    사용자 대화 채널(#모부르지)을 도배해 대화가 묻혔다. ``--status-channel`` 로
+    DIGEST_CHANNEL_ID(완료/진행 집約 채널)에 보낸다 → #모부르지 는 사용자 대화
+    전용으로 비운다. release 등 사용자 확인이 필요한 알림은 nmae 가 #모부르지 로
+    직접 보내며 본 sub-agent 완료 경로에는 release 알림이 포함되지 않는다.
+    ``--status-channel`` 은 내부에서 ``--no-reply`` 를 강제하므로 사용자 메시지
+    answer 형태로 붙지 않는다.
     """
     bin_ = "/home/mobruji/mobruji-bridge/tools/discord-daemon/discord-reply.sh"
     guild = os.environ.get("DISCORD_GUILD_ID", "")
@@ -337,7 +428,10 @@ def _notify_user_done(
     cta_block = f"\n{cta}" if cta else ""
     msg = f"✅ {title}\n{body}{link_block}{cta_block}"
     try:
-        subprocess.run([bin_, msg], capture_output=True, text=True, timeout=15, check=False)
+        subprocess.run(
+            [bin_, "--status-channel", msg],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("완료 알림 push 실패 title=%s exc=%r", title[:40], exc)
 
@@ -354,10 +448,21 @@ def _on_exec_success(cycle: str, directive_id: str, title: str, thread_id: str, 
         # (#1427/#1440) PR 본문에 directive: + cycle-forum: 크로스레프 보강 →
         # 머지 시 directive forum 완료 + cycle forum ✅ retag 자동화. sub-agent 가
         # 누락하면 forum 태그가 안 바뀌던 사고 (사용자 정정 2026-05-31).
-        try:
-            cycle_thread_id = str((ev.get_state(f"directive:{directive_id}") or {}).get("cycle_thread_id") or "")
-        except Exception:  # noqa: BLE001 — state 읽기 실패해도 xref 보강은 directive 만이라도 진행
-            cycle_thread_id = ""
+        #
+        # cycle_thread_id 우선순위: launch 시 흘러온 thread_id 인자(authoritative —
+        # dispatch_once 가 directive.cycle_thread_id → dialogue thread fallback 으로 채워
+        # run_subagent_execution 까지 전달) → directive state fallback. directive state 의
+        # cycle_thread_id 는 LAUNCH_THREAD_ID 미상속 등으로 빌 수 있어 thread_id 인자가 더 신뢰됨.
+        cycle_thread_id = str(thread_id or "")
+        if not (cycle_thread_id and cycle_thread_id.isdigit()):
+            try:
+                cycle_thread_id = str((ev.get_state(f"directive:{directive_id}") or {}).get("cycle_thread_id") or "")
+            except Exception:  # noqa: BLE001 — state 읽기 실패해도 xref 보강은 directive 만이라도 진행
+                cycle_thread_id = ""
+        # (#7) PR→cycle thread 매핑을 agent_state 에 영속 — 본문 xref 주입 성패와 무관하게
+        # 머지 완료 loop 가 신뢰 가능한 1순위 lookup 으로 쓴다. 본문 파싱(placeholder 박힘 /
+        # 줄-시작 앵커 미스 / cycle_thread_id 누락)에 의존하던 영구 정체 구멍(예: PR #1593)을 차단.
+        _persist_pr_cycle_thread(pr_num, cycle, cycle_thread_id)
         _ensure_pr_xrefs(pr_num, directive_id, cycle, cycle_thread_id, worktree)
         try:
             tq.enqueue_rev_for_pr_if_any(cycle, worktree)

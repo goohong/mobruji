@@ -14,7 +14,8 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import BookmarksPage from "./page";
 import {
@@ -164,5 +165,68 @@ describe("/bookmarks 페이지", () => {
     await waitFor(() => {
       expect(liveRegion).toHaveTextContent("총 2곡을 북마크했어요.");
     });
+  });
+
+  // 이슈 #1284 — 한국 곡은 한국어 표기 우선. 상세 모달 제목이 formatSongDisplayTitle 을
+  // 거쳐 "English (한글)" dual-name 을 한글 우선으로 swap 하는지 회귀 검증.
+  it("한국 곡 상세 모달 제목이 한국어 우선으로 노출된다 (#1284)", async () => {
+    const koreanSong: SongResponse = {
+      ...buildSong(42),
+      title: "Spring Day (봄날)",
+      language: "ko",
+    };
+    readBookmarksMock.mockResolvedValue({
+      responses: [
+        { id: 420, song: koreanSong, bookmarkedAt: "2026-05-20T12:00:00" },
+      ],
+      page: 0,
+      size: 20,
+      totalCount: 1,
+      hasNext: false,
+    });
+
+    const user = userEvent.setup();
+    renderWithQueryClient(<BookmarksPage />);
+
+    const trigger = await screen.findByRole("button", {
+      name: /봄날 \(Spring Day\) 상세 보기/,
+    });
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: "봄날 (Spring Day)" }),
+    ).toBeInTheDocument();
+  });
+
+  // 비-한국 곡 회귀 — language 가 한국어가 아니면 원본 표기를 그대로 유지.
+  it("비-한국 곡 상세 모달 제목은 원본 그대로 노출된다 (#1284)", async () => {
+    const englishSong: SongResponse = {
+      ...buildSong(7),
+      title: "Bohemian Rhapsody",
+      language: "en",
+    };
+    readBookmarksMock.mockResolvedValue({
+      responses: [
+        { id: 70, song: englishSong, bookmarkedAt: "2026-05-20T12:00:00" },
+      ],
+      page: 0,
+      size: 20,
+      totalCount: 1,
+      hasNext: false,
+    });
+
+    const user = userEvent.setup();
+    renderWithQueryClient(<BookmarksPage />);
+
+    const trigger = await screen.findByRole("button", {
+      name: /Bohemian Rhapsody 상세 보기/,
+    });
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: "Bohemian Rhapsody" }),
+    ).toBeInTheDocument();
   });
 });

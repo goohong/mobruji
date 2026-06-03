@@ -37,7 +37,7 @@ import {
   useBookmarkToggleMutation,
   useLikeToggleMutation,
 } from "@/lib/hooks/useFeedbackToggleMutation";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
@@ -45,6 +45,8 @@ import {
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
+
+import { FitReasons } from "./FitBadge";
 
 type SongDetailContentProps =
   | {
@@ -68,9 +70,9 @@ export function SongDetailContent(props: SongDetailContentProps) {
 
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number" ? midiToKoreanNoteName(song.highMidi) : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number" ? midiToKoreanNoteName(song.lowMidi) : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
   // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
   // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
@@ -278,6 +280,8 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
       <p className="text-sm text-[var(--text-body-strong)]">
         {item.matchReason}
       </p>
+      {/* closes #1484 — BE 산출 음역/분위기 적합도 배지 + 한국어 사유. 추정 breakdown 보다 위. */}
+      <FitReasons item={item} />
       <dl className="flex flex-col gap-1.5">
         {breakdown.map((entry) => (
           <BreakdownRow key={entry.key} entry={entry} />

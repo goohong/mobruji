@@ -205,6 +205,8 @@ class BotAutoAckTests(unittest.TestCase):
         class FakeClient:
             user = "fake-bot"
             loop = mock.MagicMock()
+            http = mock.MagicMock()
+            _connection = mock.MagicMock(_command_tree=None)
 
             def __init__(self):
                 self._tasks: list[object] = []
@@ -397,90 +399,6 @@ class BotAutoAckTests(unittest.TestCase):
             )
             self.assertEqual(result, "P")
 
-    def test_secondary_reaction_disabled_by_default_skips(self) -> None:
-        # _build_env default = secondary_reaction_enabled="0".
-        # primary 👀 auto-ack + 📌 pin marker = 2회. secondary 안 함.
-        env = self._build_env()
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=10
-        )
-        self._run_handler(env, message)
-        calls = [c.args[0] for c in message.add_reaction.await_args_list]
-        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-        # secondary emoji (⚡⏳🕐) 부재 확인.
-        for secondary in ("⚡", "⏳", "🕐"):
-            self.assertNotIn(secondary, calls)
-
-    def test_secondary_reaction_idle_adds_lightning(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
-            self._write_cycle_status(cycle_path, occupied=0)
-            env = self._build_env(
-                secondary_reaction_enabled="1",
-                cycle_status_path=str(cycle_path),
-            )
-            message = _make_fake_message(
-                content="hello", channel_id=999, author_id=111, message_id=11
-            )
-            self._run_handler(env, message)
-            # primary 👀 + secondary ⚡ + 📌 pin marker.
-            calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-            self.assertIn("⚡", calls)
-            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-
-    def test_secondary_reaction_partial_adds_hourglass(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
-            self._write_cycle_status(cycle_path, occupied=2)
-            env = self._build_env(
-                secondary_reaction_enabled="1",
-                cycle_status_path=str(cycle_path),
-            )
-            message = _make_fake_message(
-                content="hello", channel_id=999, author_id=111, message_id=12
-            )
-            self._run_handler(env, message)
-            calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-            self.assertIn("⏳", calls)
-            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-
-    def test_secondary_reaction_full_adds_clock(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cycle_path = pathlib.Path(tmpdir) / "cycle-status.json"
-            self._write_cycle_status(cycle_path, occupied=4)
-            env = self._build_env(
-                secondary_reaction_enabled="1",
-                cycle_status_path=str(cycle_path),
-            )
-            message = _make_fake_message(
-                content="hello", channel_id=999, author_id=111, message_id=13
-            )
-            self._run_handler(env, message)
-            calls = [c.args[0] for c in message.add_reaction.await_args_list]
-            self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-            self.assertIn("🕐", calls)
-            self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-
-    def test_secondary_reaction_file_missing_silent_skip(self) -> None:
-        # cycle-status.json 부재 → secondary skip.
-        # primary 👀 + 📌 만 호출. ⚡⏳🕐 부재.
-        env = self._build_env(
-            secondary_reaction_enabled="1",
-            cycle_status_path="/nonexistent/cycle-status.json",
-        )
-        message = _make_fake_message(
-            content="hello", channel_id=999, author_id=111, message_id=14
-        )
-        self._run_handler(env, message)
-        calls = [c.args[0] for c in message.add_reaction.await_args_list]
-        self.assertIn(bot.BOT_AUTO_ACK_EMOJI_DEFAULT, calls)
-        self.assertIn(bot.PIN_REACTION_EMOJI, calls)
-        for secondary in ("⚡", "⏳", "🕐"):
-            self.assertNotIn(secondary, calls)
-
     def test_reply_referenced_message_forwarded_to_tmux(self) -> None:
         env = self._build_env(auto_ack="0")  # ack 잡음 제거
         ref = mock.MagicMock()
@@ -498,6 +416,8 @@ class BotAutoAckTests(unittest.TestCase):
         class FakeClient:
             user = "fake-bot"
             loop = mock.MagicMock()
+            http = mock.MagicMock()
+            _connection = mock.MagicMock(_command_tree=None)
 
             def event(self, func):
                 registered[func.__name__] = func
@@ -873,20 +793,22 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         line = captured.splitlines()[0]
         return json.loads(line)
 
-    def test_reply_mode_includes_message_reference_when_last_id_present(self) -> None:
-        """본답 + last-user-msg-id 존재 → payload 에 message_reference 포함."""
+    def test_reply_mode_never_includes_message_reference(self) -> None:
+        """#1631: quote-reply 영구 제거 — last-user-msg-id 가 valid snowflake 로
+        존재해도 본답 payload 에 message_reference 미포함 (회귀 가드).
+
+        근본 원인: bot.py 가 들어오는 모든 사용자 메시지마다 last-user-msg-id.txt
+        를 덮어써서 stale target → 엉뚱한 메시지에 답글. 사용자 정정으로 quote-reply
+        전면 제거. 답은 plain standalone 메시지.
+        """
         result, capture_path, _ = self._run_reply_test(
             "hello body",
             last_id_content="9876543210987654321\n",
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._parse_first_payload(Path(capture_path).read_text())
-        self.assertIn("message_reference", payload)
-        ref = payload["message_reference"]
-        self.assertEqual(ref["message_id"], "9876543210987654321")
-        self.assertEqual(ref["channel_id"], "42")
-        self.assertFalse(ref["fail_if_not_exists"])
-        # ZWSP+\n leading prepend (#921) 도 그대로 유지.
+        self.assertNotIn("message_reference", payload)
+        # ZWSP+\n leading prepend (#921) 은 그대로 유지.
         self.assertIn("hello body", payload["content"])
         self.assertTrue(
             payload["content"].startswith("​\n"),
@@ -941,13 +863,9 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         self.assertNotIn("message_reference", payload)
         self.assertIn("body", payload["content"])
 
-    def test_ack_mode_includes_message_reference_when_last_id_present(self) -> None:
-        """#960: ack 모드도 last-user-msg-id 있으면 message_reference 적용.
-
-        사용자 요청 (2026-05-24): "ack 같은 메세지들도 나의 어떤 메세지에 대한
-        응답인지 답장 걸어주면 좋겠어". 첫 번째 payload (ack push) 가 reply
-        형태여야 한다. 두 번째 payload (thread 생성) 는 별도 REST endpoint 이므로
-        message_reference 무관.
+    def test_ack_mode_never_includes_message_reference(self) -> None:
+        """#1631: ack 모드도 quote-reply 제거 — last-user-msg-id 가 valid snowflake
+        여도 ack payload 에 message_reference 미포함 (회귀 가드).
         """
         result, capture_path, _ = self._run_reply_test(
             "--ack",
@@ -958,11 +876,7 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         import json
         lines = Path(capture_path).read_text().splitlines()
         ack_payload = json.loads(lines[0])
-        self.assertIn("message_reference", ack_payload)
-        ref = ack_payload["message_reference"]
-        self.assertEqual(ref["message_id"], "12345678901234567")
-        self.assertEqual(ref["channel_id"], "42")
-        self.assertFalse(ref["fail_if_not_exists"])
+        self.assertNotIn("message_reference", ack_payload)
         self.assertIn("ack-text", ack_payload["content"])
         # ack 모드는 ZWSP+\n prepend 미적용 (본답 전용).
         self.assertFalse(
@@ -999,8 +913,8 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         self.assertNotIn("message_reference", ack_payload)
         self.assertIn("ack-text", ack_payload["content"])
 
-    def test_auto_ack_thread_mode_includes_message_reference(self) -> None:
-        """#960: --auto-ack-thread (= --ack alias) 도 ack reply 적용."""
+    def test_auto_ack_thread_mode_never_includes_message_reference(self) -> None:
+        """#1631: --auto-ack-thread (= --ack alias) 도 quote-reply 제거 (회귀 가드)."""
         result, capture_path, _ = self._run_reply_test(
             "--auto-ack-thread",
             "auto-ack-text",
@@ -1010,11 +924,7 @@ class DiscordReplyMessageReferenceTests(unittest.TestCase):
         import json
         lines = Path(capture_path).read_text().splitlines()
         ack_payload = json.loads(lines[0])
-        self.assertIn("message_reference", ack_payload)
-        self.assertEqual(
-            ack_payload["message_reference"]["message_id"],
-            "98765432109876543",
-        )
+        self.assertNotIn("message_reference", ack_payload)
         self.assertIn("auto-ack-text", ack_payload["content"])
 
     def test_auto_ack_thread_mode_no_reference_when_file_absent(self) -> None:
@@ -1399,22 +1309,25 @@ class DiscordReplyBareBodyTests(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# #987: reply race condition — resolve_reply_to_id 우선순위 체인
+# #1631: quote-reply 영구 제거 — 어떤 reply-target 소스도 message_reference 미생성
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class DiscordReplyResolvePriorityTests(unittest.TestCase):
-    """`resolve_reply_to_id` 우선순위 체인 검증 (#987).
+    """quote-reply (message_reference) 영구 제거 회귀 가드 (#1631, 2026-06-03).
 
-    helper turn 진행 중 새 user msg 도착으로 last-user-msg-id.txt 가 덮어쓰여
-    reply 가 엉뚱한 msg 에 걸리는 race condition 차단.
+    AS-IS (#987): resolve_reply_to_id 가 --reply-to / HELPER_TURN_TARGET_MSG_ID
+    env / helper-current-target.txt / helper-queue.jsonl / last-user-msg-id.txt
+    우선순위 체인으로 reply target 을 해석해 message_reference 에 박았다.
 
-    우선순위 (높음 → 낮음):
-      1. --reply-to <id>
-      2. HELPER_TURN_TARGET_MSG_ID env
-      3. helper-current-target.txt (turn-start freeze)
-      4. helper-queue.jsonl 마지막 pending entry
-      5. last-user-msg-id.txt
+    근본 원인: bot.py 가 들어오는 *모든* 사용자 메시지마다 last-user-msg-id.txt
+    를 덮어쓰고, freeze/env/queue 소스도 helper LLM wrapper 호출 타이밍에 의존
+    (학습 의존) 이라 신뢰 불가 → stale target → 엉뚱한 메시지에 답글 (weeks 째
+    사용자 신고). 사용자 정정: "제대로 답장 못 할 거 같으면 그 기능 그냥 없애라".
+
+    TO-BE: resolve_reply_to_id 가 항상 빈 문자열 반환 + build_reply_payload 가
+    message_reference 미생성. 어떤 소스 조합을 줘도 standalone(plain) payload.
+    bot.py _push_agent_reply (reference=None) 와 정렬.
     """
 
     SCRIPT_PATH = (
@@ -1516,8 +1429,8 @@ class DiscordReplyResolvePriorityTests(unittest.TestCase):
         line = Path(capture_path).read_text().splitlines()[0]
         return json.loads(line)
 
-    def test_reply_to_flag_overrides_all_other_sources(self) -> None:
-        """--reply-to 가 env / file / queue / last-id 모두 무시하고 최우선 적용."""
+    def test_reply_to_flag_no_longer_produces_reference(self) -> None:
+        """#1631: --reply-to 가 명시돼도 message_reference 미생성 (효력 폐기)."""
         result, capture_path = self._run(
             "--reply-to",
             "11111111111111111",
@@ -1529,13 +1442,11 @@ class DiscordReplyResolvePriorityTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._first_payload(capture_path)
-        self.assertIn("message_reference", payload)
-        self.assertEqual(
-            payload["message_reference"]["message_id"], "11111111111111111"
-        )
+        self.assertNotIn("message_reference", payload)
+        self.assertIn("body", payload["content"])
 
-    def test_env_var_overrides_file_and_last_id(self) -> None:
-        """HELPER_TURN_TARGET_MSG_ID env 가 file / queue / last-id 보다 우선."""
+    def test_env_var_no_longer_produces_reference(self) -> None:
+        """#1631: HELPER_TURN_TARGET_MSG_ID env 가 있어도 message_reference 미생성."""
         result, capture_path = self._run(
             "body",
             last_id_content="22222222222222222",
@@ -1545,61 +1456,48 @@ class DiscordReplyResolvePriorityTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._first_payload(capture_path)
-        self.assertEqual(
-            payload["message_reference"]["message_id"], "55555555555555555"
-        )
+        self.assertNotIn("message_reference", payload)
 
-    def test_target_file_freeze_overrides_last_id_race(self) -> None:
-        """helper-current-target.txt freeze 가 last-user-msg-id.txt 보다 우선.
+    def test_target_file_freeze_no_longer_produces_reference(self) -> None:
+        """#1631: helper-current-target.txt freeze 가 있어도 message_reference 미생성.
 
-        실제 사고 재현: helper turn 시작에 target 9876... freeze, 도중에 user 새 msg
-        도착해서 last-id 가 1234... 로 갱신 → reply 는 freeze 된 9876... 에 걸려야 함.
+        과거 race fix (#987) 의 freeze 소스도 폐기 — quote-reply 자체를 제거했으므로
+        stale target 사고 path 자체가 사라짐.
         """
         result, capture_path = self._run(
             "body",
-            last_id_content="12345678901234567",  # race condition: 새 user msg
-            target_content="98765432109876543",   # freeze 된 turn target
+            last_id_content="12345678901234567",
+            target_content="98765432109876543",
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._first_payload(capture_path)
-        self.assertEqual(
-            payload["message_reference"]["message_id"], "98765432109876543"
-        )
+        self.assertNotIn("message_reference", payload)
 
-    def test_queue_last_pending_used_when_target_file_missing(self) -> None:
-        """target file 부재 + queue 마지막 pending entry → queue 값 사용.
-
-        queue 에 여러 entry — pending / done 섞여 있을 때 마지막 pending 만 추출.
-        """
+    def test_queue_pending_no_longer_produces_reference(self) -> None:
+        """#1631: helper-queue.jsonl pending entry 가 있어도 message_reference 미생성."""
         result, capture_path = self._run(
             "body",
             last_id_content="11111111111111111",
             queue_lines=[
                 '{"message_id":"22222222222222222","status":"done"}',
                 '{"message_id":"33333333333333333","status":"pending"}',
-                '{"message_id":"44444444444444444","status":"done"}',
                 '{"message_id":"55555555555555555","status":"pending"}',
             ],
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._first_payload(capture_path)
-        # 마지막 pending = 5555...
-        self.assertEqual(
-            payload["message_reference"]["message_id"], "55555555555555555"
-        )
+        self.assertNotIn("message_reference", payload)
 
-    def test_falls_through_to_last_id_when_higher_sources_absent(self) -> None:
-        """모든 상위 fallback 부재/실패 → last-user-msg-id.txt 사용 (기존 호환)."""
+    def test_last_id_no_longer_produces_reference(self) -> None:
+        """#1631: last-user-msg-id.txt 만 있어도 message_reference 미생성 (핵심 사고 path)."""
         result, capture_path = self._run(
             "body",
             last_id_content="99999999999999999",
-            # target_content / queue_lines / env 모두 미설정.
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = self._first_payload(capture_path)
-        self.assertEqual(
-            payload["message_reference"]["message_id"], "99999999999999999"
-        )
+        self.assertNotIn("message_reference", payload)
+        self.assertIn("body", payload["content"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

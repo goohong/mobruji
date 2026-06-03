@@ -101,7 +101,7 @@ class RecommendationServiceBatchPersistTest {
                 72,
                 Mood.UPBEAT,
                 null, null,
-                List.of());
+                List.of(), false);
 
         // when
         final RecommendationResult result = recommendationService.create(command);

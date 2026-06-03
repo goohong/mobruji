@@ -230,7 +230,7 @@ class RecommendationServiceDeterminismLogTest {
                 VOICE_HIGH,
                 Mood.UPBEAT,
                 PREFERRED_BPM, null,
-                excludeSongIds);
+                excludeSongIds, false);
     }
 
     private ILoggingEvent onlyEventOf(final String prefix) {

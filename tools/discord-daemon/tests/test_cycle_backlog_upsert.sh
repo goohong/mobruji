@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # test_cycle_backlog_upsert.sh — discord-reply.sh --cycle-backlog-upsert 모드 검증.
 #
-# 배경 (2026-05-26 사용자 정정):
-#   각 cycle (be/fe/rev/plan) forum 안 단일 `[BACKLOG] <cycle>` thread 를 upsert.
-#   기존 thread 있으면 starter PATCH, 없으면 신규 post.
+# DEPRECATED (2026-06-03): `[BACKLOG] <cycle>` 단일 스레드 방식 폐기
+# (cycle-forum-operation.md §5-7). mode 는 thread 를 생성/갱신하지 않고 no-op
+# exit 0 (빈 stdout + stderr deprecation warning). 인자 검증(cycle/body)은 유지.
+# 본 테스트는 "어떤 호출자가 호출해도 새 [BACKLOG] 스레드가 생기지 않음" 을 보장한다.
 #
 # fake curl 패턴 (test_forum_modes.sh 와 동일 — URL/METHOD/PAYLOAD 캡처).
 # GET /channels/{forum_id} 응답에 guild_id 포함 (forum_find_active_thread_by_name 가
@@ -115,43 +116,40 @@ _assert() {
   fi
 }
 
-# ── case 1: thread 없음 → 신규 생성 (POST forum/threads) ─────────────────────
+# ── case 1: 기존 thread 없음 → 신규 생성 안 함 (deprecated no-op) ─────────────
 case1_create_new() {
-  echo "[case1] --cycle-backlog-upsert be — 기존 thread 없음 → 신규 생성"
+  echo "[case1 DEPRECATED] --cycle-backlog-upsert be — 신규 [BACKLOG] 스레드 생성 안 함"
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
   local capture="$tmpdir/capture.txt"
   : > "$capture"
-  # active_threads 배열 비어 있음 → 신규 생성 경로.
   _write_fake_curl "$tmpdir" "$capture" '[]' "forum-be"
   local env_path
   env_path=$(_write_env "$tmpdir")
 
-  local stdout
+  local stdout stderr
   stdout=$(_run "$tmpdir" "$env_path" \
-    --cycle-backlog-upsert be "- [ ] 작업 1 (#100)" 2>/dev/null)
+    --cycle-backlog-upsert be "- [ ] 작업 1 (#100)" 2>"$tmpdir/err.txt")
   local rc=$?
+  stderr=$(cat "$tmpdir/err.txt")
 
-  _assert "case1 returncode 0" "[[ $rc -eq 0 ]]"
-  _assert "case1 stdout = thread-new" "[[ '$stdout' == 'thread-new' ]]"
-  _assert "case1 GET /guilds/guild-xyz/threads/active" \
-    "grep -q '^GET https://discord.com/api/v10/guilds/guild-xyz/threads/active ' $capture"
-  _assert "case1 POST forum-be/threads (신규)" \
-    "grep -q '^POST https://discord.com/api/v10/channels/forum-be/threads ' $capture"
-  _assert "case1 PATCH 호출 없음 (existing 없음)" "! grep -q '^PATCH ' $capture"
-  _assert "case1 신규 payload 안 [BACKLOG] be" "grep -q '\\[BACKLOG\\] be' $capture"
+  _assert "case1 returncode 0 (no-op)" "[[ $rc -eq 0 ]]"
+  _assert "case1 stdout 빈 값 (thread_id 미반환)" "[[ -z '$stdout' ]]"
+  _assert "case1 POST 호출 없음 (신규 생성 안 함)" "! grep -q '^POST ' $capture"
+  _assert "case1 PATCH 호출 없음" "! grep -q '^PATCH ' $capture"
+  _assert "case1 stderr DEPRECATED 경고" \
+    "echo '$stderr' | grep -q 'DEPRECATED'"
 }
 
-# ── case 2: 기존 thread 있음 → PATCH starter (업데이트 경로) ──────────────────
+# ── case 2: 기존 thread 있어도 PATCH/갱신 안 함 (deprecated no-op) ────────────
 case2_update_existing() {
-  echo "[case2] --cycle-backlog-upsert fe — 기존 thread 있음 → PATCH starter"
+  echo "[case2 DEPRECATED] --cycle-backlog-upsert fe — 기존 [BACKLOG] 스레드 갱신 안 함"
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
   local capture="$tmpdir/capture.txt"
   : > "$capture"
-  # active_threads 에 [BACKLOG] fe thread 가 forum-fe parent 로 존재.
   _write_fake_curl "$tmpdir" "$capture" \
     '[{"id":"thread-existing-fe","parent_id":"forum-fe","name":"[BACKLOG] fe"}]' \
     "forum-fe"
@@ -163,24 +161,20 @@ case2_update_existing() {
     --cycle-backlog-upsert fe "- [x] 작업 1\n- [ ] 작업 2" 2>/dev/null)
   local rc=$?
 
-  _assert "case2 returncode 0" "[[ $rc -eq 0 ]]"
-  _assert "case2 stdout = thread-existing-fe (기존 thread 재사용)" \
-    "[[ '$stdout' == 'thread-existing-fe' ]]"
-  _assert "case2 PATCH starter 호출" \
-    "grep -q '^PATCH https://discord.com/api/v10/channels/thread-existing-fe/messages/thread-existing-fe ' $capture"
-  _assert "case2 POST forum-fe/threads 호출 없음 (신규 생성 X)" \
-    "! grep -q '^POST https://discord.com/api/v10/channels/forum-fe/threads ' $capture"
+  _assert "case2 returncode 0 (no-op)" "[[ $rc -eq 0 ]]"
+  _assert "case2 stdout 빈 값" "[[ -z '$stdout' ]]"
+  _assert "case2 PATCH 호출 없음 (갱신 안 함)" "! grep -q '^PATCH ' $capture"
+  _assert "case2 POST 호출 없음" "! grep -q '^POST ' $capture"
 }
 
-# ── case 3: 다른 cycle 의 thread 는 match 안 됨 ─────────────────────────────
+# ── case 3: 어떤 cycle 도 신규 생성/갱신 안 함 (deprecated no-op) ─────────────
 case3_isolate_by_parent() {
-  echo "[case3] --cycle-backlog-upsert rev — be 의 [BACKLOG] thread 가 있어도 무시"
+  echo "[case3 DEPRECATED] --cycle-backlog-upsert rev — 신규 생성 안 함"
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
   local capture="$tmpdir/capture.txt"
   : > "$capture"
-  # active_threads 에 forum-be 의 [BACKLOG] be 만 있음 (rev forum 의 [BACKLOG] 는 없음).
   _write_fake_curl "$tmpdir" "$capture" \
     '[{"id":"thread-be","parent_id":"forum-be","name":"[BACKLOG] be"}]' \
     "forum-be"
@@ -192,12 +186,10 @@ case3_isolate_by_parent() {
     --cycle-backlog-upsert rev "본문" 2>/dev/null)
   local rc=$?
 
-  _assert "case3 returncode 0" "[[ $rc -eq 0 ]]"
-  _assert "case3 stdout = thread-new (신규 생성)" "[[ '$stdout' == 'thread-new' ]]"
-  _assert "case3 POST forum-rev/threads 호출" \
-    "grep -q '^POST https://discord.com/api/v10/channels/forum-rev/threads ' $capture"
-  _assert "case3 PATCH thread-be 호출 없음 (parent mismatch)" \
-    "! grep -q '^PATCH https://discord.com/api/v10/channels/thread-be' $capture"
+  _assert "case3 returncode 0 (no-op)" "[[ $rc -eq 0 ]]"
+  _assert "case3 stdout 빈 값" "[[ -z '$stdout' ]]"
+  _assert "case3 POST 호출 없음" "! grep -q '^POST ' $capture"
+  _assert "case3 PATCH 호출 없음" "! grep -q '^PATCH ' $capture"
 }
 
 # ── case 4: 잘못된 cycle 이름 → 명시 에러 ───────────────────────────────────

@@ -11,8 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import {
   createRecommendation,
+  createSequenceRecommendation,
   readRecommendation,
   type RecommendationResponse,
+  type SequenceRecommendationResponse,
 } from "./recommendation";
 
 const fetchMock = vi.fn();
@@ -139,5 +141,68 @@ describe("recommendation API 경계 가드", () => {
     await createRecommendation({ ...base, mood: null });
     const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
     expect(body).toContain('"mood":null');
+  });
+
+  it("persona=P-E 지정 시 body 에 \"persona\":\"P-E\" 로 직렬화된다 (BE #1598 안전곡 프리셋)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
+    await createRecommendation({ ...base, persona: "P-E" });
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
+    expect(JSON.parse(body)).toEqual({ ...base, persona: "P-E" });
+  });
+
+  it("persona 생략 시 body 에서 키 자체가 빠진다 (현행 default 가중 하위호환)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
+    await createRecommendation({ ...base });
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
+    expect(body).not.toContain("persona");
+  });
+});
+
+// ---------- P-D 시퀀스 추천 (#1601) ----------
+describe("createSequenceRecommendation", () => {
+  const sequenceResponse: SequenceRecommendationResponse = {
+    requestId: SAMPLE_REQUEST_ID,
+    persona: "P-D",
+    stages: [
+      { stage: "INTRO", songs: [] },
+      { stage: "PEAK", songs: [] },
+      { stage: "FINALE", songs: [] },
+    ],
+  };
+
+  it("POST /api/v1/recommendations/sequence 로 persona+ageGroups 를 직렬화해 호출한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sequenceResponse, 201));
+
+    const result = await createSequenceRecommendation({
+      sessionId: "sess-host",
+      voiceRangeLow: 48,
+      voiceRangeHigh: 72,
+      persona: "P-D",
+      ageGroups: ["TWENTIES", "THIRTIES"],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/recommendations\/sequence$/);
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      sessionId: "sess-host",
+      voiceRangeLow: 48,
+      voiceRangeHigh: 72,
+      persona: "P-D",
+      ageGroups: ["TWENTIES", "THIRTIES"],
+    });
+    expect(result).toEqual(sequenceResponse);
+  });
+
+  it("ApiError 를 swallow 하지 않고 그대로 전파한다 (be #1599 미머지 시 fallback 분기 근거)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "no route" }, 404));
+    await expect(
+      createSequenceRecommendation({
+        sessionId: "sess-host",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 72,
+        persona: "P-D",
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });

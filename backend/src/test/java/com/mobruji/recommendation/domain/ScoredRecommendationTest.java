@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.mobruji.song.domain.Difficulty;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -155,6 +156,49 @@ class ScoredRecommendationTest {
         // then
         assertThat(scored.moodFit()).isNull();
         assertThat(scored.moodFitReason()).isNull();
+    }
+
+    private static Song rangedSong(final int lowMidi, final int highMidi) {
+        return Song.builder()
+                .title("음역곡")
+                .artist("Artist")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(lowMidi)
+                .highMidi(highMidi)
+                .build();
+    }
+
+    @Test
+    @DisplayName("연습 지원(#1494): practiceDifficulty는 곡 음역 자동 분류 난이도를, 사유는 음역 범위(최저~최고음)+난이도 구간별 한국어")
+    void practiceDifficulty_derivesFromSongRange() {
+        // given: EASY(high<71) / NORMAL(71~75) / HARD(high≥76 또는 span≥17)
+        final ScoredRecommendation easy = new ScoredRecommendation(rangedSong(60, 67), 0.5, "match", 1);
+        final ScoredRecommendation normal = new ScoredRecommendation(rangedSong(60, 72), 0.5, "match", 1);
+        final ScoredRecommendation hard = new ScoredRecommendation(rangedSong(57, 81), 0.5, "match", 1);
+
+        // then
+        assertThat(easy.practiceDifficulty()).isEqualTo(Difficulty.EASY);
+        assertThat(easy.practiceDifficultyReason()).isEqualTo("음역 C4~G4, 음역 폭이 넓지 않아 부담 없이 연습하기 좋아요");
+        assertThat(normal.practiceDifficulty()).isEqualTo(Difficulty.NORMAL);
+        assertThat(normal.practiceDifficultyReason()).isEqualTo("음역 C4~C5, 적당한 난이도라 연습용으로 무난해요");
+        assertThat(hard.practiceDifficulty()).isEqualTo(Difficulty.HARD);
+        assertThat(hard.practiceDifficultyReason()).isEqualTo("음역 A3~A5, 고음·넓은 음역이라 도전적인 곡이에요");
+    }
+
+    @Test
+    @DisplayName("연습 지원(#1494): 음역 미보유 곡은 난이도 null + graceful 사유 — breakdown 유무 무관(곡 속성 파생)")
+    void practiceDifficulty_missingRange_gracefulRegardlessOfBreakdown() {
+        // given: lowMidi/highMidi 미지정 → difficulty null. breakdown 있는 신규 경로 + 없는 재조회 경로 둘 다
+        final ScoredRecommendation withBreakdown = new ScoredRecommendation(
+                sampleSong(), 0.5, "match", 1, new ScoreBreakdown(1.0, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0));
+        final ScoredRecommendation reread = new ScoredRecommendation(sampleSong(), 0.5, "match", 1);
+
+        // then: 곡 속성에서 파생하므로 재조회 경로에서도 채워진다 (voiceFit 과 다른 점)
+        assertThat(withBreakdown.practiceDifficulty()).isNull();
+        assertThat(withBreakdown.practiceDifficultyReason()).isEqualTo("아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요");
+        assertThat(reread.practiceDifficulty()).isNull();
+        assertThat(reread.practiceDifficultyReason()).isEqualTo("아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요");
     }
 
     @Test

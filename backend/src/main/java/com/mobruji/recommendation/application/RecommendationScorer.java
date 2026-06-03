@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.recommendation.domain.ScoreBreakdown;
+import com.mobruji.recommendation.domain.TransposeSuggestion;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
@@ -22,8 +23,10 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
- * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=곡 음역(root±7)과 사용자 음역의 overlap 비율,
- * centeredness=곡 키 중심이 사용자 음역 중앙에 가까운 정도. 넓은 음역에서 overlap 이 포화돼도 음역대별 변별력 유지(#1452).</li>
+ * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=겹치면 overlap 비율, disjoint 면 gap 거리
+ * 소프트 감쇠({@code exp(-gap/scale)}); centeredness=곡 중심↔사용자 음역 중앙 거리의 가우시안 감쇠. 넓은 음역에서
+ * overlap 이 포화돼도 음역대별 변별력 유지(#1452). 저·중음역 사용자가 고음역 편중 카탈로그와 disjoint 여도 0 으로
+ * 떨어지지 않고 곡별로 변별된다(#1639).</li>
  * <li>genreMatch: v1에서 입력 필드 없음 → 0 고정 (가중치만 보존).</li>
  * <li>moodMatch: 분위기 연속 유사도. 정확히 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 (energy,brightness) 좌표 거리 기반 유사도(#1485).</li>
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
@@ -55,6 +58,32 @@ public class RecommendationScorer {
      */
     static final double MOOD_MAX_DISTANCE = Math.sqrt(2.0);
 
+    /**
+     * 조옮김(transpose) 탐색 범위(반음). 카라오케 기기 통상 키 조절 폭(±6)에 맞춰, 이 안에서만 최적 이동량을 찾는다.
+     */
+    static final int MAX_TRANSPOSE_SEMITONES = 6;
+
+    /**
+     * 조옮김을 제안하는 voiceFit(rangeFit) 임계. 이 값 이상이면 원곡 그대로도 음역대에 무난하다고 보고 제안하지 않는다.
+     * {@link ScoredRecommendation} 의 voiceFit 사유 분기("무난하게 맞아요" 경계)와 동일한 0.4 를 쓴다.
+     */
+    static final double TRANSPOSE_SUGGEST_FIT_THRESHOLD = 0.4;
+
+    /**
+     * disjoint(겹침 0) 곡의 reachability 소프트 감쇠 스케일(반음). 사용자 음역과 곡 음역 사이 gap 이 클수록
+     * {@code Math.exp(-gap / GAP_SCALE)} 로 0 에 수렴하되 정확히 0 은 되지 않는다. 옥타브(12반음) 떨어지면
+     * {@code 1/e≈0.368} 가 되도록 12 로 둔다. hard-zero 산식은 저·중음역 사용자에게 모든 곡 voiceFit=0 을
+     * 만들어 변별을 못 했기에(#1639), gap 거리 기반 양수로 가까운 곡일수록 높은 값을 준다.
+     */
+    static final double REACHABILITY_GAP_SCALE = 12.0;
+
+    /**
+     * centeredness 가우시안 sigma 의 하한(반음). 사용자 음역폭이 0 에 가까워도 분모가 0 이 되지 않도록 보호하며,
+     * 일반적으로는 {@code Math.max(1.0, userSpan/2.0)} 로 음역폭에 비례한다. 선형 hard-clip 은 중심 거리가
+     * {@code userSpan/2} 를 넘으면 centeredness=0 → voiceFit=0 이라 변별을 못 했기에(#1639) 가우시안으로 매끄럽게 감쇠한다.
+     */
+    static final double CENTEREDNESS_SIGMA_FLOOR = 1.0;
+
     private final RecommendationProperties recommendationProperties;
 
     public Scored score(
@@ -68,7 +97,8 @@ public class RecommendationScorer {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
         final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
         final RecommendationProperties.Generation generation = recommendationProperties.generation();
-        final double rangeFit = voiceRangeFit(song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
+        final double rangeFit = voiceRangeFit(
+                song.getLowMidi(), song.getHighMidi(), song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
         final double genreMatch = genreMatch();
         final double moodMatch = moodMatch(song.getMood(), requestedMood);
@@ -86,7 +116,9 @@ public class RecommendationScorer {
                 + jitter;
         final ScoreBreakdown breakdown = new ScoreBreakdown(
                 keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit);
-        return new Scored(total, breakdown);
+        final TransposeSuggestion suggestedTranspose = suggestTranspose(
+                song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
+        return new Scored(total, breakdown, suggestedTranspose);
     }
 
     static double voiceRangeFit(final MusicalKey keyOriginal, final int voiceLow, final int voiceHigh) {
@@ -94,6 +126,56 @@ public class RecommendationScorer {
         if (rootMidi < 0) {
             return 0.5; // UNKNOWN key — neutral
         }
+        return voiceRangeFitForRoot(rootMidi, voiceLow, voiceHigh);
+    }
+
+    /**
+     * 곡 실측 음역(audio analysis 적재: {@code low_midi}/{@code high_midi}) 우선 적합도 산정.
+     *
+     * <p>둘 다 not-null 이면 실측 band 로 reachability/centeredness 산식을 그대로 적용한다 — 키 root±7 휴리스틱은
+     * 곡 분포를 53~78 MIDI 좁은 구간으로 갇히게 만들어 사용자 음역대 변화에 따른 변별력이 약한 사고를 만들었다 (#1632).
+     * 한쪽이라도 null 이면 기존 키 root±7 휴리스틱({@link #voiceRangeFit(MusicalKey, int, int)})으로 폴백해
+     * 미적재 곡의 하위호환을 유지한다.
+     *
+     * <p>spec: {@code docs/features/recommendation-algorithm-v1.md} §6 v1+v2 (voiceRangeFit 산식) — 실측 데이터
+     * 활용은 같은 산식의 입력 정확도 향상에 그쳐 가중치/결정성/SeedDeriver 입력에는 영향이 없다.
+     */
+    static double voiceRangeFit(
+            final Integer songLowMidi,
+            final Integer songHighMidi,
+            final MusicalKey keyOriginal,
+            final int voiceLow,
+            final int voiceHigh) {
+        if (songLowMidi != null && songHighMidi != null) {
+            return voiceRangeFitForBand(songLowMidi, songHighMidi, voiceLow, voiceHigh);
+        }
+        return voiceRangeFit(keyOriginal, voiceLow, voiceHigh);
+    }
+
+    /**
+     * 곡 음역 band(songLow, songHigh) 가 주어졌을 때의 음역 적합도(0~1). reachability/centeredness 산식은
+     * {@link #voiceRangeFitForRoot}와 동일하며, 중심점만 root MIDI 대신 band 중심 {@code (songLow+songHigh)/2} 로
+     * 잡는다. 곡 실측 음역과 휴리스틱 음역에 같은 산식을 일관 적용해 결과 해석을 단일 패턴으로 유지한다.
+     */
+    static double voiceRangeFitForBand(
+            final int songLow, final int songHigh, final int voiceLow, final int voiceHigh) {
+        final int songSpan = songHigh - songLow;
+        final int userSpan = voiceHigh - voiceLow;
+        if (songSpan <= 0 || userSpan <= 0) {
+            return 0.0;
+        }
+        final double reachability = reachability(songLow, songHigh, voiceLow, voiceHigh, songSpan);
+        final double songCenter = (songLow + songHigh) / 2.0;
+        final double userCenter = (voiceLow + voiceHigh) / 2.0;
+        final double centeredness = centeredness(Math.abs(songCenter - userCenter), userSpan);
+        return reachability * centeredness;
+    }
+
+    /**
+     * 키 root MIDI 가 주어졌을 때의 음역 적합도(0~1). {@link #voiceRangeFit}이 위임하며, 조옮김 탐색은
+     * {@code rootMidi} 에 반음 이동량을 더한 값으로 같은 산식을 재사용해 voiceFit 과 비교 가능한 값을 얻는다.
+     */
+    static double voiceRangeFitForRoot(final int rootMidi, final int voiceLow, final int voiceHigh) {
         final int songLow = rootMidi + MusicalKeyMidiResolver.LOW_OFFSET;
         final int songHigh = rootMidi + MusicalKeyMidiResolver.HIGH_OFFSET;
         final int songSpan = songHigh - songLow;
@@ -101,16 +183,84 @@ public class RecommendationScorer {
         if (songSpan <= 0 || userSpan <= 0) {
             return 0.0;
         }
-        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율.
-        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
-        final double reachability = Math.min(1.0, (double) overlap / songSpan);
-        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 가장자리·바깥이면 0.0.
+        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율. overlap>0 이면 비율, disjoint 면
+        // gap 거리 기반 소프트 감쇠 — 안 겹쳐도 가까운 곡은 양수라 변별이 살아난다(#1639).
+        final double reachability = reachability(songLow, songHigh, voiceLow, voiceHigh, songSpan);
+        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 멀수록 가우시안으로 매끄럽게 감쇠.
         // reachability 단독은 사용자 음역이 곡 음역을 완전히 포함하면(넓은 음역) 모든 곡이 1.0 으로 포화돼
         // 음역대 입력이 순위에 반영되지 않는다(#1452). centeredness 를 곱해 음역대별 변별력을 회복한다.
         final double userCenter = (voiceLow + voiceHigh) / 2.0;
-        final double centerDistance = Math.abs(rootMidi - userCenter);
-        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
+        final double centeredness = centeredness(Math.abs(rootMidi - userCenter), userSpan);
         return reachability * centeredness;
+    }
+
+    /**
+     * reachability(0~1): 곡 음역과 사용자 음역의 겹침 비율. overlap&gt;0 이면 {@code min(1.0, overlap/songSpan)} 그대로,
+     * 겹침이 없으면(disjoint) 두 구간 최소 거리 gap 에 대해 {@code Math.exp(-gap / REACHABILITY_GAP_SCALE)} 로
+     * 소프트 감쇠한다. hard-zero 가 저·중음역 사용자에게 모든 곡 voiceFit=0 을 만들던 사고(#1639)를 막고,
+     * disjoint 라도 가까운 곡일수록 큰 값을 줘 곡별 변별을 유지한다.
+     */
+    private static double reachability(
+            final int songLow, final int songHigh, final int voiceLow, final int voiceHigh, final int songSpan) {
+        final int overlap = Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow);
+        if (overlap > 0) {
+            return Math.min(1.0, (double) overlap / songSpan);
+        }
+        final int gap = -overlap;
+        return Math.exp(-gap / REACHABILITY_GAP_SCALE);
+    }
+
+    /**
+     * centeredness(0~1): 곡 중심과 사용자 음역 중앙의 거리 {@code centerDistance} 를 가우시안으로 환산한다.
+     * {@code Math.exp(-0.5 * (centerDistance / sigma)^2)}, sigma = {@code max(CENTEREDNESS_SIGMA_FLOOR, userSpan/2)}.
+     * 선형 hard-clip 은 거리가 {@code userSpan/2} 를 넘으면 0 → voiceFit=0 이라 변별을 못 했기에(#1639), 멀어도 0 이
+     * 되지 않고 매끄럽게 감쇠하도록 가우시안을 쓴다.
+     */
+    private static double centeredness(final double centerDistance, final int userSpan) {
+        final double sigma = Math.max(CENTEREDNESS_SIGMA_FLOOR, userSpan / 2.0);
+        final double normalized = centerDistance / sigma;
+        return Math.exp(-0.5 * normalized * normalized);
+    }
+
+    /**
+     * 키 조옮김(transpose) 제안 (#1544). 원곡 키가 사용자 음역대에 부담스러운(voiceFit 낮은) 곡에 대해,
+     * {@code ±MAX_TRANSPOSE_SEMITONES} 반음 안에서 적합도를 가장 끌어올리는 이동량을 찾는다.
+     *
+     * <p>{@code null} 을 돌려주는 경우(=제안 없음):
+     * <ul>
+     * <li>곡 키가 UNKNOWN — 적합도 산정 근거가 없어 어디로 옮길지 계산할 수 없음.</li>
+     * <li>원곡 그대로도 voiceFit 이 {@link #TRANSPOSE_SUGGEST_FIT_THRESHOLD} 이상 — 굳이 옮길 필요 없음.</li>
+     * <li>±범위 안에서 원곡보다 적합도를 높이는 이동량이 없음.</li>
+     * </ul>
+     *
+     * <p>탐색은 이동 폭이 작은 순(|반음|=1→6)으로 돌며 더 높은 적합도일 때만 갱신한다. 따라서 같은 적합도라면
+     * 더 작은 이동량을, 폭이 같으면 내림(-)을 우선해 결정적으로 한 값을 고른다.
+     */
+    static TransposeSuggestion suggestTranspose(
+            final MusicalKey keyOriginal, final int voiceLow, final int voiceHigh) {
+        final int rootMidi = MusicalKeyMidiResolver.rootMidi(keyOriginal);
+        if (rootMidi < 0) {
+            return null; // UNKNOWN key — 산정 근거 없음
+        }
+        final double originalFit = voiceRangeFitForRoot(rootMidi, voiceLow, voiceHigh);
+        if (originalFit >= TRANSPOSE_SUGGEST_FIT_THRESHOLD) {
+            return null; // 원곡 그대로도 무난
+        }
+        int bestSemitones = 0;
+        double bestFit = originalFit;
+        for (int magnitude = 1; magnitude <= MAX_TRANSPOSE_SEMITONES; magnitude++) {
+            for (final int semitones : new int[]{-magnitude, magnitude}) {
+                final double fit = voiceRangeFitForRoot(rootMidi + semitones, voiceLow, voiceHigh);
+                if (fit > bestFit) {
+                    bestFit = fit;
+                    bestSemitones = semitones;
+                }
+            }
+        }
+        if (bestSemitones == 0) {
+            return null; // 어느 방향으로도 개선되지 않음
+        }
+        return new TransposeSuggestion(bestSemitones, bestFit);
     }
 
     /**
@@ -258,11 +408,20 @@ public class RecommendationScorer {
     /**
      * 점수 계산 결과 — 가중 합산된 {@code total}과 raw 신호 분해를 함께 담는다.
      * 정렬·랭킹은 {@code total}만 사용하고, breakdown은 응답·로깅·디버깅용.
+     * {@code suggestedTranspose}는 voiceFit 낮은 곡의 권장 조옮김(#1544)으로, 없으면 {@code null}.
      */
     public record Scored(
             double total,
-            ScoreBreakdown breakdown
+            ScoreBreakdown breakdown,
+            TransposeSuggestion suggestedTranspose
     ) {
+
+        /**
+         * 조옮김 제안이 없는 호출 편의 생성자(테스트 stub 등). {@code suggestedTranspose} 를 {@code null} 로 둔다.
+         */
+        public Scored(final double total, final ScoreBreakdown breakdown) {
+            this(total, breakdown, null);
+        }
 
         public double voiceRangeFit() {
             return breakdown.rangeFit();

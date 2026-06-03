@@ -2,6 +2,8 @@ package com.mobruji.recommendation.domain;
 
 import java.util.Objects;
 
+import com.mobruji.song.domain.Difficulty;
+import com.mobruji.song.domain.NoteName;
 import com.mobruji.song.domain.Song;
 
 /**
@@ -16,13 +18,22 @@ import com.mobruji.song.domain.Song;
  * breakdown 의 {@code rangeFit} 신호를 곡별 음역 적합도 점수(0~1)와 짧은 한국어 사유로 풀어 준다.
  * {@link #moodFit()} / {@link #moodFitReason()}은 같은 패턴으로 {@code moodMatch} 분위기 연속 유사도(#1485)를 노출한다.
  * breakdown 이 없는(과거 추천 재조회) 경로에서는 모두 {@code null} — 응답 DTO 에서 그대로 통과시킨다.
+ *
+ * <p>{@link #practiceDifficulty()} / {@link #practiceDifficultyReason()}은 연습형 페르소나(P-A, #1494)용으로
+ * 곡 자체의 가창 난이도·음역 범위(최저~최고음)를 노출한다. breakdown 이 아니라 곡 속성에서 파생하므로 재조회 경로에서도 동작하며,
+ * 음역 미보유 곡은 graceful 하게 "정보 없음" 사유를 돌려준다.
+ *
+ * <p>{@link #suggestedTranspose()} / {@link #transposedVoiceFit()} / {@link #suggestedTransposeReason()}은 연습형(P-A,
+ * #1544)
+ * 용으로, voiceFit 낮은 곡에 권장 조옮김량(반음)과 조옮김 후 재계산 적합도를 노출한다. 조옮김 불요·산정 근거 없음·재조회 경로에서는 모두 {@code null}.
  */
 public record ScoredRecommendation(
         Song song,
         double score,
         String matchReason,
         int rankPosition,
-        ScoreBreakdown breakdown
+        ScoreBreakdown breakdown,
+        TransposeSuggestion transposeSuggestion
 ) {
 
     public ScoredRecommendation {
@@ -31,14 +42,26 @@ public record ScoredRecommendation(
         if (rankPosition < 1) {
             throw new IllegalArgumentException("rankPosition must be >= 1: " + rankPosition);
         }
-        // breakdown은 readById 경로에서 null. 응답 DTO에서 분기 처리.
+        // breakdown / transposeSuggestion은 readById 경로 또는 조옮김 불요 곡에서 null. 응답 DTO에서 분기 처리.
     }
 
     /**
      * breakdown 없는 호출(과거 추천 재조회 등) 편의 생성자.
      */
     public ScoredRecommendation(final Song song, final double score, final String matchReason, final int rankPosition) {
-        this(song, score, matchReason, rankPosition, null);
+        this(song, score, matchReason, rankPosition, null, null);
+    }
+
+    /**
+     * 조옮김 제안이 없는(=대부분의 곡) 호출 편의 생성자. {@code transposeSuggestion} 만 {@code null} 로 둔다.
+     */
+    public ScoredRecommendation(
+            final Song song,
+            final double score,
+            final String matchReason,
+            final int rankPosition,
+            final ScoreBreakdown breakdown) {
+        this(song, score, matchReason, rankPosition, breakdown, null);
     }
 
     /**
@@ -109,5 +132,70 @@ public record ScoredRecommendation(
             return "요청하신 분위기와 어느 정도 비슷해요";
         }
         return "요청하신 분위기와는 결이 조금 달라요";
+    }
+
+    /**
+     * 연습형 페르소나(P-A) 지원 — 곡의 가창 난이도(EASY/NORMAL/HARD)를 그대로 노출한다(#1494).
+     * 곡 음역({@code lowMidi}/{@code highMidi})으로 자동 분류된 {@link Song#getDifficulty()} 값이며,
+     * 음역 미보유 곡은 산출 근거가 없어 {@code null}. voiceFit 과 달리 곡 자체 속성에서 파생하므로
+     * breakdown 이 없는 과거 추천 재조회 경로에서도 동작한다.
+     */
+    public Difficulty practiceDifficulty() {
+        return song.getDifficulty();
+    }
+
+    /**
+     * 연습 난이도를 풀어 주는 짧은 한국어 사유 + 음역 범위(최저~최고음) 안내(#1494). 음역대 분석 정보가 없는 곡은
+     * 그 사실을 그대로 알린다(graceful) — 빈 응답 대신 "정보 없음" 을 노출해 P-A 가 항상 피드백을 받는다.
+     */
+    public String practiceDifficultyReason() {
+        return describePracticeDifficulty(song.getDifficulty(), song.getLowMidi(), song.getHighMidi());
+    }
+
+    private static String describePracticeDifficulty(
+            final Difficulty difficulty,
+            final Integer lowMidi,
+            final Integer highMidi) {
+        if (difficulty == null || lowMidi == null || highMidi == null) {
+            return "아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요";
+        }
+        final String range = NoteName.of(lowMidi) + "~" + NoteName.of(highMidi);
+        return switch (difficulty) {
+            case EASY -> "음역 " + range + ", 음역 폭이 넓지 않아 부담 없이 연습하기 좋아요";
+            case NORMAL -> "음역 " + range + ", 적당한 난이도라 연습용으로 무난해요";
+            case HARD -> "음역 " + range + ", 고음·넓은 음역이라 도전적인 곡이에요";
+        };
+    }
+
+    /**
+     * 권장 조옮김량(반음 수, #1544). 양수=올림, 음수=내림. 원곡 키가 음역대에 부담스러운 곡에만 채워지며,
+     * 조옮김이 불필요하거나(원곡 무난) 산정 근거가 없는(키 UNKNOWN) 곡, 과거 추천 재조회 경로에서는 {@code null}.
+     */
+    public Integer suggestedTranspose() {
+        return transposeSuggestion == null ? null : transposeSuggestion.semitones();
+    }
+
+    /**
+     * 권장 조옮김을 적용해 재계산한 음역 적합도(0~1, #1544). voiceFit(rangeFit)과 동일한 산식이라 직접 비교 가능하다.
+     * 조옮김 제안이 없으면 {@code null}.
+     */
+    public Double transposedVoiceFit() {
+        return transposeSuggestion == null ? null : transposeSuggestion.transposedVoiceFit();
+    }
+
+    /**
+     * 조옮김 제안을 풀어 주는 짧은 한국어 사유(#1544). 제안이 없으면 {@code null}.
+     */
+    public String suggestedTransposeReason() {
+        if (transposeSuggestion == null) {
+            return null;
+        }
+        return describeTranspose(transposeSuggestion.semitones());
+    }
+
+    private static String describeTranspose(final int semitones) {
+        final int magnitude = Math.abs(semitones);
+        final String direction = semitones > 0 ? "올려" : "내려";
+        return magnitude + "키 " + direction + " 부르면 음역대에 더 잘 맞아요";
     }
 }

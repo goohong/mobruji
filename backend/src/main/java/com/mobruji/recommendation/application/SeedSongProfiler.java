@@ -47,15 +47,17 @@ public class SeedSongProfiler {
     /**
      * seed 곡들로부터 추천 입력 프로필을 도출한다.
      *
-     * @param sessionId      세션 식별자(필수).
-     * @param seedSongs      사용자가 부른 곡(최소 1곡). 비어 있으면 안 된다 — 호출 측이 보장.
-     * @param excludeSongIds 추가로 결과에서 제외할 곡(이미 부른 seed 는 자동 제외되므로 그 외 명시 제외분).
+     * @param sessionId             세션 식별자(필수).
+     * @param seedSongs             사용자가 부른 곡(최소 1곡). 비어 있으면 안 된다 — 호출 측이 보장.
+     * @param excludeSongIds        추가로 결과에서 제외할 곡(이미 부른 seed 는 자동 제외되므로 그 외 명시 제외분).
+     * @param excludeSessionHistory 세션 단위 자동 누적 제외 플래그(#1549). {@code create} 파이프라인으로 그대로 전달.
      * @return 기존 추천 파이프라인에 그대로 투입 가능한 커맨드.
      */
     public CreateRecommendationCommand profile(
             final String sessionId,
             final List<Song> seedSongs,
-            final List<Long> excludeSongIds) {
+            final List<Long> excludeSongIds,
+            final boolean excludeSessionHistory) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(seedSongs, "seedSongs must not be null");
         Objects.requireNonNull(excludeSongIds, "excludeSongIds must not be null");
@@ -74,7 +76,8 @@ public class SeedSongProfiler {
                 mood,
                 preferredBpm,
                 null,
-                excludeSongIds);
+                excludeSongIds,
+                excludeSessionHistory);
     }
 
     private static int[] deriveVoiceRange(final List<Song> seedSongs) {

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sqlite3
 import sys
@@ -605,10 +606,17 @@ class DirectiveCompleteOnMergeTests(unittest.TestCase):
         self.assertEqual(bot.extract_directive_ids_from_body(None), [])  # type: ignore[arg-type]
 
     def test_extract_directive_id_case_insensitive(self) -> None:
-        body = "DIRECTIVE: 1234567890123 / closes Directive 1234567890124"
+        # #1473: 줄 시작 앵커 도입 — 줄 중간 prose 언급은 의도적으로 미매칭.
+        # 줄 시작 토큰만 대소문자 무관하게 추출.
+        body = (
+            "DIRECTIVE: 1234567890123\n"
+            "closes Directive 1234567890124\n"
+            "본문 중간 mentions directive 9999999999999 는 미매칭"
+        )
         ids = bot.extract_directive_ids_from_body(body)
         self.assertIn("1234567890123", ids)
         self.assertIn("1234567890124", ids)
+        self.assertNotIn("9999999999999", ids)
 
     def test_fetch_recent_merged_prs_graceful_on_gh_failure(self) -> None:
         # subprocess.run mock — rc=1 simulating gh fail.
@@ -674,6 +682,152 @@ class CycleForumThreadCompleteOnMergeTests(unittest.TestCase):
     def test_extract_cycle_forum_short_thread_id_skipped(self) -> None:
         body = "cycle-forum: be:1234"
         self.assertEqual(bot.extract_cycle_forum_refs_from_body(body), [])
+
+
+class LookupPrCycleThreadTests(unittest.TestCase):
+    """(#7) agent_state 의 pr_cycle_thread:<N> 매핑 1순위 lookup."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
+        self.tmp.close()
+        conn = sqlite3.connect(self.tmp.name)
+        conn.execute(
+            "CREATE TABLE agent_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL)"
+        )
+        conn.commit()
+        conn.close()
+        self._orig_db = bot.AGENT_EVENTS_DB_PATH
+        bot.AGENT_EVENTS_DB_PATH = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        bot.AGENT_EVENTS_DB_PATH = self._orig_db
+        os.unlink(self.tmp.name)
+
+    def _put(self, pr: int, cycle: str, thread_id: str) -> None:
+        conn = sqlite3.connect(self.tmp.name)
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_state (key, value, updated_at) "
+            "VALUES (?, ?, ?)",
+            (f"pr_cycle_thread:{pr}", json.dumps({"cycle": cycle, "thread_id": thread_id}), "t"),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_lookup_hit(self) -> None:
+        self._put(1593, "be", "1509466456230989926")
+        self.assertEqual(
+            bot.lookup_pr_cycle_thread(1593), ("be", "1509466456230989926")
+        )
+
+    def test_lookup_miss_returns_none(self) -> None:
+        self.assertIsNone(bot.lookup_pr_cycle_thread(9999))
+
+    def test_lookup_invalid_cycle_rejected(self) -> None:
+        self._put(10, "xx", "1509466456230989926")
+        self.assertIsNone(bot.lookup_pr_cycle_thread(10))
+
+    def test_lookup_short_thread_rejected(self) -> None:
+        self._put(11, "fe", "1234")
+        self.assertIsNone(bot.lookup_pr_cycle_thread(11))
+
+    def test_lookup_corrupt_value_returns_none(self) -> None:
+        conn = sqlite3.connect(self.tmp.name)
+        conn.execute(
+            "INSERT INTO agent_state (key, value, updated_at) VALUES (?, ?, ?)",
+            ("pr_cycle_thread:12", "{not json", "t"),
+        )
+        conn.commit()
+        conn.close()
+        self.assertIsNone(bot.lookup_pr_cycle_thread(12))
+
+
+class CycleThreadCompleteLoopMappingTests(unittest.TestCase):
+    """(#7) cycle_thread_complete_on_merge_loop — 매핑 1순위 + 본문 ref fallback."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
+        self.tmp.close()
+        conn = sqlite3.connect(self.tmp.name)
+        conn.execute(
+            "CREATE TABLE agent_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, "
+            "updated_at TEXT NOT NULL)"
+        )
+        conn.commit()
+        conn.close()
+        self._orig_db = bot.AGENT_EVENTS_DB_PATH
+        bot.AGENT_EVENTS_DB_PATH = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        bot.AGENT_EVENTS_DB_PATH = self._orig_db
+        os.unlink(self.tmp.name)
+
+    def _put_mapping(self, pr: int, cycle: str, thread_id: str) -> None:
+        conn = sqlite3.connect(self.tmp.name)
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_state (key, value, updated_at) "
+            "VALUES (?, ?, ?)",
+            (f"pr_cycle_thread:{pr}", json.dumps({"cycle": cycle, "thread_id": thread_id}), "t"),
+        )
+        conn.commit()
+        conn.close()
+
+    def _run_once(self, prs: list[dict]) -> list[list[str]]:
+        """loop 를 1 iter 만 — fetcher 반환 후 CancelledError 로 탈출. retag argv list 반환."""
+        retags: list[list[str]] = []
+
+        def fake_subprocess_run(argv, **_kwargs):
+            retags.append(argv)
+            r = mock.MagicMock()
+            r.returncode = 0
+            return r
+
+        async def fake_sleep(_seconds):
+            raise asyncio.CancelledError
+
+        with mock.patch.object(bot.subprocess, "run", side_effect=fake_subprocess_run), \
+             mock.patch.object(bot.Path, "exists", return_value=True), \
+             mock.patch.object(bot.asyncio, "sleep", side_effect=fake_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(
+                    bot.cycle_thread_complete_on_merge_loop(
+                        initial_delay=0,
+                        fetcher=lambda: prs,
+                    )
+                )
+        return retags
+
+    def test_mapping_drives_retag_without_body_ref(self) -> None:
+        """본문에 cycle-forum ref 가 전혀 없어도(=PR #1593 구멍) 매핑으로 retag."""
+        self._put_mapping(1593, "be", "1509466456230989926")
+        retags = self._run_once([{"number": 1593, "body": "Closes #1593 (no cycle-forum ref)"}])
+        self.assertEqual(len(retags), 1)
+        argv = retags[0]
+        self.assertIn("--forum-retag", argv)
+        self.assertIn("1509466456230989926", argv)
+        self.assertIn("be", argv)
+        self.assertIn("완료", argv)
+
+    def test_body_ref_fallback_when_no_mapping(self) -> None:
+        """매핑 없으면 본문 ref 로 fallback (하위호환)."""
+        retags = self._run_once(
+            [{"number": 200, "body": "cycle-forum: fe:2222222222222222222"}]
+        )
+        self.assertEqual(len(retags), 1)
+        self.assertIn("2222222222222222222", retags[0])
+        self.assertIn("fe", retags[0])
+
+    def test_mapping_and_body_deduped(self) -> None:
+        """매핑 == 본문 ref 면 1회만 retag (중복 전이 금지)."""
+        self._put_mapping(300, "be", "3333333333333333333")
+        retags = self._run_once(
+            [{"number": 300, "body": "cycle-forum: be:3333333333333333333"}]
+        )
+        self.assertEqual(len(retags), 1)
+
+    def test_no_mapping_no_body_skips(self) -> None:
+        retags = self._run_once([{"number": 400, "body": "그냥 본문"}])
+        self.assertEqual(retags, [])
 
 
 # 2026-05-29 폐기: ModeToggleContentTests + FindModeToggleMessageTests.

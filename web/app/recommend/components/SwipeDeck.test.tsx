@@ -19,7 +19,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { SwipeDeck, resolveSwipeIntent } from "./SwipeDeck";
+import {
+  SwipeDeck,
+  resolveSwipeIntent,
+  computeExitDurationMs,
+  SWIPE_EXIT_DURATION_MS,
+  SWIPE_EXIT_MIN_DURATION_MS,
+} from "./SwipeDeck";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 import type { UserVoiceRange } from "@/lib/scoreBreakdown";
 import { useLikesStore } from "@/store/likes";
@@ -128,6 +134,42 @@ describe("resolveSwipeIntent", () => {
     // 폭 100 → ratio 25px 보다 최소 80px 가 우선.
     expect(resolveSwipeIntent(50, 100)).toBeNull();
     expect(resolveSwipeIntent(90, 100)).toBe("like");
+  });
+
+  it("변위는 작아도 같은 방향 빠른 플릭이면 관성으로 커밋한다", () => {
+    // 변위 40px(임계 100 미만)이지만 우측으로 빠르게 튕김 → like.
+    expect(resolveSwipeIntent(40, 400, 1.2)).toBe("like");
+    expect(resolveSwipeIntent(-40, 400, -1.2)).toBe("pass");
+  });
+
+  it("속도가 느리거나 변위가 미세하면 플릭으로 보지 않는다", () => {
+    // 속도 임계 미만.
+    expect(resolveSwipeIntent(40, 400, 0.3)).toBeNull();
+    // 변위가 최소 px 미만(미세 떨림).
+    expect(resolveSwipeIntent(10, 400, 1.5)).toBeNull();
+  });
+
+  it("속도와 변위 방향이 어긋나면 커밋하지 않는다", () => {
+    // 오른쪽으로 끌었지만 릴리즈 순간 왼쪽으로 튕김 → 모호 → null.
+    expect(resolveSwipeIntent(40, 400, -1.2)).toBeNull();
+  });
+});
+
+describe("computeExitDurationMs", () => {
+  it("느린 릴리즈는 기본 지속을 쓴다", () => {
+    expect(computeExitDurationMs(0)).toBe(SWIPE_EXIT_DURATION_MS);
+    expect(computeExitDurationMs(0.4)).toBe(SWIPE_EXIT_DURATION_MS);
+  });
+
+  it("빠른 플릭일수록 지속이 짧아진다(관성 감속)", () => {
+    const slowFlick = computeExitDurationMs(0.8);
+    const fastFlick = computeExitDurationMs(2.0);
+    expect(fastFlick).toBeLessThan(slowFlick);
+    expect(fastFlick).toBeLessThanOrEqual(SWIPE_EXIT_DURATION_MS);
+  });
+
+  it("매우 빠른 플릭은 최소 지속으로 수렴한다", () => {
+    expect(computeExitDurationMs(5)).toBe(SWIPE_EXIT_MIN_DURATION_MS);
   });
 });
 

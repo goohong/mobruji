@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 
 import { SongDetailContent } from "./SongDetailContent";
 import type { SongResponse } from "@/lib/api/recommendation";
+import { buildRecommendedSong } from "@/lib/test-fixtures/history";
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
@@ -138,5 +139,22 @@ describe("SongDetailContent", () => {
     const link = screen.getByRole("link", { name: /테스트 곡 YouTube에서 듣기/ });
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  // closes #1484 — BE 가 voiceFit/moodFit + 한국어 사유를 내려준 추천 컨텍스트에서
+  // 상세 모달이 적합도 배지 + 사유를 노출하는지 회귀 가드.
+  it("추천 컨텍스트에서 음역/분위기 적합도 배지 + 사유를 노출한다", () => {
+    const item = buildRecommendedSong({
+      voiceFit: 0.88,
+      voiceFitReason: "최고음이 편하게 닿는 음역이에요.",
+      moodFit: 0.55,
+      moodFitReason: "선택한 분위기와 잘 어울려요.",
+    });
+    renderWithQueryClient(<SongDetailContent item={item} />);
+    expect(screen.getByLabelText("음역 적합도 88%")).toBeInTheDocument();
+    expect(
+      screen.getByText("최고음이 편하게 닿는 음역이에요."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("분위기 적합도 55%")).toBeInTheDocument();
   });
 });

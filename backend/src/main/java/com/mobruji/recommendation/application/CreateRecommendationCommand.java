@@ -18,6 +18,10 @@ import com.mobruji.song.domain.Mood;
  *
  * <p>{@code ageGroup}은 #1487에서 도입된 연령대 입력(옵션, nullable). null이면 generationFit 신호가 0 이 되어
  * 랭킹에 영향이 없다.
+ *
+ * <p>{@code excludeSessionHistory}는 #1549에서 도입된 세션 단위 자동 중복 회피 플래그. {@code true}면 서비스가
+ * 같은 {@code sessionId}의 이전 추천 결과 곡과 이전에 제외/부른 곡을 {@code excludeSongIds}에 자동 누적 병합해
+ * 반복 추천을 방지한다. {@code false}(기본)면 기존 동작 그대로 — 클라이언트가 넘긴 {@code excludeSongIds}만 적용.
  */
 public record CreateRecommendationCommand(
         String sessionId,
@@ -26,7 +30,8 @@ public record CreateRecommendationCommand(
         Mood mood,
         Integer preferredBpm,
         AgeGroup ageGroup,
-        List<Long> excludeSongIds
+        List<Long> excludeSongIds,
+        boolean excludeSessionHistory
 ) {
 
     public CreateRecommendationCommand {

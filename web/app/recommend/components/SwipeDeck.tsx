@@ -50,23 +50,35 @@ import { SongDetailContent } from "./SongDetailContent";
  */
 const PREFETCH_THRESHOLD = 2;
 
-/** exit 애니메이션 지속(ms). tokens.css `--duration-slow`(300ms)와 정렬. */
+/** exit 애니메이션 기본 지속(ms). tokens.css `--duration-slow`(300ms)와 정렬. */
 export const SWIPE_EXIT_DURATION_MS = 300;
+
+/** 관성 exit 최소 지속(ms) — 빠른 플릭일수록 이 값으로 수렴(급감속). */
+export const SWIPE_EXIT_MIN_DURATION_MS = 140;
 
 /** 커밋 임계: 카드 폭의 비율 또는 최소 px 중 큰 값. */
 export const SWIPE_COMMIT_RATIO = 0.25;
 export const SWIPE_COMMIT_MIN_PX = 80;
 
+/** 플릭(관성) 커밋 속도 임계(px/ms). 이 속도 이상으로 튕기면 변위가 작아도 커밋. */
+export const SWIPE_FLICK_VELOCITY = 0.5;
+/** 플릭 커밋에 필요한 최소 변위(px) — 정지 상태의 미세 떨림이 오발화하지 않도록. */
+export const SWIPE_FLICK_MIN_PX = 24;
+/** exit 지속이 최소값에 수렴하는 속도(px/ms). */
+const SWIPE_EXIT_FAST_VELOCITY = 2.5;
+
 /**
- * 드래그 변위(px)와 카드 폭으로 스와이프 의도를 판정한다 (순수 함수 — 단위 테스트 대상).
+ * 드래그 변위(px)·카드 폭·릴리즈 속도로 스와이프 의도를 판정한다 (순수 함수 — 단위 테스트 대상).
  *
- * - 우(+) 임계 초과 → `like`
- * - 좌(-) 임계 초과 → `pass`
- * - 임계 미만 → null (스냅백)
+ * - 우(+) 변위 임계 초과 → `like`
+ * - 좌(-) 변위 임계 초과 → `pass`
+ * - 변위는 작지만 같은 방향으로 빠르게 튕긴(플릭) 경우 → 관성으로 커밋
+ * - 그 외 → null (스냅백)
  */
 export function resolveSwipeIntent(
   deltaX: number,
   width: number,
+  velocityX = 0,
 ): SwipeReaction | null {
   const threshold = Math.max(SWIPE_COMMIT_MIN_PX, width * SWIPE_COMMIT_RATIO);
   if (deltaX >= threshold) {
@@ -75,7 +87,35 @@ export function resolveSwipeIntent(
   if (deltaX <= -threshold) {
     return "pass";
   }
+  // 빠른 플릭(관성): 변위가 임계 미만이어도 속도가 충분하고 변위와 같은 방향이면 커밋.
+  if (
+    Math.abs(velocityX) >= SWIPE_FLICK_VELOCITY &&
+    Math.abs(deltaX) >= SWIPE_FLICK_MIN_PX &&
+    Math.sign(velocityX) === Math.sign(deltaX)
+  ) {
+    return velocityX > 0 ? "like" : "pass";
+  }
   return null;
+}
+
+/**
+ * 릴리즈 속도로 exit 트랜지션 지속(ms)을 정한다 (순수 함수 — 단위 테스트 대상).
+ * 느린 릴리즈는 기본 지속, 빠른 플릭일수록 최소 지속에 선형 수렴해 관성 감속을 표현한다.
+ */
+export function computeExitDurationMs(velocityX: number): number {
+  const speed = Math.abs(velocityX);
+  if (speed <= SWIPE_FLICK_VELOCITY) {
+    return SWIPE_EXIT_DURATION_MS;
+  }
+  const ratio = Math.min(
+    1,
+    (speed - SWIPE_FLICK_VELOCITY) /
+      (SWIPE_EXIT_FAST_VELOCITY - SWIPE_FLICK_VELOCITY),
+  );
+  return Math.round(
+    SWIPE_EXIT_DURATION_MS +
+      ratio * (SWIPE_EXIT_MIN_DURATION_MS - SWIPE_EXIT_DURATION_MS),
+  );
 }
 
 type SwipeDeckProps = {
@@ -200,15 +240,19 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const dragStartXRef = useRef<number | null>(null);
   const resolvingRef = useRef(false);
+  // 속도 추적용 — 마지막 포인터 표본 + 평활된 속도(px/ms).
+  const lastSampleRef = useRef<{ x: number; t: number } | null>(null);
+  const velocityRef = useRef(0);
 
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [exitDirection, setExitDirection] = useState<"left" | "right" | null>(
     null,
   );
+  const [exitDurationMs, setExitDurationMs] = useState(SWIPE_EXIT_DURATION_MS);
 
   const commit = useCallback(
-    (reaction: SwipeReaction) => {
+    (reaction: SwipeReaction, velocityX = 0) => {
       if (resolvingRef.current) {
         return;
       }
@@ -221,10 +265,12 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
         onResolve(reaction, songId);
         return;
       }
+      const duration = computeExitDurationMs(velocityX);
+      setExitDurationMs(duration);
       setExitDirection(reaction === "like" ? "right" : "left");
       window.setTimeout(() => {
         onResolve(reaction, songId);
-      }, SWIPE_EXIT_DURATION_MS);
+      }, duration);
     },
     [liked, prefersReducedMotion, toggleLike, onResolve, songId],
   );
@@ -242,6 +288,8 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
       return;
     }
     dragStartXRef.current = event.clientX;
+    lastSampleRef.current = { x: event.clientX, t: performance.now() };
+    velocityRef.current = 0;
     setIsDragging(true);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -249,6 +297,17 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isDragging || dragStartXRef.current === null) {
       return;
+    }
+    const now = performance.now();
+    const last = lastSampleRef.current;
+    if (last) {
+      const dt = now - last.t;
+      if (dt > 0) {
+        const instantaneous = (event.clientX - last.x) / dt;
+        // 지수 평활 — 최근 표본에 가중해 노이즈를 완화한다.
+        velocityRef.current = velocityRef.current * 0.4 + instantaneous * 0.6;
+        lastSampleRef.current = { x: event.clientX, t: now };
+      }
     }
     setDragX(event.clientX - dragStartXRef.current);
   };
@@ -259,10 +318,11 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
     }
     setIsDragging(false);
     dragStartXRef.current = null;
+    const velocityX = velocityRef.current;
     const width = cardRef.current?.offsetWidth ?? 0;
-    const intent = resolveSwipeIntent(dragX, width);
+    const intent = resolveSwipeIntent(dragX, width, velocityX);
     if (intent) {
-      commit(intent);
+      commit(intent, velocityX);
     } else {
       setDragX(0);
     }
@@ -278,9 +338,15 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
       }deg)`
     : `translateX(${dragX}px) rotate(${dragX * 0.04}deg)`;
 
-  const transitionClass = isDragging
-    ? "" // 드래그 중에는 손가락을 즉시 따라오도록 transition 제거.
-    : "transition-[transform,opacity] duration-[var(--duration-slow)] ease-[var(--ease-out)]";
+  // 트랜지션을 상태별로 인라인 구성한다 (exit 지속이 릴리즈 속도에 따라 가변).
+  //  - 드래그 중: 손가락을 즉시 따라오도록 트랜지션 제거.
+  //  - exit: 속도 기반 가변 지속 + ease-out 으로 관성 감속.
+  //  - 스냅백/정지: spring easing 으로 자연스러운 관성 settle.
+  const transition = isDragging
+    ? "none"
+    : exitDirection
+      ? `transform ${exitDurationMs}ms var(--ease-out), opacity ${exitDurationMs}ms var(--ease-out)`
+      : "transform var(--duration-slow) var(--ease-spring), opacity var(--duration-slow) var(--ease-out)";
 
   return (
     <div className="flex flex-col gap-4">
@@ -298,9 +364,10 @@ function SwipeCard({ item, userVoiceRange, onResolve }: SwipeCardProps) {
           style={{
             transform,
             opacity: exitDirection ? 0 : 1,
+            transition,
             touchAction: "pan-y",
           }}
-          className={`animate-scale-in select-none rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] ${transitionClass}`}
+          className="animate-scale-in select-none rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)]"
         >
           <SongDetailContent item={item} userVoiceRange={userVoiceRange} />
         </div>

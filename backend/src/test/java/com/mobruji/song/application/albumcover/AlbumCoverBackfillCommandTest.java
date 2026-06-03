@@ -33,7 +33,12 @@ class AlbumCoverBackfillCommandTest {
                     "KR",
                     Duration.ofSeconds(5),
                     Duration.ZERO,
-                    "600x600"));
+                    "600x600"),
+            new AlbumCoverProperties.CoverArtArchive(
+                    "https://musicbrainz.org/ws/2",
+                    "https://coverartarchive.org",
+                    "mobruji-backend/0.1 (+test)",
+                    Duration.ofSeconds(5)));
 
     private static Song seed(final String title) {
         return Song.builder()

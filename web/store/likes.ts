@@ -65,6 +65,10 @@ export const useLikesStore = create<LikesState>()(
     {
       name: "mobruji-likes",
       storage: createJSONStorage(() => localStorage),
+      // #1105 회귀 가드: shape 변경 시 옛 localStorage 를 그대로 hydrate 하지 않도록
+      // version 을 명시한다. migrate 는 v1 baseline passthrough — version bump 시 변환 hook.
+      version: 1,
+      migrate: (persisted) => persisted as LikesState,
     },
   ),
 );

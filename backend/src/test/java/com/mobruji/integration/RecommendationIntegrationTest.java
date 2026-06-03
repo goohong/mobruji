@@ -2,6 +2,7 @@ package com.mobruji.integration;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
@@ -188,6 +189,178 @@ class RecommendationIntegrationTest {
     }
 
     @Test
+    @DisplayName("E2E (#1494): 음역 보유 곡은 practiceDifficulty(난이도) + 음역 범위(최저~최고음) 사유가 응답에 노출된다")
+    void e2e_practiceDifficultyExposedForRangedSong() {
+        // given: 음역대를 가진 곡만 시드 (HARD: low 57 ~ high 81, span 24, 음역 A3~A5)
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(Song.builder()
+                .title("도전곡").artist("도전가수").releaseYear(2020)
+                .keyOriginal(MusicalKey.C_MAJOR).bpm(120).mood(Mood.UPBEAT)
+                .language("ko").genre("발라드")
+                .lowMidi(57).highMidi(81)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build());
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e06",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 82,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].practiceDifficulty", equalTo("HARD"))
+                .body("recommendations[0].practiceDifficultyReason", equalTo("음역 A3~A5, 고음·넓은 음역이라 도전적인 곡이에요"));
+    }
+
+    @Test
+    @DisplayName("E2E (#1494): 음역 미보유 곡은 practiceDifficulty=null + graceful 사유로 처리된다")
+    void e2e_practiceDifficultyGracefulForSongWithoutRange() {
+        // 기본 시드(buildSong)는 lowMidi/highMidi 미설정 → difficulty null
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e07",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].practiceDifficulty", nullValue())
+                .body("recommendations[0].practiceDifficultyReason",
+                        equalTo("아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요"));
+    }
+
+    @Test
+    @DisplayName("E2E (#1544): voiceFit 낮은 곡은 suggestedTranspose(반음) + 조옮김 후 voiceFit 이 노출된다")
+    void e2e_transposeSuggestedForLowFitSong() {
+        // given: A_MAJOR(root 69) 한 곡만 시드. 사용자 음역 [50,70](center 60)은 곡 키 중심(69)과 멀어 voiceFit 이 낮다.
+        //        -6 반음 내리면 root 63 → 음역대 중심에 가까워져 적합도가 크게 오른다(0.4 임계 초과).
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(buildSong("높은키곡", "어떤가수", MusicalKey.A_MAJOR, Mood.UPBEAT, "발라드"));
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e08",
+                  "voiceRangeLow": 50,
+                  "voiceRangeHigh": 70,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        final Integer requestId = given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                // 원곡 voiceFit 은 낮음(< 0.4) → 조옮김 제안이 채워진다.
+                .body("recommendations[0].voiceFit", lessThanOrEqualTo(0.4f))
+                .body("recommendations[0].suggestedTranspose", equalTo(-6))
+                .body("recommendations[0].transposedVoiceFit", notNullValue())
+                // 조옮김 후 적합도는 원곡보다 높고(임계 초과) [0,1] 범위 안.
+                .body("recommendations[0].transposedVoiceFit", greaterThan(0.4f))
+                .body("recommendations[0].transposedVoiceFit", lessThanOrEqualTo(1.0f))
+                .body("recommendations[0].suggestedTransposeReason", equalTo("6키 내려 부르면 음역대에 더 잘 맞아요"))
+                .extract().path("requestId");
+
+        // 재조회 경로는 breakdown 미영속 → 조옮김 필드도 null.
+        given()
+                .when()
+                .get("/api/v1/recommendations/" + requestId)
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .body("recommendations[0].suggestedTranspose", nullValue())
+                .body("recommendations[0].transposedVoiceFit", nullValue())
+                .body("recommendations[0].suggestedTransposeReason", nullValue());
+    }
+
+    @Test
+    @DisplayName("E2E (#1544): 원곡 그대로 음역대에 무난한 곡은 조옮김 제안이 없다(null)")
+    void e2e_noTransposeWhenFitIsAdequate() {
+        // given: E_MAJOR(root 64) 한 곡. 사용자 음역 [55,75](center 65)은 곡 키 중심과 거의 일치 → voiceFit 높음.
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(buildSong("딱맞는곡", "어떤가수", MusicalKey.E_MAJOR, Mood.UPBEAT, "발라드"));
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e09",
+                  "voiceRangeLow": 55,
+                  "voiceRangeHigh": 75,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations[0].voiceFit", greaterThanOrEqualTo(0.4f))
+                .body("recommendations[0].suggestedTranspose", nullValue())
+                .body("recommendations[0].transposedVoiceFit", nullValue())
+                .body("recommendations[0].suggestedTransposeReason", nullValue());
+    }
+
+    @Test
+    @DisplayName("E2E (#1639): 저음역 사용자(40~52)는 고음역 편중 실측 band 카탈로그에서도 모든 곡 voiceFit>0 (전 곡 0 회귀 가드)")
+    void e2e_lowBandUser_allVoiceFitPositive() {
+        // given: 실측 band(lowMidi/highMidi) 가 고음역 편중인 카탈로그. 저음역 사용자와 disjoint 이지만
+        //        soft-decay 로 모든 곡 voiceFit>0 이어야 한다(hard-zero → 변별 불가 사고 #1639).
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(buildBandSong("고음역곡1", "가수A", MusicalKey.C_MAJOR, 60, 78));
+        songRepository.save(buildBandSong("고음역곡2", "가수B", MusicalKey.D_MAJOR, 62, 76));
+        songRepository.save(buildBandSong("고음역곡3", "가수C", MusicalKey.E_MAJOR, 64, 79));
+
+        final String createBody = """
+                {
+                  "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e10",
+                  "voiceRangeLow": 40,
+                  "voiceRangeHigh": 52,
+                  "mood": "UPBEAT"
+                }
+                """;
+
+        given()
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .body(createBody)
+                .when()
+                .post("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.CREATED.value())
+                .body("recommendations.size()", greaterThan(0))
+                // 모든 추천 곡의 voiceFit 이 0 이 아니라 양수 — 저음역 사용자 전 곡 0 사고 회귀 가드(#1639)
+                .body("recommendations.voiceFit", everyItem(greaterThan(0.0f)))
+                .body("recommendations.voiceFit", everyItem(lessThanOrEqualTo(1.0f)));
+    }
+
+    @Test
     @DisplayName("E2E: 없는 추천 ID는 404")
     void e2e_notFound() {
         given()
@@ -278,6 +451,21 @@ class RecommendationIntegrationTest {
                 .keyOriginal(key).bpm(120).mood(mood)
                 .language("ko").genre(genre)
                 .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+    }
+
+    private static Song buildBandSong(
+            final String title,
+            final String artist,
+            final MusicalKey key,
+            final int lowMidi,
+            final int highMidi) {
+        return Song.builder()
+                .title(title).artist(artist).releaseYear(2020)
+                .keyOriginal(key).bpm(120).mood(Mood.UPBEAT)
+                .language("ko").genre("팝")
+                .lowMidi(lowMidi).highMidi(highMidi)
+                .metadataSource(MetadataSource.AUDIO_ANALYSIS)
                 .build();
     }
 }

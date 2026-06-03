@@ -71,8 +71,8 @@ import {
   makeWrapper,
 } from "@/lib/test-helpers/race-helpers";
 import {
-  buildSongList,
-  type SongResponse,
+  buildSongListResponse,
+  type SongListResponse,
 } from "@/lib/test-fixtures/song-list";
 
 // next/navigation 가짜 구현 — happy-dom 환경에서 next/navigation hook 이 동작하지 않음.
@@ -134,8 +134,8 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
   it("시나리오 1: keyword 전환 시 이전 keyword 응답이 새 keyword 결과 오염 안 함 (queryKey 격리)", async () => {
     const user = userEvent.setup();
 
-    const defHello = createDeferred<SongResponse[]>();
-    const defWorld = createDeferred<SongResponse[]>();
+    const defHello = createDeferred<SongListResponse>();
+    const defWorld = createDeferred<SongListResponse>();
     searchSongsMock
       .mockReturnValueOnce(defHello.promise)
       .mockReturnValueOnce(defWorld.promise);
@@ -169,7 +169,7 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
 
     // 이전 keyword (hello) 응답이 **뒤늦게** 도착 — 새 화면이 이를 차용하면 안 됨.
     await act(async () => {
-      defHello.resolve(buildSongList("hello", 2, 100));
+      defHello.resolve(buildSongListResponse("hello", 2, 100));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -180,7 +180,7 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
 
     // world 응답 도착 — 마지막 keyword 의 결과만 화면에.
     await act(async () => {
-      defWorld.resolve(buildSongList("world", 2, 200));
+      defWorld.resolve(buildSongListResponse("world", 2, 200));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -204,7 +204,7 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
   it("시나리오 2: keyword 모두 지우면 enabled=false → 새 호출 0건 + 가이드 복귀", async () => {
     const user = userEvent.setup();
 
-    searchSongsMock.mockResolvedValueOnce(buildSongList("hello", 1, 100));
+    searchSongsMock.mockResolvedValueOnce(buildSongListResponse("hello", 1, 100));
 
     renderWithQueryClient(<SongSearchPage />);
 
@@ -253,7 +253,7 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
   it("시나리오 3: pending 중 페이지 unmount → React state update warning 0건", async () => {
     const user = userEvent.setup();
 
-    const def = createDeferred<SongResponse[]>();
+    const def = createDeferred<SongListResponse>();
     searchSongsMock.mockReturnValueOnce(def.promise);
 
     const consoleErrorSpy = vi
@@ -277,7 +277,7 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
 
     // 응답 도착 — observer 가 비어있어 setState 가 안 일어나야 한다.
     await act(async () => {
-      def.resolve(buildSongList("hello", 1, 100));
+      def.resolve(buildSongListResponse("hello", 1, 100));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -348,7 +348,7 @@ describe("/songs 검색 페이지 query/cleanup race 가드 (#1100 후속)", () 
     // 윈도우 안에 5타가 모두 들어가도록 강제.
     const user = userEvent.setup({ delay: null });
 
-    searchSongsMock.mockResolvedValueOnce(buildSongList("hello", 1, 100));
+    searchSongsMock.mockResolvedValueOnce(buildSongListResponse("hello", 1, 100));
 
     renderWithQueryClient(<SongSearchPage />);
 

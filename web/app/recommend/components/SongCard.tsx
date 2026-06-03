@@ -26,7 +26,7 @@
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
  *     · `song.difficulty`가 있으면 그 값을, 없으면 `deriveDifficulty(lowMidi, highMidi)`로 계산.
  *     · 둘 다 없으면(legacy 응답) 라벨을 숨긴다.
- *   - 최고음 음표명 (예: "라♯5 (F#5)") — `midiToCombinedNoteName(highMidi)` (#318)
+ *   - 최고음 음표명 (예: "라♯5") — `midiToKoreanNoteName(highMidi)` (#318)
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
  *   - matchReason 한 줄 — 추천 컨텍스트에서만
@@ -48,19 +48,21 @@ import {
 } from "react";
 
 import type {
+  RecommendationPersona,
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
+import { resolvePersonaReason } from "@/lib/persona";
 import {
-  deriveDifficulty,
   difficultyLabel,
+  resolveSongDifficulty,
   type Difficulty,
 } from "@/lib/difficulty";
 import {
   useBookmarkToggleMutation,
   useLikeToggleMutation,
 } from "@/lib/hooks/useFeedbackToggleMutation";
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
@@ -69,6 +71,7 @@ import {
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
+import { FitBadge, FitReasons } from "./FitBadge";
 import { AlbumCoverThumbnail } from "./SongDetailContent";
 
 /**
@@ -100,6 +103,12 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
       onShowDetail?: () => void;
+      /**
+       * 사용자가 추천 화면에서 고른 의도 페르소나(P-E 안전곡 등). BE 응답에 아직
+       * `persona`/`personaReason` 이 없을 때 결과 카드의 페르소나 사유 fallback 근거가
+       * 된다(lib/persona.resolvePersonaReason). 미지정이면 페르소나 사유 줄을 생략한다.
+       */
+      activePersona?: RecommendationPersona | null;
     }
   | {
       song: SongResponse;
@@ -107,6 +116,7 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: never;
       onShowDetail?: () => void;
+      activePersona?: never;
     };
 
 export function SongCard(props: SongCardProps) {
@@ -116,7 +126,12 @@ export function SongCard(props: SongCardProps) {
   const href: string | undefined = props.href;
   const userVoiceRange: UserVoiceRange | null =
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
+  const activePersona: RecommendationPersona | null =
+    "item" in props && props.activePersona ? props.activePersona : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  // closes #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트")를 카드 표면에 노출.
+  // BE personaReason 우선, 없으면 활성 페르소나 + 곡 난이도 기반 client fallback.
+  const personaReason = item ? resolvePersonaReason(item, activePersona) : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
@@ -127,11 +142,11 @@ export function SongCard(props: SongCardProps) {
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
     typeof song.highMidi === "number"
-      ? midiToCombinedNoteName(song.highMidi)
+      ? midiToKoreanNoteName(song.highMidi)
       : null;
   const lowestNoteName =
     typeof song.lowMidi === "number"
-      ? midiToCombinedNoteName(song.lowMidi)
+      ? midiToKoreanNoteName(song.lowMidi)
       : null;
 
   const body: ReactNode = (
@@ -198,7 +213,15 @@ export function SongCard(props: SongCardProps) {
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {/*
+           * closes #1484 — 음역 적합도 배지. BE 가 voiceFit 을 내려준 추천 컨텍스트에서만
+           * 노출하며, 카드 표면에서는 짧은 라벨("음역")로 폭을 아낀다. 모달 모드에서도
+           * 한눈에 보이는 핵심 신호라 그대로 유지한다.
+           */}
+          {item && typeof item.voiceFit === "number" ? (
+            <FitBadge label="음역" fit={item.voiceFit} />
+          ) : null}
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {/*
            * matchReason / score 는 모달 모드에서는 카드 표면이 아닌 상세 모달에서
@@ -217,6 +240,22 @@ export function SongCard(props: SongCardProps) {
           </span>
         ) : null}
       </div>
+
+      {/*
+       * closes #1600 — 페르소나 사유("안심 포인트") 한 줄. P-E 안전곡 모드처럼 의도
+       * 페르소나가 활성일 때만 노출하며, 모달 모드에서도 한눈에 보이는 핵심 신호라
+       * 카드 표면에 유지한다. BE personaReason 미보유 시 곡 난이도 기반 fallback.
+       */}
+      {personaReason ? (
+        <div className="flex items-start gap-2 rounded-[var(--radius-md)] bg-[var(--badge-success-bg)] px-3 py-2">
+          <span className="shrink-0 text-xs font-semibold text-[var(--badge-success-fg)]">
+            {personaReason.label}
+          </span>
+          <span className="text-xs text-[var(--text-secondary)]">
+            {personaReason.text}
+          </span>
+        </div>
+      ) : null}
     </>
   );
 
@@ -510,8 +549,10 @@ function MatchReasonExpander({
       {expanded ? (
         <div
           id={panelId}
-          className="flex flex-col gap-2 rounded-xl bg-[var(--bg-subtle)] p-3 text-xs text-[var(--text-secondary)]"
+          className="flex flex-col gap-3 rounded-xl bg-[var(--bg-subtle)] p-3 text-xs text-[var(--text-secondary)]"
         >
+          {/* closes #1484 — BE 산출 음역/분위기 적합도 + 한국어 사유를 추정 breakdown 위에 노출. */}
+          <FitReasons item={item} />
           <dl className="flex flex-col gap-1.5">
             {breakdown.map((entry) => (
               <BreakdownRow key={entry.key} entry={entry} />
@@ -615,13 +656,7 @@ function difficultyTone(difficulty: Difficulty): string {
 export function resolveDifficulty(
   song: RecommendedSongResponse["song"],
 ): Difficulty | null {
-  if (song.difficulty) {
-    return song.difficulty;
-  }
-  if (typeof song.lowMidi === "number" && typeof song.highMidi === "number") {
-    return deriveDifficulty(song.lowMidi, song.highMidi);
-  }
-  return null;
+  return resolveSongDifficulty(song);
 }
 
 /**

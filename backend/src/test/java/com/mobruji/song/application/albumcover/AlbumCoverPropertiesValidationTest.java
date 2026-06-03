@@ -40,6 +40,59 @@ class AlbumCoverPropertiesValidationTest {
                     assertThat(properties.itunes().requestTimeout()).isEqualTo(Duration.ofSeconds(5));
                     assertThat(properties.itunes().throttle()).isEqualTo(Duration.ofSeconds(1));
                     assertThat(properties.itunes().thumbResolution()).isEqualTo("600x600");
+                    assertThat(properties.coverArtArchive().musicBrainzBaseUrl())
+                            .isEqualTo("https://musicbrainz.org/ws/2");
+                    assertThat(properties.coverArtArchive().coverArtArchiveBaseUrl())
+                            .isEqualTo("https://coverartarchive.org");
+                    assertThat(properties.coverArtArchive().userAgent())
+                            .isEqualTo("mobruji-backend/0.1 (+test)");
+                    assertThat(properties.coverArtArchive().requestTimeout())
+                            .isEqualTo(Duration.ofSeconds(5));
+                });
+    }
+
+    @Test
+    @DisplayName("cover-art-archive.musicBrainzBaseUrl 빈 문자열이면 @NotBlank 위반으로 startup fail")
+    void invalidMusicBrainzBaseUrl_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("album-cover.cover-art-archive.music-brainz-base-url="))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("cover-art-archive.userAgent 빈 문자열이면 @NotBlank 위반으로 startup fail (약관상 의무)")
+    void invalidUserAgent_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("album-cover.cover-art-archive.user-agent="))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("cover-art-archive nested 자체가 누락이면 @NotNull 위반으로 startup fail")
+    void missingCoverArtArchiveNested_failsStartup() {
+        final String[] filtered = filterProps("album-cover.cover-art-archive.");
+        contextRunner
+                .withPropertyValues(filtered)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
+                });
+    }
+
+    @Test
+    @DisplayName("cover-art-archive.requestTimeout=0s 면 @DurationMin(1ms) 위반으로 startup fail")
+    void zeroDurationCoverArtArchiveTimeout_failsStartup() {
+        contextRunner
+                .withPropertyValues(propsWithOverrides("album-cover.cover-art-archive.request-timeout=0s"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).isInstanceOf(ConfigurationPropertiesBindException.class);
                 });
     }
 
@@ -179,7 +232,11 @@ class AlbumCoverPropertiesValidationTest {
                 "album-cover.itunes.country=KR",
                 "album-cover.itunes.request-timeout=5s",
                 "album-cover.itunes.throttle=1s",
-                "album-cover.itunes.thumb-resolution=600x600"
+                "album-cover.itunes.thumb-resolution=600x600",
+                "album-cover.cover-art-archive.music-brainz-base-url=https://musicbrainz.org/ws/2",
+                "album-cover.cover-art-archive.cover-art-archive-base-url=https://coverartarchive.org",
+                "album-cover.cover-art-archive.user-agent=mobruji-backend/0.1 (+test)",
+                "album-cover.cover-art-archive.request-timeout=5s"
         };
     }
 
