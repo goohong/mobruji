@@ -23,8 +23,10 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
- * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=곡 음역(root±7)과 사용자 음역의 overlap 비율,
- * centeredness=곡 키 중심이 사용자 음역 중앙에 가까운 정도. 넓은 음역에서 overlap 이 포화돼도 음역대별 변별력 유지(#1452).</li>
+ * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=겹치면 overlap 비율, disjoint 면 gap 거리
+ * 소프트 감쇠({@code exp(-gap/scale)}); centeredness=곡 중심↔사용자 음역 중앙 거리의 가우시안 감쇠. 넓은 음역에서
+ * overlap 이 포화돼도 음역대별 변별력 유지(#1452). 저·중음역 사용자가 고음역 편중 카탈로그와 disjoint 여도 0 으로
+ * 떨어지지 않고 곡별로 변별된다(#1639).</li>
  * <li>genreMatch: v1에서 입력 필드 없음 → 0 고정 (가중치만 보존).</li>
  * <li>moodMatch: 분위기 연속 유사도. 정확히 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 (energy,brightness) 좌표 거리 기반 유사도(#1485).</li>
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
@@ -66,6 +68,21 @@ public class RecommendationScorer {
      * {@link ScoredRecommendation} 의 voiceFit 사유 분기("무난하게 맞아요" 경계)와 동일한 0.4 를 쓴다.
      */
     static final double TRANSPOSE_SUGGEST_FIT_THRESHOLD = 0.4;
+
+    /**
+     * disjoint(겹침 0) 곡의 reachability 소프트 감쇠 스케일(반음). 사용자 음역과 곡 음역 사이 gap 이 클수록
+     * {@code Math.exp(-gap / GAP_SCALE)} 로 0 에 수렴하되 정확히 0 은 되지 않는다. 옥타브(12반음) 떨어지면
+     * {@code 1/e≈0.368} 가 되도록 12 로 둔다. hard-zero 산식은 저·중음역 사용자에게 모든 곡 voiceFit=0 을
+     * 만들어 변별을 못 했기에(#1639), gap 거리 기반 양수로 가까운 곡일수록 높은 값을 준다.
+     */
+    static final double REACHABILITY_GAP_SCALE = 12.0;
+
+    /**
+     * centeredness 가우시안 sigma 의 하한(반음). 사용자 음역폭이 0 에 가까워도 분모가 0 이 되지 않도록 보호하며,
+     * 일반적으로는 {@code Math.max(1.0, userSpan/2.0)} 로 음역폭에 비례한다. 선형 hard-clip 은 중심 거리가
+     * {@code userSpan/2} 를 넘으면 centeredness=0 → voiceFit=0 이라 변별을 못 했기에(#1639) 가우시안으로 매끄럽게 감쇠한다.
+     */
+    static final double CENTEREDNESS_SIGMA_FLOOR = 1.0;
 
     private final RecommendationProperties recommendationProperties;
 
@@ -147,12 +164,10 @@ public class RecommendationScorer {
         if (songSpan <= 0 || userSpan <= 0) {
             return 0.0;
         }
-        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
-        final double reachability = Math.min(1.0, (double) overlap / songSpan);
+        final double reachability = reachability(songLow, songHigh, voiceLow, voiceHigh, songSpan);
         final double songCenter = (songLow + songHigh) / 2.0;
         final double userCenter = (voiceLow + voiceHigh) / 2.0;
-        final double centerDistance = Math.abs(songCenter - userCenter);
-        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
+        final double centeredness = centeredness(Math.abs(songCenter - userCenter), userSpan);
         return reachability * centeredness;
     }
 
@@ -168,16 +183,43 @@ public class RecommendationScorer {
         if (songSpan <= 0 || userSpan <= 0) {
             return 0.0;
         }
-        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율.
-        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
-        final double reachability = Math.min(1.0, (double) overlap / songSpan);
-        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 가장자리·바깥이면 0.0.
+        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율. overlap>0 이면 비율, disjoint 면
+        // gap 거리 기반 소프트 감쇠 — 안 겹쳐도 가까운 곡은 양수라 변별이 살아난다(#1639).
+        final double reachability = reachability(songLow, songHigh, voiceLow, voiceHigh, songSpan);
+        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 멀수록 가우시안으로 매끄럽게 감쇠.
         // reachability 단독은 사용자 음역이 곡 음역을 완전히 포함하면(넓은 음역) 모든 곡이 1.0 으로 포화돼
         // 음역대 입력이 순위에 반영되지 않는다(#1452). centeredness 를 곱해 음역대별 변별력을 회복한다.
         final double userCenter = (voiceLow + voiceHigh) / 2.0;
-        final double centerDistance = Math.abs(rootMidi - userCenter);
-        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
+        final double centeredness = centeredness(Math.abs(rootMidi - userCenter), userSpan);
         return reachability * centeredness;
+    }
+
+    /**
+     * reachability(0~1): 곡 음역과 사용자 음역의 겹침 비율. overlap&gt;0 이면 {@code min(1.0, overlap/songSpan)} 그대로,
+     * 겹침이 없으면(disjoint) 두 구간 최소 거리 gap 에 대해 {@code Math.exp(-gap / REACHABILITY_GAP_SCALE)} 로
+     * 소프트 감쇠한다. hard-zero 가 저·중음역 사용자에게 모든 곡 voiceFit=0 을 만들던 사고(#1639)를 막고,
+     * disjoint 라도 가까운 곡일수록 큰 값을 줘 곡별 변별을 유지한다.
+     */
+    private static double reachability(
+            final int songLow, final int songHigh, final int voiceLow, final int voiceHigh, final int songSpan) {
+        final int overlap = Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow);
+        if (overlap > 0) {
+            return Math.min(1.0, (double) overlap / songSpan);
+        }
+        final int gap = -overlap;
+        return Math.exp(-gap / REACHABILITY_GAP_SCALE);
+    }
+
+    /**
+     * centeredness(0~1): 곡 중심과 사용자 음역 중앙의 거리 {@code centerDistance} 를 가우시안으로 환산한다.
+     * {@code Math.exp(-0.5 * (centerDistance / sigma)^2)}, sigma = {@code max(CENTEREDNESS_SIGMA_FLOOR, userSpan/2)}.
+     * 선형 hard-clip 은 거리가 {@code userSpan/2} 를 넘으면 0 → voiceFit=0 이라 변별을 못 했기에(#1639), 멀어도 0 이
+     * 되지 않고 매끄럽게 감쇠하도록 가우시안을 쓴다.
+     */
+    private static double centeredness(final double centerDistance, final int userSpan) {
+        final double sigma = Math.max(CENTEREDNESS_SIGMA_FLOOR, userSpan / 2.0);
+        final double normalized = centerDistance / sigma;
+        return Math.exp(-0.5 * normalized * normalized);
     }
 
     /**

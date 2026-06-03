@@ -72,12 +72,12 @@ class RecommendationScorerTest {
     @Test
     @DisplayName("voiceRangeFit (#1452): 곡 음역을 완전 포함해도 곡 키 중심이 음역 중앙에서 벗어나면 1.0 미만 (포화 방지)")
     void voiceRangeFit_fullyInsideButOffCenter_belowOne() {
-        // given: C major root=60. 사용자 50~80 → reachability=1.0, center=65, half=15, dist=5
-        // → centeredness = 1 - 5/15 = 0.66667
+        // given: C major root=60. 사용자 50~80 → reachability=1.0, center=65, sigma=15, dist=5
+        // → centeredness = exp(-0.5*(5/15)^2) ≈ 0.94596 (가우시안 감쇠 — #1639)
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 50, 80);
         // then: reachability 포화(1.0)에도 centeredness 가 변별력을 유지 → 1.0 미만
-        assertThat(fit).isCloseTo(1.0 - 5.0 / 15.0, offset(1e-9));
+        assertThat(fit).isCloseTo(Math.exp(-0.5 * Math.pow(5.0 / 15.0, 2)), offset(1e-9));
         assertThat(fit).isLessThan(1.0);
     }
 
@@ -93,13 +93,14 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit: 곡 음역과 사용자 음역이 전혀 겹치지 않으면 0.0")
-    void voiceRangeFit_noOverlap_returnsZero() {
-        // given: C major 53~67, 사용자 100~119 (벗어남)
+    @DisplayName("voiceRangeFit (#1639): 곡 음역과 사용자 음역이 전혀 겹치지 않으면 0 이 아니라 gap 거리 소프트 감쇠로 작은 양수")
+    void voiceRangeFit_noOverlap_returnsSmallPositive() {
+        // given: C major 53~67, 사용자 100~119 (멀리 벗어남 — disjoint)
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 100, 119);
-        // then
-        assertThat(fit).isEqualTo(0.0);
+        // then: hard-zero 가 아니라 gap 거리 기반 작은 양수 (먼 곡일수록 0 에 수렴하되 0 은 아님 — #1639)
+        assertThat(fit).isGreaterThan(0.0);
+        assertThat(fit).isLessThan(0.01);
     }
 
     @Test
@@ -613,35 +614,40 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 키 중심보다 위쪽이면 centeredness 0 → fit 0")
-    void voiceRangeFit_userAboveKeyCenter_returnsZero() {
-        // given: C major root=60. 사용자 60~67 (center=63.5, half=3.5). dist=|60-63.5|=3.5 == half
-        // → centeredness = 1 - 3.5/3.5 = 0 → reachability(7/14) 무관하게 fit 0
+    @DisplayName("voiceRangeFit (#1639): 사용자 음역이 곡 키 중심보다 위쪽이면 centeredness 가우시안 감쇠 → 0 아닌 양수")
+    void voiceRangeFit_userAboveKeyCenter_returnsDampedPositive() {
+        // given: C major root=60. 사용자 60~67 (center=63.5, sigma=3.5). dist=|60-63.5|=3.5 == sigma
+        // → centeredness = exp(-0.5*(3.5/3.5)^2) = exp(-0.5) ≈ 0.6065; reachability = 7/14 = 0.5
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 60, 67);
-        // then
-        assertThat(fit).isEqualTo(0.0);
+        // then: hard-clip 0 이 아니라 reachability*centeredness 양수 (#1639)
+        assertThat(fit).isCloseTo(0.5 * Math.exp(-0.5), offset(1e-9));
+        assertThat(fit).isGreaterThan(0.0);
+        assertThat(fit).isLessThan(1.0);
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 정확 경계 — 사용자 high == 곡 low → overlap 0 → 0.0")
-    void voiceRangeFit_touchingBoundary_returnsZero() {
-        // given: C major 곡 53~67. 사용자 40~53 (high == 곡 low) → max-min = 53-53 = 0
+    @DisplayName("voiceRangeFit (#1639): 정확 경계 — 사용자 high == 곡 low → overlap 0(gap 0) → reachability=1, centeredness 만 반영")
+    void voiceRangeFit_touchingBoundary_usesCenterednessOnly() {
+        // given: C major 곡 53~67. 사용자 40~53 (high == 곡 low) → overlap 0, gap 0 → reachability=exp(0)=1.0
+        //   centerDist=|60-46.5|=13.5, sigma=max(1,6.5)=6.5 → centeredness=exp(-0.5*(13.5/6.5)^2)
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 53);
-        // then: overlap 0 → 0.0
-        assertThat(fit).isEqualTo(0.0);
+        // then: gap 0 이라 reachability=1.0, fit == centeredness (0 아닌 양수 — #1639)
+        assertThat(fit).isCloseTo(Math.exp(-0.5 * Math.pow(13.5 / 6.5, 2)), offset(1e-9));
+        assertThat(fit).isGreaterThan(0.0);
     }
 
     @Test
-    @DisplayName("voiceRangeFit (회귀 가드): 사용자 음역이 곡 키 중심보다 한참 아래면 centeredness 0 → fit 0")
-    void voiceRangeFit_userFarBelowKeyCenter_returnsZero() {
-        // given: C major root=60. 사용자 40~54 (center=47, half=7). dist=|60-47|=13 > half=7
-        // → centeredness = max(0, 1 - 13/7) = 0 → fit 0
+    @DisplayName("voiceRangeFit (#1639): 사용자 음역이 곡 키 중심보다 한참 아래면 가우시안 감쇠로 0 에 근접하되 양수")
+    void voiceRangeFit_userFarBelowKeyCenter_returnsTinyPositive() {
+        // given: C major root=60. 사용자 40~54 (center=47, sigma=7). dist=|60-47|=13 > sigma=7
+        // → centeredness = exp(-0.5*(13/7)^2) ≈ 0.178; reachability = overlap(54-53=1)/14 ≈ 0.0714
         // when
         final double fit = RecommendationScorer.voiceRangeFit(MusicalKey.C_MAJOR, 40, 54);
-        // then
-        assertThat(fit).isEqualTo(0.0);
+        // then: 멀어도 0 이 아니라 작은 양수 — 저음역 사용자 전 곡 0 사고 회귀 가드 (#1639)
+        assertThat(fit).isGreaterThan(0.0);
+        assertThat(fit).isLessThan(0.05);
     }
 
     @Test
@@ -726,21 +732,22 @@ class RecommendationScorerTest {
     }
 
     @Test
-    @DisplayName("score (정확 합산): 신호별 가중치 단독 곱 검증 — voiceFit 0.7 * rangeFit 0.7 = 0.49 (jitter=0)")
+    @DisplayName("score (정확 합산): 신호별 가중치 단독 곱 검증 — rangeFit(가우시안) * voiceFit 가중치 0.7 (jitter=0)")
     void score_partialSignal_exactWeightedProduct() {
         // given: voiceFit 가중치 0.7 단일, 나머지 0. C major root=60. 사용자 53~73 → reachability=1.0
-        // (곡 음역 53~67 완전 포함), center=63, half=10, dist=3 → centeredness=1-3/10=0.7 → rangeFit=0.7
+        // (곡 음역 53~67 완전 포함), center=63, sigma=10, dist=3 → centeredness=exp(-0.5*(3/10)^2) ≈ 0.95600
         final Song song = buildSong(MusicalKey.C_MAJOR, null, null);
         final RecommendationProperties voiceOnly = new RecommendationProperties(
                 new RecommendationProperties.Weights(0.7, 0.0, 0.0, 0.0, 0.0, 0.0),
                 DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
                 RecommendationProperties.SeedStrategy.DERIVED);
+        final double expectedRangeFit = Math.exp(-0.5 * Math.pow(3.0 / 10.0, 2));
         // when
         final RecommendationScorer.Scored scored = scorer(voiceOnly)
                 .score(song, 53, 73, null, null, null, new Random(0));
-        // then: rangeFit=0.7 * 가중치 0.7 = 0.49
-        assertThat(scored.voiceRangeFit()).isCloseTo(0.7, offset(1e-9));
-        assertThat(scored.total()).isCloseTo(0.49, offset(1e-9));
+        // then: rangeFit(가우시안) * 가중치 0.7
+        assertThat(scored.voiceRangeFit()).isCloseTo(expectedRangeFit, offset(1e-9));
+        assertThat(scored.total()).isCloseTo(0.7 * expectedRangeFit, offset(1e-9));
     }
 
     @Test
@@ -924,11 +931,11 @@ class RecommendationScorerTest {
         // 두 산식이 같은 입력에서도 다른 값을 산출해야 fix 가 실측 band 를 실제로 반영함을 검증.
         final double withBand = RecommendationScorer.voiceRangeFit(64, 76, MusicalKey.A_MINOR, 60, 76);
         final double withoutBand = RecommendationScorer.voiceRangeFit(null, null, MusicalKey.A_MINOR, 60, 76);
-        // 휴리스틱: songSpan=14, overlap=14, reachability=1.0; centerDist=|69-68|=1, half=8 → cent=7/8=0.875
-        // 실측: songSpan=12, overlap=12, reachability=1.0; centerDist=|70-68|=2, half=8 → cent=6/8=0.75
+        // 휴리스틱: songSpan=14, overlap=14, reachability=1.0; centerDist=|69-68|=1, sigma=8 → cent=exp(-0.5*(1/8)^2)
+        // 실측: songSpan=12, overlap=12, reachability=1.0; centerDist=|70-68|=2, sigma=8 → cent=exp(-0.5*(2/8)^2)
         assertThat(withBand).isNotEqualTo(withoutBand);
-        assertThat(withoutBand).isCloseTo(7.0 / 8.0, offset(1e-9));
-        assertThat(withBand).isCloseTo(6.0 / 8.0, offset(1e-9));
+        assertThat(withoutBand).isCloseTo(Math.exp(-0.5 * Math.pow(1.0 / 8.0, 2)), offset(1e-9));
+        assertThat(withBand).isCloseTo(Math.exp(-0.5 * Math.pow(2.0 / 8.0, 2)), offset(1e-9));
     }
 
     @Test
@@ -965,7 +972,9 @@ class RecommendationScorerTest {
         final double matchedUser = RecommendationScorer.voiceRangeFit(60, 73, MusicalKey.B_MINOR, 60, 73);
         // then: 음역 일치 사용자가 좁은 저음역 사용자보다 fit 가 명확히 높음
         assertThat(matchedUser).isGreaterThan(narrowLowUser);
-        assertThat(narrowLowUser).isEqualTo(0.0); // 사용자 40~55, 곡 60~73 → overlap 0
+        // 사용자 40~55, 곡 60~73 → disjoint 이지만 hard-zero 가 아니라 작은 양수 (저음역 변별 — #1639)
+        assertThat(narrowLowUser).isGreaterThan(0.0);
+        assertThat(narrowLowUser).isLessThan(0.1);
     }
 
     @Test
@@ -993,6 +1002,63 @@ class RecommendationScorerTest {
                 .score(heuristicSong, 53, 70, Mood.UPBEAT, 120, null, new Random(0)).voiceRangeFit();
         // then: 실측 band 적재 곡의 신호값이 휴리스틱과 다름 — breakdown 흐름 검증
         assertThat(bandFit).isNotEqualTo(heuristicFit);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1639): 저음역 사용자(40~52)는 고음역 편중 카탈로그 전 곡과 disjoint 여도 voiceFit>0 + 곡별 변별")
+    void voiceRangeFit_lowBandUser_allSongsPositiveAndDiscriminated() {
+        // given: 저음역 사용자 40~52. 카탈로그는 고음역 편중(MIDI 55~78). 모든 곡이 disjoint.
+        final double lowSong = RecommendationScorer.voiceRangeFit(55, 67, MusicalKey.C_MAJOR, 40, 52);
+        final double midSong = RecommendationScorer.voiceRangeFit(60, 72, MusicalKey.C_MAJOR, 40, 52);
+        final double highSong = RecommendationScorer.voiceRangeFit(64, 76, MusicalKey.C_MAJOR, 40, 52);
+        final double veryHighSong = RecommendationScorer.voiceRangeFit(67, 78, MusicalKey.C_MAJOR, 40, 52);
+        // then: hard-zero 가 아니라 모두 양수 (전 곡 0 → 변별 불가 사고 회귀 가드 — #1639)
+        assertThat(lowSong).isGreaterThan(0.0);
+        assertThat(midSong).isGreaterThan(0.0);
+        assertThat(highSong).isGreaterThan(0.0);
+        assertThat(veryHighSong).isGreaterThan(0.0);
+        // 가까운 곡일수록 큰 값 → 곡별 변별 (gap 이 작을수록 reachability 큼)
+        assertThat(lowSong).isGreaterThan(midSong);
+        assertThat(midSong).isGreaterThan(highSong);
+        assertThat(highSong).isGreaterThan(veryHighSong);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1639): 중음역 사용자(55~59)도 곡별 voiceFit>0 + 변별 (고음역 정상 동작은 별도 유지)")
+    void voiceRangeFit_midBandUser_allSongsPositiveAndDiscriminated() {
+        // given: 중음역 사용자 55~59 (center 57). 카탈로그 고음역 편중.
+        final double lowSong = RecommendationScorer.voiceRangeFit(55, 67, MusicalKey.C_MAJOR, 55, 59);
+        final double midSong = RecommendationScorer.voiceRangeFit(60, 72, MusicalKey.C_MAJOR, 55, 59);
+        final double highSong = RecommendationScorer.voiceRangeFit(64, 76, MusicalKey.C_MAJOR, 55, 59);
+        // then: 모두 양수 + 가까운 band 가 높음 → 변별 (#1639)
+        assertThat(lowSong).isGreaterThan(0.0);
+        assertThat(midSong).isGreaterThan(0.0);
+        assertThat(highSong).isGreaterThan(0.0);
+        assertThat(lowSong).isGreaterThan(midSong);
+        assertThat(midSong).isGreaterThan(highSong);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1639): 고음역 사용자(64~76)는 겹치는 곡에서 기존대로 높은 voiceFit 유지 (정상 동작 회귀 가드)")
+    void voiceRangeFit_highBandUser_overlappingSongsRemainHigh() {
+        // given: 고음역 사용자 64~76. 카탈로그 고음역과 겹침.
+        final double matched = RecommendationScorer.voiceRangeFit(64, 76, MusicalKey.C_MAJOR, 64, 76);
+        final double midSong = RecommendationScorer.voiceRangeFit(60, 72, MusicalKey.C_MAJOR, 64, 76);
+        // then: 완전 일치 곡은 1.0, 겹치는 곡도 의미 있는 양수 → 고음역 정상 동작 유지
+        assertThat(matched).isEqualTo(1.0);
+        assertThat(midSong).isGreaterThan(0.4);
+        assertThat(matched).isGreaterThan(midSong);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1639): reachability gap 감쇠 단조성 — gap 이 클수록 disjoint reachability 가 작아진다")
+    void voiceRangeFit_reachabilityMonotonicallyDecaysWithGap() {
+        // given: 사용자 40~52 고정. 곡 band 를 점점 멀리 (gap 증가) → fit 단조 감소 확인 (소프트 감쇠 단조성)
+        final double gapSmall = RecommendationScorer.voiceRangeFit(53, 65, MusicalKey.C_MAJOR, 40, 52);
+        final double gapLarge = RecommendationScorer.voiceRangeFit(70, 82, MusicalKey.C_MAJOR, 40, 52);
+        // then: 더 가까운 band 가 더 높은 fit
+        assertThat(gapSmall).isGreaterThan(gapLarge);
+        assertThat(gapLarge).isGreaterThan(0.0);
     }
 
     @Test
