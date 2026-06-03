@@ -119,10 +119,14 @@ class StatusChannelFlagRoutingTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr)
 
             urls = Path(url_capture).read_text().splitlines()
-            self.assertEqual(len(urls), 1, f"호출 1건 기대: {urls}")
+            # (#1449/#1425 stale fix) ❓/⏹ control emoji(9b0ade1)가 reaction PUT 1건 추가 —
+            # 메시지 POST 기준으로 검증.
+            msg_urls = [u for u in urls if u.endswith("/messages")]
+            self.assertEqual(len(msg_urls), 1, f"메시지 전송 1건 기대: {urls}")
             # DIGEST 채널 (999) 로 갔는지 — MOBRUJI (42) 는 안 됨.
-            self.assertIn("/channels/999/messages", urls[0])
-            self.assertNotIn("/channels/42/", urls[0])
+            self.assertIn("/channels/999/messages", msg_urls[0])
+            for url in urls:
+                self.assertNotIn("/channels/42/", url)
 
     def test_status_channel_falls_back_to_notify_when_digest_missing(self) -> None:
         """DIGEST 미설정 + NOTIFY 설정 → NOTIFY 로 (backward-compat #1019)."""

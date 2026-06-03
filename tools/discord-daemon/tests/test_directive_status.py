@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -116,6 +117,10 @@ def _read_entries(jsonl_path: Path) -> list[dict]:
     ]
 
 
+# (#1449/#1425) directive_status.sh 가 jsonl 원자적 쓰기에 `flock`(util-linux) 사용 —
+# Linux/NCP·CI 엔 있으나 macOS 엔 미설치라 rc=127. 환경 의존이지 코드 결함 아님 →
+# flock 없는 환경(mac dev)에선 skip, Linux 에선 정상 실행.
+@unittest.skipUnless(shutil.which("flock") is not None, "flock 미설치 — Linux 전용 (mac dev skip)")
 class DirectiveStatusTest(unittest.TestCase):
     def setUp(self) -> None:
         # tmp_path 는 pytest 전용 — unittest 호환 위해 tempfile.TemporaryDirectory 사용.
