@@ -1,11 +1,14 @@
 package com.mobruji.web;
 
+import jakarta.annotation.PostConstruct;
+
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 전역 CORS 매핑 등록 ({@code WebMvcConfigurer} 기반).
@@ -26,7 +29,12 @@ import lombok.RequiredArgsConstructor;
  * {@code true} 로 바꿀 경우 와일드카드 origin 사용이 금지되며 별도 ADR 필요.</li>
  * <li>maxAge: 3600s — preflight 결과 캐시.</li>
  * </ul>
+ *
+ * <p>부팅 시 effective allowed origins 를 INFO 로그로 emit 한다 — 운영 환경(NCP `.env.dev`)
+ * 의 CORS env 가 코드/문서 origin 과 drift 됐을 때 즉시 감지 가능 (#1593 추천 받기 P0 403
+ * 사고 재발 가드).
  */
+@Slf4j
 @Configuration
 @EnableConfigurationProperties(CorsProperties.class)
 @RequiredArgsConstructor
@@ -45,5 +53,15 @@ public class WebCorsConfig implements WebMvcConfigurer {
                 .exposedHeaders("Location")
                 .allowCredentials(false)
                 .maxAge(PREFLIGHT_MAX_AGE_SECONDS);
+    }
+
+    /**
+     * 부팅 시 effective CORS allowed origins 를 INFO 로그로 emit. drift 감지용 — env 갱신
+     * 누락 사고(#1593) 재발 시 부팅 로그 grep 한 번으로 즉시 원인 추적 (Spring 기본 CORS
+     * reject 는 silent 403 만 보냄).
+     */
+    @PostConstruct
+    public void logEffectiveCorsOrigins() {
+        log.info("CORS allowed origins (effective) = {}", corsProperties.allowedOrigins());
     }
 }

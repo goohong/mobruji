@@ -32,6 +32,12 @@ class CorsPreflightIntegrationTest {
 
     // application-test.yml 의 mobruji.cors.allowed-origins 와 동일해야 한다.
     private static final String ALLOWED_DEV_ORIGIN = "http://localhost:3000";
+    /**
+     * NCP dev canonical origin (ADR-0028, nip.io + Let's Encrypt). 추천 받기 P0 사고(#1593)
+     * 가드 — application.yml default 와 application-test.yml 둘 다 본 origin 을 보유해야
+     * 한다 (env 갱신 누락 시에도 default 가 흡수).
+     */
+    private static final String ALLOWED_NCP_DEV_ORIGIN = "https://101-79-20-94.nip.io";
     private static final String DISALLOWED_ORIGIN = "http://evil.example";
 
     private static final String ACAO_HEADER = "Access-Control-Allow-Origin";
@@ -57,6 +63,21 @@ class CorsPreflightIntegrationTest {
                 .then()
                 .statusCode(HttpStatus.OK.value())
                 .header(ACAO_HEADER, equalTo(ALLOWED_DEV_ORIGIN))
+                .header(ACAM_HEADER, notNullValue());
+    }
+
+    @Test
+    @DisplayName("preflight: NCP dev nip.io https origin → 200 + ACAO 헤더 echo (#1593 가드)")
+    void preflightNcpDevNipIoOriginReturns200WithAcaoHeader() {
+        given()
+                .header("Origin", ALLOWED_NCP_DEV_ORIGIN)
+                .header("Access-Control-Request-Method", "POST")
+                .header("Access-Control-Request-Headers", "Content-Type,X-Session-Id")
+                .when()
+                .options("/api/v1/recommendations")
+                .then()
+                .statusCode(HttpStatus.OK.value())
+                .header(ACAO_HEADER, equalTo(ALLOWED_NCP_DEV_ORIGIN))
                 .header(ACAM_HEADER, notNullValue());
     }
 
