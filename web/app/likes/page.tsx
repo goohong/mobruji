@@ -31,6 +31,7 @@ import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
 import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
 import { readLikesBySessionId } from "@/lib/api/feedback";
 import type { SongResponse } from "@/lib/api/song";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
 
@@ -159,7 +160,7 @@ function SongListWithModal({ songs }: SongListWithModalProps) {
       <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
-        titleLabel={selected ? selected.title : ""}
+        titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
       </SongDetailModal>

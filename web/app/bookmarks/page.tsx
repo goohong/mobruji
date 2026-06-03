@@ -24,6 +24,7 @@ import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
 import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
 import { readBookmarksBySessionId } from "@/lib/api/feedback";
 import type { SongResponse } from "@/lib/api/song";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useBookmarksStore } from "@/store/bookmarks";
 import { useSessionStore } from "@/store/session";
 
@@ -147,7 +148,7 @@ function BookmarkSongListWithModal({ songs }: BookmarkSongListWithModalProps) {
       <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
-        titleLabel={selected ? selected.title : ""}
+        titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
       </SongDetailModal>
