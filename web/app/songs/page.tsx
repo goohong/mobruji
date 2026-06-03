@@ -29,11 +29,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
-import {
-  searchSongs,
-  type SongListResponse,
-  type SongResponse,
-} from "@/lib/api/song";
+import { searchSongs, type SongResponse } from "@/lib/api/song";
 import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip, Input } from "@/components/ui";
@@ -164,39 +160,36 @@ function SongSearchPageInner() {
   ]);
 
   const enabled = debouncedKeyword.length > 0;
-  const query = useQuery<SongListResponse, Error>({
+  const query = useQuery<SongResponse[], Error>({
     queryKey: ["songs", "search", debouncedKeyword],
     queryFn: ({ signal }) => searchSongs(debouncedKeyword, signal),
     enabled,
   });
 
-  // BE가 #1551부터 bare 배열 대신 wrapper `{items, ...}`를 반환 → items를 곡 목록으로 사용.
-  const songItems = query.data?.items;
-
   // 응답 곡들의 unique genre들 (필터 chip 옵션). null/공백은 제외, 사전 순 고정.
   const availableGenres = useMemo<string[]>(() => {
-    if (!songItems) {
+    if (!query.data) {
       return [];
     }
     const set = new Set<string>();
-    for (const song of songItems) {
+    for (const song of query.data) {
       if (song.genre && song.genre.trim().length > 0) {
         set.add(song.genre);
       }
     }
     return Array.from(set).sort();
-  }, [songItems]);
+  }, [query.data]);
 
   const filteredSongs = useMemo<SongResponse[]>(() => {
-    if (!songItems) {
+    if (!query.data) {
       return [];
     }
     const genreActive = selectedGenres.size > 0;
     const difficultyActive = selectedDifficulties.size > 0;
     if (!genreActive && !difficultyActive) {
-      return songItems;
+      return query.data;
     }
-    return songItems.filter((song) => {
+    return query.data.filter((song) => {
       if (genreActive && (!song.genre || !selectedGenres.has(song.genre))) {
         return false;
       }
@@ -208,7 +201,7 @@ function SongSearchPageInner() {
       }
       return true;
     });
-  }, [songItems, selectedGenres, selectedDifficulties]);
+  }, [query.data, selectedGenres, selectedDifficulties]);
 
   const toggleGenre = useCallback((genre: string) => {
     setSelectedGenres((prev) => toggleInSet(prev, genre));
@@ -268,9 +261,7 @@ function SongSearchPageInner() {
           isFetching={query.isFetching}
           error={query.error}
           songs={filteredSongs}
-          rawCount={songItems?.length ?? 0}
-          totalCount={query.data?.totalCount ?? 0}
-          hasNext={query.data?.hasNext ?? false}
+          rawCount={query.data?.length ?? 0}
           filtersActive={filtersActive}
         />
       </div>
@@ -367,12 +358,7 @@ type SearchResultProps = {
   isFetching: boolean;
   error: Error | null;
   songs: SongResponse[];
-  /** 현재 페이지(서버 응답 items) 곡 수. */
   rawCount: number;
-  /** 필터 통과 전체 곡 수(서버 totalCount). 현재 페이지 곡 수와 다를 수 있다. */
-  totalCount: number;
-  /** 다음 페이지 존재 여부(서버 hasNext). */
-  hasNext: boolean;
   filtersActive: boolean;
 };
 
@@ -383,8 +369,6 @@ function SearchResult({
   error,
   songs,
   rawCount,
-  totalCount,
-  hasNext,
   filtersActive,
 }: SearchResultProps) {
   if (!enabled) {
@@ -458,9 +442,7 @@ function SearchResult({
       >
         {filtersActive
           ? `필터 결과 ${songs.length}곡 / 전체 ${rawCount}곡`
-          : hasNext
-            ? `${rawCount}곡 (전체 ${totalCount}곡 중 일부)`
-            : `${totalCount}곡`}
+          : `${rawCount}곡`}
       </p>
       <SongSearchResultList songs={songs} />
     </div>

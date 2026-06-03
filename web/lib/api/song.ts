@@ -1,15 +1,14 @@
 /**
  * 곡 검색/단건 조회 API 클라이언트.
  *
- * BE 컨트롤러 `com.mobruji.song.api.SongController`와 1:1 매칭:
- *   GET /api/v1/songs?keyword=<query>  → search (SongListResponse wrapper)
+ * BE 컨트롤러 `com.mobruji.song.SongController`와 1:1 매칭:
+ *   GET /api/v1/songs?keyword=<query>  → search (List<SongResponse>)
  *   GET /api/v1/songs/{id}             → read (단건)
  *
- * 응답 wrapper(`SongListResponse`):
- *   - BE가 #1551(검색·필터 API)부터 bare 배열 대신 페이지네이션 wrapper
- *     `{items, page, size, totalCount, hasNext}`를 반환한다. 필드명은 BE
- *     `com.mobruji.song.api.dto.SongListResponse` record와 정확히 일치시킨다.
- *   - 곡 목록은 `items`에 담긴다. 빈 keyword면 빈 `items` (서버 약속).
+ * 빈 keyword 처리:
+ *   - BE `SongService.searchByKeyword`는 keyword가 null이거나 trim 시 빈 문자열이면
+ *     `List.of()` (빈 배열)를 반환한다. 검색 페이지에서는 입력이 비었을 때 호출을
+ *     생략하거나, 호출 결과가 빈 배열임을 그대로 노출한다.
  *
  * 단건 조회(`readSongById`):
  *   - 곡 상세 페이지(`/songs/[id]`)에서 사용한다 (이슈 #100 / PR #101).
@@ -26,38 +25,20 @@ import type { SongResponse } from "./recommendation";
 export type { SongResponse } from "./recommendation";
 
 /**
- * 곡 검색·필터 응답 wrapper.
- *
- * BE `com.mobruji.song.api.dto.SongListResponse` record와 1:1 매칭:
- *   - `items`: 현재 페이지 곡 배열.
- *   - `page`: 0-base 페이지 인덱스.
- *   - `size`: 페이지 크기.
- *   - `totalCount`: 필터 통과 전체 곡 수.
- *   - `hasNext`: 다음 페이지 존재 여부.
- */
-export type SongListResponse = {
-  items: SongResponse[];
-  page: number;
-  size: number;
-  totalCount: number;
-  hasNext: boolean;
-};
-
-/**
  * 곡 검색.
  *
- * @param keyword 제목/아티스트 부분 일치. 비어 있거나 undefined면 빈 items 반환(서버 약속).
+ * @param keyword 제목/아티스트 부분 일치. 비어 있거나 undefined면 빈 배열 반환(서버 약속).
  * @param signal AbortController 신호. 입력 디바운스/재호출 시 이전 요청 취소에 사용.
  */
 export function searchSongs(
   keyword?: string,
   signal?: AbortSignal,
-): Promise<SongListResponse> {
+): Promise<SongResponse[]> {
   const query =
     keyword !== undefined && keyword.trim().length > 0
       ? `?keyword=${encodeURIComponent(keyword.trim())}`
       : "";
-  return apiFetch<SongListResponse>(`/api/v1/songs${query}`, { signal });
+  return apiFetch<SongResponse[]>(`/api/v1/songs${query}`, { signal });
 }
 
 /**
