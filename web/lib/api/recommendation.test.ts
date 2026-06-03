@@ -140,4 +140,18 @@ describe("recommendation API 경계 가드", () => {
     const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
     expect(body).toContain('"mood":null');
   });
+
+  it("persona=P-E 지정 시 body 에 \"persona\":\"P-E\" 로 직렬화된다 (BE #1598 안전곡 프리셋)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
+    await createRecommendation({ ...base, persona: "P-E" });
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
+    expect(JSON.parse(body)).toEqual({ ...base, persona: "P-E" });
+  });
+
+  it("persona 생략 시 body 에서 키 자체가 빠진다 (현행 default 가중 하위호환)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
+    await createRecommendation({ ...base });
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
+    expect(body).not.toContain("persona");
+  });
 });
