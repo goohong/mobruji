@@ -287,7 +287,7 @@ export function SongCard(props: SongCardProps) {
   // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
   if (isModalMode) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
+      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]">
         <button
           type="button"
           onClick={onShowDetail}
@@ -309,7 +309,7 @@ export function SongCard(props: SongCardProps) {
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
+      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]">
         <Link
           href={href}
           aria-label={`${displayTitle} 상세 보기`}
@@ -328,7 +328,7 @@ export function SongCard(props: SongCardProps) {
   return (
     <li
       tabIndex={0}
-      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)] dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]"
+      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)] focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)]"
     >
       {body}
       {breakdownPanel}
@@ -386,7 +386,7 @@ function LikeButton({ songId, songTitle }: LikeButtonProps) {
         className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           liked
             ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            : "text-[var(--text-secondary)] hover:bg-[var(--cta-secondary-bg-hover)]"
         }`}
       >
         <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
@@ -441,7 +441,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
         className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           bookmarked
             ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
-            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            : "text-[var(--text-secondary)] hover:bg-[var(--cta-secondary-bg-hover)]"
         }`}
       >
         <span aria-hidden="true">🔖</span>
@@ -502,7 +502,7 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
         event.stopPropagation();
       }}
       aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
-      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
     >
       <span aria-hidden="true">▶</span>
       <span>YouTube에서 듣기</span>
@@ -541,7 +541,7 @@ function MatchReasonExpander({
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="inline-flex min-h-11 items-center gap-1 self-start rounded-full px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+        className="inline-flex min-h-11 items-center gap-1 self-start rounded-full px-3 py-2 text-sm font-medium text-[var(--text-body-strong)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
       >
         <span>{expanded ? "접기" : "자세히 보기"}</span>
         <ChevronDownIcon expanded={expanded} />

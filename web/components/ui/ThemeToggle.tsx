@@ -44,10 +44,11 @@ export function ThemeToggle() {
    *  6) focus ring : focus-visible:ring-zinc-500 → --cta-secondary-ring
    *     (PR #1256 / #1259 동일 패턴 — 균일 outline 토큰)
    *
-   * 미swap (후속 PR 양보):
-   *  - bg-white/90 + dark:bg-zinc-900/90 + hover:bg-white + dark:hover:bg-zinc-900
-   *    : opacity suffix 가 var() 와 호환 안 됨. backdrop-blur floating button
-   *    패턴 토큰화 별도 결정 필요 (PR 6+).
+   * swap 완결 (PR #1659 — 잔존 zinc 마감):
+   *  7) floating bg : bg-white/90 + dark:bg-zinc-900/90 → --surface-floating
+   *  8) floating hover bg : hover:bg-white + dark:hover:bg-zinc-900
+   *     → hover:bg-[var(--surface-floating-hover)]
+   *     opacity suffix 는 baked-alpha rgba 토큰으로 고정 (var() 호환 회피).
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
    * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
@@ -64,11 +65,9 @@ export function ThemeToggle() {
         // fixed top-right, safe-area 고려. BottomNav 와 z-index 겹치지 않도록 z-30.
         "fixed top-3 right-3 z-30",
         "flex h-10 w-10 items-center justify-center rounded-full",
-        "border border-[var(--border)] bg-white/90 backdrop-blur",
+        "border border-[var(--border)] bg-[var(--surface-floating)] backdrop-blur",
         "text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors duration-[var(--duration-base)]",
-        "hover:bg-white hover:text-[var(--text-primary)]",
-        "dark:bg-zinc-900/90",
-        "dark:hover:bg-zinc-900",
+        "hover:bg-[var(--surface-floating-hover)] hover:text-[var(--text-primary)]",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]",
         "pt-[env(safe-area-inset-top)]",
       ].join(" ")}

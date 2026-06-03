@@ -74,10 +74,11 @@ export function BottomNav() {
    *  5) focus ring : focus-visible:ring-zinc-500 → --cta-secondary-ring
    *     (PR #1256 / #1259 동일 패턴 — 균일 outline 토큰)
    *
-   * 미swap (후속 PR 양보):
-   *  - bg-white/95 + supports-[backdrop-filter]:bg-white/80 (다크 동일) —
-   *    opacity suffix 가 var() 와 호환 안 됨. backdrop-blur 결합 패턴 토큰화
-   *    별도 결정 필요 (PR 6+).
+   * swap 완결 (PR #1659 — 잔존 zinc 마감):
+   *  6) nav bg : bg-white/95 + dark:bg-zinc-950/95 → --surface-nav
+   *  7) nav blur bg : supports-[backdrop-filter]:bg-white/80 + dark:…/80
+   *     → supports-[backdrop-filter]:bg-[var(--surface-nav-blur)]
+   *     opacity suffix 는 baked-alpha rgba 토큰으로 고정 (var() 호환 회피).
    *
    * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
    * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
@@ -85,7 +86,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="주요 메뉴"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border)] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:bg-zinc-950/95 dark:supports-[backdrop-filter]:bg-zinc-950/80 md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border)] bg-[var(--surface-nav)] backdrop-blur supports-[backdrop-filter]:bg-[var(--surface-nav-blur)] md:hidden"
     >
       <ul
         className="mx-auto flex max-w-md items-stretch justify-around px-2 pt-1 pb-[env(safe-area-inset-bottom)]"

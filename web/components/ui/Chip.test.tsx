@@ -45,10 +45,10 @@ describe("Chip", () => {
     );
     const chip = screen.getByRole("button", { name: "ROCK" });
     expect(chip).toHaveAttribute("aria-pressed", "true");
-    expect(chip.className).toContain("bg-zinc-900");
+    expect(chip.className).toContain("bg-[var(--cta-neutral-bg)]");
   });
 
-  it("pressed=false면 inactive 시각 클래스(bg-white, ring-1)가 적용된다", () => {
+  it("pressed=false면 inactive 시각 클래스(secondary bg 토큰, ring-1)가 적용된다", () => {
     // 회귀 가드: pressed=false ↔ active 토글 시 시각이 명확히 구분되어야
     // SR 사용자뿐 아니라 시각 사용자도 상태를 인지할 수 있다.
     render(
@@ -57,12 +57,10 @@ describe("Chip", () => {
       </Chip>,
     );
     const chip = screen.getByRole("button", { name: "JAZZ" });
-    expect(chip.className).toContain("bg-white");
+    expect(chip.className).toContain("bg-[var(--cta-secondary-bg)]");
     expect(chip.className).toContain("ring-1");
-    // pressed=true 전용 클래스는 적용되지 않아야 한다.
-    // dark variant (`dark:bg-zinc-900`) 는 inactive 토큰에 포함되어 있으므로
-    // 단순 substring 매칭이 아니라 라이트 모드 활성 클래스만 검증한다 (#745).
-    expect(chip.className).not.toMatch(/(^|\s)bg-zinc-900(\s|$)/);
+    // pressed=true 전용 클래스(primary 토큰)는 적용되지 않아야 한다.
+    expect(chip.className).not.toContain("bg-[var(--cta-neutral-bg)]");
   });
 
   it("Enter 키로 onClick이 호출된다 (button 변환 회귀 가드)", () => {
@@ -96,7 +94,7 @@ describe("Chip", () => {
     expect(chip).toHaveAttribute("aria-pressed", "true");
     // success tone의 emerald 클래스가 적용되어야 (primary로 치환되면 안 됨).
     expect(chip.className).toContain("bg-emerald-100");
-    expect(chip.className).not.toContain("bg-zinc-900");
+    expect(chip.className).not.toContain("bg-[var(--cta-neutral-bg)]");
   });
 
   it("disabled prop이 button으로 전파된다", () => {
