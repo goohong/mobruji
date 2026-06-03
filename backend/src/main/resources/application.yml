@@ -26,13 +26,17 @@ spring:
 #
 # CORS 허용 origin (rev 21 QA, #314):
 # - 환경변수 MOBRUJI_CORS_ALLOWED_ORIGINS 로 쉼표 구분 주입 (예: "https://mobruji.com,https://www.mobruji.com").
-# - 기본값은 로컬 Next.js dev 서버(http://localhost:3000) — 운영 환경은 반드시 env override.
+# - 기본값은 로컬 Next.js dev 서버(http://localhost:3000) + NCP dev canonical origin (ADR-0028,
+#   nip.io + Let's Encrypt). NCP `.env.dev` 갱신 누락 시에도 default 가 흡수하도록 두 origin
+#   포함 — 추천 받기 P0 사고(#1593, https://101-79-20-94.nip.io 가 옛 env(http://101.79.20.94)
+#   와 mismatch 로 403 "Invalid CORS request") 재발 가드.
+#   prod 도메인(dev.mobruji.app, v0.4)으로 전환 시 env override 강제.
 # - 빈 값으로 주입하면 부팅 실패 (의도치 않은 와일드카드 노출 방지).
 mobruji:
   admin:
     token: ${MOBRUJI_ADMIN_TOKEN:}
   cors:
-    allowed-origins: ${MOBRUJI_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    allowed-origins: ${MOBRUJI_CORS_ALLOWED_ORIGINS:http://localhost:3000,https://101-79-20-94.nip.io}
   # 익명 sessionId 라이프사이클 (ADR-0013, spec anonymous-session-lifecycle §5-8).
   # - ttl-days: sliding TTL (default 180 — ADR-0013 §D-1). 운영 측정 후 조정 시 본 값만 변경.
   # - cleanup-cron: 만료 batch cron (Spring 6-field). Asia/Seoul timezone.

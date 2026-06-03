@@ -21,7 +21,7 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
 import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
@@ -230,8 +230,8 @@ function VoiceRangeSummary({
   isPending,
 }: VoiceRangeSummaryProps) {
   if (voiceRange) {
-    const lowNote = midiToCombinedNoteName(voiceRange.lowestNoteMidi);
-    const highNote = midiToCombinedNoteName(voiceRange.highestNoteMidi);
+    const lowNote = midiToKoreanNoteName(voiceRange.lowestNoteMidi);
+    const highNote = midiToKoreanNoteName(voiceRange.highestNoteMidi);
     return (
       <p
         aria-label="저장된 음역대"

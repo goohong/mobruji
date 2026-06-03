@@ -56,7 +56,7 @@ last_reviewed: 2026-06-03
 - **신규 `Mood` enum 값 추가** — 프리셋은 기존 enum 위 view. enum 확장은 별도 결정(필요 시 `song`/`recommendation` ADR).
 - **청중 반응 실시간 인식** — v0.4+(부모 F3 비범위 상속).
 - **청중 연령대 추천 신호화** — 청중 세대를 추천 점수에 반영하는 신호(요청 `ageGroup`=본인 세대와 별 차원)는 별도 결정(§8 Q3 후속). 본 spec 1차는 입력 수집/표시까지.
-- **음역 optional 추천 분기** — 추천이 음역 없이 동작하도록 알고리즘을 바꾸는 작업은 본 spec 밖(§9 Q4 근거 — 별 결정).
+- **음역 optional 추천 분기** — 추천이 음역 없이 동작하도록 알고리즘을 바꾸는 작업은 본 spec 밖(§9 Q4 근거 — 별 결정). 별 경로(fallback 피드 + 점진적 음역 유도)로 우회하는 결정 SoT = `voice-range-optional-recommendation-entry.md`(Option A 채택 / Option B=알고리즘 optional 화 기각).
 - **활용 팁 자동 생성** — 곡별 활용 팁의 자동 산출(audio-analysis 기반)은 후속. 1차는 프리셋 톤 + 수기 시드.
 - **온보딩 진입 분기/완료 전이 자체** — 부모 `first-user-onboarding-flow.md` SoT.
 

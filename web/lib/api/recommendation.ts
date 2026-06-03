@@ -67,6 +67,28 @@ export type MetadataSource =
   | "USER_CONTRIBUTION"
   | "INFERRED";
 
+/**
+ * 추천 의도 페르소나 식별자.
+ *
+ * BE `com.mobruji.recommendation.domain.RecommendationPersona` 와 1:1 매칭
+ * (`06-domain-model.md §4-1` 등재, persona-expansion-social-emotional.md §2).
+ * 영속 엔티티가 아니라 추천 의도·랭킹 가중 프리셋의 분류 라벨이다.
+ *
+ * - `P-A` 연습형 / `P-B` 부른곡 기반 / `P-C` 즉석 분위기·나이대 (개인·실용 축)
+ * - `P-D` 모임 사회자형 / `P-E` 안전곡형 / `P-F` 과시·킬링파트형 / `P-G` 듀엣형
+ *
+ * 추천 요청에서 미지정(null/생략)이면 현행 default 가중으로 동작한다(하위호환).
+ * 1차로 web 은 P-D 시퀀스(#1601)·P-E 안전곡(#1600) 모드를 노출한다.
+ */
+export type RecommendationPersona =
+  | "P-A"
+  | "P-B"
+  | "P-C"
+  | "P-D"
+  | "P-E"
+  | "P-F"
+  | "P-G";
+
 export type RecommendationCreateRequest = {
   sessionId: string;
   voiceRangeLow: number;
@@ -87,6 +109,14 @@ export type RecommendationCreateRequest = {
    *   그대로 전달한다.
    */
   excludeSongIds?: number[];
+  /**
+   * 추천 의도 페르소나(선택). BE #1598(P-E 안전곡 가중 프리셋)이 받는 필드.
+   *
+   * - `P-E` 지정 → 안전곡 가중 프리셋(`difficulty=EASY` + `rangeFit` 여유 +
+   *   느린 `tempoMatch` + `popularity` 강편향) 적용.
+   * - null/생략 시 현행 default 가중(하위호환). 결정성 seed 입력에도 포함된다.
+   */
+  persona?: RecommendationPersona | null;
 };
 
 /**
@@ -149,6 +179,16 @@ export type RecommendedSongResponse = {
   moodFitReason?: string | null;
   practiceDifficulty?: "EASY" | "NORMAL" | "HARD" | null;
   practiceDifficultyReason?: string | null;
+  /**
+   * 페르소나 설명가능성 필드 (BE #1598 / 이슈 #1600, P-E 안전곡 모드):
+   *   - `persona`: 이 추천을 산출한 가중 프리셋의 페르소나 식별자. 미지정 호출(default
+   *     가중)에서는 `null`/생략.
+   *   - `personaReason`: 페르소나별 사유 텍스트. P-E 안전곡 모드에서는 "안심 포인트"
+   *     (쉬운 이유) 한 줄로 노출한다. BE 가 채워주기 전에는 web 이 곡 난이도 기반으로
+   *     client-side fallback 사유를 만들어 보여준다(lib/persona.ts).
+   */
+  persona?: RecommendationPersona | null;
+  personaReason?: string | null;
   rankPosition: number;
 };
 
@@ -173,28 +213,6 @@ export function createRecommendation(
     body: request,
   });
 }
-
-/**
- * 추천 의도 페르소나 식별자.
- *
- * BE `com.mobruji.recommendation.domain.RecommendationPersona` 와 1:1 매칭
- * (`06-domain-model.md §4-1`, persona-expansion-social-emotional.md §2). 영속 엔티티가
- * 아니라 추천 의도·랭킹 가중 프리셋의 분류 라벨이다.
- *
- * - `P-A` 연습형 / `P-B` 부른곡 기반 / `P-C` 즉석 분위기·나이대 (개인·실용 축)
- * - `P-D` 모임 사회자형 / `P-E` 안전곡형 / `P-F` 과시·킬링파트형 / `P-G` 듀엣형
- *
- * 미지정(null/생략)이면 현행 default 가중으로 동작한다(하위호환). 1차로 web 은 P-D 시퀀스
- * (#1601)·P-E 안전곡(#1600) 모드를 노출한다.
- */
-export type RecommendationPersona =
-  | "P-A"
-  | "P-B"
-  | "P-C"
-  | "P-D"
-  | "P-E"
-  | "P-F"
-  | "P-G";
 
 /**
  * P-D 모임 사회자 시퀀스 추천의 자리 단계 식별자.

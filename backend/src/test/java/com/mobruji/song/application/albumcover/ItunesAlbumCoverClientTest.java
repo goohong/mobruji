@@ -301,4 +301,25 @@ class ItunesAlbumCoverClientTest {
         assertThat(result).isEmpty();
         server.verify();
     }
+
+    @Test
+    @DisplayName("lookupAlbumCoverUrl: term 은 괄호/feat. 노이즈를 제거한 정규화 값으로 결합 (ADR 0029 매칭율 보강)")
+    void lookup_termQueryParam_usesNormalizedTerms() {
+        // given — title 의 (Live) 와 artist 의 feat. 절이 검색 전에 제거돼야 한다.
+        final RestClient.Builder builder = RestClient.builder();
+        final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(ExpectedCount.once(), requestTo(org.hamcrest.Matchers.any(String.class)))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(MockRestRequestMatchers.queryParam("term", "cherry%20blossom%20busker"))
+                .andRespond(withSuccess("{\"resultCount\":0,\"results\":[]}", MediaType.APPLICATION_JSON));
+        final ItunesAlbumCoverClient client = new ItunesAlbumCoverClient(PROPERTIES, builder.build());
+
+        // when
+        final Optional<String> result = client.lookupAlbumCoverUrl(
+                "cherry blossom (Live)", "busker feat. friend");
+
+        // then
+        assertThat(result).isEmpty();
+        server.verify();
+    }
 }
