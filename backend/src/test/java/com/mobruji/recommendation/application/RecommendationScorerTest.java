@@ -917,6 +917,107 @@ class RecommendationScorerTest {
     }
 
     @Test
+    @DisplayName("voiceRangeFit (#1632): 곡 실측 음역(lowMidi/highMidi) 둘 다 있으면 키 root±7 휴리스틱 대신 실측 band 사용")
+    void voiceRangeFit_actualBandOverridesKeyHeuristic() {
+        // given: A_MINOR(root=69) 휴리스틱 음역 62~76 vs 실측 64~76 (band 위쪽 치우침 — 예: id=8 Eight 패턴)
+        // 사용자 60~76 (center=68): 휴리스틱은 (62,76,songCenter=69) / 실측은 (64,76,songCenter=70)
+        // 두 산식이 같은 입력에서도 다른 값을 산출해야 fix 가 실측 band 를 실제로 반영함을 검증.
+        final double withBand = RecommendationScorer.voiceRangeFit(64, 76, MusicalKey.A_MINOR, 60, 76);
+        final double withoutBand = RecommendationScorer.voiceRangeFit(null, null, MusicalKey.A_MINOR, 60, 76);
+        // 휴리스틱: songSpan=14, overlap=14, reachability=1.0; centerDist=|69-68|=1, half=8 → cent=7/8=0.875
+        // 실측: songSpan=12, overlap=12, reachability=1.0; centerDist=|70-68|=2, half=8 → cent=6/8=0.75
+        assertThat(withBand).isNotEqualTo(withoutBand);
+        assertThat(withoutBand).isCloseTo(7.0 / 8.0, offset(1e-9));
+        assertThat(withBand).isCloseTo(6.0 / 8.0, offset(1e-9));
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1632): lowMidi/highMidi 한쪽이라도 null 이면 키 root±7 휴리스틱 폴백 (하위호환)")
+    void voiceRangeFit_fallsBackToKeyHeuristicWhenBandMissing() {
+        // given: 미적재 곡 시나리오. C_MAJOR root=60 + 사용자 53~67 (정중앙 + 완전 포함 = 휴리스틱 fit=1.0)
+        // when
+        final double bothNull = RecommendationScorer.voiceRangeFit(null, null, MusicalKey.C_MAJOR, 53, 67);
+        final double lowOnly = RecommendationScorer.voiceRangeFit(53, null, MusicalKey.C_MAJOR, 53, 67);
+        final double highOnly = RecommendationScorer.voiceRangeFit(null, 67, MusicalKey.C_MAJOR, 53, 67);
+        // then: 셋 다 키 휴리스틱 폴백 → 정확히 1.0
+        assertThat(bothNull).isEqualTo(1.0);
+        assertThat(lowOnly).isEqualTo(1.0);
+        assertThat(highOnly).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1632): 실측 band 가 사용자 음역 중앙에 가까운 곡이 멀리 떨어진 곡보다 fit 가 높다 — 음역대별 변별력")
+    void voiceRangeFit_bandCloserToUserCenterScoresHigher() {
+        // given: 사용자 음역 60~72 (center=66). 두 실측 band 곡:
+        //  - near band: 60~74 (center=67) → 사용자 중앙과 매우 가까움
+        //  - far  band: 48~62 (center=55) → 사용자 중앙에서 멀음
+        final double near = RecommendationScorer.voiceRangeFit(60, 74, MusicalKey.C_MAJOR, 60, 72);
+        final double far = RecommendationScorer.voiceRangeFit(48, 62, MusicalKey.C_MAJOR, 60, 72);
+        // then: 사용자 음역 중앙에 가까운 band 가 더 높은 fit → 음역대 변별력 (사고 #1632)
+        assertThat(near).isGreaterThan(far);
+    }
+
+    @Test
+    @DisplayName("voiceRangeFit (#1632): 사용자 음역 변화에 따라 같은 실측 band 의 fit 가 달라진다 — '음역과 무관' 사고 회귀 가드")
+    void voiceRangeFit_actualBandRespondsToUserRangeChanges() {
+        // given: 실측 band 60~73 (B_MINOR 키 곡 패턴)
+        final double narrowLowUser = RecommendationScorer.voiceRangeFit(60, 73, MusicalKey.B_MINOR, 40, 55);
+        final double matchedUser = RecommendationScorer.voiceRangeFit(60, 73, MusicalKey.B_MINOR, 60, 73);
+        // then: 음역 일치 사용자가 좁은 저음역 사용자보다 fit 가 명확히 높음
+        assertThat(matchedUser).isGreaterThan(narrowLowUser);
+        assertThat(narrowLowUser).isEqualTo(0.0); // 사용자 40~55, 곡 60~73 → overlap 0
+    }
+
+    @Test
+    @DisplayName("score (#1632): 실측 band 적재 곡과 미적재 곡은 같은 사용자 음역에서 voiceRangeFit 신호가 다르다 (랭킹 신호 정확도)")
+    void score_actualBandFlowsThroughBreakdown() {
+        // given: 사용자 음역 53~70. 같은 키 C_MAJOR 인 두 곡:
+        //  - 실측 band 적재 곡: lowMidi=53, highMidi=70 (사용자 음역과 완전 일치)
+        //  - 미적재 곡: lowMidi=null, highMidi=null → 키 root±7 휴리스틱(53~67)
+        final Song bandSong = Song.builder()
+                .title("band").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .mood(Mood.UPBEAT).bpm(120)
+                .lowMidi(53).highMidi(70)
+                .metadataSource(MetadataSource.AUDIO_ANALYSIS)
+                .build();
+        final Song heuristicSong = buildSong(MusicalKey.C_MAJOR, Mood.UPBEAT, 120);
+        final RecommendationProperties noJitter = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when: 같은 사용자 음역 53~70 + 같은 다른 입력
+        final double bandFit = scorer(noJitter)
+                .score(bandSong, 53, 70, Mood.UPBEAT, 120, null, new Random(0)).voiceRangeFit();
+        final double heuristicFit = scorer(noJitter)
+                .score(heuristicSong, 53, 70, Mood.UPBEAT, 120, null, new Random(0)).voiceRangeFit();
+        // then: 실측 band 적재 곡의 신호값이 휴리스틱과 다름 — breakdown 흐름 검증
+        assertThat(bandFit).isNotEqualTo(heuristicFit);
+    }
+
+    @Test
+    @DisplayName("score (#1632): UNKNOWN 키 곡도 실측 band 가 있으면 voiceFit 가 0.5 중립이 아니라 band 산식 결과 (정확도 향상)")
+    void score_unknownKeyWithActualBandUsesBandNotNeutral() {
+        // given: UNKNOWN 키 곡이지만 audio analysis 로 lowMidi/highMidi 적재된 케이스
+        final Song unknownWithBand = Song.builder()
+                .title("u").artist("a")
+                .keyOriginal(MusicalKey.UNKNOWN)
+                .mood(Mood.UPBEAT).bpm(120)
+                .lowMidi(60).highMidi(72)
+                .metadataSource(MetadataSource.AUDIO_ANALYSIS)
+                .build();
+        final RecommendationProperties noJitter = new RecommendationProperties(
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0),
+                DEFAULT_DIVERSITY, defaultTempo(), defaultGeneration(), 10, 0.0,
+                RecommendationProperties.SeedStrategy.DERIVED);
+        // when: 사용자 음역 60~72 (band 와 완전 일치) → band 산식: reachability=1.0, centeredness=1.0 → fit=1.0
+        final double fit = scorer(noJitter)
+                .score(unknownWithBand, 60, 72, Mood.UPBEAT, 120, null, new Random(0)).voiceRangeFit();
+        // then: 중립 0.5 아닌 실측 band 산식 결과
+        assertThat(fit).isEqualTo(1.0);
+    }
+
+    @Test
     @DisplayName("score (#1487): ageGroup null 이면 generationFit=0 → 랭킹 무영향(하위호환)")
     void score_nullAgeGroup_noGenerationImpact() {
         final RecommendationProperties generationOnly = new RecommendationProperties(
