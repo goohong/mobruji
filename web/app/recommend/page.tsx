@@ -59,6 +59,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { midiToCombinedNoteName } from "@/lib/notes";
+import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
@@ -298,6 +299,10 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
             </p>
             <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
           </div>
+          <VoiceRangeIntuition
+            lowMidi={voiceRange.lowestNoteMidi}
+            highMidi={voiceRange.highestNoteMidi}
+          />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
             {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
                 강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"

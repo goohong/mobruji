@@ -25,6 +25,7 @@ import { ApiError } from "@/lib/api/client";
 import { midiToCombinedNoteName, octaveRangeMidis } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { Button } from "@/components/ui";
+import { VoiceRangeIntuition } from "./components/VoiceRangeIntuition";
 
 const DEFAULT_LOW_MIDI = 48; // C3
 const DEFAULT_HIGH_MIDI = 69; // A4
@@ -202,6 +203,14 @@ export default function VoiceRangePage() {
                 validationError !== null ? VALIDATION_ERROR_ID : undefined
               }
             />
+
+            {validationError === null ? (
+              <VoiceRangeIntuition
+                lowMidi={lowestNoteMidi}
+                highMidi={highestNoteMidi}
+                caption="고른 음역대를 평균과 비교하면"
+              />
+            ) : null}
 
             {/*
               (closes #464) validationError / submitError 영역에 role="alert" 를 부여해
