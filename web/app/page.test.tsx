@@ -117,11 +117,23 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     expect(items[3]).toHaveTextContent(/좋아요/);
   });
 
-  it("primary CTA는 /voice-range/auto, 보조 CTA는 /voice-range", async () => {
+  it("진입 분기 카드는 측정 방식 선택 화면으로, '직접 입력으로 시작'은 /voice-range", async () => {
     renderWithQueryClient(<Home />);
+    // 3 페르소나 카드·둘러보기 모두 측정 방식 선택 화면(/voice-range/method)으로 연결
+    // — 진입만으로 마이크 측정을 강제하지 않는다 (directive #1511).
     expect(
-      screen.getByRole("link", { name: /음역대 측정하기/ }),
-    ).toHaveAttribute("href", "/voice-range/auto");
+      screen.getByRole("link", { name: /내 목소리부터 알아보기/ }),
+    ).toHaveAttribute("href", "/voice-range/method");
+    expect(
+      screen.getByRole("link", { name: /발성·고음 연습할 곡 찾기/ }),
+    ).toHaveAttribute("href", "/voice-range/method");
+    expect(
+      screen.getByRole("link", { name: /분위기 띄울 곡 찾기/ }),
+    ).toHaveAttribute("href", "/voice-range/method");
+    // 보조 경로.
+    expect(
+      screen.getByRole("link", { name: /그냥 둘러보기/ }),
+    ).toHaveAttribute("href", "/voice-range/method");
     expect(
       screen.getByRole("link", { name: /직접 입력으로 시작/ }),
     ).toHaveAttribute("href", "/voice-range");
@@ -132,7 +144,7 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     // 마이크로태스크 한 사이클 대기 후에도 호출 없음.
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: /시작하기/ }),
+        screen.getByRole("heading", { name: /무엇을 도와드릴까요/ }),
       ).toBeInTheDocument();
     });
     expect(readVoiceRangeMock).not.toHaveBeenCalled();
@@ -142,7 +154,7 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     const { container } = renderWithQueryClient(<Home />);
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: /시작하기/ }),
+        screen.getByRole("heading", { name: /무엇을 도와드릴까요/ }),
       ).toBeInTheDocument();
     });
     await expectNoA11yViolations(container);
@@ -188,12 +200,12 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     ).toHaveAttribute("href", "/voice-range");
   });
 
-  it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (C3 ~ A4)", async () => {
+  it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (도3 ~ 라4)", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
       sessionId: "00000000-0000-4000-8000-000000000001",
-      lowestNoteMidi: 48, // C3
-      highestNoteMidi: 69, // A4
+      lowestNoteMidi: 48, // 도3
+      highestNoteMidi: 69, // 라4
       sourceMethod: "OCTAVE_PICK",
       createdAt: "2026-05-22T00:00:00Z",
       updatedAt: "2026-05-22T00:00:00Z",
@@ -202,9 +214,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     renderWithQueryClient(<Home />);
 
     await waitFor(() => {
-      // 이슈 #318: 한국어 (SPN) 병기.
+      // 한국어 단독 표기 (#1310 사용자 정정 2026-06-03 — SPN 병기 #318 폐지).
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 ~ 라4/,
       );
     });
     expect(readVoiceRangeMock).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001");
@@ -239,9 +251,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
 
     const { container } = renderWithQueryClient(<Home />);
     await waitFor(() => {
-      // 이슈 #318: 한국어 (SPN) 병기.
+      // 한국어 단독 표기 (#1310 사용자 정정 2026-06-03).
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 ~ 라4/,
       );
     });
     await expectNoA11yViolations(container);

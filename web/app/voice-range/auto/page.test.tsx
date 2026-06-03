@@ -351,10 +351,10 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
       ).toBeInTheDocument();
     });
 
-    // 측정 결과: low=48(도3/C3), high=69(라4/A4) 가 슬라이더 표시값에 반영.
-    // 이슈 #318: 한국어 음명 병기 + MIDI 숫자.
-    expect(screen.getByText(/도3 \(C3\) · MIDI 48/)).toBeInTheDocument();
-    expect(screen.getByText(/라4 \(A4\) · MIDI 69/)).toBeInTheDocument();
+    // 측정 결과: low=48(도3), high=69(라4) 가 슬라이더 표시값에 반영.
+    // 이슈 #1613: 한국어 음명 단독 + MIDI 숫자.
+    expect(screen.getByText(/도3 · MIDI 48/)).toBeInTheDocument();
+    expect(screen.getByText(/라4 · MIDI 69/)).toBeInTheDocument();
   });
 
   it("결과 화면의 '다시 측정하기' 버튼을 누르면 PERMISSION 단계로 돌아간다", async () => {
@@ -444,8 +444,8 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
     // userEvent의 range 처리가 환경마다 다르므로 fireEvent.change로 직접 값 설정.
     fireEvent.change(lowSlider, { target: { value: "50" } });
 
-    // 이슈 #318: 한국어 (SPN) · MIDI 형식.
-    expect(screen.getByText(/레3 \(D3\) · MIDI 50/)).toBeInTheDocument();
+    // 이슈 #1613: 한국어 음명 단독 · MIDI 형식.
+    expect(screen.getByText(/레3 · MIDI 50/)).toBeInTheDocument();
   });
 });
 

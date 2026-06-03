@@ -10,3 +10,4 @@ export { Card, CardHeader, CardBody, CardFooter } from "./Card";
 export { Input } from "./Input";
 export { Chip } from "./Chip";
 export type { ChipTone } from "./Chip";
+export { Skeleton } from "./Skeleton";

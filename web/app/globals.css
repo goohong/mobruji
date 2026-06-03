@@ -118,6 +118,15 @@ body {
   }
 }
 
+@keyframes mobruji-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .animate-fade-in {
   animation: mobruji-fade-in var(--duration-slow) var(--ease-out) both;
 }
@@ -130,10 +139,38 @@ body {
   animation: mobruji-scale-in var(--duration-slow) var(--ease-spring) both;
 }
 
+/*
+ * Shimmer sweep — 스켈레톤 로딩 플레이스홀더용 (#1493).
+ *
+ * Tailwind 기본 `animate-pulse`(opacity 깜빡임) 대신, 토스/네이버 류 앱의 "빛이
+ * 한 번씩 쓸고 지나가는" 로딩 감각을 재현한다. base 톤(`--skeleton-base`) 위로
+ * 살짝 밝은 highlight(`--skeleton-highlight`) 가 좌→우로 흐르는 gradient 를
+ * 200% 폭으로 깔고 background-position 만 애니메이션해 paint 비용을 최소화한다.
+ */
+.animate-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--skeleton-base) 0%,
+    var(--skeleton-base) 35%,
+    var(--skeleton-highlight) 50%,
+    var(--skeleton-base) 65%,
+    var(--skeleton-base) 100%
+  );
+  background-size: 200% 100%;
+  animation: mobruji-shimmer 1.4s var(--ease-in-out) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
   .animate-fade-in-up,
   .animate-scale-in {
     animation: none;
+  }
+
+  /* shimmer 는 무한 반복이라 keyframe 을 끄고 정적 base 톤만 남긴다. */
+  .animate-shimmer {
+    animation: none;
+    background-image: none;
+    background-color: var(--skeleton-base);
   }
 }

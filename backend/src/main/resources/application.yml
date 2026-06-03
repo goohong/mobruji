@@ -26,13 +26,17 @@ spring:
 #
 # CORS 허용 origin (rev 21 QA, #314):
 # - 환경변수 MOBRUJI_CORS_ALLOWED_ORIGINS 로 쉼표 구분 주입 (예: "https://mobruji.com,https://www.mobruji.com").
-# - 기본값은 로컬 Next.js dev 서버(http://localhost:3000) — 운영 환경은 반드시 env override.
+# - 기본값은 로컬 Next.js dev 서버(http://localhost:3000) + NCP dev canonical origin (ADR-0028,
+#   nip.io + Let's Encrypt). NCP `.env.dev` 갱신 누락 시에도 default 가 흡수하도록 두 origin
+#   포함 — 추천 받기 P0 사고(#1593, https://101-79-20-94.nip.io 가 옛 env(http://101.79.20.94)
+#   와 mismatch 로 403 "Invalid CORS request") 재발 가드.
+#   prod 도메인(dev.mobruji.app, v0.4)으로 전환 시 env override 강제.
 # - 빈 값으로 주입하면 부팅 실패 (의도치 않은 와일드카드 노출 방지).
 mobruji:
   admin:
     token: ${MOBRUJI_ADMIN_TOKEN:}
   cors:
-    allowed-origins: ${MOBRUJI_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    allowed-origins: ${MOBRUJI_CORS_ALLOWED_ORIGINS:http://localhost:3000,https://101-79-20-94.nip.io}
   # 익명 sessionId 라이프사이클 (ADR-0013, spec anonymous-session-lifecycle §5-8).
   # - ttl-days: sliding TTL (default 180 — ADR-0013 §D-1). 운영 측정 후 조정 시 본 값만 변경.
   # - cleanup-cron: 만료 batch cron (Spring 6-field). Asia/Seoul timezone.
@@ -162,3 +166,18 @@ audio:
     use-docker: ${AUDIO_ANALYSIS_USE_DOCKER:false}
     docker-compose-file: ${AUDIO_ANALYSIS_COMPOSE_FILE:../docker-compose.audio.yml}
     docker-compose-service: ${AUDIO_ANALYSIS_COMPOSE_SERVICE:audio-analysis}
+
+# 곡 카탈로그 메타-only 임포트 설정 — spec docs/features/song-catalog-expansion.md PR 2 (#1496).
+# 운영자가 정리한 (title, artist) 후보를 MusicBrainz(CC0) 에 질의해 메타데이터만 채워 Song upsert.
+# 음역대/key/tempo 는 채우지 않고 자체 분석(#1490) 큐가 후속한다. 배치는 --mobruji.import-catalog=true 수동 trigger.
+# - music-brainz-base-url: recording 검색 webservice 기준. 테스트는 stub 으로 override.
+# - user-agent: MusicBrainz 약관상 contact 포함 식별 User-Agent 의무 — 환경변수로 운영 contact 주입 권장.
+# - request-timeout: 곡당 호출 timeout.
+# - throttle: 곡 사이 sleep — MusicBrainz anonymous 1 req/s rate limit 보수적 준수.
+# - import-confidence: 임포트 곡 초기 metadataConfidence (메타만 → 음역 미상이라 낮게, spec §8 Q4 (a)).
+catalog-import:
+  music-brainz-base-url: ${MUSICBRAINZ_BASE_URL:https://musicbrainz.org/ws/2}
+  user-agent: ${CATALOG_IMPORT_USER_AGENT:mobruji-backend/0.1 (+https://github.com/goohong/mobruji)}
+  request-timeout: 5s
+  throttle: 1s
+  import-confidence: 0.3

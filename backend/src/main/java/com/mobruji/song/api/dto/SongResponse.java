@@ -6,6 +6,7 @@ import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.NoteName;
 import com.mobruji.song.domain.Song;
+import com.mobruji.song.domain.SongAnalysisProfile;
 
 public record SongResponse(
         Long id,
@@ -28,7 +29,8 @@ public record SongResponse(
         Float energy,
         String lowestNoteName,
         String highestNoteName,
-        String albumCoverUrl
+        String albumCoverUrl,
+        SongAnalysisProfile analysisProfile
 ) {
 
     public static SongResponse from(final Song song) {
@@ -55,6 +57,7 @@ public record SongResponse(
                 song.getEnergy(),
                 songLowMidi != null ? NoteName.of(songLowMidi) : null,
                 songHighMidi != null ? NoteName.of(songHighMidi) : null,
-                song.getAlbumCoverUrl());
+                song.getAlbumCoverUrl(),
+                SongAnalysisProfile.from(song));
     }
 }

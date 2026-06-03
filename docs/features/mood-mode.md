@@ -56,7 +56,7 @@ last_reviewed: 2026-06-03
 - **신규 `Mood` enum 값 추가** — 프리셋은 기존 enum 위 view. enum 확장은 별도 결정(필요 시 `song`/`recommendation` ADR).
 - **청중 반응 실시간 인식** — v0.4+(부모 F3 비범위 상속).
 - **청중 연령대 추천 신호화** — 청중 세대를 추천 점수에 반영하는 신호(요청 `ageGroup`=본인 세대와 별 차원)는 별도 결정(§8 Q3 후속). 본 spec 1차는 입력 수집/표시까지.
-- **음역 optional 추천 분기** — 추천이 음역 없이 동작하도록 알고리즘을 바꾸는 작업은 본 spec 밖(§9 Q4 근거 — 별 결정).
+- **음역 optional 추천 분기** — 추천이 음역 없이 동작하도록 알고리즘을 바꾸는 작업은 본 spec 밖(§9 Q4 근거 — 별 결정). 별 경로(fallback 피드 + 점진적 음역 유도)로 우회하는 결정 SoT = `voice-range-optional-recommendation-entry.md`(Option A 채택 / Option B=알고리즘 optional 화 기각).
 - **활용 팁 자동 생성** — 곡별 활용 팁의 자동 산출(audio-analysis 기반)은 후속. 1차는 프리셋 톤 + 수기 시드.
 - **온보딩 진입 분기/완료 전이 자체** — 부모 `first-user-onboarding-flow.md` SoT.
 
@@ -84,8 +84,11 @@ last_reviewed: 2026-06-03
 ### 5-2) API 엔드포인트
 | Method | Path | 설명 | 인증 | Req | Res |
 |---|---|---|---|---|---|
-| — | — | **신규 endpoint 없음** — 기존 `POST /api/v1/recommendations` 재사용. 프리셋은 fe 에서 `mood`+`preferredBpm` 으로 풀어 기존 body 로 전송 | 익명 | (기존) | (기존) |
+| GET | `/api/v1/mood-presets` | **프리셋 카탈로그 조회**(BE 1단계, #1562) — 4 프리셋을 각자의 `Mood` + `preferredBpm` 으로 해석해 노출. fe picker 가 라벨 표시 + 추천 호출 구성에 쓰는 **프리셋→`Mood`/`preferredBpm` 매핑 BE 단일 출처** | 익명 | — | `MoodPresetListResponse` (`presets[]` = `preset`/`label`/`mood`/`preferredBpm`) |
+| POST | `/api/v1/recommendations` | 추천 — 기존 재사용. 프리셋은 fe 에서 카탈로그가 준 `mood`+`preferredBpm` 으로 풀어 기존 body 로 전송(신호·산식 무변경) | 익명 | (기존) | (기존) |
 
+- 추천 자체는 기존 `POST /api/v1/recommendations` 그대로 — 추천 알고리즘·신호·결정성 무변경. 신규 카탈로그 엔드포인트는 **읽기 전용**(매핑 노출만)이라 p95/결정성 회귀 가드와 무관.
+- `preferredBpm` 은 별도 BPM 표 없이 기존 `recommendation.tempo.moodDefaultBpm`(프리셋의 `Mood` 키)에서 해석 → 보호 영역(`application.yml`) 무변경. moodDefaultBpm 에 키 부재 시 `fallbackBpm`.
 - 청중 연령대를 추천 신호로 보낼지(요청 필드 추가)는 §8 Q3 결정 전까지 미전송(클라이언트 수집만).
 
 ### 5-3) 추천 신호(무변경 재사용)
@@ -126,24 +129,24 @@ last_reviewed: 2026-06-03
 ## 6) 작업 분할 (예상 PR 리스트)
 - [ ] PR 1 (docs, plan): 본 spec + `06-domain-model.md §4-1` 용어 등재(`MoodPreset`/`AudienceProfile`) + 온보딩 §8 Q4 확정 반영. **본 PR**.
 - [ ] PR 2 (fe): `<MoodPresetPicker>` + 프리셋→`Mood`/`preferredBpm` 매핑(`web/lib/moodPreset.ts`) + MOOD 경로 측정 위치(마지막 단계) wiring. 온보딩 PR 4(MOOD 경로 wiring)와 동기.
-- [ ] PR 3 (be): `RecommendationProperties.moodBpm` 에 프리셋 BPM 키 보강(필요 시) — `application.yml`(보호 영역) 변경. 신호 산식·가중치 무변경, 결정성 회귀 가드 재실행.
+- [x] PR 3 (be): **프리셋 카탈로그 엔드포인트 `GET /api/v1/mood-presets`**(BE 1단계, #1562) — `MoodPreset` enum(프리셋→`Mood` 단일 출처) + `preferredBpm` 을 기존 `recommendation.tempo.moodDefaultBpm` 에서 해석(별도 BPM 표·`application.yml` 변경 없이 단일 출처 유지) + RestAssured 성공 E2E. 추천 신호·산식·가중치 무변경 → 결정성/p95 회귀 가드 무영향(읽기 전용 엔드포인트).
 - [ ] PR 4 (fe): `<AudiencePicker>` 청중 연령대 옵션(PoC 세션 옵션).
 - [ ] PR 5 (fe): `<RecommendationCard>` `stageTip` slot + 프리셋별 활용 팁(수기 시드) + "다음 분위기로" 재추천 CTA.
 - [ ] PR 6 (song-curation): mood 태그 정밀화 — 프리셋 변별에 필요한 곡 mood 정합(seed 보강, `song-curation-seed-100.md` 진행도 의존).
 
 ### 보호 영역 변경 여부 (필수 명시)
 
-- 보호 영역 변경 여부: ☑ 있음 — PR 3 한정:
-  - `backend/src/main/resources/application.yml` — `recommendation.moodBpm` 에 프리셋 BPM 키(`떼창`/`도입` 등) 추가. 가중치·신호 산식 무변경(키 추가만). rev 단계는 결정성/p95 회귀 가드 재실행 가중도 권고.
+- 보호 영역 변경 여부: ☐ 없음 (현 PR 리스트 기준):
+  - PR 3(be 카탈로그 엔드포인트)은 `preferredBpm` 을 기존 `recommendation.tempo.moodDefaultBpm` 에서 **읽어** 해석하므로 `application.yml` 변경이 없다(초안의 `moodBpm` 키 추가 방식 폐기 — 단일 출처를 기존 tempo 설정으로 통일). 추천 신호·산식·가중치 무변경.
   - 나머지 PR(2/4/5)은 `web/*` + docs 범위로 보호 영역 무변경. 청중 연령대 **영속**(migration) 채택 시 별 PR 에서 보호 영역 재명시.
 
 ## 7) 테스트 전략
 - **fe 단위**: 프리셋 선택 → `{ mood, preferredBpm }` 매핑 정확성, 청중 옵션 store 전이, 프리셋 전환 재추천(측정 재요구 없음), `stageTip` 프리셋별 톤 분기.
 - **fe e2e (Playwright)**: "MOOD 카드 → 프리셋 선택 → (청중) → 측정 → 첫 추천 + 활용 팁 노출" 1건, "추천 후 다음 분위기 프리셋 전환 → 재추천(측정 스킵)" 1건.
-- **be 단위**: `RecommendationProperties.moodBpm` 신규 키 바인딩, 프리셋 BPM → `tempoMatch` 경계값(기존 v2 산식 재사용).
-- **결정성 회귀**: 같은 `{ mood, preferredBpm, voiceRange }` 두 번 → 1위 score 동일(기존 가드 재실행). 신호 무변경이므로 신규 가드 불요.
-- **정합 검증**: 프리셋→`Mood` 매핑이 fe(`moodPreset.ts`) ↔ be(`moodBpm`) drift 없는지(단일 출처 가드).
-- **be E2E**: 신규 endpoint 없음 → 기존 recommendation E2E 재사용. 본 spec 단독 docs PR(PR 1)은 rev 단계 1 no-op pass 대상.
+- **be 단위**: `MoodPresetCatalog` 가 프리셋 `Mood` 키로 `moodDefaultBpm` 에서 `preferredBpm` 해석, 키 부재 시 `fallbackBpm` 폴백.
+- **결정성 회귀**: 같은 `{ mood, preferredBpm, voiceRange }` 두 번 → 1위 score 동일(기존 가드 재실행). 카탈로그는 읽기 전용·추천 신호 무변경이므로 신규 가드 불요.
+- **정합 검증**: 프리셋→`Mood`/`preferredBpm` 매핑이 fe(`moodPreset.ts`) ↔ be(`/api/v1/mood-presets` 카탈로그) drift 없는지(단일 출처 가드). fe 는 카탈로그를 소비하거나 동일 매핑을 미러.
+- **be E2E**: `GET /api/v1/mood-presets` 성공 E2E(RestAssured) — 4 프리셋 선언 순서 + `label`/`mood`/`preferredBpm` 매핑 검증. 본 spec 단독 docs PR(PR 1)은 rev 단계 1 no-op pass 대상.
 
 ## 8) 오픈 질문
 > 구현 전에 답이 나와야 하는 것들. 해소되면 §9 결정 로그로 이동.
@@ -163,9 +166,13 @@ last_reviewed: 2026-06-03
 - **2026-06-03**: **온보딩 `first-user-onboarding-flow.md §8 Q4`(P-B 측정 위치) 확정 = (a) 음역 측정을 마지막 경량 단계로 유지**.
   - 근거(evidence): (1) `06-domain-model.md §5-3` — `RecommendationRequestEntity.voiceRangeLow/voiceRangeHigh` 가 `int, not null`. 추천 요청이 음역을 **구조적으로 필수** 로 요구한다. (2) `application.yml` 가중치 — `voice-fit: 0.5` 가 1순위(dominant) 신호. (3) 따라서 선택지 (b)광역 default 음역은 voiceFit 을 균일 포화시켜 dominant 신호를 노이즈로 만들고 추천 품질을 떨어뜨린다. (c)음역 optional 추천 분기는 dominant 신호 + score 정규화 + 결정성 가드를 건드리는 **별 규모 결정**(recommendation scope)으로 본 spec 밖.
   - 결론: P-B 경로는 음역을 "분위기 다 골랐고 마지막으로 목소리만" 으로 **가볍게 프레이밍해 마지막에** 받는다. 추천 알고리즘 무변경 + 안전한 PoC 경로. 출처: 본 PR, 부모 spec §8 Q4 / §5-4.
+- **2026-06-03 (BE 1단계 구현)**: 프리셋→`Mood`/`preferredBpm` 매핑의 BE 단일 출처를 **읽기 전용 카탈로그 엔드포인트 `GET /api/v1/mood-presets`** 로 신설(초안 §5-2 의 "신규 endpoint 없음" 을 갱신). 출처: 본 BE PR(#1562 1단계).
+  - 변경 사유: 초안은 매핑을 fe `web/lib/moodPreset.ts` 단독에 두고 BE 는 BPM 키만 보강하려 했으나, §3 비기능 "프리셋↔`Mood`/`preferredBpm` 매핑 단일 출처(fe/be drift 방지)" 를 만족하려면 BE 가 권위 있는 매핑을 노출하는 편이 안전하다. 카탈로그는 추천을 호출하지 않고 매핑만 반환하므로 추천 신호·산식·가중치·결정성/p95 가드에 무영향.
+  - `preferredBpm` 단일 출처 결정 = **기존 `recommendation.tempo.moodDefaultBpm`(프리셋의 `Mood` 키)에서 해석** (Q1 권고안 (a) 의 별도 `moodBpm` 키 추가 방식 폐기). 이유: 신규 BPM 표는 tempo 신호 설정과 또 하나의 진실원을 만들어 drift 위험. 기존 tempo 표를 재사용하면 프리셋 BPM 이 `tempoMatch` 신호와 항상 일치하고 `application.yml`(보호 영역) 변경도 불요. moodDefaultBpm 키 부재 시 `fallbackBpm` 폴백. (§8 Q1 → 결정: tempo 표 재사용으로 close.)
+  - 신규: `recommendation` 패키지 `MoodPreset` enum(프리셋→`Mood` 매핑 SoT, §8 Q2 권고안 (a) 단일 enum 고정 채택: PARTY→UPBEAT / SINGALONG→POWERFUL / EMOTIONAL→EMOTIONAL / ICEBREAKER→GROOVY) + `MoodPresetCatalog`(BPM 해석) + `MoodPresetController` + RestAssured E2E.
 
 ## 10) 다음 단계
 1. 본 PR 머지 후 온보딩 PR 4(MOOD 경로 wiring)와 본 spec PR 2(`<MoodPresetPicker>`)를 동기 fe 사이클로 launch 가능.
-2. PR 3(`moodBpm` 보강)은 보호 영역(`application.yml`) 변경이므로 rev 단계에 결정성/p95 회귀 가드 재실행을 가중도로 권고.
+2. PR 3(프리셋 카탈로그 엔드포인트)은 추천 신호 무변경·읽기 전용이라 보호 영역 변경이 없다. fe PR 2 는 `/api/v1/mood-presets` 를 소비하거나 동일 매핑을 미러해 drift 가드를 닫는다.
 3. Q3(청중 연령대)·Q5(F2 통합)는 PR 진입 전 권고안(각 a)로 빠르게 닫는 것을 권한다.
 4. `v03-roadmap.md` 매트릭스 F3 행에 본 spec 진척 반영(다음 plan 사이클, 부모 §10 과 동반).

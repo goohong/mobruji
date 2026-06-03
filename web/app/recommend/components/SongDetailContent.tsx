@@ -37,7 +37,7 @@ import {
   useBookmarkToggleMutation,
   useLikeToggleMutation,
 } from "@/lib/hooks/useFeedbackToggleMutation";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
@@ -70,9 +70,9 @@ export function SongDetailContent(props: SongDetailContentProps) {
 
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number" ? midiToKoreanNoteName(song.highMidi) : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number" ? midiToKoreanNoteName(song.lowMidi) : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
   // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
   // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.

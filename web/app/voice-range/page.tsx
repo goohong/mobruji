@@ -8,7 +8,7 @@
  *   - 제출 시 POST /api/v1/voice-ranges 호출 후 sessionId/voiceRangeId 저장.
  *   - 성공 시 /recommend로 라우팅.
  *
- * 입력은 MIDI 노트 정수로 BE에 전달하고, 사용자에게는 노트명(C4 등)으로 보여준다.
+ * 입력은 MIDI 노트 정수로 BE에 전달하고, 사용자에게는 한국어 음명(도4 등)으로 보여준다.
  */
 
 import { FormEvent, useMemo, useState } from "react";
@@ -22,7 +22,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
-import { midiToCombinedNoteName, octaveRangeMidis } from "@/lib/notes";
+import { midiToKoreanNoteName, octaveRangeMidis } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { Button } from "@/components/ui";
 import { VoiceRangeIntuition } from "./components/VoiceRangeIntuition";
@@ -291,7 +291,7 @@ function NoteSelect({
       >
         {options.map((midi) => (
           <option key={midi} value={midi}>
-            {midiToCombinedNoteName(midi)} · MIDI {midi}
+            {midiToKoreanNoteName(midi)} · MIDI {midi}
           </option>
         ))}
       </select>

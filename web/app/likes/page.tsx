@@ -26,11 +26,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
+import { Skeleton } from "@/components/ui";
 import { SongCard } from "@/app/recommend/components/SongCard";
 import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
 import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
 import { readLikesBySessionId } from "@/lib/api/feedback";
 import type { SongResponse } from "@/lib/api/song";
+import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useLikesStore } from "@/store/likes";
 import { useSessionStore } from "@/store/session";
 
@@ -159,7 +161,7 @@ function SongListWithModal({ songs }: SongListWithModalProps) {
       <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
-        titleLabel={selected ? selected.title : ""}
+        titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
       </SongDetailModal>
@@ -168,15 +170,27 @@ function SongListWithModal({ songs }: SongListWithModalProps) {
 }
 
 function LoadingLikes() {
+  // 실제 LikesContent(헤더 + 곡 리스트) 윤곽을 shimmer 스켈레톤으로 미리 그린다 —
+  // 맨 텍스트 대비 레이아웃 shift 가 줄고 토스/네이버 류 로딩 감각을 낸다 (#1493).
   return (
     <main
       role="status"
       aria-label="좋아한 곡 불러오는 중"
-      className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]"
+      className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]"
     >
-      <p className="text-sm text-[var(--text-caption)]">
-        좋아한 곡을 불러오는 중…
-      </p>
+      <div className="w-full max-w-2xl flex flex-col gap-6">
+        <header className="space-y-2">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-8 w-40" />
+        </header>
+        <ul className="flex flex-col gap-2">
+          {Array.from({ length: 4 }).map((_, rowIndex) => (
+            <li key={rowIndex}>
+              <Skeleton className="h-20 w-full rounded-[var(--radius-lg)]" />
+            </li>
+          ))}
+        </ul>
+      </div>
     </main>
   );
 }

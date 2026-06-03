@@ -24,14 +24,14 @@ import type {
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 
 /**
  * 점수 분해 단일 항목.
  *
  * - `score`는 0~1 정규화. UI는 막대 길이 또는 %로 노출한다.
  * - `detail`은 카드에서 점수 옆에 보여줄 한 줄 부연 — 예: "C# Major" 또는
- *   "사용자 C3-G4 vs 곡 G3-F5".
+ *   "사용자 도3-솔4 vs 곡 솔3-파5" (한국어 단독, #1310 사용자 정정 2026-06-03).
  * - `estimated`가 true이면 client-side 추정값임을 카드에서 명시(자세히 보기 안내)할 수 있다.
  */
 export type RecommendationBreakdownItem = {
@@ -142,10 +142,10 @@ function estimateRangeFit(
   const songSpan = Math.max(1, songHigh - songLow);
   const ratio = Math.min(1, overlapSemitones / songSpan);
 
-  const songLowName = midiToCombinedNoteName(songLow);
-  const songHighName = midiToCombinedNoteName(songHigh);
-  const userLowName = midiToCombinedNoteName(userLow);
-  const userHighName = midiToCombinedNoteName(userHigh);
+  const songLowName = midiToKoreanNoteName(songLow);
+  const songHighName = midiToKoreanNoteName(songHigh);
+  const userLowName = midiToKoreanNoteName(userLow);
+  const userHighName = midiToKoreanNoteName(userHigh);
 
   return {
     key: "rangeFit",
