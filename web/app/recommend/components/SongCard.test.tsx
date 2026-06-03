@@ -857,4 +857,44 @@ describe("SongCard", () => {
       ).toBeInTheDocument();
     });
   });
+
+  // 이슈 #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트") 노출.
+  describe("페르소나 사유 (#1600)", () => {
+    it("BE personaReason 이 있으면 '안심 포인트' 라벨과 함께 노출한다", () => {
+      const item = buildItem(
+        { difficulty: "EASY" },
+        { persona: "P-E", personaReason: "느린 템포라 따라 부르기 쉬워요." },
+      );
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} activePersona="P-E" />
+        </ul>,
+      );
+      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
+      expect(
+        screen.getByText("느린 템포라 따라 부르기 쉬워요."),
+      ).toBeInTheDocument();
+    });
+
+    it("BE personaReason 이 없어도 활성 P-E + EASY 곡이면 client fallback 사유를 노출한다", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} activePersona="P-E" />
+        </ul>,
+      );
+      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
+      expect(screen.getByText(/부담 없이/)).toBeInTheDocument();
+    });
+
+    it("의도 모드 미선택(activePersona=null)이면 페르소나 사유 줄을 그리지 않는다", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      expect(screen.queryByText("안심 포인트")).not.toBeInTheDocument();
+    });
+  });
 });
