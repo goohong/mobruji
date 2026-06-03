@@ -369,13 +369,21 @@ def _notify_user_done(
     pr_url: str = "",
     cta: str = "",
 ) -> None:
-    """#모부르지 채널에 작업 알림 (#1417, 문구 정정 #1427). graceful.
+    """digest 채널에 sub-agent 작업 완료 알림 (#1417, 문구 정정 #1427, 채널 이전 #7). graceful.
 
     사용자 정정 2026-05-31: 알림이 '검토 후 머지됩니다 / 확인 부탁' 처럼 모호하면 안 됨.
     (1) rev 를 모호어로 부르지 말 것 — 'rev(코드 리뷰)' 로 풀이.
     (2) develop 자동 머지는 사용자 할 일 없음을 분명히 (확인 필요한 건 release 뿐).
     (3) PR 링크 포함 (pr_url).
     (4) 행동 요청(cta)은 정말 필요할 때만 — 불필요한 '확인 부탁' 금지.
+
+    채널 이전 (#7, 2026-06-03 사용자 요청): sub-agent 완료/진행 류 알림이
+    사용자 대화 채널(#모부르지)을 도배해 대화가 묻혔다. ``--status-channel`` 로
+    DIGEST_CHANNEL_ID(완료/진행 집約 채널)에 보낸다 → #모부르지 는 사용자 대화
+    전용으로 비운다. release 등 사용자 확인이 필요한 알림은 nmae 가 #모부르지 로
+    직접 보내며 본 sub-agent 완료 경로에는 release 알림이 포함되지 않는다.
+    ``--status-channel`` 은 내부에서 ``--no-reply`` 를 강제하므로 사용자 메시지
+    answer 형태로 붙지 않는다.
     """
     bin_ = "/home/mobruji/mobruji-bridge/tools/discord-daemon/discord-reply.sh"
     guild = os.environ.get("DISCORD_GUILD_ID", "")
@@ -388,7 +396,10 @@ def _notify_user_done(
     cta_block = f"\n{cta}" if cta else ""
     msg = f"✅ {title}\n{body}{link_block}{cta_block}"
     try:
-        subprocess.run([bin_, msg], capture_output=True, text=True, timeout=15, check=False)
+        subprocess.run(
+            [bin_, "--status-channel", msg],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("완료 알림 push 실패 title=%s exc=%r", title[:40], exc)
 

@@ -377,6 +377,19 @@ REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET: Final[str] = "mobruji:0.0"
 REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
 # debounce cache 사이즈 cap — 메모리 누수 방지 (LRU 비슷한 단순 cap).
 REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
+# Discord 공지 중복 차단 — 영속 store (#7 사용자 "digest 스팸" fix).
+# 기존 in-memory debounce(monotonic) 는 bridge 재시작마다 리셋 → autodeploy
+# 재시작이 잦은 운영에서 같은 머지 PR 이 매 재시작마다 재공지됐다. 또 15분
+# debounce 는 PR 이 `rev-post-merge-pass` 라벨을 받기 전까지 24h 윈도우 내내
+# 15분 간격 재공지를 반복해 채널이 같은 PR 번호로 도배됐다 (사용자 가시 스팸).
+# → "이미 Discord 공지한 PR" 을 파일에 영속 기록하고 재공지는 절대 하지 않는다.
+#   (rev 큐 적재 event 발행은 멱등이라 그대로 두되, 채널 push 만 1회로 강제.)
+# 형식: {"<pr_number>": "<iso ts>"}.  retention = 7일 (오래된 항목은 load 시
+# prune — 파일 무한 증식 방지).
+REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT: Final[str] = (
+    "~/.mobruji/rev-post-merge-announced.json"
+)
+REV_POST_MERGE_AUDIT_ANNOUNCED_RETENTION_DAYS: Final[int] = 7
 # gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
 # 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
 REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "24h"
@@ -4683,6 +4696,73 @@ def fetch_rev_post_merge_candidates(
     return pr_numbers
 
 
+def load_announced_prs(
+    path: str = REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
+    *,
+    now: datetime | None = None,
+    retention_days: int = REV_POST_MERGE_AUDIT_ANNOUNCED_RETENTION_DAYS,
+) -> dict[int, str]:
+    """이미 Discord 에 공지한 PR 번호 → iso ts 맵을 파일에서 load 합니다 (#7).
+
+    bridge 재시작에도 살아남는 영속 dedup store. 파일 부재 / 깨짐 / 타입 이상은
+    빈 dict 로 graceful fallback (loop 가 다음 push 부터 새로 기록).
+
+    retention_days 이전 항목은 prune 해서 반환 (파일 무한 증식 방지). prune 된
+    결과는 호출부가 즉시 ``save_announced_prs`` 로 다시 써 디스크에도 반영한다.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    target = Path(path).expanduser()
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("rev post-merge announce store 파싱 실패 (무시): %s", target)
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    cutoff = now - timedelta(days=retention_days)
+    result: dict[int, str] = {}
+    for key, value in payload.items():
+        try:
+            pr_number = int(key)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(value, str):
+            continue
+        try:
+            ts = datetime.fromisoformat(value)
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if ts < cutoff:
+            continue  # retention 초과 — prune.
+        result[pr_number] = value
+    return result
+
+
+def save_announced_prs(
+    announced: dict[int, str],
+    path: str = REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
+) -> None:
+    """공지한 PR 맵을 파일에 atomic write 합니다 (#7). 실패는 warning 만."""
+    target = Path(path).expanduser()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        serializable = {str(num): ts for num, ts in announced.items()}
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(serializable, ensure_ascii=False), encoding="utf-8"
+        )
+        tmp.replace(target)
+    except OSError as exc:
+        logger.warning("rev post-merge announce store write 실패 (무시): %s", exc)
+
+
 def filter_debounced_prs(
     candidates: list[int],
     last_inject_at: dict[int, float],
@@ -5452,8 +5532,10 @@ async def rev_post_merge_audit_loop(
     debounce_seconds: int = REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS,
     pass_label: str = REV_POST_MERGE_PASS_LABEL,
     search_window: str = REV_POST_MERGE_AUDIT_SEARCH_WINDOW,
+    announced_path: str = REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
     candidate_fetcher=None,
     time_source=time.monotonic,
+    wall_clock=None,
 ) -> None:
     """5분 polling — develop 머지된 PR 단계 2 (dev 배포 E2E 검증) 자동 trigger
     (#1008).
@@ -5463,29 +5545,40 @@ async def rev_post_merge_audit_loop(
     동작:
       1. ``initial_delay`` 초 warmup 후 polling 시작.
       2. ``poll_interval`` 초마다 `gh pr list ... -label:rev-post-merge-pass` 호출.
-      3. 후보 PR ≥ 1 → debounce 적용 후 fresh PR 만 추출.
-      4. fresh ≥ 1:
-         - nmae tmux pane (``inject_target``) 에 inject
-           (단계 2 (dev 배포 E2E 검증) launch 알림).
-         - Discord ``digest_channel_id`` 에 push (cycle digest 채널 공유).
-         - 각 fresh PR `last_inject_at` 갱신.
-      5. graceful skip — gh CLI 실패 / fresh 없음 / tmux 부재 / Discord channel 부재 시
+      3. 후보 PR ≥ 1 → in-memory debounce 적용 후 fresh PR 만 추출.
+      4. fresh ≥ 1 → rev 큐 적재 event 발행 (멱등).
+      5. fresh 중 **영속 store 에 아직 공지 안 된 PR** 만 Discord ``digest_channel_id``
+         에 1회 push + announce store 에 기록. 이미 공지된 PR 은 절대 재 push 안 함
+         (#7 — bridge 재시작·15분 재폴링에도 같은 PR 도배 방지).
+      6. graceful skip — gh CLI 실패 / fresh 없음 / Discord channel 부재 시
          warn 1회 + 다음 iter 재시도.
-      6. ``poll_interval <= 0`` 이면 disabled — 즉시 return (테스트 용).
+      7. ``poll_interval <= 0`` 이면 disabled — 즉시 return (테스트 용).
 
     asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
 
     Args:
+        announced_path: 이미 Discord 공지한 PR 영속 store 경로 (#7). 재시작에도
+            살아남아 재공지를 막는다. 테스트는 tmp 경로 주입.
         candidate_fetcher: ``() -> list[int]`` 콜러블. None 이면 기본
             ``fetch_rev_post_merge_candidates`` 사용. 테스트 stub 진입점.
         time_source: monotonic 시각 source. 테스트 stub.
+        wall_clock: announce ts 기록용 ``() -> datetime`` 콜러블. None 이면
+            ``datetime.now(timezone.utc)``. 테스트 stub.
     """
     if poll_interval <= 0:
         logger.info("rev_post_merge_audit_loop disabled (poll_interval<=0)")
         return
 
+    if wall_clock is None:
+        def wall_clock() -> datetime:  # noqa: E306
+            return datetime.now(timezone.utc)
+
     # (#1447) tmux inject 폐기 → event 발행. inject_session/missing_session 가드 불요.
     last_inject_at: dict[int, float] = {}
+    # (#7) 영속 dedup — 이미 Discord 공지한 PR 은 재시작/재폴링에도 재 push 금지.
+    # load 시 retention prune 된 결과를 즉시 다시 써 디스크에도 반영한다.
+    announced = load_announced_prs(announced_path, now=wall_clock())
+    save_announced_prs(announced, announced_path)
     missing_channel_warned = False
 
     if candidate_fetcher is None:
@@ -5532,25 +5625,35 @@ async def rev_post_merge_audit_loop(
                     "pr_title": "",
                 })
 
-            channel = client.get_channel(digest_channel_id)
-            if channel is None:
-                if not missing_channel_warned:
-                    logger.warning(
-                        "rev post-merge audit: Discord channel 부재 — push skip (channel_id=%s)",
-                        digest_channel_id,
+            # (#7) Discord push 는 영속 store 기준 "아직 공지 안 한 PR" 만.
+            # 재시작/재폴링으로 같은 PR 이 fresh 로 재등장해도 채널엔 1회만 알린다.
+            to_announce = [pr for pr in fresh if pr not in announced]
+            if to_announce:
+                channel = client.get_channel(digest_channel_id)
+                if channel is None:
+                    if not missing_channel_warned:
+                        logger.warning(
+                            "rev post-merge audit: Discord channel 부재 — push skip (channel_id=%s)",
+                            digest_channel_id,
+                        )
+                        missing_channel_warned = True
+                else:
+                    missing_channel_warned = False
+                    sent = await send_with_retry(
+                        channel, content=format_rev_post_merge_discord(to_announce)
                     )
-                    missing_channel_warned = True
-            else:
-                missing_channel_warned = False
-                await send_with_retry(
-                    channel, content=format_rev_post_merge_discord(fresh)
-                )
+                    if sent:
+                        announce_ts = wall_clock().isoformat()
+                        for pr in to_announce:
+                            announced[pr] = announce_ts
+                        save_announced_prs(announced, announced_path)
 
             for pr in fresh:
                 last_inject_at[pr] = mono_now
             logger.info(
-                "rev_post_merge_audit_loop: inject fresh=%s candidates=%d",
+                "rev_post_merge_audit_loop: event fresh=%s announced=%s candidates=%d",
                 ",".join(f"#{n}" for n in fresh),
+                ",".join(f"#{n}" for n in to_announce) or "(none)",
                 len(candidates),
             )
         except asyncio.CancelledError:
@@ -6505,6 +6608,10 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         "REV_POST_MERGE_AUDIT_INJECT_TARGET",
         REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
     )
+    rev_post_merge_audit_announced_path = env.get(
+        "REV_POST_MERGE_AUDIT_ANNOUNCED_PATH",
+        REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
+    )
 
     # Claude API usage tracker (#1020) — env 해석.
     claude_usage_loop_enabled = (
@@ -6844,6 +6951,7 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     digest_channel_id,
                     inject_target=rev_post_merge_audit_inject_target,
                     poll_interval=rev_post_merge_audit_interval,
+                    announced_path=rev_post_merge_audit_announced_path,
                 )
             )
             logger.info(
