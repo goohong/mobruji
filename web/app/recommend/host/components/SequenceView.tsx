@@ -65,10 +65,11 @@ export function SequenceView({ stages, userVoiceRange }: SequenceViewProps) {
         </div>
       ) : (
         <ul className="flex flex-col gap-3">
-          {currentSongs.map((item) => (
+          {currentSongs.map((item, index) => (
             <SongCard
               key={item.song.id}
               item={item}
+              index={index}
               userVoiceRange={userVoiceRange}
               onShowDetail={() => setSelected(item)}
             />

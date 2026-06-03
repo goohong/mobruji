@@ -403,10 +403,11 @@ function HistoryCard({ entry, onRemove }: HistoryCardProps) {
       </div>
 
       <ul aria-label="추천 곡 미리보기" className="flex flex-col gap-2">
-        {visibleSongs.map((item) => (
+        {visibleSongs.map((item, index) => (
           <SongCard
             key={item.song.id}
             item={item}
+            index={index}
             href={`/songs/${item.song.id}`}
           />
         ))}
