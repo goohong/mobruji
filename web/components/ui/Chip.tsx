@@ -8,7 +8,7 @@
  *   - `<Chip onClick>` 또는 `<Chip pressed>` — `<button>`으로 자동 전환되며 `aria-pressed`를 노출.
  *
  * tone:
- *   - neutral — 기본 zinc 톤.
+ *   - neutral — 기본 무채색 톤.
  *   - primary — pressed/active 강조 톤 (검은 배경).
  *   - success/warning/danger — difficulty 라벨 같은 의미 톤 (호출자가 선택).
  */

@@ -273,32 +273,6 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     return <NoSessionFallback />;
   }
 
-  /*
-   * ADR-0018 단계 4 PR 4 — /recommend 페이지 토큰 swap (#1150 secondary pages 패턴).
-   *
-   * swap 한 요소 (first-paint 핵심):
-   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
-   *  2) h1 : text-zinc-900 dark:text-zinc-50 → --text-primary
-   *  3) "내 음역대" 부제 p : text-zinc-600 dark:text-zinc-400 → --text-secondary
-   *  4) header Link 2개 (마이크 다시 측정 / 음역대 다시 입력) : zinc text → tokens
-   *  5) error 박스 (red bg + button) → --danger-* 토큰 swap (#1044 PR 9 적용)
-   *  6) 빈 결과 / hasNextPage=false fallback 카드 (2건) : rounded-2xl ring-zinc-200
-   *     bg-white dark:* → tokens (--radius-lg / --bg-base / --border)
-   *  7) fallback CTA Link (2건) : bg-zinc-900 dark:bg-zinc-50 → --brand-500/600
-   *  8) StatusShell <main> 배경/padding/h1/부제/CTA : tokens
-   *
-   * 미swap (후속 PR 양보):
-   *  - SourceMethodBadge 내부 (zinc / emerald) — 자체 함수 컴포넌트, 별도 토큰 그룹
-   *  - (resolved #1044 PR 9) error 박스 (text-red / bg-red) → --danger-bg / --danger-border / --danger-fg-strong / --danger-cta-* 토큰 swap.
-   *  - SongCard / SongCardSkeleton — 별도 컴포넌트 (PR 6 #1160 진행 중)
-   *
-   * 본 PR 8 (#1044 단계 4 PR 8) 에서 추가:
-   *  - "Step 2" caption (text-zinc-500 dark:text-zinc-400 → text-[var(--text-caption)])
-   *    — tokens.css `--text-caption` 신규 정의 (zinc-500 light / zinc-400 dark).
-   *
-   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
-   * `dark:` prefix 제거.
-   */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-8">
@@ -784,8 +758,8 @@ type SourceMethodBadgeProps = {
  * "내 음역대가 어떻게 측정된 결과인지" 를 한눈에 보여줘서 사용자가
  * 이 추천 결과를 어떤 입력값과 연결할지 추론할 수 있게 한다.
  *  - MIC_MEASURE → 마이크 측정 (emerald — 정확도 신호)
- *  - OCTAVE_PICK → 직접 선택 (zinc — 중립)
- *  - SELF_REPORT → 자가 보고 (zinc — 중립)
+ *  - OCTAVE_PICK → 직접 선택 (무채색 — 중립)
+ *  - SELF_REPORT → 자가 보고 (무채색 — 중립)
  */
 function SourceMethodBadge({ sourceMethod }: SourceMethodBadgeProps) {
   const { label, tone } = describeSourceMethod(sourceMethod);

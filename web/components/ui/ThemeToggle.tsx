@@ -30,29 +30,6 @@ const CURRENT_MODE_LABEL: Record<ReturnType<typeof useTheme>["mode"], string> = 
 export function ThemeToggle() {
   const { mode, isDark, toggleMode } = useTheme();
 
-  /*
-   * ADR-0018 단계 4 PR 5 — ThemeToggle 컴포넌트 토큰 swap.
-   *
-   * swap 한 element:
-   *  1) border : border-zinc-200 dark:border-zinc-700 → --border
-   *  2) text : text-zinc-700 dark:text-zinc-200 → --text-secondary
-   *  3) hover text : hover:text-zinc-900 dark:hover:text-zinc-50 → --text-primary
-   *  4) shadow : shadow-sm → --shadow-sm
-   *  5) transition duration: transition-colors → duration-[var(--duration-base)]
-   *
-   * 후속 PR (#1259 / 본 PR) 추가 swap:
-   *  6) focus ring : focus-visible:ring-zinc-500 → --cta-secondary-ring
-   *     (PR #1256 / #1259 동일 패턴 — 균일 outline 토큰)
-   *
-   * swap 완결 (PR #1659 — 잔존 zinc 마감):
-   *  7) floating bg : bg-white/90 + dark:bg-zinc-900/90 → --surface-floating
-   *  8) floating hover bg : hover:bg-white + dark:hover:bg-zinc-900
-   *     → hover:bg-[var(--surface-floating-hover)]
-   *     opacity suffix 는 baked-alpha rgba 토큰으로 고정 (var() 호환 회피).
-   *
-   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
-   * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
-   */
   return (
     <button
       type="button"

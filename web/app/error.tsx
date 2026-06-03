@@ -29,20 +29,6 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
     safeLog.error("[recommend] unhandled error", error);
   }, [error]);
 
-  /*
-   * ADR-0018 단계 4 PR 11 — error boundary 토큰 swap.
-   *
-   * swap 한 요소 (6개):
-   *  1) <main> 배경 : `bg-zinc-50 dark:bg-zinc-950` → `--bg-subtle`
-   *  2) h1 : `text-zinc-900 dark:text-zinc-50` → `--text-primary`
-   *  3) 안내 p : `text-zinc-600 dark:text-zinc-400` → `--text-secondary`
-   *  4) digest ref : `text-zinc-500 dark:text-zinc-500` → `--text-disclaimer`
-   *  5) "다시 시도" 버튼 : 검정/흰 invert CTA → `--cta-neutral-*`
-   *  6) "홈으로" link : 보조 CTA → `--cta-secondary-*` (bg 없는 변형)
-   *
-   * 다크 모드: tokens.css 의 `:where(html.dark)` selector 가 토큰값을 자동
-   * swap → 사용처에서 `dark:` prefix 제거.
-   */
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-[var(--bg-subtle)] px-6 py-12 text-center">
       <div className="w-full max-w-md flex flex-col items-center gap-4">

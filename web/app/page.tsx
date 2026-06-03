@@ -49,29 +49,6 @@ export default function Home() {
   const voiceRangeId = useSessionStore((state) => state.voiceRangeId);
   const hasMeasurement = hasHydrated && voiceRangeId !== null;
 
-  /*
-   * ADR-0018 단계 4 — homepage 토큰 swap.
-   *
-   * PR 2 (#1137) — first-paint 핵심 5요소 swap:
-   *  1) <main> 배경 + padding (--bg-subtle + --page-padding-*)
-   *  2) h1 / header 부제 (--text-primary + --text-secondary)
-   *  3) NewUser/Returning 카드 (--bg-base + --shadow-sm + --border + --radius-lg)
-   *  4) primary CTA (--brand-500 / --brand-600 + --shadow-brand)
-   *
-   * PR 8 (#1170) — `--text-caption` 통합 (보조 caption 페어 일괄 swap).
-   *
-   * PR 11 (#1044) — 잔여 zinc hardcode swap (본 PR):
-   *  5) NewUser/Returning 패널 h2/p (--text-primary + --text-secondary)
-   *  6) FlowStep 텍스트 라벨 (--text-label)
-   *  7) 보조 CTA "직접 입력으로 시작" / "음역대 다시 측정" (--cta-secondary-*)
-   *  8) VoiceRangeSummary 박스 3종 (--badge-neutral-bg + --text-* 재사용)
-   *  9) SecondaryNav 4 link (--cta-secondary-* + --border-input)
-   * 10) FlowStep index chip (--surface-step-*)
-   * 11) disclaimer "익명 세션..." (--text-disclaimer)
-   *
-   * 다크 모드: tokens.css 의 `:where(html.dark)` selector 가 토큰값을 자동
-   * swap → 사용처에서 `dark:` prefix 제거.
-   */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col items-center gap-8">

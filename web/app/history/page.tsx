@@ -169,26 +169,6 @@ export default function HistoryPage() {
   // 헤더 카피와 일치시키기 위한 alias — 이미 위에서 hasBackendEntries 로 계산했다.
   const isBackendSource = hasBackendEntries;
 
-  /*
-   * ADR-0018 단계 4 PR 3 — /history 페이지 토큰 swap (homepage PR #1137 패턴).
-   *
-   * swap 한 요소 (first-paint 핵심):
-   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
-   *  2) h1 (받은 추천 다시 보기) : text-zinc-900 dark:text-zinc-50 → --text-primary
-   *  3) HistoryCard ring/bg/radius : bg-white ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800
-   *     rounded-2xl → tokens
-   *  4) ProgressEmptyCta : bg-white border-zinc-300 dark:bg-zinc-900 dark:border-zinc-700
-   *     rounded-2xl + CTA bg-zinc-900 → tokens + brand-500/600
-   *  5) EmptyHistory : bg-zinc-50 dark:bg-zinc-950, h1 + CTA → tokens
-   *
-   * 잔존 swap (sub-PR 5 — 매트릭스 PR #1263):
-   *  - count live 영역 부제 → --text-secondary (likes/bookmarks 동일 패턴)
-   *  - 전체 삭제 button (border/text/hover) → border/--text-label + hover:bg-muted
-   *  - HistoryCard time → --text-body-emphasis
-   *  - HistoryCard 삭제 button hover → border/--text-primary
-   *  - HistoryCard 더보기 button → --text-label
-   *  본 sub-PR 로 /history 의 zinc-* className 잔존 0 달성.
-   */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">

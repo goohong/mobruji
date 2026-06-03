@@ -87,21 +87,6 @@ type LikesContentProps = {
 };
 
 function LikesContent({ songs }: LikesContentProps) {
-  /*
-   * ADR-0018 단계 4 PR 7 — /likes 페이지 토큰 swap (#1163 /recommend 패턴 확장).
-   *
-   * swap 한 요소 (first-paint 핵심):
-   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
-   *  2) h1 "좋아한 곡" : text-zinc-900 dark:text-zinc-50 → --text-primary
-   *  3) 카운트 라이브 p : text-zinc-600 dark:text-zinc-400 → --text-secondary
-   *
-   * 미swap (후속 PR 양보 — #1163 정책 일치):
-   *  - "Likes" caption (text-zinc-500 dark:text-zinc-400) — caption 토큰 매핑 미정
-   *  - SongCard / SongDetailModal — 별도 컴포넌트 (PR 6 #1160 머지 후 진행)
-   *
-   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
-   * `dark:` prefix 제거.
-   */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl flex flex-col gap-6">

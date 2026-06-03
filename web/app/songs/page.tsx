@@ -45,33 +45,6 @@ const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
   { key: "HARD", label: "Hard" },
 ];
 
-/*
- * ADR-0018 단계 4 — /songs 페이지 토큰 swap (#1044 후속).
- *
- * swap 한 요소 (likes/bookmarks PR 7 동일 패턴):
- *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950 + px-6 py-12
- *     → --bg-subtle / --page-padding-x / --page-padding-y
- *     (SearchPageFallback + SongSearchPageInner 본문 둘 다 동일 매핑)
- *  2) h1 : text-zinc-900 dark:text-zinc-50 → --text-primary
- *  3) 부제 / 보조 텍스트 : text-zinc-600 dark:text-zinc-400 → --text-secondary
- *     (header 부제 + SearchResult empty rawCount p + FilterPanel "필터 초기화"
- *     버튼 셋이 동일 매핑)
- *  4) 검색 전 empty surface : border-dashed border-zinc-300 bg-white +
- *     dark:border-zinc-700 dark:bg-zinc-900 → --cta-secondary-border /
- *     --cta-secondary-bg (PR 11 도입 토큰 재사용 — light white→dark zinc-900
- *     매핑이 정확) + rounded-2xl → --radius-lg
- *  5) empty surface 본문 텍스트 : text-zinc-700 dark:text-zinc-300 → --text-label
- *     (Input label 토큰 재사용 — light/dark 같은 단계 매핑)
- *
- * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element
- * 에서 `dark:` prefix 제거.
- *
- * 미swap (의도):
- *  - <Input /> / <Chip /> / <SongCard /> / <SongDetailModal /> 등 자식 컴포넌트
- *    는 별도 PR (PR 5/6/10 등) 에서 이미 토큰화. 본 PR 은 page-level surface 만.
- *  - SongDetailContent (recommend 공통) 잔여 zinc 는 SongCard 의 형제 후속
- *    PR 후보.
- */
 export default function SongSearchPage() {
   // useSearchParams는 CSR bail-out을 유발하므로 Suspense boundary로 감싼다 (Next.js 16 요구사항).
   // fallback은 결과 영역이 비어 있는 형태로 충분히 짧게 유지.

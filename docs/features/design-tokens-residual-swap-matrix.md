@@ -106,10 +106,10 @@ PR #1259 audit 결과 5 카테고리 후속 백로그 (SongDetailModal 전용 �
 >   | grep -vE '(:[[:space:]]*\*|^[^:]+:[^:]+:[[:space:]]*//)'
 > ```
 
-#### 비활성 (주석 마커) — 75건 추적 cleanup
+#### 비활성 (주석 마커) — 75건 → **0** (issue #1663 완결)
 - PR 11~14 작업 시 **swap 직전 마커 주석** ("`bg-zinc-50` → `--bg-subtle`" 형식) 으로 박힌 잔여물. 활성 hardcode 가 없으면 codebase 동작 영향 0 — 다만 코드 노이즈.
 - **cleanup 룰**: 각 sub-PR 머지 시 해당 파일의 주석 마커도 동시 제거 (PR 본문 self-check 포함). 별도 sub-PR 신설하지 않음.
-- 측정: 활성 grep 결과 (41건) 의 약 1.8배 = 약 75건 (각 swap 카테고리당 마커 1-3행).
+- **issue #1663 완결**: PR #1659 가 활성 hardcode 를 0 으로 마감했으나 swap 마커 주석 (15 파일) 은 잔존했음 — 게이트 4 조건 4 (주석 cleanup) 미완. 본 issue 에서 15 파일의 swap 마커 주석 일괄 제거 → `web/app/**` + `web/components/**` (테스트 / `tokens.css` 토큰 정의 주석 제외) zinc 문자열 0 달성. tokens.css 의 토큰 정의 주석 (`/* zinc-900 @ 60% */` 형식) 은 토큰 값 출처 문서로 의도적 유지 (§4 비기능 "의도적 zinc 사용은 token 정의 내부 박제").
 
 #### 테스트 assertion 잔여 — 2 파일
 - `web/components/ui/Button.test.tsx` — `bg-zinc-900` 등 primary variant assertion. **sub-PR 2 와 동시 갱신 필수**.
@@ -271,4 +271,5 @@ sub-PR 0 (신규 토큰 4종 ADR-0018 보강) — 모든 sub-PR 의 선행 조�
 - **2026-05-29**: 초안 작성 (status=implementing). PR #1259 audit 발견 5 카테고리 백로그 → 5 sub-PR + 1 신규 토큰 spec 으로 단계 4 swap 완결 경로 명확화. 활성 hardcode 41 / 10 파일 / 신규 토큰 4종 measure-grep 박제.
 - **2026-05-29**: ADR-0018 status timeline 신설 결정 — `accepted (2026-05-24)` → `implementing (2026-05-26 PR 1 #1131 머지부터)` → `implemented (단계 4 swap 완결 게이트 통과 시)`.
 - **2026-05-29**: 단계 4 swap 완결 게이트 4 조건 (활성 == 0 + 신규 토큰 결정 + 테스트 동기 + 주석 cleanup) 정의 — `ui-ux-redesign.md §6` 컴포넌트 redesign 진입 사전 조건.
+- **2026-06-03 (issue #1663)**: 게이트 4 조건 4 (주석 마커 cleanup) 완결 — PR #1659 가 보존했던 swap-history JSDoc/주석 마커 (15 파일) 일괄 제거. `web/app/**` + `web/components/**` zinc 문자열 0 (테스트 / `tokens.css` 토큰 정의 주석 제외). 활성 hardcode 는 이미 0 이었으므로 동작·시각 변화 0 (주석 전용 diff). lint+typecheck+test(934) green + darkModeCoverage/tokens 테스트 통과로 다크모드 회귀 0 검증. 게이트 4 (활성 0 + 신규 토큰 결정 + 테스트 동기 + 주석 cleanup) 4조건 전부 충족 — ADR-0018 `implemented` 상태 정합 완성.
 - **2026-06-03 (PR #1659)**: 잔존 zinc swap 완결 — 활성 hardcode 카운트 0 달성. 신규 의미 토큰 7종 (`--ring-soft-hover` / `--ring-soft-focus-within` / `--surface-floating` / `--surface-floating-hover` / `--surface-nav` / `--surface-nav-blur` / `--border-subtle`) 추가. opacity-suffix 배경 (ThemeToggle/HomeLink/BottomNav `bg-*/90·95·80`) 은 Tailwind `/opacity` 와 `var()` 비호환 회피 위해 baked-alpha rgba 토큰으로 고정. Button.test/Chip.test assertion 동기 갱신 + tokens.test 신규 7종 가드 추가. ADR-0018 status `implementing` → `implemented` 전이. 매트릭스 status `implementing` → `shipped`. 게이트 4조건 중 "주석 마커 cleanup" 은 활성 swap 8 파일의 swap-history 주석만 갱신 (이미 완료된 파일의 설명용 JSDoc 은 문서 가치로 보존 — scope creep 회피).

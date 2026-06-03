@@ -1,7 +1,7 @@
 /**
  * 디자인 시스템 Card 컴포넌트 (closes #195).
  *
- * 페이지에서 반복되던 `rounded-2xl bg-white ring-1 ring-zinc-200 ...` 묶음을 한곳에 모은다.
+ * 페이지에서 반복되던 카드 표면(둥근 모서리 + 배경 + ring) 스타일 묶음을 한곳에 모은다.
  *
  * 구조: `<Card>` 기본 + 옵셔널 서브 컴포넌트(`Card.Header`, `Card.Body`, `Card.Footer`).
  * 서브 컴포넌트 없이 children을 직접 넣어도 그대로 사용 가능 — 기존 마크업과 호환.

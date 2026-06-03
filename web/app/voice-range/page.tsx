@@ -101,31 +101,6 @@ export default function VoiceRangePage() {
       : mutation.error.message
     : null;
 
-  /*
-   * ADR-0018 단계 4 PR 3 — /voice-range 페이지 토큰 swap (homepage PR #1137 패턴).
-   *
-   * swap 한 요소 (first-paint 핵심):
-   *  1) <main> 배경 + padding : bg-zinc-50 dark:bg-zinc-950, px-6 py-12 → tokens
-   *  2) h1 / 부제 : text-zinc-900 dark:text-zinc-50, text-zinc-600 dark:text-zinc-400 → tokens
-   *  3) auto / manual 카드 2개 : bg-white ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800
-   *     rounded-2xl shadow-sm → tokens (--bg-base / --border / --radius-lg / --shadow-sm)
-   *  4) auto CTA Link : bg-zinc-900 ... dark:bg-zinc-50 → brand-500/600 + shadow-brand
-   *  5) section heading h2 (각 1건) : text-zinc-900 dark:text-zinc-50 → --text-primary
-   *
-   * #1044 단계 4 PR 12 — NoteSelect 내부 잔여 zinc 일괄 swap:
-   *  6) label <span> : text-zinc-700 dark:text-zinc-300 → --text-label (PR 10 토큰 재사용)
-   *  7) <select> : border-zinc-300 / bg-white / text-zinc-900 / focus:border-zinc-500
-   *     + dark:border-zinc-700 / dark:bg-zinc-950 / dark:text-zinc-50
-   *     → --border-input / --bg-base / --text-primary / --border-input-focus
-   *     (input PR 10 토큰 + --bg-base 재사용 — select dark bg-zinc-950 가 input
-   *     dark zinc-900 과 다르므로 별도 토큰 대신 --bg-base 매핑이 정확)
-   *
-   * 미swap (후속 PR 양보):
-   *  - <Button /> 컴포넌트 — 별도 컴포넌트라 본 페이지 범위 밖.
-   *
-   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap. swap 한 element 에서
-   * `dark:` prefix 제거.
-   */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col gap-8">
