@@ -97,10 +97,12 @@ jobs:
               docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --remove-orphans
 
               # healthcheck — nginx 통해 backend liveness. 총 150s window.
+              # ADR-0028: 80 은 https 로 301 리다이렉트되므로 443 직접 호출.
+              # -k: localhost 는 server_name(nip.io)과 불일치해 cert 검증 skip (local probe).
               echo "[cd-dev] waiting for /actuator/health/liveness ..."
               HEALTHY=0
               for i in $(seq 1 30); do
-                  if curl -fsS http://localhost/actuator/health/liveness >/dev/null 2>&1; then
+                  if curl -fsSk https://localhost/actuator/health/liveness >/dev/null 2>&1; then
                       echo "[cd-dev] healthy after ${i}*5s"
                       HEALTHY=1
                       break
