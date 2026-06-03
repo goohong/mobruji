@@ -38,7 +38,7 @@ CREATE UNIQUE INDEX uk_app_user_provider_identity
     ON app_user (auth_provider, provider_user_id);
 
 CREATE TABLE user_auth_token (
-    token_hash CHAR(64)    NOT NULL,
+    token_hash VARCHAR(64) NOT NULL,
     user_id    BIGINT      NOT NULL,
     created_at DATETIME(6) NOT NULL,
     expires_at DATETIME(6) NOT NULL,

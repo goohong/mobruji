@@ -80,10 +80,10 @@ public class User {
     /**
      * 이메일 회원가입(LOCAL) 계정을 생성한다.
      *
-     * @param email 소문자 정규화된 이메일. null/blank 금지.
-     * @param passwordHash {@code PasswordHasher} 가 인코딩한 해시 문자열. null/blank 금지.
-     * @param gender 선택 — null 이면 {@link UserGender#UNSPECIFIED} 로 보정.
-     * @param vocalRangeLowMidi 음역 최저음 MIDI. {@code vocalRangeHighMidi} 와 동시 null 또는 동시 present.
+     * @param email              소문자 정규화된 이메일. null/blank 금지.
+     * @param passwordHash       {@code PasswordHasher} 가 인코딩한 해시 문자열. null/blank 금지.
+     * @param gender             선택 — null 이면 {@link UserGender#UNSPECIFIED} 로 보정.
+     * @param vocalRangeLowMidi  음역 최저음 MIDI. {@code vocalRangeHighMidi} 와 동시 null 또는 동시 present.
      * @param vocalRangeHighMidi 음역 최고음 MIDI.
      */
     public static User createLocal(

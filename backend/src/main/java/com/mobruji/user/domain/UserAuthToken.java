@@ -61,7 +61,7 @@ public class UserAuthToken {
      * 신규 토큰을 발급한다.
      *
      * @param tokenHash 원문 토큰의 SHA-256 hex. null/blank 금지.
-     * @param userId 토큰 소유 사용자 id. null 금지.
+     * @param userId    토큰 소유 사용자 id. null 금지.
      * @param expiresAt 만료 시각. {@code now} 이후여야 한다.
      */
     public static UserAuthToken issue(
