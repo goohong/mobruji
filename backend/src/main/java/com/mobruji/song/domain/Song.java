@@ -28,6 +28,7 @@ import lombok.NoArgsConstructor;
         @Index(name = "ix_song_title", columnList = "title"),
         @Index(name = "ix_song_artist", columnList = "artist"),
         @Index(name = "uk_song_isrc", columnList = "isrc", unique = true),
+        @Index(name = "uk_song_mb_id", columnList = "mb_id", unique = true),
 })
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -99,6 +100,16 @@ public class Song {
     private String isrc;
 
     /**
+     * MusicBrainz Recording UUID (36자, 예: {@code b9ad642e-b012-41c7-b72a-42cf3437f9d8}). nullable —
+     * 매칭 전/실패 시 null. 글로벌 유일 식별자라 DB 레벨 {@code UNIQUE} 인덱스로 보호한다 — null 은
+     * MySQL 8.4 UNIQUE 가 다중 허용하므로 충돌 없음.
+     *
+     * <p>spec {@code musicbrainz-integration.md} §5-1 — {@link #backfillFromMusicBrainz} backfill 로 채운다.
+     */
+    @Column(name = "mb_id", length = 36)
+    private String mbId;
+
+    /**
      * 메타데이터 신뢰도 (0.0~1.0). 기본 1.0 = {@link MetadataSource#MANUAL_SEED} 수기 입력 신뢰도.
      * {@link #backfillFromAudioAnalysis} 시 {@link AudioAnalysisResult#confidence()} 가 저장된다.
      *
@@ -168,6 +179,7 @@ public class Song {
             final String kyNumber,
             final MetadataSource metadataSource,
             final String isrc,
+            final String mbId,
             final Double metadataConfidence,
             final Integer lowMidi,
             final Integer highMidi,
@@ -207,7 +219,7 @@ public class Song {
         final LocalDateTime now = LocalDateTime.now();
         return new Song(
                 null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
-                tjNumber, kyNumber, metadataSource, isrc, resolvedConfidence,
+                tjNumber, kyNumber, metadataSource, isrc, mbId, resolvedConfidence,
                 lowMidi, highMidi, resolvedDifficulty, energy, albumCoverUrl, now, now);
     }
 
@@ -355,5 +367,41 @@ public class Song {
             this.updatedAt = LocalDateTime.now();
         }
         return changed;
+    }
+
+    /**
+     * MusicBrainz recording 매칭 결과를 적용한다 — spec {@code musicbrainz-integration.md} §5-4.
+     *
+     * <p>멱등성 — 이미 {@code mbId} 가 채워진 곡은 no-op({@code false} 반환)으로 재실행 시 중복 매칭/덮어쓰기를
+     * 막고 운영자가 수기 지정한 값을 보존한다. {@code isrc} 는 비어 있을 때만 채운다 (기존/운영자값 보존).
+     *
+     * <p>매칭 채택 시 {@code metadataConfidence} 를 MusicBrainz score 기반 신뢰도로 갱신하고
+     * {@link MetadataSource#EXTERNAL_API} 로 표시한다. 음역대/key/tempo 는 MusicBrainz 가 제공하지 않으므로
+     * 손대지 않는다 — 추천 점수 산식 입력이 채워지지 않아 결정성 회귀가 없다.
+     *
+     * @param newMbId    MusicBrainz Recording UUID (필수)
+     * @param newIsrc    매칭 recording 의 ISRC (없으면 null)
+     * @param confidence 매칭 신뢰도 (0.0~1.0 — MusicBrainz score / 100.0)
+     * @return 실제로 적용됐는지 여부 — 이미 mbId 가 있으면 false
+     */
+    public boolean backfillFromMusicBrainz(
+            final String newMbId,
+            final String newIsrc,
+            final double confidence) {
+        Objects.requireNonNull(newMbId, "newMbId must not be null");
+        if (confidence < 0.0 || confidence > 1.0) {
+            throw new IllegalArgumentException("confidence out of [0.0, 1.0]: " + confidence);
+        }
+        if (this.mbId != null) {
+            return false;
+        }
+        this.mbId = newMbId;
+        if (this.isrc == null && newIsrc != null && !newIsrc.isBlank()) {
+            this.isrc = newIsrc;
+        }
+        this.metadataConfidence = confidence;
+        this.metadataSource = MetadataSource.EXTERNAL_API;
+        this.updatedAt = LocalDateTime.now();
+        return true;
     }
 }
