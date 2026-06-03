@@ -21,7 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Skeleton } from "@/components/ui";
 import { SongCard } from "@/app/recommend/components/SongCard";
-import { SongDetailModal } from "@/app/recommend/components/SongDetailModal";
+import { SongDetailSheet } from "@/app/recommend/components/SongDetailSheet";
 import { SongDetailContent } from "@/app/recommend/components/SongDetailContent";
 import { readBookmarksBySessionId } from "@/lib/api/feedback";
 import type { SongResponse } from "@/lib/api/song";
@@ -147,13 +147,13 @@ function BookmarkSongListWithModal({ songs }: BookmarkSongListWithModalProps) {
           />
         ))}
       </ul>
-      <SongDetailModal
+      <SongDetailSheet
         open={selected !== null}
         onClose={() => setSelected(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
-      </SongDetailModal>
+      </SongDetailSheet>
     </>
   );
 }

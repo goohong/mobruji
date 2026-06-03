@@ -35,7 +35,7 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip, Input } from "@/components/ui";
 
 import { SongCard } from "../recommend/components/SongCard";
-import { SongDetailModal } from "../recommend/components/SongDetailModal";
+import { SongDetailSheet } from "../recommend/components/SongDetailSheet";
 import { SongDetailContent } from "../recommend/components/SongDetailContent";
 
 const DEBOUNCE_MS = 300;
@@ -472,13 +472,13 @@ function SongSearchResultList({ songs }: SongSearchResultListProps) {
           />
         ))}
       </ul>
-      <SongDetailModal
+      <SongDetailSheet
         open={selected !== null}
         onClose={() => setSelected(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
-      </SongDetailModal>
+      </SongDetailSheet>
     </>
   );
 }
