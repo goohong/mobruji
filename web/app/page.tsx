@@ -24,6 +24,7 @@ import { useQuery } from "@tanstack/react-query";
 import { midiToCombinedNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
+import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
 
 /**
  * zustand persist hydration 완료 여부를 React에 구독시킨다.
@@ -102,8 +103,9 @@ export default function Home() {
  * 측정 안 한(또는 마운트 전) 사용자에게 노출되는 패널.
  *
  * - 1→4 단계 흐름을 ordered list로 안내해 첫 진입 사용자가 전체 그림을 파악하게 한다.
- * - primary CTA는 자동 측정. 직접 입력은 보조 link로 한 단계 내린다 — 자동 측정이
- *   현재 가장 정확하고 ux 마찰이 적기 때문에 (PR #271 폴리싱 완료).
+ * - 진입 분기는 `<OnboardingIntentPicker>` 로 위임 — 3 페르소나 경로 카드 + "그냥
+ *   둘러보기" 보조 경로. 의도별로 측정 진입 카피를 다르게 옷 입혀 D3 표기 충격(P1)과
+ *   동기 불일치를 완화한다 (first-user-onboarding-flow.md §2·§3, PR 2).
  */
 function NewUserPanel() {
   return (
@@ -116,10 +118,10 @@ function NewUserPanel() {
           id="home-onboarding-heading"
           className="text-lg font-semibold text-[var(--text-primary)]"
         >
-          시작하기
+          무엇을 도와드릴까요?
         </h2>
         <p className="text-sm text-[var(--text-secondary)]">
-          음역대를 알아야 부르기 편한 키의 곡만 추려서 보여드릴 수 있어요.
+          원하는 걸 고르면 그에 맞춰 안내해드려요. 아무거나 골라도 막다른 길은 없어요.
         </p>
       </div>
 
@@ -133,20 +135,7 @@ function NewUserPanel() {
         <FlowStep index={4} label="좋아요·북마크로 다시 찾아보기" />
       </ol>
 
-      <div className="flex flex-col gap-2">
-        <Link
-          href="/voice-range/auto"
-          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--brand-500)] px-6 text-base font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
-        >
-          음역대 측정하기
-        </Link>
-        <Link
-          href="/voice-range"
-          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] px-6 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
-        >
-          직접 입력으로 시작
-        </Link>
-      </div>
+      <OnboardingIntentPicker />
     </section>
   );
 }

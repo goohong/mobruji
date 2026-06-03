@@ -149,7 +149,9 @@ describe("Home `/` query/hydration/unmount race 가드", () => {
     // 후) 또는 0회 (NewUserPanel 분기) 인지.
     await waitFor(() => {
       // 어느 panel 이든 마운트는 완료.
-      const newPanel = screen.queryByRole("heading", { name: /시작하기/ });
+      const newPanel = screen.queryByRole("heading", {
+        name: /무엇을 도와드릴까요/,
+      });
       const returningPanel = screen.queryByRole("heading", {
         name: /다시 오신 걸 환영해요/,
       });
