@@ -168,6 +168,7 @@ frontmatter의 `status` 필드로 추적한다.
 | Slug | Feature | Status | Last reviewed |
 |---|---|---|---|
 | [audio-tooling-bootstrap](audio-tooling-bootstrap.md) | Python 오디오 분석 툴링 부트스트랩 | shipped | 2026-05-24 |
+| [entry-flow-browse-first](entry-flow-browse-first.md) | 진입 흐름 재정의 — browse-first + measure-on-intent (음역대 강제 제거) | draft | 2026-06-03 |
 | [external-api-fallback](external-api-fallback.md) | 외부 API graceful fallback (Spotify / MusicBrainz / YouTube / iTunes 횡단) | draft | 2026-05-24 |
 | [musicbrainz-integration](musicbrainz-integration.md) | MusicBrainz 통합 — ISRC/mbid backfill + 메타 보강 | draft | 2026-05-24 |
 | [song-catalog-genre-browse](song-catalog-genre-browse.md) | 장르 카탈로그 — 노래방 책 형태 곡 열람 (둘러보기) | draft | 2026-05-29 |
