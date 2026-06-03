@@ -517,4 +517,103 @@ class SongTest {
         assertThat(song.backfillAlbumCoverUrl("   ")).isFalse();
         assertThat(song.getAlbumCoverUrl()).isNull();
     }
+
+    @Test
+    @DisplayName("backfillFromMusicBrainz: mbId 가 null 이면 매칭 적용 + EXTERNAL_API/confidence 갱신, true 반환")
+    void backfillFromMusicBrainz_whenMissing_appliesMatch() {
+        final Song song = Song.builder()
+                .title("좋니").artist("윤종신")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        final boolean changed = song.backfillFromMusicBrainz(
+                "b9ad642e-b012-41c7-b72a-42cf3437f9d8", "KRA401700001", 0.95);
+
+        assertThat(changed).isTrue();
+        assertThat(song.getMbId()).isEqualTo("b9ad642e-b012-41c7-b72a-42cf3437f9d8");
+        assertThat(song.getIsrc()).isEqualTo("KRA401700001");
+        assertThat(song.getMetadataConfidence()).isEqualTo(0.95);
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.EXTERNAL_API);
+    }
+
+    @Test
+    @DisplayName("backfillFromMusicBrainz: 이미 mbId 가 있으면 보존, false 반환 (멱등·운영자값 보호)")
+    void backfillFromMusicBrainz_whenPresent_isNoop() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .mbId("existing-mbid")
+                .build();
+
+        final boolean changed = song.backfillFromMusicBrainz("new-mbid", "KRB123", 0.99);
+
+        assertThat(changed).isFalse();
+        assertThat(song.getMbId()).isEqualTo("existing-mbid");
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+    }
+
+    @Test
+    @DisplayName("backfillFromMusicBrainz: isrc 가 이미 있으면 보존, mbId 만 채운다")
+    void backfillFromMusicBrainz_existingIsrc_preserved() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .isrc("KR-EXISTING")
+                .build();
+
+        final boolean changed = song.backfillFromMusicBrainz("mbid-1", "KR-NEW", 0.9);
+
+        assertThat(changed).isTrue();
+        assertThat(song.getMbId()).isEqualTo("mbid-1");
+        assertThat(song.getIsrc()).isEqualTo("KR-EXISTING");
+    }
+
+    @Test
+    @DisplayName("backfillFromMusicBrainz: isrc 가 null/blank 면 채우지 않고 mbId/confidence 만 적용")
+    void backfillFromMusicBrainz_nullIsrc_skipsIsrc() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        final boolean changed = song.backfillFromMusicBrainz("mbid-1", null, 0.9);
+
+        assertThat(changed).isTrue();
+        assertThat(song.getMbId()).isEqualTo("mbid-1");
+        assertThat(song.getIsrc()).isNull();
+        assertThat(song.backfillFromMusicBrainz("mbid-2", "  ", 0.9)).isFalse();
+    }
+
+    @Test
+    @DisplayName("backfillFromMusicBrainz: mbId null 이면 NullPointerException")
+    void backfillFromMusicBrainz_nullMbId_throws() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThatThrownBy(() -> song.backfillFromMusicBrainz(null, "KR1", 0.9))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("newMbId");
+    }
+
+    @Test
+    @DisplayName("backfillFromMusicBrainz: confidence 가 0.0~1.0 범위 밖이면 IllegalArgumentException")
+    void backfillFromMusicBrainz_confidenceOutOfRange_throws() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThatThrownBy(() -> song.backfillFromMusicBrainz("mbid", "KR1", 1.5))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> song.backfillFromMusicBrainz("mbid", "KR1", -0.1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

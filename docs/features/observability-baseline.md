@@ -108,7 +108,7 @@ mobruji.job.<jobName>.<state>            # 스케줄 잡 (state=started|complete
 | `mobruji.song.audio.backfill.success` | counter | — | backfill 성공 1건 | 기존 |
 | `mobruji.song.audio.backfill.failed` | counter | `reason` (python/io/parse/timeout) | backfill 실패 1건 | 기존 — `reason` 라벨 신설 |
 | `mobruji.song.audio.analysis.duration` | timer | — | librosa 분석 1건 처리 시간 (**운영** 메트릭. CI 빌드 시간은 별도 — `docs/features/librosa-ci-build-monitoring.md`) | 신설 (#209 와 연계) |
-| `mobruji.external.musicbrainz.request` | counter | `outcome` (success/error/ratelimited) | MB 호출 1회 | 신설 (#68 트리거) |
+| `mobruji.external.musicbrainz.request` | counter | `outcome` (success/lowscore/notfound/error/ratelimited) | MB backfill 곡 outcome 1건 | 구현됨 (#267/#268 — `MusicBrainzBackfillCommand`) |
 | `mobruji.external.musicbrainz.request.duration` | timer | `outcome` | MB 호출 응답시간 | 신설 (#68) |
 | `mobruji.external.spotify.request` | counter | `outcome` | Spotify 호출 1회 | 신설 (#69 트리거) |
 | `mobruji.external.spotify.request.duration` | timer | `outcome` | Spotify 호출 응답시간 | 신설 (#69) |

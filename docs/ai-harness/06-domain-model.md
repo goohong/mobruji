@@ -195,7 +195,8 @@
 | `genre` | String(32) | nullable | |
 | `tjNumber` | String(16) | nullable | TJ 노래방 번호 |
 | `kyNumber` | String(16) | nullable | 금영 노래방 번호 |
-| `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED |
+| `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED. MusicBrainz 매칭 채택 시 `EXTERNAL_API` 로 갱신 |
+| `mbId` | String(36) | nullable, UNIQUE | MusicBrainz Recording UUID. `MusicBrainzBackfillCommand` 매칭 결과 캐싱. null=미매칭. 같은 mbid 2곡 매칭 방지 UNIQUE(NULL 다중 허용). 음역대/key/tempo 미보강이라 추천 결정성 무영향. V13 마이그레이션(`V13__song_musicbrainz_id.sql`). #267/#268 / musicbrainz-integration.md |
 | `lowMidi` | Integer | nullable | 곡 보컬 멜로디 최저음 (MIDI). 시드부터 적재. PR #96 |
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
@@ -208,6 +209,7 @@
 - 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재. 시드 각 곡에 `lowMidi`/`highMidi`가 채워져 있어 적재 시 difficulty 자동 분류된다.
 - `SongRange`는 별 VO로 두지 않고 `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전).
 - `Song.backfillAlbumCoverUrl(url)` — 외부 backfill 결과 적용. **기존 `albumCoverUrl` 이 null 일 때 + 비-blank URL 일 때만** 채우고 변경 여부를 boolean 반환(큐레이터 수정값을 자동 backfill 이 덮어쓰는 사고 방지, no-overwrite 가드). 출처 chain(iTunes→CAA)·정기 배치·라이선스(이미지 미저장)는 album-cover-art.md §5 / ADR-0029 SoT.
+- `Song.backfillFromMusicBrainz(mbId, isrc, confidence)` — MusicBrainz 매칭 결과 적용. **기존 `mbId` 가 null 일 때만** 채우고(멱등·운영자값 보존, no-overwrite 가드) `isrc` 는 비어 있을 때만 채운다. 채택 시 `metadataConfidence`=score/100, `metadataSource`=`EXTERNAL_API` 로 갱신. 음역대/key/tempo 는 손대지 않아 추천 결정성 무영향. #267/#268 / musicbrainz-integration.md §5-4 SoT.
 
 ### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
 
@@ -373,6 +375,7 @@ erDiagram
         varchar tj_number
         varchar ky_number
         varchar metadata_source
+        varchar mb_id
         int low_midi
         int high_midi
         varchar difficulty
