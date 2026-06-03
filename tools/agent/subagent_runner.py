@@ -156,6 +156,8 @@ def build_task_prompt(
         f"- 너는 {cycle} 사이클 sub-agent. CLAUDE.md + 역할 룰 준수.\n"
         f"{forum_line}\n"
         "- 품질 게이트 통과 후 PR 생성 (base develop). AskUserQuestion 금지 — 자율 진행.\n"
+        "- ★로컬 서버 기동(gradle bootRun/npm run dev)·curl 라이브 검증·ScheduleWakeup 대기 금지 "
+        "— 단위/통합 테스트(./gradlew test, npm test)까지만. 라이브 dev 검증은 머지 후 nmae 담당★\n"
         "- 작업 완료 시 한 줄 완료 보고로 끝낸다."
     )
 
