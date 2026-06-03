@@ -34,6 +34,7 @@ import {
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
 import { Button } from "@/components/ui";
+import { PitchWaveRing } from "@/components/voice/PitchWaveRing";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import {
   MEASUREMENT_DURATION_MS,
@@ -458,6 +459,10 @@ interface MeasureStepProps {
   elapsedMs: number;
 }
 
+/** PitchWaveRing 표시 음역대 스케일 — C2(36) ~ C6(84), 일반 성악 가시 범위. */
+const RING_DISPLAY_LOW_MIDI = 36;
+const RING_DISPLAY_HIGH_MIDI = 84;
+
 function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
   const phaseLabel = phase === "low" ? "가장 낮은 음" : "가장 높은 음";
   const remainingMs = Math.max(0, MEASUREMENT_DURATION_MS - elapsedMs);
@@ -471,6 +476,12 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
   const levelPercent = Math.min(100, Math.max(0, clarity * 100));
   const hasSignal = clarity >= 0.05;
 
+  // low/high 두 phase 를 0~100% 한 ring 진행으로 매핑(low=0~50, high=50~100).
+  const ringProgress =
+    phase === "low" ? progressPercent / 2 : 50 + progressPercent / 2;
+  const ringFrequencyHz =
+    sample && sample.frequencyHz > 0 ? sample.frequencyHz : null;
+
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold text-[var(--text-primary)]">
@@ -479,6 +490,18 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
       <p className="text-sm text-[var(--text-secondary)]">
         편한 모음(예: &quot;아&quot;) 으로 길게 내주세요.
       </p>
+
+      <PitchWaveRing
+        lowMidi={RING_DISPLAY_LOW_MIDI}
+        highMidi={RING_DISPLAY_HIGH_MIDI}
+        currentFrequencyHz={ringFrequencyHz}
+        progressPercent={ringProgress}
+        amplitude={clarity}
+        stepNumber={phase === "low" ? 1 : 2}
+        totalSteps={2}
+        stepLabel={`${phaseLabel}을 발성`}
+      />
+
       {/*
         #454: 외곽 wrapper 의 aria-live 제거에 맞춰 이 박스도 중첩 aria-live 를
         해제. 카운트다운 <p aria-live="polite"> 와 page 상단 status region 만
