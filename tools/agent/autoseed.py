@@ -39,8 +39,11 @@ _SCOPE_CYCLE: dict[str, str] = {
     "scope:feedback": "be",
     "scope:infra": "infra",
 }
-# autoseed 가 보충할 cycle (rev 는 PR 리뷰 전용 — 자체 백로그 시드 안 함).
-SEEDABLE_CYCLES: tuple[str, ...] = ("be", "fe", "plan", "infra")
+# autoseed 가 자동 보충할 cycle. rev 는 PR 리뷰 전용이라 제외.
+# infra 제외 (사용자 2026-06-03): infra 는 ephemeral 라 항상 비어 autoseed 가 매번
+# 먼저 집어 오래된 저가치 이슈만 반복 churn + infra forum 부재로 cycle thread 생성
+# rc=1 noise. infra 는 가치 있는 이슈만 사람/nmae 가 수동 큐레이션해 dispatch.
+SEEDABLE_CYCLES: tuple[str, ...] = ("be", "fe", "plan")
 
 # ── G3 high-stakes 제외 (spec §5-3) ───────────────────────────────────────────
 _EXCLUDE_LABELS = frozenset({"type:release", "security", "do-not-merge"})
