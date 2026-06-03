@@ -50,6 +50,7 @@ import {
   createRecommendation,
   Mood,
   RecommendationCreateRequest,
+  RecommendationPersona,
   RecommendationResponse,
   RecommendedSongResponse,
 } from "@/lib/api/recommendation";
@@ -64,6 +65,7 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
+import { IntentModeToggle } from "./components/IntentModeToggle";
 import { RecommendFilters } from "./components/RecommendFilters";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 import { SongDetailModal } from "./components/SongDetailModal";
@@ -111,6 +113,11 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const [selectedAgeGroup, setSelectedAgeGroup] = useState<AgeGroup | null>(
     null,
   );
+  // 추천 의도 모드(P-E 안전곡 등, 이슈 #1600) — mood/ageGroup 과 동일한 화면 로컬 상태.
+  // 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터 재발화된다. null(미선택)은
+  // createRecommendation 에서 persona 를 생략 → 현행 default 추천(하위호환).
+  const [selectedPersona, setSelectedPersona] =
+    useState<RecommendationPersona | null>(null);
 
   const isVoiceRangeReady =
     voiceRangeQuery.isSuccess &&
@@ -148,6 +155,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       voiceRangeIdFromStore,
       selectedMood,
       selectedAgeGroup,
+      selectedPersona,
     ],
     enabled:
       isVoiceRangeReady &&
@@ -169,6 +177,9 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       if (selectedAgeGroup !== null) {
         request.ageGroup = selectedAgeGroup;
       }
+      if (selectedPersona !== null) {
+        request.persona = selectedPersona;
+      }
       return createRecommendation(request);
     },
     getNextPageParam: (lastPage, allPages) => {
@@ -189,7 +200,13 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   // 0 으로 리셋한다.
   useEffect(() => {
     lastProcessedPageCountRef.current = 0;
-  }, [sessionId, voiceRangeIdFromStore, selectedMood, selectedAgeGroup]);
+  }, [
+    sessionId,
+    voiceRangeIdFromStore,
+    selectedMood,
+    selectedAgeGroup,
+    selectedPersona,
+  ]);
 
   useEffect(() => {
     if (!pages || pages.length === 0) {
@@ -324,6 +341,23 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           </div>
         </header>
 
+        {/* (closes #1601) 모임 사회자(P-D) 모드 진입 — "다 같이 즐길 곡" 시퀀스 화면으로
+            이동한다. 이 링크를 누르지 않으면 기존 단일 곡 추천 흐름은 불변(하위호환). */}
+        <Link
+          href="/recommend/host"
+          className="flex flex-col items-start gap-0.5 self-start rounded-[var(--radius-md)] bg-[var(--badge-neutral-bg)] px-4 py-2.5 text-left text-[var(--badge-neutral-fg)] transition-colors duration-[var(--duration-base)] hover:bg-[var(--bg-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
+        >
+          <span className="text-sm font-semibold">다 같이 즐길 곡 추천받기</span>
+          <span className="text-xs text-[var(--text-caption)]">
+            모임 사회자용 — 도입·고조·마무리 단계별 흐름으로
+          </span>
+        </Link>
+
+        <IntentModeToggle
+          selectedPersona={selectedPersona}
+          onPersonaChange={setSelectedPersona}
+        />
+
         <RecommendFilters
           selectedMood={selectedMood}
           selectedAgeGroup={selectedAgeGroup}
@@ -335,6 +369,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           query={recommendQuery}
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
+          activePersona={selectedPersona}
         />
       </div>
     </main>
@@ -355,12 +390,18 @@ type RecommendationFeedProps = {
    */
   userVoiceRangeLow: number;
   userVoiceRangeHigh: number;
+  /**
+   * 사용자가 고른 의도 페르소나(P-E 안전곡 등, 이슈 #1600). 결과 카드에 페르소나 사유
+   * fallback 근거로 전달한다. 미선택(null)이면 카드는 페르소나 사유 줄을 생략한다.
+   */
+  activePersona: RecommendationPersona | null;
 };
 
 function RecommendationFeed({
   query,
   userVoiceRangeLow,
   userVoiceRangeHigh,
+  activePersona,
 }: RecommendationFeedProps) {
   const {
     data,
@@ -576,6 +617,7 @@ function RecommendationFeed({
             key={item.song.id}
             item={item}
             userVoiceRange={userRange}
+            activePersona={activePersona}
             onShowDetail={() => setSelected(item)}
           />
         ))}

@@ -23,8 +23,8 @@ describe("VoiceRangeScale", () => {
     const label = img.getAttribute("aria-label") ?? "";
     expect(label).toContain("내 음역대");
     expect(label).toContain("평균 음역대");
-    expect(label).toContain("C3"); // low 48
-    expect(label).toContain("A4"); // high 69
+    expect(label).toContain("도3"); // low 48
+    expect(label).toContain("라4"); // high 69
   });
 
   it("사용자 밴드와 벤치마크 밴드를 모두 렌더한다", () => {
@@ -94,9 +94,9 @@ describe("VoiceRangeScale", () => {
       />,
     );
     const label = screen.getByRole("img").getAttribute("aria-label") ?? "";
-    // NEUTRAL low 45 = A2, high 60 = C4
-    expect(label).toContain("A2");
-    expect(label).toContain("C4");
+    // NEUTRAL low 45 = 라2, high 60 = 도4
+    expect(label).toContain("라2");
+    expect(label).toContain("도4");
   });
 
   it("a11y 위반(serious/critical) 이 없다", async () => {

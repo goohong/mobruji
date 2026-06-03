@@ -61,7 +61,7 @@ def _wrap_error(exc: Exception) -> dict[str, Any]:
     input_schema={
         "channel_id": str,
         "body": str,
-        "reply_to_msg_id": str,
+        # reply_to_msg_id 제거 (#1631, 2026-06-03) — quote-reply 영구 폐기.
         "thread_id": str,
         "choices": list,  # optional — 선택지 list (str). 최대 10.
         "dialogue_style": str,  # optional — "register" 또는 "default".
@@ -80,7 +80,6 @@ async def post_discord_message(args: dict[str, Any]) -> dict[str, Any]:
         result = td.post_discord_message(
             args["channel_id"],
             args["body"],
-            reply_to_msg_id=args.get("reply_to_msg_id") or None,
             thread_id=args.get("thread_id") or None,
             choices=choices,
             dialogue_style=args.get("dialogue_style") or None,

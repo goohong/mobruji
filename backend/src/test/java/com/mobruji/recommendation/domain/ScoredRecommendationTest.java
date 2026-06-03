@@ -170,7 +170,7 @@ class ScoredRecommendationTest {
     }
 
     @Test
-    @DisplayName("연습 지원(#1494): practiceDifficulty는 곡 음역 자동 분류 난이도를, 사유는 최고음+난이도 구간별 한국어")
+    @DisplayName("연습 지원(#1494): practiceDifficulty는 곡 음역 자동 분류 난이도를, 사유는 음역 범위(최저~최고음)+난이도 구간별 한국어")
     void practiceDifficulty_derivesFromSongRange() {
         // given: EASY(high<71) / NORMAL(71~75) / HARD(high≥76 또는 span≥17)
         final ScoredRecommendation easy = new ScoredRecommendation(rangedSong(60, 67), 0.5, "match", 1);
@@ -179,11 +179,11 @@ class ScoredRecommendationTest {
 
         // then
         assertThat(easy.practiceDifficulty()).isEqualTo(Difficulty.EASY);
-        assertThat(easy.practiceDifficultyReason()).isEqualTo("최고음 G4, 음역 폭이 넓지 않아 부담 없이 연습하기 좋아요");
+        assertThat(easy.practiceDifficultyReason()).isEqualTo("음역 C4~G4, 음역 폭이 넓지 않아 부담 없이 연습하기 좋아요");
         assertThat(normal.practiceDifficulty()).isEqualTo(Difficulty.NORMAL);
-        assertThat(normal.practiceDifficultyReason()).isEqualTo("최고음 C5, 적당한 난이도라 연습용으로 무난해요");
+        assertThat(normal.practiceDifficultyReason()).isEqualTo("음역 C4~C5, 적당한 난이도라 연습용으로 무난해요");
         assertThat(hard.practiceDifficulty()).isEqualTo(Difficulty.HARD);
-        assertThat(hard.practiceDifficultyReason()).isEqualTo("최고음 A5, 고음·넓은 음역이라 도전적인 곡이에요");
+        assertThat(hard.practiceDifficultyReason()).isEqualTo("음역 A3~A5, 고음·넓은 음역이라 도전적인 곡이에요");
     }
 
     @Test

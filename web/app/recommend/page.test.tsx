@@ -381,6 +381,52 @@ describe("RecommendPage", () => {
     });
   });
 
+  // ---------- 의도 모드 (P-E 안전곡, #1600) ----------
+  it("'안 망할 곡' 의도 모드 선택 시 persona=P-E 를 포함해 추천을 다시 요청한다", async () => {
+    const user = userEvent.setup();
+    sessionMock.set({ sessionId: "sess-pe", voiceRangeId: 7 });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 7,
+      sessionId: "sess-pe",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValue(
+      buildResponseWithSongIds(302, [1]),
+    );
+
+    renderWithQueryClient(<RecommendPage />);
+
+    // 최초: persona 없이 호출 (하위호환).
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
+        sessionId: "sess-pe",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 69,
+        excludeSongIds: [],
+      });
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /안 망할 곡 추천받기/ }),
+    );
+
+    // 의도 모드 선택 → queryKey 변경 → persona 포함 재요청.
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenCalledWith({
+        sessionId: "sess-pe",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 69,
+        excludeSongIds: [],
+        persona: "P-E",
+      });
+    });
+  });
+
   // ---------- 스와이프 뷰 토글 (#1489) ----------
   it("'스와이프' 토글 시 한 곡씩 카드(덱)로 전환되고 진행 표시가 보인다", async () => {
     const user = userEvent.setup();

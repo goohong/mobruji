@@ -48,12 +48,14 @@ import {
 } from "react";
 
 import type {
+  RecommendationPersona,
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
+import { resolvePersonaReason } from "@/lib/persona";
 import {
-  deriveDifficulty,
   difficultyLabel,
+  resolveSongDifficulty,
   type Difficulty,
 } from "@/lib/difficulty";
 import {
@@ -101,6 +103,12 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
       onShowDetail?: () => void;
+      /**
+       * 사용자가 추천 화면에서 고른 의도 페르소나(P-E 안전곡 등). BE 응답에 아직
+       * `persona`/`personaReason` 이 없을 때 결과 카드의 페르소나 사유 fallback 근거가
+       * 된다(lib/persona.resolvePersonaReason). 미지정이면 페르소나 사유 줄을 생략한다.
+       */
+      activePersona?: RecommendationPersona | null;
     }
   | {
       song: SongResponse;
@@ -108,6 +116,7 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: never;
       onShowDetail?: () => void;
+      activePersona?: never;
     };
 
 export function SongCard(props: SongCardProps) {
@@ -117,7 +126,12 @@ export function SongCard(props: SongCardProps) {
   const href: string | undefined = props.href;
   const userVoiceRange: UserVoiceRange | null =
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
+  const activePersona: RecommendationPersona | null =
+    "item" in props && props.activePersona ? props.activePersona : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  // closes #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트")를 카드 표면에 노출.
+  // BE personaReason 우선, 없으면 활성 페르소나 + 곡 난이도 기반 client fallback.
+  const personaReason = item ? resolvePersonaReason(item, activePersona) : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
@@ -226,6 +240,22 @@ export function SongCard(props: SongCardProps) {
           </span>
         ) : null}
       </div>
+
+      {/*
+       * closes #1600 — 페르소나 사유("안심 포인트") 한 줄. P-E 안전곡 모드처럼 의도
+       * 페르소나가 활성일 때만 노출하며, 모달 모드에서도 한눈에 보이는 핵심 신호라
+       * 카드 표면에 유지한다. BE personaReason 미보유 시 곡 난이도 기반 fallback.
+       */}
+      {personaReason ? (
+        <div className="flex items-start gap-2 rounded-[var(--radius-md)] bg-[var(--badge-success-bg)] px-3 py-2">
+          <span className="shrink-0 text-xs font-semibold text-[var(--badge-success-fg)]">
+            {personaReason.label}
+          </span>
+          <span className="text-xs text-[var(--text-secondary)]">
+            {personaReason.text}
+          </span>
+        </div>
+      ) : null}
     </>
   );
 
@@ -626,13 +656,7 @@ function difficultyTone(difficulty: Difficulty): string {
 export function resolveDifficulty(
   song: RecommendedSongResponse["song"],
 ): Difficulty | null {
-  if (song.difficulty) {
-    return song.difficulty;
-  }
-  if (typeof song.lowMidi === "number" && typeof song.highMidi === "number") {
-    return deriveDifficulty(song.lowMidi, song.highMidi);
-  }
-  return null;
+  return resolveSongDifficulty(song);
 }
 
 /**

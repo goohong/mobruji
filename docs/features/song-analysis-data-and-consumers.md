@@ -113,8 +113,8 @@ last_reviewed: 2026-06-03
 ## 6) 작업 분할 (예상 PR 리스트)
 > be 단계적 구현 가능하도록 스키마 → 적재 → 소비 노출 순서 분리. PR 1 선행, 이후 병렬 가능.
 
-- [ ] **PR 1 (feat:song)** — 스키마: `Song.energy` 컬럼 + Flyway 마이그레이션 + `06-domain-model.md` §5-2/§6 갱신. E2E: 곡 생성/조회 시 `energy` round-trip.
-- [ ] **PR 2 (feat:song)** — read-model: `SongAnalysisProfile` 정의 + `GET /api/v1/songs/{id}` 응답 노출 + RestAssured E2E.
+- [x] **PR 1 (feat:song)** — 스키마: `Song.energy` 컬럼 + Flyway 마이그레이션(`V10__song_energy.sql`) + `06-domain-model.md` §5-2/§6 갱신. E2E: 곡 생성/조회 시 `energy` round-trip.
+- [x] **PR 2 (feat:song)** — read-model: `SongAnalysisProfile` 정의 + `GET /api/v1/songs/{id}` 응답 노출(`analysisProfile`) + RestAssured E2E.
 - [ ] **PR 3 (chore:song)** — 수기/시드 적재: `songs-seed.json` 에 `energy`/`mood` 채움 + `SongSeedLoader` 멱등 적재 + 적재율 메트릭(`mobruji.song.energy.coverage`).
 - [ ] **PR 4 (chore:song / 조건부)** — 배치 적재 연결: 분석 backfill 이 `energy`/`mood` 자동 산출(§8 Q2 결정 후). 미결 시 보류.
 
@@ -141,4 +141,5 @@ last_reviewed: 2026-06-03
 ## 9) 결정 로그
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
+- 2026-06-03: PR 2 (feat:song) 구현 — `SongAnalysisProfile` read-model(`com.mobruji.song.domain`) 신설 + `GET /api/v1/songs/{id}` 응답에 `analysisProfile` 노출. 5종 소비자(§5-3)가 `Song` 컬럼 직접 read 대신 단일 표면 경유. nullable 필드(energy/mood/range) graceful degrade 입력 보존. PR 1(`Song.energy` 컬럼 + V10 마이그레이션) 은 선행 머지 확인. 출처: #1490
 - 2026-06-03: 초안 작성 (status=draft). #1490 — self-analysis pivot 토대의 **데이터 스키마 + 소비자 계약** layer 신설. 기존 `song-self-analysis-pipeline.md`(DSP 생산자)와 생산자/소비자로 분리. `energy` 차원을 스키마 + 수기/배치 적재 스캐폴드로 선도입(자동 산출은 §8 Q2 보류 — 기존 §10-9 정확도 우려 정합). 소비자 5종(#1484/#1485/#1486/#1488/#1494) 계약 표(§5-3) 단일화. 도메인 용어 `Energy`/`SongAnalysisProfile` §4-1 등재.

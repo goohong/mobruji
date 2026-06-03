@@ -49,6 +49,7 @@
 | 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
 | 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
 | 에너지 | Energy (Song.energy) | `song` | 곡의 음향 에너지/강렬함 정도 0.0~1.0 (nullable). 추천 mood 변별·곡 유사도 신호로 소비. 산출 출처는 미정 — 1차는 수기/시드 적재, 자동화(Spotify valence·energy fallback 또는 librosa MFCC)는 후속 결정. song-analysis-data-and-consumers.md §5-1·§8 + song-self-analysis-pipeline.md §10-9 cross-ref |
+| 앨범 커버 | AlbumCover (Song.albumCoverUrl) | `song` | 곡 카드/모달에 표시할 외부 앨범 커버 이미지 URL (nullable). 외부 출처(iTunes Search 1차 → Cover Art Archive 폴백) backfill 결과를 **이미지 바이트 미저장·URL 문자열만** 캐싱한 표시 속성 (라이선스 준수). 추천 결정성 무영향 (UX 표시 전용). 매칭 실패 곡은 null → FE placeholder. 출처 결정 SoT = ADR-0029, 적용 plan = album-cover-art.md. §5-2 |
 | 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
 | 곡 후보 풀 | SongCandidatePool | `song` | 추천/검색/카탈로그가 매칭 대상으로 삼는 곡 집합 — 큐레이션 곡(`MANUAL_SEED`) + 임포트 곡(`EXTERNAL_API`) 합집합. 규모 확장(30→100→수백)의 단위. 영속 엔티티 아님 — `Song` 행 전체의 개념 라벨. song-catalog-expansion.md §5-1 |
 | 메타-only 임포트 | MetadataOnlyImport | `song` | 외부 CC0 출처(MusicBrainz)에서 메타데이터(제목/아티스트/연도/장르/식별자)만 가져와 `Song` 으로 upsert 하는 배치(`MetadataOnlyImportCommand`, `--mobruji.import-catalog`). 음역대/key/tempo 미설정 — 자체 분석(#1490)이 후속. `metadataSource=EXTERNAL_API` + 낮은 confidence. (title, artist)·ISRC 멱등. song-catalog-expansion.md §5-1 |
@@ -88,6 +89,8 @@
 | 음역 분류 | VocalRegister | `voice` | **설계 단계** 음역대(low/high MIDI)를 절대 음역 밴드로 분류한 라벨. 비전문 사용자 친화 — 1차는 정식 성악 명칭(테너/소프라노 등) 대신 일상어 밴드(낮은/중간/높은/넓은 음역). 영속 엔티티 아님(`VoiceRange` 파생). 추천 결정성 무영향. voice-range-intuitive-display.md §5-1 |
 | 음역 벤치마크 | VoiceRangeBenchmark | `voice` | **설계 단계** 상대 음역 설명·시각화 비교 기준이 되는 평균 음역 reference. 성별 중립 기본(일반 성인 A2~C4 시드) + 선택적 성별 분기(성별 신호 확보 시 — 현재 미수집). 시드값, 검증·튜닝 대상. voice-range-intuitive-display.md §5-1 |
 | 상대 음역 설명 | RelativeRangeDescriptor | `voice` | **설계 단계** 사용자 음역대를 `VoiceRangeBenchmark` 와 비교해 생성하는 짧은 한국어 설명("고음이 평균보다 약간 높아요"). 고음/저음/음역폭 3축 차이를 버킷(≤2 비슷 / 3~5 약간 / ≥6 훨씬)으로 환산. 1차 FE 파생, BE enrichment 는 재사용 수요 확정 시 후속. voice-range-intuitive-display.md §5-1 |
+| 음역 미입력 추천 피드 | VoiceRangeOptionalFeed | `recommendation` | **설계 단계** 음역대 미입력 사용자에게 음역 측정 전 노출하는 fallback 추천 표면. 본 추천(`POST /recommendations`, voiceRange `@NotNull`)·점수식·결정성을 건드리지 않고 기존 트렌딩(`GET /recommendations/trending`, 음역 옵션)·분위기 필터·곡 카탈로그 큐레이션을 graceful chain 으로 묶은 read-model. 신규 엔티티·마이그레이션 없음. 측정 완료 시 기존 개인화 경로로 전환. voice-range-optional-recommendation-entry.md §5-1 |
+| 음역 입력 유도 | VoiceRangeNudge | `recommendation` (web) | **설계 단계** `VoiceRangeOptionalFeed` 위에서 "더 정확한 맞춤 추천을 원하면 음역대를 알려 주세요" 로 음역 측정을 비강제·점진적으로 유도하는 클라이언트 UX 트리거. 피드를 막지 않음(opt-in) + dismiss/세션 노출 빈도 가드. 측정 완료 시 본 추천(`POST /recommendations`) 개인화 경로로 전환. 신규 BE 엔티티 없음(클라이언트 상태). voice-range-optional-recommendation-entry.md §5-6 |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -187,12 +190,14 @@
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
 | `energy` | Float | nullable, 0.0~1.0 | 곡 음향 에너지/강렬함. 1차 수기/시드 적재, 자동 산출 후속(§8 Q2). 추천 점수 입력 아님 — null 곡은 소비자 graceful degrade. song-analysis-data-and-consumers.md §5-1, #1490 |
+| `albumCoverUrl` | String(512) | nullable | 곡 카드/모달 표시용 외부 앨범 커버 URL. iTunes(1차)→Cover Art Archive(폴백) backfill 결과를 캐싱(이미지 미저장, URL 만). 비-조회키라 인덱스 없음. 추천 결정성 무영향. V7 마이그레이션(`V7__song_album_cover_url.sql`). 이슈 #322 / ADR-0029 / album-cover-art.md |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
 - 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
 - `Song.deriveDifficulty(int lowMidi, int highMidi)` static — fe `web/lib/difficulty.ts`와 1:1 룰 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
 - 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재. 시드 각 곡에 `lowMidi`/`highMidi`가 채워져 있어 적재 시 difficulty 자동 분류된다.
 - `SongRange`는 별 VO로 두지 않고 `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전).
+- `Song.backfillAlbumCoverUrl(url)` — 외부 backfill 결과 적용. **기존 `albumCoverUrl` 이 null 일 때 + 비-blank URL 일 때만** 채우고 변경 여부를 boolean 반환(큐레이터 수정값을 자동 backfill 이 덮어쓰는 사고 방지, no-overwrite 가드). 출처 chain(iTunes→CAA)·정기 배치·라이선스(이미지 미저장)는 album-cover-art.md §5 / ADR-0029 SoT.
 
 ### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
 
@@ -240,6 +245,24 @@
 - 도메인 메서드: `static create(sessionId, songId)`. toggle 로직은 `LikeService`/`BookmarkService`에 위치.
 - **v0.2 비영향 약속**: 추천 알고리즘 입력에 포함되지 않는다 (`RecommendationService` 어떤 코드도 `LikeRepository`/`BookmarkRepository`를 의존하지 않음).
 - **조회 응답 형태** (PR F, #256): `GET /api/v1/sessions/{id}/likes`, `/bookmarks` 는 곡 메타데이터 join + offset 페이지네이션 + `SessionAuthGuard` 적용. application 레이어가 `SongRepository.findAllById(songIds)` batch lookup 으로 N+1 회피, 컨트롤러는 `LikeWithSongResponse(id, song, likedAt)` / `BookmarkWithSongResponse` 로 합쳐 `LikeListResponse(responses, page, size, totalCount, hasNext)` wrapper 로 응답 (Spring Data `Page<>` 직접 노출은 직렬화 안정성 위해 피함). 곡이 삭제된 orphan songId 는 응답에서 제외하되 `totalCount` 는 count 기준이라 차이날 수 있다.
+
+### 5-4-1) `SessionFeedback` (#1545, recommendation-feedback-loop.md PR B)
+
+`recommendation` BC. 스와이프 세션 반응 1건. `feedback` BC 의 `Like`/`Bookmark`(toggle, 추천 비영향)와 달리 **추천 결합 신호로 환류**된다 — `LIKE` 는 부른곡 시드와 함께 선호 집합, `PASS` 는 회피/제외 집합. Song aggregate 참조는 ID-only(ADR-0005 §A-7).
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | |
+| `sessionId` | String(64) | not null, UK(`session_id, song_id`) | 익명 사용자 식별자 |
+| `songId` | Long | not null, UK | FK 없음(application 레벨) |
+| `reaction` | enum `FeedbackReaction` | not null, `STRING`(8) | `LIKE` / `PASS` |
+| `createdAt` | LocalDateTime | not null | 최신 반응 시각(재스와이프 시 갱신) |
+
+- 테이블명: `session_feedback`. 인덱스 `(session_id, created_at)` — 세션별 최신순 조회 + 결합 신호 도출용.
+- **upsert**(toggle 아님): 같은 `(sessionId, songId)` 재스와이프 시 `reaction`/`createdAt` 을 덮어쓴다(현재 상태 설정 의미). 도메인 메서드: `static create(sessionId, songId, reaction)`, `overwriteReaction(reaction)`.
+- **결합 약속**: `RecommendationService.createFromSeeds` 가 `useSessionFeedback`(기본 true) 시 `SessionFeedbackRepository` 로 세션 `LIKE` 곡을 시드에, `PASS` 곡을 제외에 합친다. 반응 0건이면 기여 0(콜드스타트 하위호환).
+- **조회**: `GET /api/v1/sessions/{id}/feedback` — `SessionAuthGuard` + offset 페이지네이션. `SessionFeedbackResponse(id, songId, reaction, reactedAt)` → `SessionFeedbackListResponse(responses, page, size, totalCount, hasNext)` wrapper.
+- ADR-0013 cascade-delete 대상(sessionId revoke 시 함께 삭제).
 
 ### 5-5) `VoiceRangeSnapshot` (PR #231, voice-range-progress.md PR A)
 
@@ -344,6 +367,7 @@ erDiagram
         int high_midi
         varchar difficulty
         decimal energy
+        varchar album_cover_url
         datetime created_at
         datetime updated_at
     }
@@ -383,6 +407,14 @@ erDiagram
         bigint id PK
         varchar session_id UK
         bigint song_id UK
+        datetime created_at
+    }
+
+    SESSION_FEEDBACK {
+        bigint id PK
+        varchar session_id UK
+        bigint song_id UK
+        varchar reaction
         datetime created_at
     }
 
@@ -428,11 +460,13 @@ erDiagram
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
     SONG ||--o{ LIKE_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
     SONG ||--o{ BOOKMARK_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
+    SONG ||--o{ SESSION_FEEDBACK : "song_id (FK 없음, 추천 결합 신호)"
     VOICE_RANGE ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId로 join (FK 없음, insert-only 시계열)"
     ANONYMOUS_SESSION ||--o{ VOICE_RANGE : "sessionId 라이프사이클 owner (FK 없음, cascade-delete app 레벨)"
     ANONYMOUS_SESSION ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ LIKE_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ BOOKMARK_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
+    ANONYMOUS_SESSION ||--o{ SESSION_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ RECOMMENDATION_REQUEST : "sessionId 라이프사이클 owner (FK 없음)"
     USER ||--o| USER_PROFILE : "v0.4 draft — 1:1 선호 영속 (FK user_id)"
     USER ||--o{ VOICE_RANGE : "v0.4 draft — 머지 후 user owner (sessionId→userId 치환)"
@@ -442,7 +476,7 @@ erDiagram
     USER ||--o{ RECOMMENDATION : "v0.4 draft — 머지 후 user owner"
 ```
 
-- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession` — 8개 엔티티.
+- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession`, `SessionFeedback` — 9개 엔티티.
 - v0.4 draft (미구현): `User`, `UserProfile` — 정식 회원 + 선호 프로필. 머지 시 sessionId-bound 엔티티의 owner 가 sessionId → userId 로 치환된다 (dual column 권장, FK 없이 application 레벨 owner). 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 전환 정책/머지 = `anonymous-to-account-conversion.md`.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join. `AnonymousSession` 이 sessionId 라이프사이클(TTL 만료 / 회전 / 머지) 의 단일 owner — cascade-delete 는 `AnonymousSessionTtlCleanup` / `SessionRotationService` 가 application 레벨에서 명시적 DELETE.
 

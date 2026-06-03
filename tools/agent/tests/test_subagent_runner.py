@@ -162,6 +162,49 @@ def test_on_exec_success_with_pr_triggers_rev_and_notifies(monkeypatch):
     assert any("PR #9" in b for b in notes)
 
 
+def test_persist_pr_cycle_thread_stores_mapping(isolated_db):
+    """(#7) be/fe/rev/plan + snowflake → agent_state pr_cycle_thread:<N> 저장."""
+    import subagent_runner as sr, events as ev
+    sr._persist_pr_cycle_thread("1593", "be", "1509466456230989926")
+    assert ev.get_state("pr_cycle_thread:1593") == {
+        "cycle": "be", "thread_id": "1509466456230989926"
+    }
+
+
+def test_persist_pr_cycle_thread_skips_invalid_cycle(isolated_db):
+    """(#7) nmae/infra 등 비-cycle 은 저장 안 함."""
+    import subagent_runner as sr, events as ev
+    sr._persist_pr_cycle_thread("10", "nmae", "1509466456230989926")
+    assert ev.get_state("pr_cycle_thread:10") is None
+
+
+def test_persist_pr_cycle_thread_skips_non_snowflake(isolated_db):
+    """(#7) thread_id 가 빈/짧은 값이면 저장 안 함(오태깅 방지)."""
+    import subagent_runner as sr, events as ev
+    sr._persist_pr_cycle_thread("11", "fe", "")
+    sr._persist_pr_cycle_thread("12", "fe", "abc")
+    assert ev.get_state("pr_cycle_thread:11") is None
+    assert ev.get_state("pr_cycle_thread:12") is None
+
+
+def test_on_exec_success_persists_mapping_from_thread_arg(isolated_db, monkeypatch):
+    """(#7) PR 있으면 launch thread_id 인자로 pr_cycle_thread 매핑 영속 — 본문 주입과 무관.
+
+    directive state 에 cycle_thread_id 가 없어도(LAUNCH_THREAD_ID 미상속 시나리오)
+    thread_id 인자가 authoritative source 라 매핑이 저장된다(PR #1593 구멍 차단).
+    """
+    import subagent_runner as sr, tools_queue as tq, events as ev
+    monkeypatch.setattr(sr, "_find_pr_number", lambda wt: "1593")
+    monkeypatch.setattr(sr, "_ensure_pr_xrefs", lambda *a, **k: None)
+    monkeypatch.setattr(tq, "enqueue_rev_for_pr_if_any", lambda c, wt: "1593")
+    monkeypatch.setattr(sr, "_notify_user_done", lambda *a, **k: None)
+    # directive state 비움 — thread_id 인자 단독으로 매핑돼야.
+    sr._on_exec_success("be", "d1", "제목", "1509466456230989926", "/tmp/wt")
+    assert ev.get_state("pr_cycle_thread:1593") == {
+        "cycle": "be", "thread_id": "1509466456230989926"
+    }
+
+
 def test_ensure_pr_xrefs_no_markers_skips_gh(monkeypatch):
     """rev-pr-* 합성 id + cycle/thread 없음 → 추가할 marker 없어 gh 미호출."""
     import subagent_runner as sr

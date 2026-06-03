@@ -130,7 +130,7 @@ describe("SongCard", () => {
     expect(
       screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = 파5 (#1634 한국어 음명 단독)
+    // 최고음 음표명 노출 — MIDI 77 = 파5 (한국어 단독, #1310 사용자 정정 2026-06-03)
     expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
     // 최저음(작게) — MIDI 55 = 솔3
     expect(screen.getByText("솔3")).toBeInTheDocument();
@@ -354,10 +354,10 @@ describe("SongCard", () => {
       expect(screen.getByText("키 매칭")).toBeInTheDocument();
       expect(screen.getByText("장르")).toBeInTheDocument();
       expect(screen.getByText("음역 적합")).toBeInTheDocument();
-      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (#318: 한국어 (SPN) 병기)
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (한국어 단독, #1310 사용자 정정 2026-06-03)
       expect(
         screen.getByText(
-          "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+          "사용자 도3-솔4 vs 곡 솔3-파5",
         ),
       ).toBeInTheDocument();
       // 추정값 안내 footnote
@@ -738,6 +738,8 @@ describe("SongCard", () => {
 
     it("buildYouTubeSearchUrl: 한글 제목/아티스트도 안전하게 인코딩한다", () => {
       const url = buildYouTubeSearchUrl("밤편지", "아이유");
+      // 직전 PR (#1310) 무차별 한국어 치환이 percent-encoding hex (%A4 → %라4 등)
+      // 까지 깨먹은 회귀 복구. percent-encoded 바이트는 한국어 음명 치환과 무관.
       expect(url).toBe(
         "https://www.youtube.com/results?search_query=%EB%B0%A4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%B4%EC%9C%A0",
       );
@@ -855,6 +857,46 @@ describe("SongCard", () => {
       expect(
         screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
       ).toBeInTheDocument();
+    });
+  });
+
+  // 이슈 #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트") 노출.
+  describe("페르소나 사유 (#1600)", () => {
+    it("BE personaReason 이 있으면 '안심 포인트' 라벨과 함께 노출한다", () => {
+      const item = buildItem(
+        { difficulty: "EASY" },
+        { persona: "P-E", personaReason: "느린 템포라 따라 부르기 쉬워요." },
+      );
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} activePersona="P-E" />
+        </ul>,
+      );
+      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
+      expect(
+        screen.getByText("느린 템포라 따라 부르기 쉬워요."),
+      ).toBeInTheDocument();
+    });
+
+    it("BE personaReason 이 없어도 활성 P-E + EASY 곡이면 client fallback 사유를 노출한다", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} activePersona="P-E" />
+        </ul>,
+      );
+      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
+      expect(screen.getByText(/부담 없이/)).toBeInTheDocument();
+    });
+
+    it("의도 모드 미선택(activePersona=null)이면 페르소나 사유 줄을 그리지 않는다", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      expect(screen.queryByText("안심 포인트")).not.toBeInTheDocument();
     });
   });
 });

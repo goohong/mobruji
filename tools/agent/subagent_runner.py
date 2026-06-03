@@ -324,6 +324,34 @@ def _find_pr_number(worktree) -> str | None:  # noqa: ANN001
         return None
 
 
+def _persist_pr_cycle_thread(pr_num: str, cycle: str, cycle_thread_id: str) -> None:
+    """(#7) PR 번호 → cycle forum thread 매핑을 agent_state 에 영속 저장.
+
+    bot.py 의 ``cycle_thread_complete_on_merge_loop`` 가 머지 감지 시 PR 본문 파싱이
+    아니라 이 매핑(``pr_cycle_thread:<N>``)을 1순위로 조회해 thread 를 ``완료`` 로 전이한다.
+    본문 xref 주입이 실패(placeholder 박힘 / 줄-시작 앵커 미스 / cycle_thread_id 누락)해도
+    완료 태그가 붙도록 보장하는 신뢰 가능한 매핑 채널 — 영구 정체 구멍(예: PR #1593) 차단.
+
+    cycle 이 be/fe/rev/plan 이고 thread_id 가 snowflake 일 때만 저장. graceful — 저장
+    실패는 warning 만(머지 loop 가 본문 ref fallback 으로 여전히 동작).
+    """
+    if cycle not in ("be", "fe", "rev", "plan"):
+        return
+    if not (cycle_thread_id and str(cycle_thread_id).isdigit()):
+        return
+    try:
+        ev.set_state(
+            f"pr_cycle_thread:{pr_num}",
+            {"cycle": cycle, "thread_id": str(cycle_thread_id)},
+        )
+        logger.info(
+            "pr_cycle_thread 매핑 저장: PR #%s → cycle=%s thread=%s",
+            pr_num, cycle, cycle_thread_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pr_cycle_thread 매핑 저장 실패 pr=#%s exc=%r", pr_num, exc)
+
+
 def _ensure_pr_xrefs(
     pr_num: str,
     directive_id: str,
@@ -420,10 +448,21 @@ def _on_exec_success(cycle: str, directive_id: str, title: str, thread_id: str, 
         # (#1427/#1440) PR 본문에 directive: + cycle-forum: 크로스레프 보강 →
         # 머지 시 directive forum 완료 + cycle forum ✅ retag 자동화. sub-agent 가
         # 누락하면 forum 태그가 안 바뀌던 사고 (사용자 정정 2026-05-31).
-        try:
-            cycle_thread_id = str((ev.get_state(f"directive:{directive_id}") or {}).get("cycle_thread_id") or "")
-        except Exception:  # noqa: BLE001 — state 읽기 실패해도 xref 보강은 directive 만이라도 진행
-            cycle_thread_id = ""
+        #
+        # cycle_thread_id 우선순위: launch 시 흘러온 thread_id 인자(authoritative —
+        # dispatch_once 가 directive.cycle_thread_id → dialogue thread fallback 으로 채워
+        # run_subagent_execution 까지 전달) → directive state fallback. directive state 의
+        # cycle_thread_id 는 LAUNCH_THREAD_ID 미상속 등으로 빌 수 있어 thread_id 인자가 더 신뢰됨.
+        cycle_thread_id = str(thread_id or "")
+        if not (cycle_thread_id and cycle_thread_id.isdigit()):
+            try:
+                cycle_thread_id = str((ev.get_state(f"directive:{directive_id}") or {}).get("cycle_thread_id") or "")
+            except Exception:  # noqa: BLE001 — state 읽기 실패해도 xref 보강은 directive 만이라도 진행
+                cycle_thread_id = ""
+        # (#7) PR→cycle thread 매핑을 agent_state 에 영속 — 본문 xref 주입 성패와 무관하게
+        # 머지 완료 loop 가 신뢰 가능한 1순위 lookup 으로 쓴다. 본문 파싱(placeholder 박힘 /
+        # 줄-시작 앵커 미스 / cycle_thread_id 누락)에 의존하던 영구 정체 구멍(예: PR #1593)을 차단.
+        _persist_pr_cycle_thread(pr_num, cycle, cycle_thread_id)
         _ensure_pr_xrefs(pr_num, directive_id, cycle, cycle_thread_id, worktree)
         try:
             tq.enqueue_rev_for_pr_if_any(cycle, worktree)
