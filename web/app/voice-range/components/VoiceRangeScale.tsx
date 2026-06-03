@@ -151,10 +151,13 @@ export function VoiceRangeScale({
           className="fill-[var(--chart-bar-inactive-bg)]"
           opacity={0.45}
         >
-          <title>
-            평균 음역대 {midiToKoreanNoteName(benchmark.lowMidi)} ~{" "}
-            {midiToKoreanNoteName(benchmark.highMidi)}
-          </title>
+          {/*
+           * SVG <title> 는 단일 텍스트 노드만 두어야 한다 (#1654). 정적 텍스트 +
+           * {표현식} 을 섞으면 React 가 인접 텍스트 노드를 <!-- --> 마커로 분리해
+           * SSR 하는데, SVG <title> 안에서는 이 분리가 hydration 과 어긋나 #418
+           * (텍스트 콘텐츠 mismatch) 가 발생한다. 템플릿 리터럴로 한 노드로 합친다.
+           */}
+          <title>{`평균 음역대 ${midiToKoreanNoteName(benchmark.lowMidi)} ~ ${midiToKoreanNoteName(benchmark.highMidi)}`}</title>
         </rect>
 
         {/* 사용자 밴드 — 강조 */}
@@ -167,9 +170,7 @@ export function VoiceRangeScale({
           rx={5}
           className="fill-[var(--chart-bar-active-bg)]"
         >
-          <title>
-            내 음역대 {lowNote} ~ {highNote}
-          </title>
+          <title>{`내 음역대 ${lowNote} ~ ${highNote}`}</title>
         </rect>
 
         {/* 사용자 양 끝 음표명(한국어 음명) */}
