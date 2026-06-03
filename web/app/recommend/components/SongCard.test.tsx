@@ -18,7 +18,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { SongCard, buildYouTubeSearchUrl } from "./SongCard";
+import { SongCard, buildYouTubeSearchUrl, getSongHue } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 import { useBookmarksStore } from "@/store/bookmarks";
@@ -447,6 +447,71 @@ describe("SongCard", () => {
         .map((toggle) => toggle.getAttribute("aria-controls"));
       expect(controlsIds).toHaveLength(2);
       expect(new Set(controlsIds).size).toBe(controlsIds.length);
+    });
+  });
+
+  // closes #1683 — 좌측 gradient stripe + stagger fade-in 진입.
+  describe("gradient stripe + stagger 진입 (#1683)", () => {
+    it("li 에 stagger 클래스와 --card-index / --song-hue 인라인 변수가 부여된다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} index={3} />
+        </ul>,
+      );
+      const card = screen.getByRole("listitem");
+      expect(card).toHaveClass("animate-card-enter");
+      expect(card.style.getPropertyValue("--card-index")).toBe("3");
+      // hue 는 getSongHue(song.id) 결정값과 일치해야 한다.
+      expect(card.style.getPropertyValue("--song-hue")).toBe(
+        String(getSongHue(item.song.id)),
+      );
+    });
+
+    it("index 미지정 시 --card-index 는 0 으로 떨어진다 (단일 카드 즉시 진입)", () => {
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      const card = screen.getByRole("listitem");
+      expect(card.style.getPropertyValue("--card-index")).toBe("0");
+    });
+
+    it("좌측 accent stripe(.song-accent-stripe)가 aria-hidden 으로 렌더된다", () => {
+      const item = buildItem({ difficulty: "HARD" });
+      const { container } = renderWithQueryClient(
+        <ul>
+          <SongCard item={item} index={1} />
+        </ul>,
+      );
+      const stripe = container.querySelector(".song-accent-stripe");
+      expect(stripe).not.toBeNull();
+      expect(stripe).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("href / 모달 모드에서도 stripe 와 stagger 변수가 유지된다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      const { container, rerender } = renderWithQueryClient(
+        <ul>
+          <SongCard item={item} index={2} href="/songs/1" />
+        </ul>,
+      );
+      let card = screen.getByRole("listitem");
+      expect(card).toHaveClass("animate-card-enter");
+      expect(card.style.getPropertyValue("--card-index")).toBe("2");
+      expect(container.querySelector(".song-accent-stripe")).not.toBeNull();
+
+      rerender(
+        <ul>
+          <SongCard item={item} index={5} onShowDetail={() => {}} />
+        </ul>,
+      );
+      card = screen.getByRole("listitem");
+      expect(card).toHaveClass("animate-card-enter");
+      expect(card.style.getPropertyValue("--card-index")).toBe("5");
+      expect(container.querySelector(".song-accent-stripe")).not.toBeNull();
     });
   });
 

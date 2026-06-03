@@ -140,6 +140,32 @@ body {
 }
 
 /*
+ * Stagger 진입 — 리스트 카드(SongCard)용 (#1683).
+ *
+ * `mobruji-fade-in-up` 를 인덱스 기반 delay 로 흘려 카드가 위에서 차례로 떠오른다.
+ * delay 는 호출 측이 인라인 style 로 넘기는 `--card-index`(0,1,2…) × 50ms.
+ * `backwards` fill 로 delay 동안 시작 상태(opacity:0)를 유지해 깜빡임을 막는다.
+ */
+.animate-card-enter {
+  animation: mobruji-fade-in-up var(--duration-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--card-index, 0) * 50ms);
+}
+
+/*
+ * 좌측 accent stripe — 곡별 deterministic hue (#1683).
+ *
+ * hue 는 SongCard 가 `getSongHue(songId)` 로 산출해 인라인 style `--song-hue` 로
+ * 넘긴다(같은 곡 → 항상 같은 색). 외부 색 추출 없이 hash 기반으로만 분산한다.
+ */
+.song-accent-stripe {
+  background-image: linear-gradient(
+    180deg,
+    hsl(var(--song-hue, 270) 70% 60%),
+    hsl(var(--song-hue, 270) 70% 40%)
+  );
+}
+
+/*
  * Shimmer sweep — 스켈레톤 로딩 플레이스홀더용 (#1493).
  *
  * Tailwind 기본 `animate-pulse`(opacity 깜빡임) 대신, 토스/네이버 류 앱의 "빛이
@@ -163,7 +189,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
   .animate-fade-in-up,
-  .animate-scale-in {
+  .animate-scale-in,
+  .animate-card-enter {
     animation: none;
   }
 

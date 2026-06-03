@@ -43,6 +43,7 @@ import Link from "next/link";
 import {
   useId,
   useState,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -96,6 +97,11 @@ import { AlbumCoverThumbnail } from "./SongDetailContent";
  * 두 경로를 모두 노출하고 싶을 때를 위해 빌드 에러는 띄우지 않는다 — 단, 카드 본문
  * 클릭은 모달로 흘러간다.
  */
+/**
+ * `index`는 리스트 내 카드 위치(0,1,2…)로, stagger 진입 애니메이션의 delay 계산에만
+ * 쓰인다 — `--card-index` 인라인 변수로 흘려 `animate-card-enter` 가 50ms 씩 늦춘다.
+ * 미지정이면 0(즉시 진입). 단일 카드 렌더에서는 생략해도 무방하다.
+ */
 type SongCardProps =
   | {
       item: RecommendedSongResponse;
@@ -103,6 +109,7 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
       onShowDetail?: () => void;
+      index?: number;
       /**
        * 사용자가 추천 화면에서 고른 의도 페르소나(P-E 안전곡 등). BE 응답에 아직
        * `persona`/`personaReason` 이 없을 때 결과 카드의 페르소나 사유 fallback 근거가
@@ -116,6 +123,7 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: never;
       onShowDetail?: () => void;
+      index?: number;
       activePersona?: never;
     };
 
@@ -129,6 +137,20 @@ export function SongCard(props: SongCardProps) {
   const activePersona: RecommendationPersona | null =
     "item" in props && props.activePersona ? props.activePersona : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  const index: number = typeof props.index === "number" ? props.index : 0;
+  // closes #1683 — stagger 진입 delay(--card-index) + 곡별 deterministic accent hue(--song-hue).
+  const cardStyle = {
+    "--card-index": index,
+    "--song-hue": getSongHue(song.id),
+  } as CSSProperties;
+  // 좌측 4px accent stripe. rounded-l 로 카드 모서리를 따라가 overflow-hidden 없이도
+  // 둥근 코너 밖으로 삐져나오지 않는다(내부 포커스 ring clip 회피).
+  const accentStripe: ReactNode = (
+    <span
+      aria-hidden="true"
+      className="song-accent-stripe pointer-events-none absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)]"
+    />
+  );
   // closes #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트")를 카드 표면에 노출.
   // BE personaReason 우선, 없으면 활성 페르소나 + 곡 난이도 기반 client fallback.
   const personaReason = item ? resolvePersonaReason(item, activePersona) : null;
@@ -287,13 +309,17 @@ export function SongCard(props: SongCardProps) {
   // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
   if (isModalMode) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]">
+      <li
+        style={cardStyle}
+        className="group relative flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]"
+      >
+        {accentStripe}
         <button
           type="button"
           onClick={onShowDetail}
           aria-label={`${displayTitle} 상세 보기`}
           aria-haspopup="dialog"
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </button>
@@ -309,11 +335,15 @@ export function SongCard(props: SongCardProps) {
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]">
+      <li
+        style={cardStyle}
+        className="group relative flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]"
+      >
+        {accentStripe}
         <Link
           href={href}
           aria-label={`${displayTitle} 상세 보기`}
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </Link>
@@ -328,8 +358,10 @@ export function SongCard(props: SongCardProps) {
   return (
     <li
       tabIndex={0}
-      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)] focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)]"
+      style={cardStyle}
+      className="group relative flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)] focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)]"
     >
+      {accentStripe}
       {body}
       {breakdownPanel}
       {feedbackPanel}
@@ -677,6 +709,19 @@ export function formatMusicalKey(key: string): string {
     .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
       return `${head}${tail.toLowerCase()}`;
     });
+}
+
+/**
+ * 곡 id → 좌측 accent stripe 의 hue(0–359). 같은 곡은 항상 같은 색이 되도록
+ * id 문자열의 char code 합을 360 으로 나눈 나머지를 쓴다(외부 색 추출 없이 hash
+ * 기반 분산). closes #1683.
+ *
+ * 회귀 가드: 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
+ */
+export function getSongHue(songId: number): number {
+  return String(songId)
+    .split("")
+    .reduce((accumulated, character) => accumulated + character.charCodeAt(0), 0) % 360;
 }
 
 /**
