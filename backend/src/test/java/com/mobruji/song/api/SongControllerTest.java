@@ -25,6 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.mobruji.admin.AdminTokenVerifier;
+import com.mobruji.song.application.SongSearchPage;
+import com.mobruji.song.application.SongSearchService;
 import com.mobruji.song.application.SongService;
 import com.mobruji.song.application.SongStats;
 import com.mobruji.song.application.SongStatsService;
@@ -43,6 +45,9 @@ class SongControllerTest {
 
     @MockitoBean
     private SongService songService;
+
+    @MockitoBean
+    private SongSearchService songSearchService;
 
     @MockitoBean
     private SongStatsService songStatsService;
@@ -82,7 +87,7 @@ class SongControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/v1/songs?keyword=xxx: 200 + 리스트")
+    @DisplayName("GET /api/v1/songs?keyword=xxx: 200 + wrapper items")
     void search_returns200() throws Exception {
         final Song song = Song.builder()
                 .title("벚꽃 엔딩").artist("버스커 버스커").releaseYear(2012)
@@ -91,23 +96,27 @@ class SongControllerTest {
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .lowMidi(57).highMidi(76)
                 .build();
-        given(songService.searchByKeyword("벚꽃")).willReturn(List.of(song));
+        given(songSearchService.search(any()))
+                .willReturn(new SongSearchPage(List.of(song), 0, 20, 1L, false));
 
         mockMvc.perform(get("/api/v1/songs").param("keyword", "벚꽃"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].title", is("벚꽃 엔딩")));
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].title", is("벚꽃 엔딩")))
+                .andExpect(jsonPath("$.totalCount", is(1)))
+                .andExpect(jsonPath("$.hasNext", is(false)));
     }
 
     @Test
-    @DisplayName("GET /api/v1/songs: keyword 누락 → 200 + 빈 배열 (의도된 정책)")
+    @DisplayName("GET /api/v1/songs: keyword 명시+빈 → 200 + 빈 items (의도된 정책)")
     void search_blankKeyword_returnsEmpty() throws Exception {
-        // SongService.searchByKeyword(null/blank) → emptyList 정책 검증.
-        given(songService.searchByKeyword(null)).willReturn(List.of());
+        given(songSearchService.search(any()))
+                .willReturn(new SongSearchPage(List.of(), 0, 20, 0L, false));
 
-        mockMvc.perform(get("/api/v1/songs"))
+        mockMvc.perform(get("/api/v1/songs").param("keyword", ""))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(0)));
+                .andExpect(jsonPath("$.items", hasSize(0)))
+                .andExpect(jsonPath("$.totalCount", is(0)));
     }
 
     @Test

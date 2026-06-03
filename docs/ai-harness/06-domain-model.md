@@ -50,6 +50,11 @@
 | 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
 | 에너지 | Energy (Song.energy) | `song` | 곡의 음향 에너지/강렬함 정도 0.0~1.0 (nullable). 추천 mood 변별·곡 유사도 신호로 소비. 산출 출처는 미정 — 1차는 수기/시드 적재, 자동화(Spotify valence·energy fallback 또는 librosa MFCC)는 후속 결정. song-analysis-data-and-consumers.md §5-1·§8 + song-self-analysis-pipeline.md §10-9 cross-ref |
 | 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
+| 곡 검색 | SongSearch | `song` | 제목/가수 텍스트 + 다축 필터(genre/difficulty/mood/음역 적합)로 곡을 찾는 read-only 유스케이스. `GET /api/v1/songs` 진화형 + `/suggest`. 추천과 완전 분리(결정성 무영향). song-search-and-filter.md |
+| 검색 적합도 | SearchRelevance | `song` | 검색 결과 정렬 신호 — tier(제목 정확>제목 prefix>제목 부분>가수) + 동 tier 가나다순 tie-break. 추천 score 무관 조회 전용. song-search-and-filter.md §5-1 |
+| 초성 검색 | ChosungSearch | `song` | 한글 초성열(`ㅂㄹㄷ`)로 `titleChosung`/`artistChosung` 파생열과 prefix 매칭하는 검색 모드. 파생은 `ChosungDeriver` SoT. song-search-and-filter.md §5-1 |
+| 검색 제안 | SearchSuggestion | `song` | 자동완성 경량 결과 1건(`id`/`title`/`artist`). `GET /api/v1/songs/suggest` 응답 item. song-search-and-filter.md §5-2 |
+| 음역 적합 필터 | VoiceFitFilter | `song` | `fitLow`/`fitHigh` MIDI 구간으로 "부를 수 있는 곡"(`lowMidi>=fitLow AND highMidi<=fitHigh`)만 거르는 boolean 필터. sessionId 비의존 explicit param. 추천 `rangeFit` 연속 점수와 다른 차원. song-search-and-filter.md §5-1 |
 | 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡, 선호 BPM, 연령대). 영속 단위. 엔티티 §5-3 |
 | 연령대 | AgeGroup | `recommendation` | 추천 요청 선택 입력 enum (`TEENS`/`TWENTIES`/`THIRTIES`/`FORTIES`/`FIFTIES`/`SIXTIES_PLUS`). 세대별 대표 발매 시기(`application.yml` `recommendation.generation.representative-year`)와의 거리로 `generationFit` 신호 산출 (#1487). null 이면 랭킹 무영향 (하위호환) |
 | 추천 | Recommendation | `recommendation` | 사용자 컨텍스트 기반 곡 매칭 결과 (영속 행). 요청 1 : N 행. 엔티티 §5-3 |
@@ -169,6 +174,8 @@
 | `id` | Long | PK, autoIncrement | |
 | `title` | String(200) | not null, not blank | |
 | `artist` | String(200) | not null, not blank | |
+| `titleChosung` | String(200) | nullable, index | `title` 초성 파생열 (`발라드`→`ㅂㄹㄷ`). 사용자 입력 아님 — `ChosungDeriver`. 초성 검색 prefix 매칭용. V11, song-search-and-filter.md |
+| `artistChosung` | String(200) | nullable, index | `artist` 초성 파생열. V11, song-search-and-filter.md |
 | `releaseYear` | Integer | nullable | 출시 연도 |
 | `keyOriginal` | enum `MusicalKey` | not null | 메이저 12 + 마이너 12 + UNKNOWN |
 | `bpm` | Integer | nullable, 30~300 | |
@@ -188,6 +195,7 @@
 - `Song.deriveDifficulty(int lowMidi, int highMidi)` static — fe `web/lib/difficulty.ts`와 1:1 룰 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
 - 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재. 시드 각 곡에 `lowMidi`/`highMidi`가 채워져 있어 적재 시 difficulty 자동 분류된다.
 - `SongRange`는 별 VO로 두지 않고 `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전).
+- `titleChosung`/`artistChosung` 는 `ChosungDeriver.of()` 파생값 — `Song.create()` 에서 동기 파생, 마이그레이션(V11) 이전 row 는 `ChosungBackfillRunner`(`@Profile("!test")`) 가 부팅 시 멱등 backfill. 곡 검색·필터 진화(`SongSearchService` + `SongSpecifications` 필터 엔진)는 song-search-and-filter.md.
 
 ### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
 
@@ -326,6 +334,8 @@ erDiagram
         bigint id PK
         varchar title
         varchar artist
+        varchar title_chosung
+        varchar artist_chosung
         int release_year
         varchar key_original
         int bpm

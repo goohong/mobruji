@@ -4,13 +4,14 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Song;
 
-public interface SongRepository extends JpaRepository<Song, Long> {
+public interface SongRepository extends JpaRepository<Song, Long>, JpaSpecificationExecutor<Song> {
 
     /**
      * {@code MetadataSource} 별 곡 수 집계 row — admin 통계 API 용. JPQL group by 결과를 그대로 매핑한다.

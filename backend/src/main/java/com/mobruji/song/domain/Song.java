@@ -27,6 +27,8 @@ import lombok.NoArgsConstructor;
 @Table(name = "song", indexes = {
         @Index(name = "ix_song_title", columnList = "title"),
         @Index(name = "ix_song_artist", columnList = "artist"),
+        @Index(name = "ix_song_title_chosung", columnList = "title_chosung"),
+        @Index(name = "ix_song_artist_chosung", columnList = "artist_chosung"),
         @Index(name = "uk_song_isrc", columnList = "isrc", unique = true),
 })
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
@@ -57,6 +59,20 @@ public class Song {
 
     @Column(nullable = false, length = 200)
     private String artist;
+
+    /**
+     * {@link #title} 의 초성 파생열 ({@code "발라드" → "ㅂㄹㄷ"}). 사용자 입력이 아니라 {@link ChosungDeriver}
+     * 파생값 — 초성 검색 {@code titleChosung LIKE 'ㅂㄹㄷ%'} prefix 매칭용 (spec
+     * {@code song-search-and-filter.md}). {@link #create} / {@link #backfillChosung} 에서 채운다.
+     */
+    @Column(name = "title_chosung", length = 200)
+    private String titleChosung;
+
+    /**
+     * {@link #artist} 의 초성 파생열. {@link #titleChosung} 와 동일 규칙.
+     */
+    @Column(name = "artist_chosung", length = 200)
+    private String artistChosung;
 
     @Column(name = "release_year")
     private Integer releaseYear;
@@ -206,9 +222,33 @@ public class Song {
                 : (lowMidi != null && highMidi != null ? deriveDifficulty(lowMidi, highMidi) : null);
         final LocalDateTime now = LocalDateTime.now();
         return new Song(
-                null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
+                null, title, artist, ChosungDeriver.of(title), ChosungDeriver.of(artist),
+                releaseYear, keyOriginal, bpm, mood, language, genre,
                 tjNumber, kyNumber, metadataSource, isrc, resolvedConfidence,
                 lowMidi, highMidi, resolvedDifficulty, energy, albumCoverUrl, now, now);
+    }
+
+    /**
+     * 초성 파생열이 비어 있으면({@code null}) {@link #title}/{@link #artist} 에서 파생해 채운다.
+     * 마이그레이션 이전 적재된 기존 row backfill 용 ({@code ChosungBackfillRunner}). 멱등 — 이미
+     * 채워진 row 는 보존하고 변경 없음을 반환한다.
+     *
+     * @return 실제로 한 필드라도 채웠는지 여부
+     */
+    public boolean backfillChosung() {
+        boolean changed = false;
+        if (this.titleChosung == null) {
+            this.titleChosung = ChosungDeriver.of(this.title);
+            changed = true;
+        }
+        if (this.artistChosung == null) {
+            this.artistChosung = ChosungDeriver.of(this.artist);
+            changed = true;
+        }
+        if (changed) {
+            this.updatedAt = LocalDateTime.now();
+        }
+        return changed;
     }
 
     /**
