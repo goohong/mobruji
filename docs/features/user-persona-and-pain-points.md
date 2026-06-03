@@ -195,7 +195,7 @@ last_reviewed: 2026-05-24
 - [x] `docs/features/user-persona-and-pain-points.md` 본 spec 작성 (본 PR)
 - [x] 자식 spec stub `docs/features/high-note-training-mode.md` (F2 — 본 PR)
 - [x] 자식 spec stub `docs/features/voice-range-measure-guided-tour.md` (F1 — 본 PR)
-- [ ] 자식 spec `docs/features/mood-mode.md` (F3) — 다음 plan 사이클
+- [x] 자식 spec `docs/features/mood-mode.md` (F3) — 작성 완료 (2026-06-03 plan, 온보딩 §8 Q4 확정 동반)
 - [ ] 자식 spec `docs/features/recommendation-explainability.md` (F4) — v0.3 후반 plan
 - [ ] F1/F2/F3 별 백로그 이슈 3건 등록 (본 PR 직후 `gh issue create`)
 - [ ] `v03-roadmap.md` P1·P2 매트릭스에 F1/F2/F3 행 삽입 (다음 plan 사이클)
