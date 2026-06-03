@@ -162,6 +162,14 @@
   --text-signal-active: #047857; /* emerald-700 */
 
   /*
+   * Skeleton shimmer 토큰 (#1493) — 로딩 플레이스홀더의 base 톤과 쓸고 가는
+   * highlight 톤. base 는 meter-track 과 같은 zinc-200 계열, highlight 는 한 단계
+   * 밝은 zinc-100 으로 빛이 흐르는 대비를 만든다 (globals.css `.animate-shimmer`).
+   */
+  --skeleton-base: #e4e4e7; /* zinc-200 */
+  --skeleton-highlight: #f4f4f5; /* zinc-100 */
+
+  /*
    * 홈 + 에러 페이지 의미 토큰 (#1044 단계 4 PR 11) — `app/page.tsx` + `app/error.tsx`
    * 잔여 hardcode 일괄 swap.
    *
@@ -337,6 +345,10 @@ html.dark {
   --badge-warning-fg: #fde68a; /* amber-200 */
   --meter-track-bg: #27272a; /* zinc-800 */
   --text-signal-active: #6ee7b7; /* emerald-300 */
+
+  /* Skeleton shimmer dark swap (#1493) — base zinc-800, highlight zinc-700. */
+  --skeleton-base: #27272a; /* zinc-800 */
+  --skeleton-highlight: #3f3f46; /* zinc-700 */
 
   /* 홈 + 에러 페이지 의미 토큰 dark swap (PR 11) */
   --text-disclaimer: #71717a; /* zinc-500 — 의도적 균일 (light/dark 같음) */
