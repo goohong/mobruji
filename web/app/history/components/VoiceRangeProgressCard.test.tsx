@@ -99,7 +99,8 @@ describe("VoiceRangeProgressCard", () => {
 
   it("#249: 모든 측정 막대에 lowMidi/highMidi 음표명 라벨이 노출된다", () => {
     // 기본 픽스처: 52~70 / 51~72 / 50~74.
-    // → low/high 음표: 미3/A#4, D#3/도5, 레3/레5.
+    // → low/high 음표 (한국어 단독, #1310 사용자 정정 2026-06-03):
+    //   1번 미3/라♯4, 2번 레♯3/도5, 3번 레3/레5.
     const { container } = render(
       <VoiceRangeProgressCard summary={buildSummary()} />,
     );
@@ -109,11 +110,11 @@ describe("VoiceRangeProgressCard", () => {
       container.querySelectorAll("svg text"),
     ).map((node) => node.textContent ?? "");
 
-    // 1번 측정: low=미3, high=A#4
+    // 1번 측정: low=미3, high=라♯4
     expect(svgTexts).toContain("미3");
-    expect(svgTexts).toContain("A#4");
-    // 2번 측정: low=D#3, high=도5
-    expect(svgTexts).toContain("D#3");
+    expect(svgTexts).toContain("라♯4");
+    // 2번 측정: low=레♯3, high=도5
+    expect(svgTexts).toContain("레♯3");
     expect(svgTexts).toContain("도5");
     // 3번(최신) 측정: low=레3, high=레5
     expect(svgTexts).toContain("레3");

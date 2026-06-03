@@ -91,9 +91,9 @@ describe("SongDetailPage", () => {
     });
     expect(screen.getByText("Adele")).toBeInTheDocument();
     expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
-    // 최고음 파5 (F5), 최저음 솔3 (솔3) — #318 한국어 (SPN) 병기
-    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/최저음 솔3 \(솔3\)/)).toBeInTheDocument();
+    // 최고음 파5, 최저음 솔3 — 한국어 단독 (#1310 사용자 정정 2026-06-03)
+    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/최저음 솔3/)).toBeInTheDocument();
     // 키 라벨 (F Minor)
     expect(screen.getByText(/키 F Minor/)).toBeInTheDocument();
     // 메타 셀
