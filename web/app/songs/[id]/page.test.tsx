@@ -14,7 +14,13 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { useParams } from "next/navigation";
 
 import SongDetailPage from "./page";
@@ -170,6 +176,57 @@ describe("SongDetailPage", () => {
 
     expect(screen.getByText(/곡을 찾을 수 없습니다/)).toBeInTheDocument();
     expect(readSongByIdMock).not.toHaveBeenCalled();
+  });
+
+  // closes #1666 — 단건 상세 페이지에도 앨범 커버를 노출한다. 카드/모달과 동일한
+  // SongDetailContent 의 large AlbumCover 를 재사용하므로 placeholder/onError fallback
+  // 동작이 그대로 따라온다.
+  describe("앨범 커버 (closes #1666)", () => {
+    it("albumCoverUrl 이 string 이면 <img> 가 렌더된다", async () => {
+      useParamsMock.mockReturnValue({ id: "1" });
+      readSongByIdMock.mockResolvedValueOnce(
+        buildSong({ albumCoverUrl: "https://example.com/cover.jpg" }),
+      );
+
+      renderWithQueryClient(<SongDetailPage />);
+
+      const img = (await screen.findByAltText(
+        "Hello 앨범 커버",
+      )) as HTMLImageElement;
+      expect(img.tagName).toBe("IMG");
+      expect(img.getAttribute("src")).toBe("https://example.com/cover.jpg");
+    });
+
+    it("albumCoverUrl 이 null 이면 placeholder 로 fallback 한다", async () => {
+      useParamsMock.mockReturnValue({ id: "1" });
+      readSongByIdMock.mockResolvedValueOnce(
+        buildSong({ albumCoverUrl: null }),
+      );
+
+      renderWithQueryClient(<SongDetailPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByLabelText(/Hello 앨범 커버 \(이미지 없음\)/),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("img", { name: /Hello 앨범 커버$/ })).toBeNull();
+    });
+
+    it("img onError 시 placeholder 로 fallback 한다", async () => {
+      useParamsMock.mockReturnValue({ id: "1" });
+      readSongByIdMock.mockResolvedValueOnce(
+        buildSong({ albumCoverUrl: "https://example.com/404.jpg" }),
+      );
+
+      renderWithQueryClient(<SongDetailPage />);
+
+      const img = await screen.findByAltText("Hello 앨범 커버");
+      fireEvent.error(img);
+      expect(
+        screen.getByLabelText(/Hello 앨범 커버 \(이미지 없음\)/),
+      ).toBeInTheDocument();
+    });
   });
 
   // closes #107 — 곡 상세 페이지의 정상 응답/404 두 상태에 대해 a11y 검사.

@@ -1,0 +1,42 @@
+{
+  "description": "directive #1490 batch 파이프라인 정확도 확인용 소량 검증셋(5곡). audio 바이너리 미포함 — URL/제목/MIDI 라벨 등 메타데이터만(spec song-self-analysis-pipeline.md §13 보안). label.lowMidi/highMidi 는 운영자 PoC 추정값이며, 통계적 ground truth(10곡, label MAE±2 semitone 가드)는 spec §10-4 PR H 의 tests/ground_truth.json 이 단일 진실. 본 set 은 batch_analyze.py end-to-end 동작 + 정확도 리포트 경로 검증용.",
+  "labeledBy": "infra(directive #1490, PoC 추정)",
+  "labeledAt": "2026-06-04",
+  "songs": [
+    {
+      "id": "val-001",
+      "title": "밤편지",
+      "artist": "아이유",
+      "youtubeUrl": null,
+      "label": { "lowMidi": 55, "highMidi": 77, "key": "G" }
+    },
+    {
+      "id": "val-002",
+      "title": "벚꽃 엔딩",
+      "artist": "버스커 버스커",
+      "youtubeUrl": null,
+      "label": { "lowMidi": 52, "highMidi": 71, "key": "C" }
+    },
+    {
+      "id": "val-003",
+      "title": "사랑했지만",
+      "artist": "김광석",
+      "youtubeUrl": null,
+      "label": { "lowMidi": 50, "highMidi": 67, "key": "A" }
+    },
+    {
+      "id": "val-004",
+      "title": "Yesterday",
+      "artist": "The Beatles",
+      "youtubeUrl": null,
+      "label": { "lowMidi": 53, "highMidi": 65, "key": "F" }
+    },
+    {
+      "id": "val-005",
+      "title": "Someone Like You",
+      "artist": "Adele",
+      "youtubeUrl": null,
+      "label": { "lowMidi": 57, "highMidi": 72, "key": "A" }
+    }
+  ]
+}

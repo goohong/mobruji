@@ -181,3 +181,30 @@ catalog-import:
   request-timeout: 5s
   throttle: 1s
   import-confidence: 0.3
+
+# MusicBrainz Recording mbId/ISRC backfill 설정 — spec docs/features/musicbrainz-integration.md (#267/#268).
+# mbId IS NULL 곡만 selective 매칭(저신뢰도 우선). 음역대/key/tempo 는 채우지 않아 추천 결정성 무영향.
+# 약관 준수 — (a) contact 포함 User-Agent 의무, (b) anonymous 1 req/s rate limit, (c) 503 시 즉시 재시도 금지.
+# - base-url: recording 검색/상세 webservice 기준. 테스트는 stub 으로 override.
+# - user-agent: MusicBrainz 약관상 contact 포함 식별 User-Agent — 운영 contact 는 환경변수로 주입 권장.
+# - request-timeout: 곡당 호출 timeout.
+# - throttle: 호출 직전 per-instance sleep — 1 req/s 보다 약간 여유(1100ms).
+# - max-retries / backoff: 503 응답 시 base × 2^attempt 지수 backoff, 소진 시 batch 전체 중단.
+# - min-score: 채택 score 임계 (0~100). top-hit score 미만이면 lowscore skip. score/100 이 metadataConfidence.
+# - search-limit: recording 검색 limit (top-hit 1위만 채택, 후보 가시성 위해 N).
+# - backfill.batch-size: admin/스케줄러 1회 처리 곡 수 상한. 1.1s × N 이 최소 소요.
+# - backfill.enabled: 정기 스케줄러 활성 (기본 false — 로컬/CI 자동 호출 금지, 운영자가 명시 enable). admin endpoint 무관.
+# - backfill.schedule-cron: 정기 실행 cron (KST, prod 프로파일만). 기본 매일 04:00.
+musicbrainz:
+  base-url: ${MUSICBRAINZ_BASE_URL:https://musicbrainz.org/ws/2}
+  user-agent: ${MUSICBRAINZ_USER_AGENT:mobruji-backend/0.1 (+https://github.com/goohong/mobruji)}
+  request-timeout: 5s
+  throttle: 1100ms
+  max-retries: 3
+  backoff: 1s
+  min-score: 90
+  search-limit: 5
+  backfill:
+    batch-size: 30
+    enabled: ${MUSICBRAINZ_BACKFILL_ENABLED:false}
+    schedule-cron: ${MUSICBRAINZ_BACKFILL_CRON:0 0 4 * * *}

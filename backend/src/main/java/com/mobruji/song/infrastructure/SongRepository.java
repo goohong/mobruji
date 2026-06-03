@@ -4,14 +4,13 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Song;
 
-public interface SongRepository extends JpaRepository<Song, Long>, JpaSpecificationExecutor<Song> {
+public interface SongRepository extends JpaRepository<Song, Long> {
 
     /**
      * {@code MetadataSource} 별 곡 수 집계 row — admin 통계 API 용. JPQL group by 결과를 그대로 매핑한다.
@@ -78,4 +77,19 @@ public interface SongRepository extends JpaRepository<Song, Long>, JpaSpecificat
      */
     @Query("select s from Song s where s.albumCoverUrl is null order by s.id asc")
     List<Song> findMissingAlbumCover();
+
+    /**
+     * MusicBrainz backfill 대상 selective query — {@code mbId IS NULL} 인 곡만 반환한다 (spec
+     * {@code musicbrainz-integration.md} §5-2). {@code metadataConfidence} 오름차순으로 정렬해 신뢰도가 낮아
+     * 재검증 가치가 높은 곡을 우선 처리한다 (동률은 {@code id} 오름차순으로 결정적).
+     */
+    @Query("select s from Song s where s.mbId is null "
+            + "order by s.metadataConfidence asc, s.id asc")
+    List<Song> findMissingMbId();
+
+    /**
+     * mbId UNIQUE 충돌 사전 회피용 lookup — 같은 MusicBrainz recording 이 서로 다른 두 곡에 매칭되는 사고를
+     * 막고 DB UNIQUE(mb_id) 제약 위반을 미리 회피한다 (spec {@code musicbrainz-integration.md} §5-5).
+     */
+    Optional<Song> findByMbId(String mbId);
 }

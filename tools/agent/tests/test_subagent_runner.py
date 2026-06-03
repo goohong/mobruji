@@ -94,6 +94,17 @@ def test_build_task_prompt_uses_asis_tobe_report_format(tmp_path):
     assert "AS-IS" in p2
 
 
+def test_build_task_prompt_bans_local_live_verification(tmp_path):
+    """#1668: 로컬 bootRun/dev 라이브검증·ScheduleWakeup 대기 금지 문구 포함 (hang 재발방지)."""
+    import subagent_runner as sr
+    for thread in ("T1", ""):
+        p = sr.build_task_prompt("be", "d1668", "제목", "작업", thread)
+        assert "bootRun" in p
+        assert "ScheduleWakeup 대기 금지" in p
+        assert "단위/통합 테스트" in p
+        assert "머지 후 nmae 담당" in p
+
+
 def test_find_pr_number(monkeypatch):
     import subagent_runner as sr, types, json as _json
     def fr(argv, **k):

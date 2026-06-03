@@ -40,11 +40,11 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    "bg-zinc-900 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200",
+    "bg-[var(--cta-neutral-bg)] text-[var(--cta-neutral-fg)] hover:bg-[var(--cta-neutral-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50",
   secondary:
-    "bg-white text-zinc-900 ring-1 ring-zinc-200 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-900 dark:text-zinc-50 dark:ring-zinc-800 dark:hover:bg-zinc-800",
+    "bg-[var(--cta-secondary-bg)] text-[var(--text-primary)] ring-1 ring-[var(--surface-card-ring)] hover:bg-[var(--cta-secondary-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50",
   ghost:
-    "bg-transparent text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800",
+    "bg-transparent text-[var(--text-body-strong)] hover:bg-[var(--cta-secondary-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50",
   danger:
     "bg-rose-600 text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-rose-500 dark:hover:bg-rose-600",
 };
