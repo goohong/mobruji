@@ -45,6 +45,13 @@ public interface SongRepository extends JpaRepository<Song, Long> {
     Optional<Song> findByTitleAndArtist(String title, String artist);
 
     /**
+     * 메타-only 임포트 멱등성 보조 lookup — {@code isrc} 글로벌 유일 식별자로 기존 곡을 찾는다 (spec
+     * {@code song-catalog-expansion.md} §3). 외부 출처가 ISRC 를 제공하면 (title, artist) 표기 차이와
+     * 무관하게 중복 import 를 막고, DB UNIQUE(isrc) 제약 위반을 사전에 회피한다.
+     */
+    Optional<Song> findByIsrc(String isrc);
+
+    /**
      * 정기 audio analysis backfill 후보 selective query (rev 15 #226).
      *
      * <p>대상 조건 (OR):

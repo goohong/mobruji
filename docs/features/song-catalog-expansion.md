@@ -162,7 +162,7 @@ last_reviewed: 2026-06-03
 > 본 spec 은 조율 spec — 실제 구현 상당 부분은 기존 3 spec 으로 위임. 본 spec 고유 산출은 PR 1(본 spec) + PR 2(임포트 스캐폴드 spec→구현 가교).
 
 - [ ] **PR 1 (docs)** — 본 spec 초안 (현재). pivot 긴장 결론 + 출처 조사 + 단계화 박제.
-- [ ] **PR 2 (docs/feat:song)** — `MetadataOnlyImport` 배치 스캐폴드: (title, artist) 입력 → MusicBrainz 질의 → `Song` upsert(메타만) + 멱등성 + 실패/skip 처리 + `06-domain-model.md §4` 신규 용어 등재. **[[musicbrainz-integration]] 구현에 의존** — 그 spec 의 backfill job 을 "신규 곡 import" 모드로 확장하는 형태 권고 (중복 구현 회피).
+- [x] **PR 2 (feat:song)** — `MetadataOnlyImport` 배치 스캐폴드 구현: (title, artist) 후보 JSON → MusicBrainz recording 질의 → `Song` upsert(메타만, `metadataSource=EXTERNAL_API`, key `UNKNOWN`, 음역대 NULL) + (title,artist)·ISRC 멱등 + 실패/skip 격리 + `06-domain-model.md §4-1` 신규 용어(SongCandidatePool/MetadataOnlyImport) 등재 + 성공 E2E(stats EXTERNAL_API 반영). 별도 `catalog-import.*` 설정 + 신규 컬럼/마이그레이션 없음(기존 `Song` 컬럼 재사용). Q1 은 (b) 별 `MetadataOnlyImportCommand`(`song.application.catalogimport`) 로 시작 — `musicbrainz-integration` 미머지 상태에서 후보 풀 확장 경로를 독립 가동, 동일 RestClient 패턴 공유로 중복 최소화.
 - [ ] **PR 3 (chore:song)** — Stage 2 후보 목록 작성(AI 1차 제안 → 운영자 검수) + 임포트 실행 → ~300곡. [[song-self-analysis-pipeline]] backfill 가동 확인.
 - [ ] **PR 4 (test:song)** — 임포트 멱등성 + `metadataSource` 전이(EXTERNAL_API → AUDIO_ANALYSIS) 회귀 테스트 + 후보 풀 규모 통계 테스트.
 
@@ -195,7 +195,7 @@ last_reviewed: 2026-06-03
 
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
-| Q1 | 메타-only 임포트를 [[musicbrainz-integration]] backfill job 에 "신규 곡 import" 모드로 합칠지, 별 배치로 둘지 | (a) 기존 job 확장(중복 구현 회피, 권고) / (b) 별 `MetadataImportJob` (관심사 분리) | @goohong / PR 2 직전 |
+| ~~Q1~~ (해소 2026-06-03) | 메타-only 임포트를 [[musicbrainz-integration]] backfill job 에 합칠지, 별 배치로 둘지 | **(b) 채택** — 별 `MetadataOnlyImportCommand` (`song.application.catalogimport`). 사유: `musicbrainz-integration` 미머지 상태에서 후보 풀 확장을 독립 가동 + 임포트(신규 곡 생성)와 backfill(기존 곡 보강)은 관심사가 다름. RestClient/graceful 패턴은 공유해 중복 최소화. | §9 결정 로그 |
 | Q2 | Stage 2 규모 ~300 의 절대값이 적절한가 | (a) ~300 (자체 분석 cron 처리량/검수 부담 합리적) / (b) 200 (보수적) / (c) 자체 분석 backlog 처리량에 연동(상대값) | @goohong / Stage 2 진입 시 |
 | Q3 | Wikidata 보조 출처를 1차 도입할지 v0.4 로 미룰지 | (a) MusicBrainz 단독으로 시작(단순) / (b) Wikidata 식별자 교차 동시 도입 | @goohong / PR 2 직전 |
 | Q4 | 임포트 곡 초기 `metadataConfidence` 값 | (a) 0.3 (메타만, 음역대 미상 → 낮게) / (b) NULL (자체 분석 전까지 미정) | @goohong / PR 2 직전 |
@@ -210,6 +210,10 @@ last_reviewed: 2026-06-03
   - **출처 합법성 판정 (§5-3)**: 자동 수집 = CC0(MusicBrainz 1차, Wikidata 보조)만. 차트/노래방 사이트 자동 크롤링은 약관·robots.txt 리스크로 **명시적 비채택** — 수기 참고만. 음역대는 외부 미제공 → 자체 분석 권위.
   - **규모 목표**: 수만+ 아닌 "수백". Stage 1(100, 큐레이션) → 2(~300, 임포트+자체분석) → 3(조건부) 단계화 + 게이트(§6).
   - **중복 구현 회피**: 임포트 스캐폴드는 [[musicbrainz-integration]] backfill 을 "신규 곡 import" 모드로 확장 권고 (Q1). 본 spec 은 3 spec(큐레이션/자체분석/MusicBrainz)을 하나의 확장 전략으로 조율하는 SoT.
+- 2026-06-03: PR 2 — 메타-only 임포트 스캐폴드 구현 (status 여전히 draft, 구현 단계 진입). 출처: #1496
+  - **Q1 해소 → (b)**: 별 `MetadataOnlyImportCommand` (`song.application.catalogimport`) 로 시작. `musicbrainz-integration` 미머지 상태에서 후보 풀 확장을 독립 가동하고, 임포트(신규 곡 생성)와 backfill(기존 곡 보강)의 관심사를 분리. RestClient/graceful empty/throttle 패턴은 album cover client 와 동일 컨벤션 공유로 중복 최소화.
+  - **Q4 해소 → (a)**: 임포트 곡 초기 `metadataConfidence = 0.3` (메타만, 음역 미상 → 낮게). `catalog-import.import-confidence` 로 외부화.
+  - **구현 범위**: (title, artist) 후보 JSON(`song-import-candidates.json`) → MusicBrainz `/recording` 질의 → `Song` upsert(`metadataSource=EXTERNAL_API`, key `UNKNOWN`, 음역대/bpm NULL). (title,artist)·ISRC 멱등 skip. 신규 컬럼/마이그레이션 없음(기존 `Song` 컬럼 재사용 — `mbId` 영속은 [[musicbrainz-integration]] 책임이라 본 PR 은 로깅용으로만 보유). 성공 E2E: 임포트 후 `stats.byMetadataSource.EXTERNAL_API` 증가.
 
 ## 10) 관련 spec / ADR
 
