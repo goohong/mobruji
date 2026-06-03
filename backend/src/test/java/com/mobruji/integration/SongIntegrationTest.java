@@ -53,27 +53,27 @@ class SongIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E: 키워드 검색으로 제목 일치 곡을 찾는다 (wrapper items)")
+    @DisplayName("E2E: 키워드 검색으로 제목 일치 곡을 찾는다")
     void e2e_searchByTitle() {
         given()
                 .when()
                 .get("/api/v1/songs?keyword=벚꽃")
                 .then()
                 .statusCode(HttpStatus.OK.value())
-                .body("items.size()", greaterThanOrEqualTo(1))
-                .body("items[0].title", equalTo("벚꽃 엔딩"));
+                .body("size()", greaterThanOrEqualTo(1))
+                .body("[0].title", equalTo("벚꽃 엔딩"));
     }
 
     @Test
-    @DisplayName("E2E: 키워드 검색으로 아티스트 일치 곡을 찾는다 (wrapper items)")
+    @DisplayName("E2E: 키워드 검색으로 아티스트 일치 곡을 찾는다")
     void e2e_searchByArtist() {
         given()
                 .when()
                 .get("/api/v1/songs?keyword=BTS")
                 .then()
                 .statusCode(HttpStatus.OK.value())
-                .body("items.size()", greaterThanOrEqualTo(1))
-                .body("items[0].artist", equalTo("BTS"));
+                .body("size()", greaterThanOrEqualTo(1))
+                .body("[0].artist", equalTo("BTS"));
     }
 
     @Test

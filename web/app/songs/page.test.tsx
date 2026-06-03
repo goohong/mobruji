@@ -23,7 +23,7 @@ import userEvent from "@testing-library/user-event";
 
 import SongSearchPage from "./page";
 import { ApiError } from "@/lib/api/client";
-import { searchSongs, type SongListResponse, type SongResponse } from "@/lib/api/song";
+import { searchSongs } from "@/lib/api/song";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 // next/navigation의 useRouter / useSearchParams 가짜 구현.
@@ -74,25 +74,8 @@ afterEach(() => {
   cleanup();
 });
 
-// BE가 #1551부터 bare 배열 대신 wrapper `{items, page, size, totalCount, hasNext}`를
-// 반환 → searchSongs 모킹은 이 형태를 돌려줘야 페이지가 query.data.items로 읽는다.
-// 기존 테스트의 곡 배열을 그대로 감싸는 헬퍼.
-function listResponse(
-  items: SongResponse[],
-  meta: Partial<Omit<SongListResponse, "items">> = {},
-): SongListResponse {
-  return {
-    items,
-    page: 0,
-    size: 20,
-    totalCount: items.length,
-    hasNext: false,
-    ...meta,
-  };
-}
-
 // 두 곡 응답: POP/EASY, ROCK/HARD. deriveDifficulty 기준 highMidi>=76은 HARD, <71은 EASY.
-function twoSongsResponse(): SongResponse[] {
+function twoSongsResponse() {
   return [
     {
       id: 1,
@@ -140,24 +123,22 @@ describe("SongSearchPage", () => {
   it("검색어 입력 후 디바운스가 지나면 searchSongs를 호출하고 결과 카드를 렌더한다", async () => {
     const user = userEvent.setup();
 
-    searchSongsMock.mockResolvedValueOnce(
-      listResponse([
-        {
-          id: 1,
-          title: "Hello",
-          artist: "Adele",
-          releaseYear: 2015,
-          keyOriginal: "F_MINOR",
-          bpm: 79,
-          mood: "EMOTIONAL",
-          language: "en",
-          genre: "POP",
-          tjNumber: "12345",
-          kyNumber: "54321",
-          metadataSource: "MANUAL_SEED",
-        },
-      ]),
-    );
+    searchSongsMock.mockResolvedValueOnce([
+      {
+        id: 1,
+        title: "Hello",
+        artist: "Adele",
+        releaseYear: 2015,
+        keyOriginal: "F_MINOR",
+        bpm: 79,
+        mood: "EMOTIONAL",
+        language: "en",
+        genre: "POP",
+        tjNumber: "12345",
+        kyNumber: "54321",
+        metadataSource: "MANUAL_SEED",
+      },
+    ]);
 
     renderWithQueryClient(<SongSearchPage />);
 
@@ -189,7 +170,7 @@ describe("SongSearchPage", () => {
   it("응답이 빈 배열이면 '검색 결과 없음' fallback을 노출한다", async () => {
     const user = userEvent.setup();
 
-    searchSongsMock.mockResolvedValueOnce(listResponse([]));
+    searchSongsMock.mockResolvedValueOnce([]);
 
     renderWithQueryClient(<SongSearchPage />);
     const input = screen.getByPlaceholderText("곡 제목이나 아티스트로 검색");
@@ -210,7 +191,7 @@ describe("SongSearchPage", () => {
   it("난이도 필터 칩을 누르면 응답을 client-side 필터링한다", async () => {
     const user = userEvent.setup();
 
-    searchSongsMock.mockResolvedValueOnce(listResponse(twoSongsResponse()));
+    searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
 
     renderWithQueryClient(<SongSearchPage />);
     const input = screen.getByPlaceholderText("곡 제목이나 아티스트로 검색");
@@ -235,7 +216,7 @@ describe("SongSearchPage", () => {
   it("장르 필터 단일 선택은 해당 장르 곡만 남긴다 (#118)", async () => {
     const user = userEvent.setup();
 
-    searchSongsMock.mockResolvedValueOnce(listResponse(twoSongsResponse()));
+    searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
 
     renderWithQueryClient(<SongSearchPage />);
     await user.type(
@@ -265,27 +246,25 @@ describe("SongSearchPage", () => {
     const user = userEvent.setup();
 
     // POP/EASY, ROCK/HARD, POP/HARD 세 곡.
-    searchSongsMock.mockResolvedValueOnce(
-      listResponse([
-        ...twoSongsResponse(),
-        {
-          id: 3,
-          title: "팝 어려운 곡",
-          artist: "C",
-          releaseYear: 2024,
-          keyOriginal: "C_MAJOR" as const,
-          bpm: 110,
-          mood: "POWERFUL" as const,
-          language: "ko",
-          genre: "POP",
-          tjNumber: null,
-          kyNumber: null,
-          metadataSource: "MANUAL_SEED" as const,
-          lowMidi: 55,
-          highMidi: 78, // HARD
-        },
-      ]),
-    );
+    searchSongsMock.mockResolvedValueOnce([
+      ...twoSongsResponse(),
+      {
+        id: 3,
+        title: "팝 어려운 곡",
+        artist: "C",
+        releaseYear: 2024,
+        keyOriginal: "C_MAJOR" as const,
+        bpm: 110,
+        mood: "POWERFUL" as const,
+        language: "ko",
+        genre: "POP",
+        tjNumber: null,
+        kyNumber: null,
+        metadataSource: "MANUAL_SEED" as const,
+        lowMidi: 55,
+        highMidi: 78, // HARD
+      },
+    ]);
 
     renderWithQueryClient(<SongSearchPage />);
     await user.type(
@@ -314,7 +293,7 @@ describe("SongSearchPage", () => {
 
   it("'필터 초기화' 버튼을 누르면 모든 필터가 해제되고 전체 결과가 복귀한다 (#118)", async () => {
     const user = userEvent.setup();
-    searchSongsMock.mockResolvedValueOnce(listResponse(twoSongsResponse()));
+    searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
 
     renderWithQueryClient(<SongSearchPage />);
     await user.type(
@@ -352,7 +331,7 @@ describe("SongSearchPage", () => {
     paramsRef.current = new URLSearchParams(
       "keyword=song&genre=ROCK&difficulty=HARD",
     );
-    searchSongsMock.mockResolvedValueOnce(listResponse(twoSongsResponse()));
+    searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
 
     renderWithQueryClient(<SongSearchPage />);
 
@@ -384,7 +363,7 @@ describe("SongSearchPage", () => {
 
   it("필터 토글 시 router.replace로 URL을 동기화한다 (#118)", async () => {
     const user = userEvent.setup();
-    searchSongsMock.mockResolvedValueOnce(listResponse(twoSongsResponse()));
+    searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
 
     renderWithQueryClient(<SongSearchPage />);
     await user.type(
@@ -438,7 +417,7 @@ describe("SongSearchPage", () => {
 
     it("결과 카운트는 aria-live='polite' status 영역에서 필터 변경을 반영한다", async () => {
       const user = userEvent.setup();
-      searchSongsMock.mockResolvedValueOnce(listResponse(twoSongsResponse()));
+      searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
 
       renderWithQueryClient(<SongSearchPage />);
       await user.type(
@@ -478,26 +457,24 @@ describe("SongSearchPage", () => {
 
     it("검색 결과 카드 렌더 상태에 a11y 위반이 없다", async () => {
       const user = userEvent.setup();
-      searchSongsMock.mockResolvedValueOnce(
-        listResponse([
-          {
-            id: 1,
-            title: "a11y 곡",
-            artist: "Tester",
-            releaseYear: 2024,
-            keyOriginal: "C_MAJOR",
-            bpm: 100,
-            mood: "UPBEAT",
-            language: "ko",
-            genre: "POP",
-            tjNumber: null,
-            kyNumber: null,
-            metadataSource: "MANUAL_SEED",
-            lowMidi: 48,
-            highMidi: 70,
-          },
-        ]),
-      );
+      searchSongsMock.mockResolvedValueOnce([
+        {
+          id: 1,
+          title: "a11y 곡",
+          artist: "Tester",
+          releaseYear: 2024,
+          keyOriginal: "C_MAJOR",
+          bpm: 100,
+          mood: "UPBEAT",
+          language: "ko",
+          genre: "POP",
+          tjNumber: null,
+          kyNumber: null,
+          metadataSource: "MANUAL_SEED",
+          lowMidi: 48,
+          highMidi: 70,
+        },
+      ]);
 
       const { container } = renderWithQueryClient(<SongSearchPage />);
       await user.type(
@@ -517,7 +494,7 @@ describe("SongSearchPage", () => {
 
     it("'검색 결과 없음' fallback 상태에 a11y 위반이 없다", async () => {
       const user = userEvent.setup();
-      searchSongsMock.mockResolvedValueOnce(listResponse([]));
+      searchSongsMock.mockResolvedValueOnce([]);
 
       const { container } = renderWithQueryClient(<SongSearchPage />);
       await user.type(
