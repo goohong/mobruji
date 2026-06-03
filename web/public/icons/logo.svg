@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="모부르지 로고">
+  <defs>
+    <linearGradient id="mobruji-logo-grad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <filter id="mobruji-logo-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#mobruji-logo-glow)" fill="none" stroke="url(#mobruji-logo-grad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="24" y="10" width="16" height="28" rx="8"/>
+    <path d="M18 30a14 14 0 0 0 28 0"/>
+    <line x1="32" y1="44" x2="32" y2="52"/>
+    <line x1="24" y1="54" x2="40" y2="54"/>
+  </g>
+</svg>
