@@ -161,11 +161,16 @@ class CycleChannelFlagRoutingTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr)
 
             urls = Path(url_capture).read_text().splitlines()
-            self.assertEqual(len(urls), 1, f"호출 1건 기대: {urls}")
-            self.assertIn(f"/channels/{channel_id}/messages", urls[0])
-            # MOBRUJI / DIGEST 로 가면 안 됨.
-            self.assertNotIn("/channels/42/", urls[0])
-            self.assertNotIn("/channels/999/", urls[0])
+            # (#1449/#1425 stale fix) 9b0ade1 의 ❓/⏹ control emoji 가 메시지 전송 후
+            # 같은 채널로 reaction PUT 1건을 더 보낸다 — 라우팅은 정상(둘 다 cycle 채널).
+            # 메시지 POST 1건 + 어떤 호출도 MOBRUJI/DIGEST 로 안 감을 검증.
+            msg_urls = [u for u in urls if u.endswith("/messages")]
+            self.assertEqual(len(msg_urls), 1, f"메시지 전송 1건 기대: {urls}")
+            self.assertIn(f"/channels/{channel_id}/messages", msg_urls[0])
+            # 메시지·리액션 모두 cycle 채널로 — MOBRUJI / DIGEST 로 가면 안 됨.
+            for url in urls:
+                self.assertNotIn("/channels/42/", url)
+                self.assertNotIn("/channels/999/", url)
 
     def test_falls_back_to_digest_when_cycle_channel_missing(self) -> None:
         """*_CHANNEL_ID 미설정 + DIGEST 설정 → DIGEST 로 fallback + stderr warning."""
