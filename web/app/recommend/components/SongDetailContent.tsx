@@ -164,7 +164,7 @@ type AlbumCoverProps = {
   song: SongResponse;
 };
 
-function AlbumCover({ song }: AlbumCoverProps) {
+export function AlbumCover({ song }: AlbumCoverProps) {
   // closes #322 — BE PR #337 에서 Song.albumCoverUrl 컬럼 + iTunes Search backfill 도입.
   // backfill 미적용/fuzzy match 실패 곡은 null → placeholder. img 로딩 실패(404/CORS)
   // 시에도 onError 로 placeholder 로 fallback. eager 로드는 모달이 열린 직후만
@@ -533,7 +533,8 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
 
 /**
  * 외부에서 placeholder 만 단독으로 쓰고 싶을 때 (예: 카드 thumbnail) export.
- * AlbumCover 컴포넌트는 모달 전용이라 export 하지 않고 placeholder 만 노출한다.
+ * 큰 사이즈 `AlbumCover` 는 모달 외에 곡 상세 페이지(`/songs/[id]`)에서도 재사용한다
+ * (closes #1666) — placeholder/onError fallback 동작을 한 곳에서 공유한다.
  */
 export type { AlbumCoverPlaceholderProps };
 
