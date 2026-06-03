@@ -117,10 +117,21 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     expect(items[3]).toHaveTextContent(/좋아요/);
   });
 
-  it("primary CTA는 /voice-range/auto, 보조 CTA는 /voice-range", async () => {
+  it("진입 분기 카드는 /voice-range/auto, '직접 입력으로 시작'은 /voice-range", async () => {
     renderWithQueryClient(<Home />);
+    // 3 페르소나 카드 모두 측정 wizard 로 연결(F1/F2/F3 미연결 graceful fallback).
     expect(
-      screen.getByRole("link", { name: /음역대 측정하기/ }),
+      screen.getByRole("link", { name: /내 목소리부터 알아보기/ }),
+    ).toHaveAttribute("href", "/voice-range/auto");
+    expect(
+      screen.getByRole("link", { name: /발성·고음 연습할 곡 찾기/ }),
+    ).toHaveAttribute("href", "/voice-range/auto");
+    expect(
+      screen.getByRole("link", { name: /분위기 띄울 곡 찾기/ }),
+    ).toHaveAttribute("href", "/voice-range/auto");
+    // 보조 경로.
+    expect(
+      screen.getByRole("link", { name: /그냥 둘러보기/ }),
     ).toHaveAttribute("href", "/voice-range/auto");
     expect(
       screen.getByRole("link", { name: /직접 입력으로 시작/ }),
@@ -132,7 +143,7 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     // 마이크로태스크 한 사이클 대기 후에도 호출 없음.
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: /시작하기/ }),
+        screen.getByRole("heading", { name: /무엇을 도와드릴까요/ }),
       ).toBeInTheDocument();
     });
     expect(readVoiceRangeMock).not.toHaveBeenCalled();
@@ -142,7 +153,7 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
     const { container } = renderWithQueryClient(<Home />);
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: /시작하기/ }),
+        screen.getByRole("heading", { name: /무엇을 도와드릴까요/ }),
       ).toBeInTheDocument();
     });
     await expectNoA11yViolations(container);
