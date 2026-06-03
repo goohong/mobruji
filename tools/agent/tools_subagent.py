@@ -28,6 +28,14 @@ from state import CycleName, PausedError, CycleAlreadyRunningError
 
 WRAPPER_PATH = Path("/home/mobruji/mobruji/tools/agent-launch-wrapper.sh")
 
+# (#1542) 합성 directive — enqueue 가 자동 생성하며 사용자 dialogue thread 없이
+# 전용 cycle forum thread 에만 의존한다. cycle thread 동기 생성(_create_cycle_thread)
+# 이 Discord flake 로 None 을 반환하면 pending_thread_id 가 빈 값이 되어 launch 가
+# ValueError → dispatch_once 가 재시도(noise) → MAX 초과 시 큐 드롭(PR 리뷰 유실)으로
+# 이어졌다. 이 prefix 의 directive 는 infra 와 동일하게 thread 면제 — 보고는 graceful
+# degrade(cycle thread 있으면 거기로, 없으면 PR 코멘트). 표준 사이클 동작은 불변.
+THREAD_OPTIONAL_DIRECTIVE_PREFIXES = ("rev-pr-", "pr-review-")
+
 
 # ─── 6. launch_subagent ──────────────────────────────────────────────────────
 
@@ -77,8 +85,12 @@ def launch_subagent(
     # 미지정 시 기존대로 directive thread (register_directive_pending 경로 호환).
     pending_thread_id = cycle_thread_id or directive.get("thread_id") or ""
     # (#1531) infra 는 전용 forum 채널이 없어 cycle thread 가 없다 — PR 코멘트로 보고하므로
-    # pending thread 요구를 면제. 표준 사이클(be/fe/rev/plan)은 기존대로 thread 필수.
-    if not pending_thread_id and cycle != "infra":
+    # pending thread 요구를 면제. (#1542) 합성 directive(rev-pr-/pr-review-)도 cycle thread
+    # 동기 생성 flake 시 thread 면제 — 표준 사이클(register_directive_pending 경로)은 기존대로 필수.
+    thread_optional = cycle == "infra" or directive_id.startswith(
+        THREAD_OPTIONAL_DIRECTIVE_PREFIXES
+    )
+    if not pending_thread_id and not thread_optional:
         raise ValueError(
             f"directive {directive_id} 의 pending thread 미등록 — "
             f"register_directive_pending 먼저 호출 필요"
