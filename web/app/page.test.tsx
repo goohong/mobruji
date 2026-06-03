@@ -158,7 +158,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     });
   });
 
-  it("primary CTA는 /recommend, 보조 CTA는 /voice-range/auto", async () => {
+  it("primary CTA는 /recommend, 보조 CTA는 /voice-range/auto + /voice-range", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
       sessionId: "00000000-0000-4000-8000-000000000001",
@@ -182,6 +182,10 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     expect(
       screen.getByRole("link", { name: /음역대 다시 측정/ }),
     ).toHaveAttribute("href", "/voice-range/auto");
+    // 측정 완료 사용자도 수동 재설정 경로(/voice-range)에 진입할 수 있어야 한다.
+    expect(
+      screen.getByRole("link", { name: /직접 다시 설정/ }),
+    ).toHaveAttribute("href", "/voice-range");
   });
 
   it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (C3 ~ A4)", async () => {
