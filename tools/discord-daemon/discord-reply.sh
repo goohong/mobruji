@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # discord-reply.sh — helper 가 직접 bot REST API 로 응답 push.
 #
-# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화 + #987 race condition fix):
+# ⚠️ quote-reply (message_reference) 영구 제거 (#1631, 2026-06-03):
+#   본답/ack/choices 모드는 더 이상 사용자 메시지에 답글(message_reference) 형태로
+#   매달지 않는다 — 모두 standalone(plain) 메시지로 push. 근본 원인: bot.py 가
+#   들어오는 모든 사용자 메시지마다 last-user-msg-id.txt 를 덮어써 stale target →
+#   엉뚱한 메시지에 답글 (weeks 째 사용자 신고). 사용자 정정: "제대로 답장 못 할 거
+#   같으면 그 기능 그냥 없애라". bot.py _push_agent_reply (reference=None) 와 정렬.
+#   resolve_reply_to_id 는 항상 빈 문자열을 반환 (함수 시그니처는 호환 유지).
+#   아래 문서의 message_reference 관련 서술은 #1631 이전 동작 기록(historical).
+#   ✍️ writing-marker (#1095) 는 transient UX 라 유지 (resolve_writing_target_id 분리).
+#
+# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화 + #987 race condition fix + #1631 quote-reply 제거):
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
@@ -1120,96 +1130,68 @@ read_last_pending_queue_msg_id() {
 #
 # bare body + ack 모드 모두 동일 로직을 공유하기 위해 함수로 분리.
 resolve_reply_to_id() {
+  # 2026-06-03 (#1631) — quote-reply (message_reference) 영구 제거.
+  #
+  # 근본 원인: target message_id 를 state 파일 (last-user-msg-id.txt) 에서 해석하는데
+  # bot.py 가 들어오는 *모든* 사용자 메시지마다 이 파일을 덮어쓴다. helper 응답이
+  # 최신 메시지보다 뒤처지면 (queue lag / turn 지연) 해석된 target 이 stale → 엉뚱한
+  # 메시지에 quote-reply 가 걸린다 (weeks 째 사용자 신고). turn-start freeze /
+  # HELPER_TURN_TARGET_MSG_ID env / helper-queue.jsonl 도 helper LLM 의 wrapper 호출
+  # 타이밍에 의존 (학습 의존) 이라 신뢰 불가. 사용자 정정: "제대로 답장 못 할 거
+  # 같으면 그 기능 그냥 없애라".
+  #
+  # bot.py `_push_agent_reply` 는 2026-05-30 에 이미 quote-reply 폐기 (reference=None).
+  # 본 함수는 그 결정과 정렬 — 항상 빈 문자열 반환 → 모든 답이 standalone(plain)
+  # 메시지로 push. 채널/thread 컨텍스트만으로 어떤 메시지에 대한 답인지 충분히 가시
+  # (Discord plugin 가이드도 최신 메시지엔 reply_to 생략 권장).
+  #
+  # 호출부 호환을 위해 함수 시그니처는 유지 — 빈 문자열 → build_reply_payload 가
+  # message_reference 없는 단순 content payload 빌드. --reply-to / 각종 target 소스는
+  # 더 이상 효력 없음 (회귀 가드 테스트 존재).
+  printf ''
+}
+
+# ✍️ writing-marker hook 전용 target msg id (#1631, 2026-06-03).
+#
+# quote-reply 와 분리: quote-reply (message_reference) 는 영구 제거됐지만, "답
+# 작성 중" ✍️ reaction (#1095) 은 사용자 메시지에 잠깐 붙었다 즉시 제거되는
+# transient UX 라 유지한다 (사용자 신고 = 영구적인 답글 오매칭, not transient ✍️).
+#
+# 대상은 last-user-msg-id.txt 만 사용 — 영구 artifact 가 아니므로 stale 위험이
+# 낮고 (turn 종료 시 제거), payload 의 message_reference 와 무관. NO_REPLY=1 /
+# 파일 부재 / 비-snowflake → 빈 문자열 → hook skip (대상 없음, graceful).
+resolve_writing_target_id() {
   if [[ "$NO_REPLY" -eq 1 ]]; then
     printf ''
     return 0
   fi
-
-  local candidate=""
-
-  # 1) --reply-to override (최우선).
-  if [[ -n "$REPLY_TO_OVERRIDE" ]]; then
-    if candidate=$(validate_snowflake "$REPLY_TO_OVERRIDE" "--reply-to"); then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  fi
-
-  # 2) HELPER_TURN_TARGET_MSG_ID env.
-  if [[ -n "${HELPER_TURN_TARGET_MSG_ID:-}" ]]; then
-    if candidate=$(validate_snowflake \
-        "$HELPER_TURN_TARGET_MSG_ID" \
-        "HELPER_TURN_TARGET_MSG_ID env"); then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  fi
-
-  # 3) helper-current-target.txt (turn-start freeze).
-  if [[ -r "$HELPER_TARGET_FILE" ]]; then
-    local target_raw
-    target_raw=$(head -1 "$HELPER_TARGET_FILE" 2>/dev/null \
-      | tr -d '[:space:]' || true)
-    if [[ -n "$target_raw" ]]; then
-      if candidate=$(validate_snowflake "$target_raw" "helper-current-target.txt"); then
-        printf '%s' "$candidate"
-        return 0
-      fi
-    fi
-  fi
-
-  # 4) helper-queue.jsonl 마지막 pending entry.
-  local queue_id
-  queue_id=$(read_last_pending_queue_msg_id)
-  if [[ -n "$queue_id" ]]; then
-    if candidate=$(validate_snowflake "$queue_id" "helper-queue.jsonl pending entry"); then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  fi
-
-  # 5) last-user-msg-id.txt (기존 fallback).
   if [[ -r "$LAST_USER_MSG_ID_FILE" ]]; then
-    local last_raw
+    local last_raw candidate
     last_raw=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null \
       | tr -d '[:space:]' || true)
     if [[ -n "$last_raw" ]]; then
-      if candidate=$(validate_snowflake "$last_raw" "last-user-msg-id.txt"); then
+      if candidate=$(validate_snowflake "$last_raw" "writing-marker target"); then
         printf '%s' "$candidate"
         return 0
       fi
     fi
   fi
-
   printf ''
 }
 
-# reply 적용 payload 빌더 — message_id 있으면 message_reference 포함, 없으면 단순 content (#946, #960).
+# reply payload 빌더 — 항상 message_reference 없는 단순 content (#1631, 2026-06-03).
 #
 # 인자: CONTENT REPLY_TO_ID
 # 출력: jq -nc 로 빌드한 JSON payload (stdout 1줄).
 #
-# fail_if_not_exists: false — referenced message 가 삭제됐어도 본 메시지
-# 자체는 정상 push (standalone 으로 표시). Discord 권장 패턴.
+# 2026-06-03 (#1631): quote-reply (message_reference) 영구 제거. resolve_reply_to_id
+# 가 항상 빈 문자열을 반환하므로 reply_to_id 인자는 실질적으로 비어 있으나, 회귀
+# 방어 (defense in depth) 차원에서 본 함수도 reply_to_id 를 무시하고 단순 content
+# payload 만 빌드한다 — 어떤 경로로 비-빈 id 가 흘러들어와도 stale quote-reply
+# 사고 불가능. (근본 원인 + 결정은 resolve_reply_to_id 주석 참조.)
 build_reply_payload() {
   local content="$1"
-  local reply_to_id="$2"
-  if [[ -n "$reply_to_id" ]]; then
-    jq -nc \
-      --arg c "$content" \
-      --arg mid "$reply_to_id" \
-      --arg cid "$CHANNEL" \
-      '{
-        content: $c,
-        message_reference: {
-          message_id: $mid,
-          channel_id: $cid,
-          fail_if_not_exists: false
-        }
-      }'
-  else
-    jq -nc --arg c "$content" '{content: $c}'
-  fi
+  jq -nc --arg c "$content" '{content: $c}'
 }
 
 # helper-current-thread.txt atomic write (#911 G-5).
@@ -1695,17 +1677,16 @@ case "$MODE" in
     # ack / thread 모드는 짧은 단발성 push 라 미적용.
     MSG=$'​\n'"$MSG"
 
-    # #946: 사용자 메시지에 reply (답장) 형태로 push.
-    # bot.py 가 on_message 시 atomic write 한 LAST_USER_MSG_ID_FILE 에서
-    # message_id 를 읽어 Discord REST `message_reference` 에 포함.
-    # 파일 부재 / 빈 값 / 비숫자 → graceful standalone push (legacy 호환).
-    # --no-reply flag 시에도 standalone.
+    # #1631 (2026-06-03): quote-reply (message_reference) 영구 제거 — REPLY_TO_ID 는
+    # 항상 빈 문자열 → build_reply_payload 가 standalone(plain) payload 빌드.
+    # 근본 원인 + 결정은 resolve_reply_to_id 주석 참조.
     REPLY_TO_ID=$(resolve_reply_to_id)
 
     # #1095 (2026-05-26): 본답 push 직전 ✍️ reaction + typing — 답 작성 시작 가시화.
-    # NO_REPLY=1 (--no-reply / --status-channel / --channel / --cycle-channel 등)
-    # 시 REPLY_TO_ID 가 빈 문자열 → writing_hook_start 도 skip (대상 없음).
-    writing_hook_start "$REPLY_TO_ID"
+    # quote-reply 와 분리 (#1631) — ✍️ 는 transient marker 라 유지. 대상은 전용
+    # resolver (last-user-msg-id.txt) 사용. NO_REPLY=1 / 파일 부재 → 빈 문자열 → skip.
+    WRITING_TARGET_ID=$(resolve_writing_target_id)
+    writing_hook_start "$WRITING_TARGET_ID"
 
     # #1121 (2026-05-26): 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 chunk split + 순차 push.
     # 단일 chunk (cap 이하) 인 경우 단일 push 동작과 동일 (split_long_message 가 1개
@@ -1730,7 +1711,7 @@ case "$MODE" in
 
     # #1095: 본답 push 직후 ✍️ remove — 답 작성 완료 가시화.
     # typing 은 Discord 자체 10초 timeout + 메시지 push 후 자동 종료.
-    writing_hook_end "$REPLY_TO_ID"
+    writing_hook_end "$WRITING_TARGET_ID"
     ;;
 
   ack)
@@ -1953,7 +1934,8 @@ case "$MODE" in
       CHOICES_BODY+=$'\n'"${CHOICE_KEYCAPS_DISPLAY[$i]} ${CHOICES_OPTS[$i]}"
     done
 
-    # 2) 메시지 post — 사용자 마지막 메시지에 reply 형태 (일관성 + 시각적 연결).
+    # 2) 메시지 post — standalone(plain). quote-reply 제거 (#1631) 로 reply 형태
+    #    미사용. resolve_reply_to_id 는 항상 빈 문자열 (build_reply_payload 무시).
     CHOICES_REPLY_TO=$(resolve_reply_to_id)
     CHOICES_PAYLOAD=$(build_reply_payload "$CHOICES_BODY" "$CHOICES_REPLY_TO")
     CHOICES_RESPONSE=$(post_channel_message "$CHOICES_PAYLOAD")
