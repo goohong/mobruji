@@ -162,9 +162,16 @@ export function SongDetailContent(props: SongDetailContentProps) {
  */
 type AlbumCoverProps = {
   song: SongResponse;
+  /**
+   * PR7 (#1687) hero morph 식별자. 카드 thumbnail 과 상세 cover 에 같은 이름을 주면
+   * 라우트 전환 시 브라우저가 두 요소를 morph 한다. 라우트 이동이 없는 모달 컨텍스트
+   * 에서는 생략한다 — 같은 곡 cover 가 화면에 둘 이상 동시에 같은 이름을 쓰면
+   * view-transition-name 중복으로 전환이 무시되기 때문.
+   */
+  viewTransitionName?: string;
 };
 
-export function AlbumCover({ song }: AlbumCoverProps) {
+export function AlbumCover({ song, viewTransitionName }: AlbumCoverProps) {
   // closes #322 — BE PR #337 에서 Song.albumCoverUrl 컬럼 + iTunes Search backfill 도입.
   // backfill 미적용/fuzzy match 실패 곡은 null → placeholder. img 로딩 실패(404/CORS)
   // 시에도 onError 로 placeholder 로 fallback. eager 로드는 모달이 열린 직후만
@@ -176,7 +183,13 @@ export function AlbumCover({ song }: AlbumCoverProps) {
   const displayTitle = formatSongDisplayTitle(song);
 
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="large" songTitle={displayTitle} />;
+    return (
+      <AlbumCoverPlaceholder
+        size="large"
+        songTitle={displayTitle}
+        viewTransitionName={viewTransitionName}
+      />
+    );
   }
 
   return (
@@ -191,6 +204,7 @@ export function AlbumCover({ song }: AlbumCoverProps) {
         src={url}
         alt={`${displayTitle} 앨범 커버`}
         onError={() => setFailed(true)}
+        style={viewTransitionName ? { viewTransitionName } : undefined}
         className="h-48 w-48 rounded-2xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
       />
     </div>
@@ -200,6 +214,8 @@ export function AlbumCover({ song }: AlbumCoverProps) {
 type AlbumCoverPlaceholderProps = {
   size: "large" | "thumbnail";
   songTitle: string;
+  /** PR7 (#1687) hero morph 식별자 — AlbumCover/Thumbnail 이 그대로 흘려준다. */
+  viewTransitionName?: string;
 };
 
 /**
@@ -209,6 +225,7 @@ type AlbumCoverPlaceholderProps = {
 export function AlbumCoverPlaceholder({
   size,
   songTitle,
+  viewTransitionName,
 }: AlbumCoverPlaceholderProps) {
   const sizeClass =
     size === "large"
@@ -219,6 +236,7 @@ export function AlbumCoverPlaceholder({
       <div
         role="img"
         aria-label={`${songTitle} 앨범 커버 (이미지 없음)`}
+        style={viewTransitionName ? { viewTransitionName } : undefined}
         className={`flex items-center justify-center bg-gradient-to-br from-[var(--surface-cover-from)] to-[var(--surface-cover-to)] ring-1 ring-[var(--ring-soft-detail)] ${sizeClass}`}
       >
         <MusicNoteIcon size={size === "large" ? 56 : 24} />
@@ -540,13 +558,21 @@ export type { AlbumCoverPlaceholderProps };
 
 type AlbumCoverThumbnailProps = {
   song: SongResponse;
+  /**
+   * PR7 (#1687) hero morph 식별자. 카드가 곡 상세 페이지로 라우트 이동하는 모드
+   * (href)에서만 넘긴다 — 상세 페이지의 큰 cover 와 같은 이름이라 전환 시 morph 한다.
+   */
+  viewTransitionName?: string;
 };
 
 /**
  * 카드 요약 thumbnail (closes #322) — SongCard 좌측 sm 영역에 사용.
  * url 이 있으면 lazy load, 실패/없으면 placeholder.
  */
-export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
+export function AlbumCoverThumbnail({
+  song,
+  viewTransitionName,
+}: AlbumCoverThumbnailProps) {
   // closes #322 — SongCard 좌측 small (48~64px) thumbnail. loading="lazy" 로
   // 뷰포트 진입 시점에 페치 — 긴 리스트(추천 무한 스크롤, 검색 결과)에서 초기
   // 네트워크 비용 최소화. onError 시 placeholder 로 fallback.
@@ -556,7 +582,13 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
   const displayTitle = formatSongDisplayTitle(song);
 
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="thumbnail" songTitle={displayTitle} />;
+    return (
+      <AlbumCoverPlaceholder
+        size="thumbnail"
+        songTitle={displayTitle}
+        viewTransitionName={viewTransitionName}
+      />
+    );
   }
 
   return (
@@ -567,6 +599,7 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
       loading="lazy"
       alt={`${displayTitle} 앨범 커버`}
       onError={() => setFailed(true)}
+      style={viewTransitionName ? { viewTransitionName } : undefined}
       className="h-14 w-14 rounded-xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
     />
   );

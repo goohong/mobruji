@@ -157,6 +157,12 @@ export function SongCard(props: SongCardProps) {
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
+  // closes #1687 (PR7) — hero morph. 카드가 실제로 /songs/[id] 로 라우트 이동하는
+  // href 모드에서만 thumbnail 에 view-transition-name 을 부여해 상세 페이지의 큰
+  // cover 와 morph 시킨다. 모달 모드(라우트 이동 없음)나 plain 모드에서는 부여하지
+  // 않는다 — 같은 곡 cover 가 두 곳에 같은 이름으로 동시에 존재하면 전환이 무시된다.
+  const albumViewTransitionName =
+    href && !isModalMode ? `album-${song.id}` : undefined;
   // closes #1284 — 한국 곡의 한국어 표시 우선 (lib/songTitle.formatSongDisplayTitle SoT).
   // 카드 표면 / aria-label / 자식 컴포넌트 prop 까지 동일한 표시명을 사용해 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -181,7 +187,10 @@ export function SongCard(props: SongCardProps) {
          * 유지.
          */}
         <div className="shrink-0">
-          <AlbumCoverThumbnail song={song} />
+          <AlbumCoverThumbnail
+            song={song}
+            viewTransitionName={albumViewTransitionName}
+          />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {item ? (

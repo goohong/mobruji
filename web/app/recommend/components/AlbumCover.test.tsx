@@ -183,6 +183,42 @@ describe("onError fallback 회귀 가드 (PR #500 후속, closes #529)", () => {
  *    스크린리더 이중 읽기 방지를 위해 aria-hidden="true" 여야 한다.
  *  - large / thumbnail 양쪽 모두 동일 규칙 적용.
  */
+/*
+ * Hero morph view-transition-name (closes #1687, PR7):
+ *  - viewTransitionName prop 을 주면 img/placeholder 에 inline style 로 흘러간다.
+ *  - 미지정이면 style 이 비어 있다 (모달/plain 모드 — 라우트 morph 비대상).
+ */
+describe("AlbumCover view-transition-name (closes #1687, PR7)", () => {
+  it("thumbnail img 에 viewTransitionName 을 주면 inline style 로 적용된다", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/c.jpg" });
+    render(
+      <AlbumCoverThumbnail song={song} viewTransitionName="album-1" />,
+    );
+    const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
+    expect(img.style.viewTransitionName).toBe("album-1");
+  });
+
+  it("thumbnail placeholder(fallback) 에도 viewTransitionName 이 적용된다", () => {
+    const song = buildSong({ albumCoverUrl: null });
+    render(
+      <AlbumCoverThumbnail song={song} viewTransitionName="album-1" />,
+    );
+    const placeholder = screen.getByLabelText(
+      /테스트 곡 앨범 커버 \(이미지 없음\)/,
+    );
+    expect((placeholder as HTMLElement).style.viewTransitionName).toBe(
+      "album-1",
+    );
+  });
+
+  it("viewTransitionName 미지정 시 thumbnail img 에 view-transition-name 이 없다", () => {
+    const song = buildSong({ albumCoverUrl: "https://example.com/c.jpg" });
+    render(<AlbumCoverThumbnail song={song} />);
+    const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
+    expect(img.style.viewTransitionName).toBeFalsy();
+  });
+});
+
 describe("AlbumCoverPlaceholder MusicNoteIcon aria-hidden 회귀 가드 (closes #531)", () => {
   it("thumbnail placeholder 내부 SVG 는 aria-hidden='true'", () => {
     const song = buildSong({ albumCoverUrl: null });
