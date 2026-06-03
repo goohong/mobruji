@@ -34,6 +34,7 @@ import {
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
 import { Button } from "@/components/ui";
+import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import {
   MEASUREMENT_DURATION_MS,
   MeasurementPhase,
@@ -630,6 +631,14 @@ function ResultStep({
         onChange={onHighChange}
         testId="high-midi-slider"
       />
+
+      {validationError === null ? (
+        <VoiceRangeIntuition
+          lowMidi={lowMidi}
+          highMidi={highMidi}
+          caption="내 음역대를 평균과 비교하면"
+        />
+      ) : null}
 
       {validationError ? (
         <p className="text-sm text-[var(--danger-fg-soft)]">{validationError}</p>
