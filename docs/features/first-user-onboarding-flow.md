@@ -5,7 +5,7 @@ status: draft
 owner: @goohong
 scope: user
 related_issues: []
-related_prs: []
+related_prs: [1562]
 last_reviewed: 2026-06-03
 ---
 
