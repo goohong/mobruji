@@ -80,7 +80,8 @@ public class RecommendationScorer {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
         final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
         final RecommendationProperties.Generation generation = recommendationProperties.generation();
-        final double rangeFit = voiceRangeFit(song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
+        final double rangeFit = voiceRangeFit(
+                song.getLowMidi(), song.getHighMidi(), song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
         final double genreMatch = genreMatch();
         final double moodMatch = moodMatch(song.getMood(), requestedMood);
@@ -109,6 +110,50 @@ public class RecommendationScorer {
             return 0.5; // UNKNOWN key — neutral
         }
         return voiceRangeFitForRoot(rootMidi, voiceLow, voiceHigh);
+    }
+
+    /**
+     * 곡 실측 음역(audio analysis 적재: {@code low_midi}/{@code high_midi}) 우선 적합도 산정.
+     *
+     * <p>둘 다 not-null 이면 실측 band 로 reachability/centeredness 산식을 그대로 적용한다 — 키 root±7 휴리스틱은
+     * 곡 분포를 53~78 MIDI 좁은 구간으로 갇히게 만들어 사용자 음역대 변화에 따른 변별력이 약한 사고를 만들었다 (#1632).
+     * 한쪽이라도 null 이면 기존 키 root±7 휴리스틱({@link #voiceRangeFit(MusicalKey, int, int)})으로 폴백해
+     * 미적재 곡의 하위호환을 유지한다.
+     *
+     * <p>spec: {@code docs/features/recommendation-algorithm-v1.md} §6 v1+v2 (voiceRangeFit 산식) — 실측 데이터
+     * 활용은 같은 산식의 입력 정확도 향상에 그쳐 가중치/결정성/SeedDeriver 입력에는 영향이 없다.
+     */
+    static double voiceRangeFit(
+            final Integer songLowMidi,
+            final Integer songHighMidi,
+            final MusicalKey keyOriginal,
+            final int voiceLow,
+            final int voiceHigh) {
+        if (songLowMidi != null && songHighMidi != null) {
+            return voiceRangeFitForBand(songLowMidi, songHighMidi, voiceLow, voiceHigh);
+        }
+        return voiceRangeFit(keyOriginal, voiceLow, voiceHigh);
+    }
+
+    /**
+     * 곡 음역 band(songLow, songHigh) 가 주어졌을 때의 음역 적합도(0~1). reachability/centeredness 산식은
+     * {@link #voiceRangeFitForRoot}와 동일하며, 중심점만 root MIDI 대신 band 중심 {@code (songLow+songHigh)/2} 로
+     * 잡는다. 곡 실측 음역과 휴리스틱 음역에 같은 산식을 일관 적용해 결과 해석을 단일 패턴으로 유지한다.
+     */
+    static double voiceRangeFitForBand(
+            final int songLow, final int songHigh, final int voiceLow, final int voiceHigh) {
+        final int songSpan = songHigh - songLow;
+        final int userSpan = voiceHigh - voiceLow;
+        if (songSpan <= 0 || userSpan <= 0) {
+            return 0.0;
+        }
+        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
+        final double reachability = Math.min(1.0, (double) overlap / songSpan);
+        final double songCenter = (songLow + songHigh) / 2.0;
+        final double userCenter = (voiceLow + voiceHigh) / 2.0;
+        final double centerDistance = Math.abs(songCenter - userCenter);
+        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
+        return reachability * centeredness;
     }
 
     /**
