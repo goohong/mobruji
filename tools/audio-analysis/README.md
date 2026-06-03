@@ -111,14 +111,60 @@ vocal stem 에만 librosa pyin 을 적용한다. 반주·드럼 harmonics 가 pi
 
 실패 시 exit code 1 + stdout JSON `{"error": "...", "toolingVersion": "..."}`.
 
+## Batch 파이프라인 + 정확도 검증 (batch_analyze.py)
+
+단일 곡 분석(analyze.py)을 시드 곡 묶음에 대해 순차 실행하고 backfill-ready feed
+(NDJSON)를 emit 한다. `--ground-truth` 모드는 시드의 `label`(MIDI 정답)과 비교해
+lowMidi/highMidi MAE · key 정확도 · confidence 평균을 정확도 리포트로 로깅한다.
+
+```bash
+cd tools/audio-analysis
+
+# 1) 시드 분석(yt-dlp→[Spleeter]→librosa) + feed 생성 + 정확도 리포트
+python batch_analyze.py --seed tests/validation_set.json \
+  --out /data/tmp/feed.ndjson --ground-truth
+
+# 2) Spleeter vocal 분리 적용
+python batch_analyze.py --seed tests/validation_set.json --vocal-separation --ground-truth
+
+# 3) offline — 사전 feed 로 분석 skip, 정확도만 재계산(네트워크/의존성 불요)
+python batch_analyze.py --seed tests/validation_set.json \
+  --from-results /data/tmp/feed.ndjson --ground-truth
+```
+
+- **feed 레코드**: `{id, status, metadataSource="AUDIO_ANALYSIS", lowMidi, highMidi,
+  key, tempo, confidence, analysisMethod, toolingVersion}`. vocal range 는
+  self-analysis 가 1차 권위(spec §10-8). 실패 곡은 `{id, status:"failed", error}`.
+  Spring 측 backfill(`SongAudioBackfillCommand`)이 갱신하는 `lowMidi/highMidi/
+  metadataSource/metadataConfidence` 와 동일 의미의 메타데이터 feed 이다.
+- **곡 단위 실패 격리**: 한 곡이 timeout/403/parse 실패해도 batch 가 중단되지 않고
+  `failed` 레코드로 기록 후 다음 곡으로 진행한다.
+- **디스크 안전**: `--tmpdir`(default `/data/tmp`, `AUDIO_ANALYSIS_TMPDIR` 로도 지정)
+  이 `TMPDIR` 을 고정해 audio/stem 임시 파일이 시스템 `/` 가 아닌 `/data` 영속
+  볼륨에 쌓이게 한다. analyze.py 가 분석 직후 `shutil.rmtree` 로 삭제한다.
+- **회귀 가드**(spec §10-4): lowMidi/highMidi MAE ≤ 2 semitone · MAX ≤ 4 · confidence
+  평균 ≥ 0.6 충족 시 `회귀 가드 통과: True`. 미통과 시 경고 로그.
+
+### 검증셋
+
+`tests/validation_set.json` — directive #1490 batch 동작·정확도 리포트 경로 확인용
+**소량(5곡)** PoC 검증셋. audio 바이너리 미포함(URL/제목/MIDI 라벨 등 메타만 — 저작권
+§13). `label.lowMidi/highMidi` 는 운영자 PoC 추정값이다. 통계적 ground truth(10곡,
+정식 회귀 가드)는 spec §10-4 PR H 의 `tests/ground_truth.json` 이 단일 진실이며 본
+set 과 별개다.
+
 ## 테스트
 
 ```bash
 cd tools/audio-analysis
-pytest -q
+pytest -q                      # 또는 의존성 없는 환경: python3 -m unittest discover -p 'test_*.py'
 ```
 
-순수 helper (`frequency_to_midi`, `extract_range`, `confidence_score`, `mask_url`)에 대한 단위 테스트만 포함한다. 외부 IO(yt-dlp/librosa)는 PR B에서 sample wav 기반 통합 테스트로 추가한다.
+- `test_analyze.py` — analyze.py 순수 helper (`frequency_to_midi`, `extract_range`,
+  `confidence_score`, `mask_url`).
+- `test_batch_analyze.py` — batch_analyze.py 순수 로직 (시드 로드 / 정확도 산출 /
+  회귀 가드 판정 / feed 변환 / TMPDIR 고정). 외부 IO(yt-dlp/librosa) 미호출이라
+  의존성 없는 환경에서도 `unittest` 로 실행된다.
 
 ## 운영 주의 (저작권 / YouTube ToS)
 
