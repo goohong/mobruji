@@ -362,6 +362,45 @@ describe("SongDetailSheet (#1696)", () => {
     });
   });
 
+  // #1699: 부분 스와이프 spring-back 시 enter 애니메이션 재시작 글리치 회귀 가드.
+  describe("spring-back 글리치 (#1699)", () => {
+    it("초기 오픈 시에는 enter 슬라이드업(animate-sheet-in)이 적용된다", () => {
+      render(
+        <SongDetailSheet open onClose={vi.fn()} titleLabel="테스트 곡">
+          <p>본문</p>
+        </SongDetailSheet>,
+      );
+      expect(screen.getByRole("dialog").className).toContain("animate-sheet-in");
+    });
+
+    it("임계 미달 부분 스와이프 후 손을 떼면 enter 애니메이션이 재시작되지 않는다", () => {
+      const onClose = vi.fn();
+      render(
+        <SongDetailSheet open onClose={onClose} titleLabel="테스트 곡">
+          <p>본문</p>
+        </SongDetailSheet>,
+      );
+      const dialog = screen.getByRole("dialog");
+      // offsetHeight 를 양수로 고정 → 닫힘 거리 임계(25% = 100px)를 결정적으로 만든다.
+      Object.defineProperty(dialog, "offsetHeight", {
+        value: 400,
+        configurable: true,
+      });
+
+      // 임계 미달(30px) 부분 스와이프. 마지막 move 를 같은 위치로 한 번 더 보내
+      // velocity 를 0 으로 떨궈 flick-close 가 아닌 순수 spring-back 을 만든다.
+      fireEvent.touchStart(dialog, { touches: [{ clientY: 0 }] });
+      fireEvent.touchMove(dialog, { touches: [{ clientY: 30 }] });
+      fireEvent.touchMove(dialog, { touches: [{ clientY: 30 }] });
+      fireEvent.touchEnd(dialog);
+
+      expect(onClose).not.toHaveBeenCalled();
+      // spring-back 후 enter 키프레임(translateY 100%→0)이 재적용되면 화면 밖
+      // 점프→재진입 글리치가 난다. 드래그 세션에서는 억제돼야 한다.
+      expect(dialog.className).not.toContain("animate-sheet-in");
+    });
+  });
+
   // G11: prefers-reduced-motion 시 drag gesture 비활성 (translateY 변동 없음).
   describe("prefers-reduced-motion", () => {
     beforeEach(() => {
