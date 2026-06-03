@@ -5220,6 +5220,46 @@ def extract_cycle_forum_refs_from_body(body: str) -> list[tuple[str, str]]:
     return result
 
 
+def lookup_pr_cycle_thread(pr_number: int) -> tuple[str, str] | None:
+    """(#7) agent_state 의 `pr_cycle_thread:<N>` 매핑 조회 → (cycle, thread_id) 또는 None.
+
+    subagent_runner._persist_pr_cycle_thread 가 PR 생성 시점에 저장한 신뢰 매핑.
+    cycle_thread_complete_on_merge_loop 의 **1순위 lookup** — PR 본문 cycle-forum ref 가
+    누락/placeholder/앵커 미스여도 머지 완료 태그가 붙도록 보장한다 (본문 파싱 의존 제거).
+
+    graceful — DB 부재/깨짐/형식 이상은 None 반환(loop 가 본문 ref fallback 으로 진행).
+    cycle 은 be/fe/rev/plan, thread_id 는 snowflake(17–20 자리)일 때만 유효.
+    """
+    try:
+        conn = sqlite3.connect(str(AGENT_EVENTS_DB_PATH), isolation_level=None, timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT value FROM agent_state WHERE key = ?",
+                (f"pr_cycle_thread:{pr_number}",),
+            ).fetchone()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("lookup_pr_cycle_thread 실패 pr=#%s: %r", pr_number, exc)
+        return None
+    if not row:
+        return None
+    try:
+        payload = json.loads(row["value"])
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    cycle = str(payload.get("cycle") or "").lower()
+    thread_id = str(payload.get("thread_id") or "")
+    if cycle not in ("be", "fe", "rev", "plan"):
+        return None
+    if not (thread_id.isdigit() and 17 <= len(thread_id) <= 20):
+        return None
+    return (cycle, thread_id)
+
+
 # ─── 구멍 A/C 공통 — rev forum thread 완료 자동 retag + dedupe backfill ─────────
 #
 # 배경 (cycle forum '완료' 태그 자동화 구멍):
@@ -5459,7 +5499,14 @@ async def cycle_thread_complete_on_merge_loop(
     initial_delay: int = 30,
     fetcher=None,
 ) -> None:
-    """5분 polling — PR body 의 cycle-forum: <cycle>:<thread_id> 매칭 시 자동 ✅ retag.
+    """5분 polling — 머지 PR → cycle forum thread 를 자동 ✅ retag.
+
+    thread lookup 우선순위 (#7):
+      1순위 agent_state 의 ``pr_cycle_thread:<N>`` 매핑 (subagent_runner 가 PR 생성
+            시점 영속 — 본문 파싱 무관 신뢰 채널).
+      2순위(fallback) PR 본문의 ``cycle-forum: <cycle>:<thread_id>`` ref (하위호환).
+    둘을 dedup 병합 — 본문 ref 주입 실패(placeholder / 줄-시작 앵커 미스 /
+    cycle_thread_id 누락)로 영구 정체하던 구멍을 매핑이 메운다.
 
     spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3). PR B 자매 — 같은 fetcher / seen cap / heartbeat.
     """
@@ -5482,8 +5529,21 @@ async def cycle_thread_complete_on_merge_loop(
                 pr_number = pr.get("number")
                 if not isinstance(pr_number, int) or pr_number in seen_prs:
                     continue
+                # (#7) 1순위 = agent_state 의 PR→thread 매핑(본문 파싱 무관 신뢰 채널).
+                # 2순위(fallback) = PR 본문 cycle-forum ref(하위호환). 둘 dedup 병합 —
+                # 본문 주입 실패(placeholder / 앵커 미스 / cycle_thread_id 누락)로 영구
+                # 정체하던 구멍(예: PR #1593)을 매핑으로 메운다.
                 body = pr.get("body") or ""
-                refs = extract_cycle_forum_refs_from_body(body)
+                refs: list[tuple[str, str]] = []
+                seen_refs: set[tuple[str, str]] = set()
+                mapping = lookup_pr_cycle_thread(pr_number)
+                if mapping is not None:
+                    refs.append(mapping)
+                    seen_refs.add(mapping)
+                for ref in extract_cycle_forum_refs_from_body(body):
+                    if ref not in seen_refs:
+                        seen_refs.add(ref)
+                        refs.append(ref)
                 if not refs:
                     continue
                 if not reply_script.exists():
@@ -5492,8 +5552,9 @@ async def cycle_thread_complete_on_merge_loop(
                     )
                     break
                 logger.info(
-                    "cycle_thread_complete_on_merge: PR #%d body 에서 cycle-forum 매칭: %s",
+                    "cycle_thread_complete_on_merge: PR #%d cycle-forum 매칭: %s (src=%s)",
                     pr_number, refs,
+                    "state+body" if mapping is not None else "body",
                 )
                 for cycle, thread_id in refs:
                     try:
