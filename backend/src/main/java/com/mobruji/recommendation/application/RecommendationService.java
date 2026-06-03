@@ -22,6 +22,7 @@ import com.mobruji.song.infrastructure.SongRepository;
 import lombok.RequiredArgsConstructor;
 
 import com.mobruji.recommendation.domain.FeedbackReaction;
+import com.mobruji.recommendation.domain.FilterRelaxation;
 import com.mobruji.recommendation.domain.Recommendation;
 import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
@@ -163,24 +164,33 @@ public class RecommendationService {
         // seed에 excludeSongIds를 정렬된 형태로 포함 (누적 패턴: rev 사이클 3 경고).
         // 같은 voiceRange여도 제외 곡 셋이 달라지면 다른 seed → 다른 jitter → 다른 결과.
         final SeedContext seedContext = buildSeedContext(savedRequest, excludeSongIds);
-        final Random random = new Random(seedContext.seed());
-        final List<ScoredSong> scoredSongs = candidates.stream()
-                .map(song -> {
-                    final Scored scored = recommendationScorer.score(
-                            song,
-                            savedRequest.getVoiceRangeLow(),
-                            savedRequest.getVoiceRangeHigh(),
-                            savedRequest.getMood(),
-                            savedRequest.getPreferredBpm(),
-                            savedRequest.getAgeGroup(),
-                            random);
-                    return new ScoredSong(song, scored);
-                })
-                .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.scored.total()).reversed())
-                .toList();
-
         final int resultCount = recommendationProperties.resultCount();
-        final List<ScoredSong> diversified = diversityPostProcessor.apply(scoredSongs, resultCount);
+        final List<FilterRelaxation> relaxedFilters = new ArrayList<>();
+        List<ScoredSong> diversified = rankCandidates(candidates, savedRequest, seedContext.seed(), resultCount);
+
+        // 0건 fallback(#1668): 결과가 비면 빈 화면 대신 제외 필터를 가장 덜 침습적인 순서로 완화해 재질의한다.
+        // 음역대·분위기·연령대는 점수 신호일 뿐 후보를 0건으로 줄이지 않으므로, 완화 대상은 유일한 하드 필터인 제외 곡 셋이다.
+        // 음역대는 점수 순(가까운 순) 정렬로 끝까지 보존 — 완전 무관 곡이 아닌 가까운 곡부터 노출한다.
+        if (diversified.isEmpty()) {
+            // 1단계: 세션 단위 자동 중복 회피(#1549)로 누적된 제외만 풀고, 사용자가 명시한 제외 곡은 유지한다.
+            final Set<Long> clientExcludeSet = new HashSet<>(createRecommendationCommand.excludeSongIds());
+            if (clientExcludeSet.size() < excludeSet.size()) {
+                final List<Song> sessionHistoryRelaxed = allSongs.stream()
+                        .filter(song -> !clientExcludeSet.contains(song.getId()))
+                        .toList();
+                diversified = rankCandidates(sessionHistoryRelaxed, savedRequest, seedContext.seed(), resultCount);
+                if (!diversified.isEmpty()) {
+                    relaxedFilters.add(FilterRelaxation.SESSION_HISTORY);
+                }
+            }
+            // 2단계: 그래도 0건이면 사용자 명시 제외 곡까지 후보에 포함한다(빈 화면보다는 가까운 곡 노출).
+            if (diversified.isEmpty() && !allSongs.isEmpty()) {
+                diversified = rankCandidates(allSongs, savedRequest, seedContext.seed(), resultCount);
+                if (!diversified.isEmpty()) {
+                    relaxedFilters.add(FilterRelaxation.EXCLUDED_SONGS);
+                }
+            }
+        }
 
         // 결과 row를 개별 save 호출이 아닌 saveAll로 모아 영속한다.
         // - IDENTITY 전략이라 Hibernate JDBC batch insert는 적용되지 않지만,
@@ -214,14 +224,47 @@ public class RecommendationService {
         // RANDOM 전략일 때는 seed/hash 가 비결정이므로 hash="-" 로 표기해 운영자가 구분.
         final long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
         log.info(
-                "event=recommendation.created request.input.hash={} seed={} algoVersion={} resultCount={} durationMs={}",
+                "event=recommendation.created request.input.hash={} seed={} algoVersion={} resultCount={} "
+                        + "relaxed={} relaxedFilters={} durationMs={}",
                 seedContext.inputHash(),
                 seedContext.seed(),
                 ALGO_VERSION,
                 recommendations.size(),
+                !relaxedFilters.isEmpty(),
+                relaxedFilters,
                 durationMs);
 
-        return new RecommendationResult(savedRequest.getId(), recommendations);
+        return new RecommendationResult(savedRequest.getId(), recommendations, relaxedFilters);
+    }
+
+    /**
+     * 후보 곡을 점수 내림차순으로 정렬한 뒤 다양성 캡을 적용해 상위 결과를 고른다. {@link #create} 의 정상 경로와
+     * 0건 fallback(#1668) 재질의가 같은 산식·결정성을 공유하도록 추출했다.
+     *
+     * <p>{@code seed} 로 매 호출 새 {@link Random} 을 만들어, 같은 입력(같은 후보·seed)이면 같은 jitter·순서를 보장한다
+     * (spec §3 비기능 — 결정성). 후보 리스트는 정렬된 입력 순서를 유지해 jitter 배정이 결정적이다.
+     */
+    private List<ScoredSong> rankCandidates(
+            final List<Song> candidates,
+            final RecommendationRequestEntity savedRequest,
+            final long seed,
+            final int resultCount) {
+        final Random random = new Random(seed);
+        final List<ScoredSong> scoredSongs = candidates.stream()
+                .map(song -> {
+                    final Scored scored = recommendationScorer.score(
+                            song,
+                            savedRequest.getVoiceRangeLow(),
+                            savedRequest.getVoiceRangeHigh(),
+                            savedRequest.getMood(),
+                            savedRequest.getPreferredBpm(),
+                            savedRequest.getAgeGroup(),
+                            random);
+                    return new ScoredSong(song, scored);
+                })
+                .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.scored.total()).reversed())
+                .toList();
+        return diversityPostProcessor.apply(scoredSongs, resultCount);
     }
 
     /**
