@@ -165,6 +165,14 @@ export type SongResponse = {
  *   - `practiceDifficultyReason`: 최고음 + 난이도를 풀어 주는 짧은 한국어 사유. 음역 정보가
  *     없는 곡도 "정보 없음" 사유를 돌려주므로 값이 있으면 항상 노출 가능.
  *
+ * 조옮김 권장 필드 (BE #1544, P-A 페르소나):
+ *   - `suggestedTranspose`: voiceFit 이 낮은 곡에 권장하는 조옮김량(반음 정수, 예: `-6`).
+ *     원조(原調)가 음역에 잘 맞아 조옮김이 불요한 곡이나 산정 근거가 없는 경우 `null`.
+ *   - `transposedVoiceFit` (0~1): 권장 조옮김을 적용한 뒤 재계산한 음역 적합도. `voiceFit`과
+ *     동일 산식이라 직접 비교 가능(예: 0.3 → 0.8). 조옮김 권장이 없으면 `null`.
+ *   - `suggestedTransposeReason`: 조옮김 권장 사유 한국어 문장(예: "6키 내려 부르면 음역대에
+ *     더 잘 맞아요"). 권장이 없으면 `null`.
+ *
  * breakdown 이 없는 과거 추천 재조회 경로에서는 적합도 필드는 모두 `null`/생략 — fe 는 값이
  * 있을 때만 적합도 배지/사유를 노출하고, 없으면 종전대로 matchReason + 클라이언트 추정
  * breakdown 만 보여준다.
@@ -179,6 +187,9 @@ export type RecommendedSongResponse = {
   moodFitReason?: string | null;
   practiceDifficulty?: "EASY" | "NORMAL" | "HARD" | null;
   practiceDifficultyReason?: string | null;
+  suggestedTranspose?: number | null;
+  transposedVoiceFit?: number | null;
+  suggestedTransposeReason?: string | null;
   /**
    * 페르소나 설명가능성 필드 (BE #1598 / 이슈 #1600, P-E 안전곡 모드):
    *   - `persona`: 이 추천을 산출한 가중 프리셋의 페르소나 식별자. 미지정 호출(default
