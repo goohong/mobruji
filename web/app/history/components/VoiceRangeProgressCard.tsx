@@ -32,7 +32,7 @@
 
 import {
   INVALID_MIDI_A11Y_FALLBACK,
-  midiToCombinedNoteName,
+  midiToKoreanNoteName,
   midiToNoteName,
 } from "@/lib/notes";
 import { formatRelativeKorean } from "@/lib/relativeTime";
@@ -246,10 +246,10 @@ export function VoiceRangeProgressCard({ summary }: Props) {
           const lowNoteShort = midiToNoteName(point.lowMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
-          const highNoteCombined = midiToCombinedNoteName(point.highMidi, {
+          const highNoteLabel = midiToKoreanNoteName(point.highMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
-          const lowNoteCombined = midiToCombinedNoteName(point.lowMidi, {
+          const lowNoteLabel = midiToKoreanNoteName(point.lowMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
 
@@ -268,8 +268,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 }
               >
                 <title>
-                  {formatRelativeKorean(point.requestedAt)}: {lowNoteCombined}{" "}
-                  ~ {highNoteCombined} ({point.highMidi - point.lowMidi} 반음)
+                  {formatRelativeKorean(point.requestedAt)}: {lowNoteLabel}{" "}
+                  ~ {highNoteLabel} ({point.highMidi - point.lowMidi} 반음)
                 </title>
               </rect>
               {/*

@@ -213,9 +213,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     renderWithQueryClient(<Home />);
 
     await waitFor(() => {
-      // 이슈 #318: 한국어 (SPN) 병기.
+      // 이슈 #1634: 한국어 음명 단독 표기.
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 ~ 라4/,
       );
     });
     expect(readVoiceRangeMock).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001");
@@ -250,9 +250,9 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
 
     const { container } = renderWithQueryClient(<Home />);
     await waitFor(() => {
-      // 이슈 #318: 한국어 (SPN) 병기.
+      // 이슈 #1634: 한국어 음명 단독 표기.
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 ~ 라4/,
       );
     });
     await expectNoA11yViolations(container);

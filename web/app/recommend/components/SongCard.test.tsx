@@ -130,10 +130,10 @@ describe("SongCard", () => {
     expect(
       screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = 파5 (F5) (#318 한국어 (SPN) 병기)
-    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = 솔3 (G3)
-    expect(screen.getByText("솔3 (G3)")).toBeInTheDocument();
+    // 최고음 음표명 노출 — MIDI 77 = 파5 (#1634 한국어 음명 단독)
+    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 솔3
+    expect(screen.getByText("솔3")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
