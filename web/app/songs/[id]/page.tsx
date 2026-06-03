@@ -41,7 +41,7 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useLikesStore } from "@/store/likes";
 
@@ -117,11 +117,11 @@ function SongDetailView({ song }: SongDetailViewProps) {
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
     typeof song.highMidi === "number"
-      ? midiToCombinedNoteName(song.highMidi)
+      ? midiToKoreanNoteName(song.highMidi)
       : null;
   const lowestNoteName =
     typeof song.lowMidi === "number"
-      ? midiToCombinedNoteName(song.lowMidi)
+      ? midiToKoreanNoteName(song.lowMidi)
       : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
   // closes #1284 — 한국 곡 한국어 표시 우선 (heading + 좋아요 aria-label 동일 표시).

@@ -119,7 +119,7 @@ describe("Home — 측정 안 한 사용자 (NewUserPanel)", () => {
 
   it("진입 분기 카드는 /voice-range/auto, '직접 입력으로 시작'은 /voice-range", async () => {
     renderWithQueryClient(<Home />);
-    // 3 페르소나 카드 모두 측정 wizard 로 연결(F1/F2/F3 미연결 graceful fallback).
+    // 3 페르소나 카드 모두 측정 wizard 로 연결(F1/F2/파3 미연결 graceful fallback).
     expect(
       screen.getByRole("link", { name: /내 목소리부터 알아보기/ }),
     ).toHaveAttribute("href", "/voice-range/auto");
@@ -199,12 +199,12 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     ).toHaveAttribute("href", "/voice-range");
   });
 
-  it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (C3 ~ A4)", async () => {
+  it("BE 응답이 도착하면 음역대를 음표명으로 노출한다 (도3 ~ 라4)", async () => {
     readVoiceRangeMock.mockResolvedValue({
       id: 77,
       sessionId: "00000000-0000-4000-8000-000000000001",
-      lowestNoteMidi: 48, // C3
-      highestNoteMidi: 69, // A4
+      lowestNoteMidi: 48, // 도3
+      highestNoteMidi: 69, // 라4
       sourceMethod: "OCTAVE_PICK",
       createdAt: "2026-05-22T00:00:00Z",
       updatedAt: "2026-05-22T00:00:00Z",
@@ -215,7 +215,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     await waitFor(() => {
       // 이슈 #318: 한국어 (SPN) 병기.
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 \(도3\) ~ 라4 \(라4\)/,
       );
     });
     expect(readVoiceRangeMock).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001");
@@ -252,7 +252,7 @@ describe("Home — 측정 한 사용자 (ReturningUserPanel)", () => {
     await waitFor(() => {
       // 이슈 #318: 한국어 (SPN) 병기.
       expect(screen.getByLabelText(/저장된 음역대/)).toHaveTextContent(
-        /도3 \(C3\) ~ 라4 \(A4\)/,
+        /도3 \(도3\) ~ 라4 \(라4\)/,
       );
     });
     await expectNoA11yViolations(container);

@@ -132,8 +132,8 @@ describe("SongCard", () => {
     ).toBeInTheDocument();
     // 최고음 음표명 노출 — MIDI 77 = 파5 (F5) (#318 한국어 (SPN) 병기)
     expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = 솔3 (G3)
-    expect(screen.getByText("솔3 (G3)")).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 솔3 (솔3)
+    expect(screen.getByText("솔3 (솔3)")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
@@ -357,7 +357,7 @@ describe("SongCard", () => {
       // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (#318: 한국어 (SPN) 병기)
       expect(
         screen.getByText(
-          "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
+          "사용자 도3 (도3)-솔4 (솔4) vs 곡 솔3 (솔3)-파5 (F5)",
         ),
       ).toBeInTheDocument();
       // 추정값 안내 footnote
@@ -739,7 +739,7 @@ describe("SongCard", () => {
     it("buildYouTubeSearchUrl: 한글 제목/아티스트도 안전하게 인코딩한다", () => {
       const url = buildYouTubeSearchUrl("밤편지", "아이유");
       expect(url).toBe(
-        "https://www.youtube.com/results?search_query=%EB%B0%A4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%B4%EC%9C%A0",
+        "https://www.youtube.com/results?search_query=%EB%B0%라4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%시4%EC%9C%A0",
       );
     });
 
