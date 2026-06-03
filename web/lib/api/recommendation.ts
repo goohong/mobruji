@@ -78,7 +78,7 @@ export type MetadataSource =
  * - `P-D` 모임 사회자형 / `P-E` 안전곡형 / `P-F` 과시·킬링파트형 / `P-G` 듀엣형
  *
  * 추천 요청에서 미지정(null/생략)이면 현행 default 가중으로 동작한다(하위호환).
- * 1차(#1598/#1600)는 `P-E` 안전곡 모드만 web 에서 선택 가능하다.
+ * 1차로 web 은 P-D 시퀀스(#1601)·P-E 안전곡(#1600) 모드를 노출한다.
  */
 export type RecommendationPersona =
   | "P-A"
@@ -212,6 +212,73 @@ export function createRecommendation(
     method: "POST",
     body: request,
   });
+}
+
+/**
+ * P-D 모임 사회자 시퀀스 추천의 자리 단계 식별자.
+ *
+ * 단일 추천과 달리 P-D 는 "분위기 흐름"(워밍업 → 고조 → 마무리)을 단계별 곡 묶음으로
+ * 산출한다(persona-expansion-social-emotional.md §2 P-D / §5-1). BE 시퀀스 단계 enum 과
+ * 1:1 UPPER 매칭을 가정한다(be #1599, spec §8 Q1 결정 후 확정).
+ *
+ * - `INTRO` 도입 — 누구나 아는 곡으로 자리를 연다.
+ * - `PEAK` 고조 — 트렌딩/신나는 곡으로 분위기를 끌어올린다.
+ * - `FINALE` 마무리 — 다 같이 부르는 곡으로 흐름을 닫는다.
+ */
+export type SequenceStage = "INTRO" | "PEAK" | "FINALE";
+
+/** 한 자리 단계의 곡 묶음. 단계별로 다른 가중 프리셋으로 산출된다. */
+export type SequenceStageBundle = {
+  stage: SequenceStage;
+  songs: RecommendedSongResponse[];
+};
+
+/**
+ * P-D 시퀀스 추천 요청.
+ *
+ * 단일 음역 입력은 기존 추천과 동일하되, **인원 연령대 분포**(`ageGroups`)를 배열로 받아
+ * 좌중 구성을 반영한다(spec §2 P-D 입력 신호). `persona` 는 `P-D` 로 고정 전달한다.
+ * 미지정 필드는 생략한다(BE 결정성 seed 입력 정합, 하위호환).
+ */
+export type SequenceRecommendationRequest = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 좌중 연령대 분포(선택, 다중). spec §2 P-D 입력 신호 — generationFit 분포 가중. */
+  ageGroups?: AgeGroup[];
+  persona?: RecommendationPersona | null;
+};
+
+/**
+ * P-D 시퀀스 추천 응답.
+ *
+ * 단일 추천 envelope 와 달리 단계별 곡 묶음(`stages`)을 돌려준다. `persona` 는 이 시퀀스를
+ * 산출한 페르소나 식별자(`P-D`).
+ */
+export type SequenceRecommendationResponse = {
+  requestId: string;
+  persona: RecommendationPersona;
+  stages: SequenceStageBundle[];
+};
+
+/**
+ * P-D 모임 사회자 시퀀스 추천 생성.
+ *
+ * 엔드포인트 형상은 spec §5-4 후보(신규 `POST /api/v1/recommendations/sequence`, §8 Q1
+ * 선택지 b)를 1차 가설로 둔다. be #1599 머지 전에는 이 호출이 실패할 수 있으며, 호출 측
+ * (lib/sequence.deriveSequenceFallback)이 기존 추천을 단계별로 묶는 client placeholder
+ * fallback 으로 병행 동작한다([[feedback-be-fe-parallel]]).
+ */
+export function createSequenceRecommendation(
+  request: SequenceRecommendationRequest,
+): Promise<SequenceRecommendationResponse> {
+  return apiFetch<SequenceRecommendationResponse>(
+    "/api/v1/recommendations/sequence",
+    {
+      method: "POST",
+      body: request,
+    },
+  );
 }
 
 /**

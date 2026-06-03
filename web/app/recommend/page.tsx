@@ -341,6 +341,18 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           </div>
         </header>
 
+        {/* (closes #1601) 모임 사회자(P-D) 모드 진입 — "다 같이 즐길 곡" 시퀀스 화면으로
+            이동한다. 이 링크를 누르지 않으면 기존 단일 곡 추천 흐름은 불변(하위호환). */}
+        <Link
+          href="/recommend/host"
+          className="flex flex-col items-start gap-0.5 self-start rounded-[var(--radius-md)] bg-[var(--badge-neutral-bg)] px-4 py-2.5 text-left text-[var(--badge-neutral-fg)] transition-colors duration-[var(--duration-base)] hover:bg-[var(--bg-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
+        >
+          <span className="text-sm font-semibold">다 같이 즐길 곡 추천받기</span>
+          <span className="text-xs text-[var(--text-caption)]">
+            모임 사회자용 — 도입·고조·마무리 단계별 흐름으로
+          </span>
+        </Link>
+
         <IntentModeToggle
           selectedPersona={selectedPersona}
           onPersonaChange={setSelectedPersona}
