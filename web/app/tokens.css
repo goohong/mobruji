@@ -276,6 +276,37 @@
   --surface-modal: #ffffff; /* white */
 
   /*
+   * 잔존 swap 완결 의미 토큰 (ADR-0018 §4-2, 매트릭스 §5/§6, PR #1659) —
+   * 매트릭스 활성 카운트 0 마감용. 정확값 1:1 swap (회귀 0).
+   *
+   * soft ring (SongCard hover/focus-within — 키보드 focus 가 아닌 마우스 hover /
+   * 컨테이너 focus-within 의 옅은 강조 ring):
+   *   hover:ring-zinc-300        + dark:hover:ring-zinc-600        → --ring-soft-hover
+   *   focus-within:ring-zinc-400 + dark:focus-within:ring-zinc-500 → --ring-soft-focus-within
+   *
+   * floating 표면 (ThemeToggle / HomeLink — backdrop-blur 떠 있는 버튼.
+   * opacity suffix `/90` 가 var() 와 불안정해 baked-alpha rgba 로 고정):
+   *   bg-white/90    + dark:bg-zinc-900/90    → --surface-floating
+   *   hover:bg-white + dark:hover:bg-zinc-900 → --surface-floating-hover
+   *
+   * nav 표면 (BottomNav — 동일 baked-alpha 사유):
+   *   bg-white/95                          + dark:bg-zinc-950/95 → --surface-nav
+   *   supports-[backdrop-filter]:bg-white/80 + dark:…/80         → --surface-nav-blur
+   *
+   * subtle border (Card header/footer divider):
+   *   border-zinc-100 + dark:border-zinc-800 → --border-subtle
+   *
+   * 다크 모드 swap 은 본 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  --ring-soft-hover: #d4d4d8; /* zinc-300 */
+  --ring-soft-focus-within: #a1a1aa; /* zinc-400 */
+  --surface-floating: rgba(255, 255, 255, 0.9); /* white @ 90% */
+  --surface-floating-hover: #ffffff; /* white */
+  --surface-nav: rgba(255, 255, 255, 0.95); /* white @ 95% */
+  --surface-nav-blur: rgba(255, 255, 255, 0.8); /* white @ 80% */
+  --border-subtle: #f4f4f5; /* zinc-100 */
+
+  /*
    * Chart bar + card surface 의미 토큰 (#1044 단계 4 PR 13) — history
    * `VoiceRangeProgressCard.tsx` SVG 차트 + section card surface 잔여 zinc 일괄
    * swap.
@@ -378,6 +409,15 @@ html.dark {
   /* Modal 의미 토큰 dark swap (PR #1263 매트릭스 sub-PR 1) */
   --modal-backdrop: rgba(24, 24, 27, 0.6); /* zinc-900 @ 60% — light/dark 동일 */
   --surface-modal: #18181b; /* zinc-900 */
+
+  /* 잔존 swap 완결 의미 토큰 dark swap (PR #1659) */
+  --ring-soft-hover: #52525b; /* zinc-600 */
+  --ring-soft-focus-within: #71717a; /* zinc-500 */
+  --surface-floating: rgba(24, 24, 27, 0.9); /* zinc-900 @ 90% */
+  --surface-floating-hover: #18181b; /* zinc-900 */
+  --surface-nav: rgba(9, 9, 11, 0.95); /* zinc-950 @ 95% */
+  --surface-nav-blur: rgba(9, 9, 11, 0.8); /* zinc-950 @ 80% */
+  --border-subtle: #27272a; /* zinc-800 */
 
   /* Chart bar + card surface 의미 토큰 dark swap (PR 13) */
   --chart-bar-active-bg: #f4f4f5; /* zinc-100 */

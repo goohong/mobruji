@@ -40,11 +40,9 @@ export function HomeLink() {
         // fixed top-left, safe-area 고려. ThemeToggle(우상단) 과 대칭. z-30 동일.
         "fixed top-3 left-3 z-30",
         "flex h-10 w-10 items-center justify-center rounded-full",
-        "border border-[var(--border)] bg-white/90 backdrop-blur",
+        "border border-[var(--border)] bg-[var(--surface-floating)] backdrop-blur",
         "text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors duration-[var(--duration-base)]",
-        "hover:bg-white hover:text-[var(--text-primary)]",
-        "dark:bg-zinc-900/90",
-        "dark:hover:bg-zinc-900",
+        "hover:bg-[var(--surface-floating-hover)] hover:text-[var(--text-primary)]",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]",
         "pt-[env(safe-area-inset-top)]",
       ].join(" ")}

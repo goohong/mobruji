@@ -49,9 +49,9 @@ type ChipProps = SpanChipProps | ButtonChipProps;
 
 const TONE_STATIC: Record<ChipTone, string> = {
   neutral:
-    "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+    "bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-fg)]",
   primary:
-    "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900",
+    "bg-[var(--cta-neutral-bg)] text-[var(--cta-neutral-fg)]",
   success:
     "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
   warning:
@@ -61,7 +61,7 @@ const TONE_STATIC: Record<ChipTone, string> = {
 };
 
 const TONE_BUTTON_INACTIVE =
-  "bg-white text-zinc-700 ring-1 ring-zinc-200 hover:bg-zinc-100 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800 dark:hover:bg-zinc-800";
+  "bg-[var(--cta-secondary-bg)] text-[var(--badge-neutral-fg)] ring-1 ring-[var(--surface-card-ring)] hover:bg-[var(--cta-secondary-bg-hover)]";
 
 export const Chip = forwardRef<HTMLElement, ChipProps>(function Chip(
   props,

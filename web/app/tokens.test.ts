@@ -430,4 +430,38 @@ describe("design tokens (ADR-0018)", () => {
       expect(allDark).toMatch(new RegExp(`${token}:`));
     }
   });
+
+  /*
+   * ADR-0018 단계 4 게이트 마감 (PR #1659) — 잔존 zinc hardcode 의미 토큰화 회귀
+   * 가드. 매트릭스 활성 카운트 0 마감용 신규 7종.
+   *
+   *  - soft ring (SongCard hover/focus-within) : `--ring-soft-hover` /
+   *    `--ring-soft-focus-within`
+   *  - floating 표면 (ThemeToggle/HomeLink, baked-alpha rgba) :
+   *    `--surface-floating` / `--surface-floating-hover`
+   *  - nav 표면 (BottomNav, baked-alpha rgba) : `--surface-nav` /
+   *    `--surface-nav-blur`
+   *  - subtle border (Card header/footer divider) : `--border-subtle`
+   *
+   * 다크 모드 swap 은 토큰 자체에서 처리 → 사용처는 `dark:` prefix 제거.
+   */
+  it("잔존 swap 완결 의미 토큰 7종이 light + dark 모두 정의된다 (PR #1659)", () => {
+    const requiredTokens = [
+      "--ring-soft-hover",
+      "--ring-soft-focus-within",
+      "--surface-floating",
+      "--surface-floating-hover",
+      "--surface-nav",
+      "--surface-nav-blur",
+      "--border-subtle",
+    ];
+    for (const token of requiredTokens) {
+      expect(tokens).toMatch(new RegExp(`${token}:`));
+    }
+    const darkBlocks = tokens.match(/html\.dark\s*{([\s\S]*?)}/g) ?? [];
+    const allDark = darkBlocks.join("\n");
+    for (const token of requiredTokens) {
+      expect(allDark).toMatch(new RegExp(`${token}:`));
+    }
+  });
 });

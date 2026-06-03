@@ -28,7 +28,7 @@ describe("Button", () => {
     const button = screen.getByRole("button", { name: "저장" });
     expect(button).toBeInTheDocument();
     expect(button.className).toContain("h-12");
-    expect(button.className).toContain("bg-zinc-900");
+    expect(button.className).toContain("bg-[var(--cta-neutral-bg)]");
     expect(button.getAttribute("type")).toBe("button");
 
     fireEvent.click(button);
