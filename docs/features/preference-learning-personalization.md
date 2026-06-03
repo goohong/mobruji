@@ -5,7 +5,7 @@ status: draft
 owner: @mobruji-maestro
 scope: recommendation
 related_issues: [1486, 1489]
-related_prs: []
+related_prs: [1568]
 last_reviewed: 2026-06-03
 ---
 
@@ -163,7 +163,7 @@ sequenceDiagram
 
 ## 6) 작업 분할 (예상 PR 리스트)
 
-- [ ] **PR A** (plan, 본 PR): Feature Spec draft + `06-domain-model.md §4` 용어 4종 등재.
+- [x] **PR A** (plan, #1568): Feature Spec draft + `06-domain-model.md §4` 용어 4종 등재.
 - [ ] **PR B** (be, scope:recommendation): `LearnedPreferenceProfile`·`PreferenceAffinity` 엔티티 + 마이그레이션 + 신호 파생 갱신(좋아요/패스/시드/노출 훅) + E2E. §5/§6 도메인 문서 갱신.
 - [ ] **PR C** (be, scope:recommendation): `learnedAffinity` 신호 + warm-up 게이트 + 추천 결합 + ε 탐색 + 결정성 회귀 가드. 가중치/감쇠 ADR(§8 Q2) 동반.
 - [ ] **PR D** (be, scope:recommendation): 조회/초기화/opt-out endpoint + SessionAuthGuard + E2E.
