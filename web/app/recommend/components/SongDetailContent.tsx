@@ -1,7 +1,7 @@
 /**
  * 곡 상세 모달 본문 컨텐츠 (closes #323).
  *
- * SongDetailModal 의 children 으로 들어가 카드 클릭 시 펼쳐지는 풀 상세를 그린다.
+ * SongDetailSheet 의 children 으로 들어가 카드 클릭 시 펼쳐지는 풀 상세를 그린다.
  * 책임:
  *   - 앨범 커버 이미지 자리(또는 placeholder — closes #322 PR 2 에서 src 채움)
  *   - 곡 메타(아티스트/난이도/최고음·최저음/키/장르/mood/BPM/발매년)
