@@ -8,22 +8,12 @@
 @import "./tokens.css";
 
 /*
- * Pretendard Variable — ADR-0018 단계 4 PR 2 자체 호스팅 결정.
- *
- *  - 파일: `web/public/fonts/PretendardVariable.woff2` (~2MB, OFL-1.1).
- *  - `font-display: swap` — 폰트 로드 전에는 system-ui fallback 으로 즉시 paint,
- *    로드 후 부드럽게 교체. FOIT (Flash of Invisible Text) 회피.
- *  - `font-weight: 45 920` — variable axis 전체 범위 (Pretendard v1.3 weight 45-920).
- *    한 파일이 9 weight 를 모두 cover 하므로 후속 weight 별 import 불요.
- *  - `unicode-range`: Pretendard 는 한글 + 라틴 모두 포함 → 별도 subset 없이 전체.
+ * Pretendard Variable / Geist 폰트 로딩은 next/font (`app/layout.tsx`) 가 담당한다
+ * (ui-ux-redesign 단계 4 PR 9, #1692). 수동 폰트 페이스 선언을 두면 next/font 가
+ * 생성하는 size-adjust fallback (CLS 방지) 과 자체 호스팅 경로가 중복되므로 제거했다.
+ * tokens.css 의 `--font-family-*` stack 이 next/font 변수(`--font-pretendard` /
+ * `--font-geist-sans` / `--font-geist-mono`)를 가리킨다.
  */
-@font-face {
-  font-family: "Pretendard Variable";
-  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
-  font-weight: 45 920;
-  font-style: normal;
-  font-display: swap;
-}
 
 /*
  * 이슈 #319 — 다크 모드 수동 토글.

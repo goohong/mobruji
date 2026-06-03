@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
@@ -9,14 +10,43 @@ import { HomeLink } from "@/components/nav/HomeLink";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
+/*
+ * Pretendard Variable — 한글 본문 폰트 (ui-ux-redesign 단계 4 PR 9, #1692).
+ *
+ * 기존 globals.css 의 수동 `@font-face` 를 next/font/local 로 이관한다. next 가
+ * 빌드 시 woff2 를 `/_next/static/media` 로 해시 복사해 자체 호스팅(외부 요청 0)
+ * 하고, 폰트 메트릭을 읽어 CLS 를 줄이는 size-adjust fallback face 를 자동 생성한다.
+ *
+ *  - display: "swap" — 폰트 도착 전 fallback 으로 즉시 paint (FOIT 회피, FOUT 허용).
+ *  - adjustFontFallback(local 기본 "Arial") — next 가 woff2 메트릭으로 size-adjust 된
+ *    fallback `@font-face` 를 만들어 swap 시 reflow(CLS) 를 최소화한다.
+ *  - preload: false — 한글 전체 글리프 + variable axis 라 ~2MB. 모든 라우트에서
+ *    eager preload 하면 LCP 를 해치므로, swap + size-adjust fallback 으로 충분히
+ *    부드럽게 교체되도록 두고 critical path 에서 뺀다.
+ *  - weight: "45 920" — Pretendard v1.3 variable weight 축 전체 범위.
+ *
+ * `tokens.css` 의 `--font-family-*` stack 이 `var(--font-pretendard)` 를 1순위로
+ * 가리키며, Latin 은 그다음 `var(--font-geist-sans)` → system 으로 graceful fallback.
+ */
+const pretendard = localFont({
+  src: "../public/fonts/PretendardVariable.woff2",
+  variable: "--font-pretendard",
+  display: "swap",
+  weight: "45 920",
+  preload: false,
+  fallback: ["system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+});
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -73,7 +103,7 @@ export default function RootLayout({
     <html
       lang="ko"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${pretendard.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
         {/*

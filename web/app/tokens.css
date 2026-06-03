@@ -430,9 +430,13 @@ html.dark {
 
 :root {
   /*
-   * font-family — Pretendard (한글) → Geist (라틴) → system fallback.
-   * Pretendard 호스팅 결정은 PR 2 (Pretendard 통합) 시점에 별도 결정. 본 PR 은
-   * 변수만 선언 — system-ui fallback 으로 회귀 0.
+   * font-family — Pretendard (한글, next/font/local) → Geist (라틴, next/font/google)
+   * → system fallback. 폰트 로딩은 `app/layout.tsx` 의 next/font 가 담당하며 여기선
+   * 그 변수(`--font-pretendard` / `--font-geist-sans` / `--font-geist-mono`)를 참조만
+   * 한다. next/font 변수는 size-adjust fallback 까지 포함하므로 CLS 가 최소화된다.
+   * PR 9 (#1692) 이전엔 Geist 를 리터럴 family 명으로 적어 next/font 가 생성한 실제
+   * (obfuscate 된) family 명과 연결되지 않아 Latin 이 system 으로 떨어졌다 — 변수
+   * 참조로 교정.
    */
   /*
    * 별칭 (`--font-family-*`) 을 정의해 globals.css `@theme inline` 에서 자기참조
@@ -441,12 +445,12 @@ html.dark {
    * source-of-truth 가 필요하다.
    */
   --font-family-sans:
-    "Pretendard Variable", "Geist", system-ui, -apple-system, "Segoe UI",
-    sans-serif;
+    var(--font-pretendard), var(--font-geist-sans), system-ui, -apple-system,
+    "Segoe UI", sans-serif;
   --font-family-display:
-    "Pretendard Variable", "Geist", system-ui, sans-serif;
+    var(--font-pretendard), var(--font-geist-sans), system-ui, sans-serif;
   --font-family-mono:
-    "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
 
   /* tokens.css 직접 사용용 별칭 (`var(--font-sans)` 호출 호환) */
   --font-sans: var(--font-family-sans);
