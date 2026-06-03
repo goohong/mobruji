@@ -131,6 +131,7 @@ frontmatter의 `status` 필드로 추적한다.
 | [helper-thread-stream](helper-thread-stream.md) | Helper UX 묶음 — bot 1초 auto-ack + Discord thread stream + reply.referenced_message forwarding | draft | 2026-05-24 |
 | [helper-writing-marker-timing-fix](helper-writing-marker-timing-fix.md) | helper writing marker timing fix | implementing | 2026-05-27 |
 | [internal-label-scrub](internal-label-scrub.md) | 내부 ID 라벨 scrub (A1/B2/D1 → user-friendly paraphrase 분리) | draft | 2026-05-24 |
+| [legal-risk-data-collection-and-pii](legal-risk-data-collection-and-pii.md) | 외부 데이터 수집·사용자 PII 처리 법적 리스크 레지스터 (저작권/약관/개인정보 3축) | draft | 2026-06-03 |
 | [librosa-ci-build-monitoring](librosa-ci-build-monitoring.md) | librosa CI 빌드 시간 모니터링 + 캐싱 전략 | draft | 2026-05-24 |
 | [loop-heartbeat-reliability](loop-heartbeat-reliability.md) | Loop heartbeat reliability — `record_loop_heartbeat` "skip on continue" 패턴 일소 (try/finally 단일 종점) | draft | 2026-05-28 |
 | [maestro-auto-wake](maestro-auto-wake.md) | maestro 자동 wake 사이클 (idle 시 self-perpetuating + secondary backup) | approved | 2026-05-24 |
