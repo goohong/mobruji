@@ -1,9 +1,11 @@
 /**
  * 곡 메타 표시 헬퍼 (이슈 #1715 디테일 폴리시).
  *
- * BE Song 응답의 일부 필드는 내부 코드값(예: `language="ko"`, `metadataSource="MANUAL_SEED"`)
- * 이라 사용자에게 그대로 노출하면 노이즈가 된다. 사용자 친화 표시를 위해:
+ * BE Song 응답의 일부 필드는 내부 코드값(예: `language="ko"`, `mood="UPBEAT"`,
+ * `metadataSource="MANUAL_SEED"`)이라 사용자에게 그대로 노출하면 노이즈가 된다.
+ * 사용자 친화 표시를 위해:
  *   - `language`: ISO 639-1 코드를 한국어 라벨로 매핑. 매핑할 수 없으면 `null` → 호출 측이 숨김.
+ *   - `mood`: Mood enum(SCREAMING_SNAKE)을 한국어 라벨로 매핑(#1764). 매핑할 수 없으면 `null` → 셀 생략.
  *   - `metadataSource`: 내부 출처(데이터 적재 경로)라 사용자에게 보여 줄 의미가 없어 상세에서 제거.
  *     (라벨이 필요하면 호출 측이 직접 정의 — 본 모듈은 노출 정책상 매핑하지 않는다.)
  */
