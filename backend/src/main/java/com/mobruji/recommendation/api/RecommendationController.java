@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.mobruji.recommendation.api.dto.DuetRecommendationCreateRequest;
+import com.mobruji.recommendation.api.dto.DuetRecommendationResponse;
 import com.mobruji.recommendation.api.dto.NextRecommendationRequest;
 import com.mobruji.recommendation.api.dto.RecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.RecommendationResponse;
@@ -22,6 +24,7 @@ import com.mobruji.recommendation.api.dto.ShowoffRecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.ShowoffRecommendationResponse;
 import com.mobruji.recommendation.api.dto.TrendingListResponse;
 import com.mobruji.recommendation.application.TrendingQuery;
+import com.mobruji.recommendation.domain.DuetRecommendationResult;
 import com.mobruji.recommendation.domain.RecommendationResult;
 import com.mobruji.recommendation.domain.SafeRecommendationResult;
 import com.mobruji.recommendation.domain.SequenceRecommendationResult;
@@ -110,6 +113,21 @@ public class RecommendationController {
                 showoffRecommendationCreateRequest.toCommand());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ShowoffRecommendationResponse.from(showoffRecommendationResult));
+    }
+
+    /**
+     * 듀엣·함께 부르기형(P-G) 추천(persona-expansion-social-emotional.md §2/§5). "둘이/같이 부를 곡" 의도에 맞춰 두 사람 음역을
+     * 모두 충족하는 듀엣곡을 만든다 — 큐레이션 듀엣곡(MIXED) 우위 + 두 음역 동시 충족도로 강편향한다. 응답에 페르소나 식별자 + 곡별
+     * "파트 분담" 안내를 함께 노출한다(설명 가능성). 요청 형상이 2인 음역으로 단일 추천과 달라(다중 음역 입력) 기존
+     * {@code POST /recommendations} 확장이 아닌 별도 엔드포인트로 둔다(P-D 시퀀스·P-E 안전곡·P-F 과시와 같은 패턴).
+     */
+    @PostMapping("/duet")
+    public ResponseEntity<DuetRecommendationResponse> createDuet(
+            @Valid @RequestBody final DuetRecommendationCreateRequest duetRecommendationCreateRequest) {
+        final DuetRecommendationResult duetRecommendationResult = recommendationService.createDuet(
+                duetRecommendationCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(DuetRecommendationResponse.from(duetRecommendationResult));
     }
 
     @GetMapping("/{id}")

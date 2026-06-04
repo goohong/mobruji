@@ -21,6 +21,7 @@ import com.mobruji.song.infrastructure.SongRepository;
 
 import lombok.RequiredArgsConstructor;
 
+import com.mobruji.recommendation.domain.DuetRecommendationResult;
 import com.mobruji.recommendation.domain.FeedbackReaction;
 import com.mobruji.recommendation.domain.FilterRelaxation;
 import com.mobruji.recommendation.domain.Recommendation;
@@ -36,6 +37,7 @@ import com.mobruji.recommendation.domain.SequenceStage;
 import com.mobruji.recommendation.domain.ShowoffRecommendationResult;
 import com.mobruji.song.domain.Difficulty;
 import com.mobruji.song.domain.Mood;
+import com.mobruji.song.domain.VocalGender;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
 import com.mobruji.recommendation.infrastructure.SessionFeedbackRepository;
@@ -402,6 +404,141 @@ public class RecommendationService {
             case NORMAL -> 1;
             case EASY -> 2;
         };
+    }
+
+    /**
+     * 듀엣·함께 부르기형(P-G) 추천(persona-expansion-social-emotional.md §2/§5). "둘이/같이 부를 곡" 의도에 맞춰 두 사람 음역을
+     * 모두 충족하는 듀엣곡을 만든다. 신규 추천 알고리즘이 아니라 기존 {@link #create} 파이프라인을 *듀엣 가중 프리셋* 으로 재조합하는
+     * 것이다 — 점수 함수·가중치/결정성 불변식을 건드리지 않는다.
+     *
+     * <p>가중 프리셋(기존 신호 재조합, 가중치 변경 없음):
+     * <ul>
+     * <li>두 사람 음역의 합집합({@code min(low)}~{@code max(high)})을 단일 추천 입력 음역으로 넣어 두 사람을 함께 커버하는
+     * 후보(넓은 음역 곡)를 만든다. 듀엣은 두 성별이 섞이므로 성별 필터를 비워(null) 듀엣곡이 배제되지 않게 하고, 분위기 편향도 두지
+     * 않는다(mood null — 듀엣은 모든 분위기에 걸친다).</li>
+     * <li>산출된 결과를 ① {@code VocalGender.MIXED}(큐레이션 듀엣/혼성 곡) 우위 ② 두 음역 동시 충족도(곡 음역을 중간음에서 둘로
+     * 나눠 낮은 파트는 저음 가수, 높은 파트는 고음 가수 음역에 얼마나 들어맞는지) 순으로 결정적으로 재정렬한다({@link #applyDuetPreset}).
+     * 전용 듀엣곡 분류 데이터셋은 미확보 상태라(§5-2) 기존 MIXED 큐레이션 신호를 1차 듀엣 분류 신호로 재사용하고, 부족하면 두 음역
+     * 동시 충족도로 graceful 하게 채운다(과시 P-F 가 킬링파트 메타 부재 시 음역 천장 근접만으로 1차 추천한 것과 같은 패턴).</li>
+     * </ul>
+     *
+     * <p>각 추천 곡에는 "파트 분담" 안내({@code partAssignmentReason}) 한 줄이 곡 음역·두 가수 성별에서 결정적으로 파생되어 붙는다
+     * (§4 설명 가능성). 결과는 단일 추천과 같은 경로로 영속되어 고유 {@code requestId} 로 곡 피드백·재조회를 재사용할 수 있다.
+     */
+    public DuetRecommendationResult createDuet(final DuetRecommendationCommand duetRecommendationCommand) {
+        final int unionLow = Math.min(
+                duetRecommendationCommand.voiceRangeLow(), duetRecommendationCommand.partnerVoiceRangeLow());
+        final int unionHigh = Math.max(
+                duetRecommendationCommand.voiceRangeHigh(), duetRecommendationCommand.partnerVoiceRangeHigh());
+        final CreateRecommendationCommand createCommand = new CreateRecommendationCommand(
+                duetRecommendationCommand.sessionId(),
+                unionLow,
+                unionHigh,
+                null,
+                null,
+                duetRecommendationCommand.ageGroup(),
+                null,
+                List.of(),
+                false);
+        // 빈 화면을 막기 위해 0건 fallback 을 켠다(relaxOnZeroResult=true) — 듀엣 사용자도 항상 함께 부를 곡을 받길 원한다.
+        final RecommendationResult result = create(createCommand, true);
+
+        // 두 가수 중 음역 천장이 더 낮은 쪽이 낮은 파트, 더 높은 쪽이 높은 파트를 담당한다(천장이 같으면 요청자가 낮은 파트, 결정적).
+        final boolean requesterIsLowerPart = duetRecommendationCommand.voiceRangeHigh() <= duetRecommendationCommand
+                .partnerVoiceRangeHigh();
+        final SingerPart lowerSinger = requesterIsLowerPart
+                ? new SingerPart(duetRecommendationCommand.voiceRangeLow(),
+                        duetRecommendationCommand.voiceRangeHigh(), duetRecommendationCommand.gender())
+                : new SingerPart(duetRecommendationCommand.partnerVoiceRangeLow(),
+                        duetRecommendationCommand.partnerVoiceRangeHigh(), duetRecommendationCommand.partnerGender());
+        final SingerPart higherSinger = requesterIsLowerPart
+                ? new SingerPart(duetRecommendationCommand.partnerVoiceRangeLow(),
+                        duetRecommendationCommand.partnerVoiceRangeHigh(), duetRecommendationCommand.partnerGender())
+                : new SingerPart(duetRecommendationCommand.voiceRangeLow(),
+                        duetRecommendationCommand.voiceRangeHigh(), duetRecommendationCommand.gender());
+
+        final List<DuetRecommendationResult.DuetRecommendation> duetRecommendations = applyDuetPreset(
+                result.recommendations(), lowerSinger, higherSinger, duetRecommendationCommand.limit());
+        log.info(
+                "event=recommendation.duet.created persona={} resultCount={} relaxed={}",
+                RecommendationPersona.P_G.code(),
+                duetRecommendations.size(),
+                result.relaxed());
+        return new DuetRecommendationResult(
+                RecommendationPersona.P_G, result.requestId(), duetRecommendations, result.relaxedFilters());
+    }
+
+    /**
+     * 듀엣 강편향 — 점수 순으로 정렬된 추천을 ① {@code VocalGender.MIXED}(큐레이션 듀엣곡) 우위 ② 두 음역 동시 충족도(곡 음역 미상은
+     * 후순위) 순으로 재정렬하고, 노출 곡 수를 {@code limit} 으로 자른다. 두 키가 모두 같은 곡끼리는 입력 순서(점수 내림차순)를 보존하는
+     * stable sort 라 같은 입력이면 같은 결과(결정성 보존). 재정렬 후 노출 순서대로 {@code rankPosition} 을 1부터 다시 매겨
+     * "파트 분담" 안내를 붙인다.
+     */
+    private static List<DuetRecommendationResult.DuetRecommendation> applyDuetPreset(
+            final List<ScoredRecommendation> recommendations,
+            final SingerPart lowerSinger,
+            final SingerPart higherSinger,
+            final Integer limit) {
+        final List<ScoredRecommendation> reranked = new ArrayList<>(recommendations);
+        reranked.sort(Comparator
+                .comparingInt(RecommendationService::duetClassRank)
+                .thenComparingInt((final ScoredRecommendation recommendation) -> jointRangeMismatch(
+                        recommendation, lowerSinger, higherSinger)));
+        final int bound = limit == null ? reranked.size() : Math.min(limit, reranked.size());
+        final List<DuetRecommendationResult.DuetRecommendation> duetRecommendations = new ArrayList<>(bound);
+        for (int i = 0; i < bound; i++) {
+            final ScoredRecommendation source = reranked.get(i);
+            final ScoredRecommendation ranked = new ScoredRecommendation(
+                    source.song(),
+                    source.score(),
+                    source.matchReason(),
+                    i + 1,
+                    source.breakdown(),
+                    source.transposeSuggestion());
+            duetRecommendations.add(DuetRecommendationResult.DuetRecommendation.of(
+                    ranked, lowerSinger.gender(), higherSinger.gender()));
+        }
+        return duetRecommendations;
+    }
+
+    /**
+     * 듀엣 재정렬용 듀엣곡 분류 우선순위 — {@code VocalGender.MIXED}(큐레이션 듀엣/혼성 곡)(0) → 그 외/미상(1). 전용 듀엣 분류
+     * 데이터셋 미확보(§5-2) 상태라 기존 MIXED 큐레이션 신호를 1차 듀엣 분류 신호로 재사용한다. 값이 작을수록 듀엣(상위 노출).
+     */
+    private static int duetClassRank(final ScoredRecommendation recommendation) {
+        return recommendation.song().getVocalGender() == VocalGender.MIXED ? 0 : 1;
+    }
+
+    /**
+     * 듀엣 재정렬용 두 음역 동시 충족도 — 곡 음역을 중간음에서 둘로 나눠 낮은 파트({@code lowMidi}~중간음)는 저음 가수, 높은 파트
+     * (중간음~{@code highMidi})는 고음 가수의 음역에서 얼마나 벗어나는지(반음 합)를 잰다. 값이 작을수록(두 음역에 잘 들어맞을수록)
+     * 듀엣으로 부르기 좋은 곡이라 상위 노출한다. 곡 음역 미상은 {@link Integer#MAX_VALUE} 로 후순위(graceful).
+     */
+    private static int jointRangeMismatch(
+            final ScoredRecommendation recommendation,
+            final SingerPart lowerSinger,
+            final SingerPart higherSinger) {
+        final Integer lowMidi = recommendation.song().getLowMidi();
+        final Integer highMidi = recommendation.song().getHighMidi();
+        if (lowMidi == null || highMidi == null) {
+            return Integer.MAX_VALUE;
+        }
+        final int splitMidi = (lowMidi + highMidi) / 2;
+        return partMismatch(lowMidi, splitMidi, lowerSinger) + partMismatch(splitMidi, highMidi, higherSinger);
+    }
+
+    /**
+     * 한 파트({@code partLow}~{@code partHigh})가 담당 가수의 음역({@link SingerPart})에서 벗어나는 반음 수 — 파트 최저음이
+     * 가수 최저음보다 낮으면 그 차이, 파트 최고음이 가수 최고음보다 높으면 그 차이를 합한다. 파트가 가수 음역 안에 다 들어가면 0.
+     */
+    private static int partMismatch(final int partLow, final int partHigh, final SingerPart singer) {
+        return Math.max(0, singer.low() - partLow) + Math.max(0, partHigh - singer.high());
+    }
+
+    /**
+     * 듀엣 파트 분담 산정용 가수 1인 — 음역(최저~최고음) + 성별(파트 라벨용, nullable). 두 음역 동시 충족도와 "파트 분담" 안내에 함께 쓴다.
+     */
+    private record SingerPart(int low, int high, VocalGender gender) {
     }
 
     /**
