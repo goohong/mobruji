@@ -8,7 +8,7 @@
  *    저장된 음역대 요약(API 응답 도착 시 노트명) + "음역대 다시 측정" 보조.
  *
  * 추가 검증:
- *  - SecondaryNav는 두 상태 모두에서 곡 검색/받은 추천/좋아요/북마크 4개 링크 노출.
+ *  - SecondaryNav는 두 상태 모두에서 곡 검색/이력/좋아요/북마크 4개 링크 노출.
  *  - a11y violation 0 (axe).
  */
 
@@ -84,7 +84,7 @@ describe("Home — 공통", () => {
     ).toBeInTheDocument();
   });
 
-  it("빠른 진입 nav에 검색/받은 추천/좋아요/북마크 4개 링크가 노출된다", async () => {
+  it("빠른 진입 nav에 검색/이력/좋아요/북마크 4개 링크가 노출된다", async () => {
     renderWithQueryClient(<Home />);
     const nav = screen.getByRole("navigation", { name: /빠른 진입/ });
     expect(nav).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe("Home — 공통", () => {
       screen.getByRole("link", { name: /곡 검색/ }),
     ).toHaveAttribute("href", "/songs");
     expect(
-      screen.getByRole("link", { name: /받은 추천/ }),
+      screen.getByRole("link", { name: /^이력$/ }),
     ).toHaveAttribute("href", "/history");
     expect(screen.getByRole("link", { name: /좋아요/ })).toHaveAttribute(
       "href",
