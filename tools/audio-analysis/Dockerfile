@@ -13,6 +13,12 @@ RUN apt-get update \
       libsndfile1 \
  && rm -rf /var/lib/apt/lists/*
 
+# Deno JS 런타임 (#1826): yt-dlp 가 YouTube nsig/sig JS 챌린지를 풀려면 JS 인터프리터가
+# PATH 에 있어야 한다. 없으면 yt-dlp 의 JS Challenge Provider 가 전부 unavailable 이라
+# 시그니처 미해결로 'Video unavailable' 이 된다 — bgutil PO token(#1813)만으로는 부족.
+# node 대비 단일 정적 바이너리라 의존성이 가벼워 deno 를 채택. bin 이미지에서 복사해 핀 고정.
+COPY --from=denoland/deno:bin-2.1.4 /deno /usr/local/bin/deno
+
 WORKDIR /app
 
 # 기본은 경량 경로(yt-dlp+librosa). vocal stem 분리(Spleeter/TensorFlow)는
