@@ -672,6 +672,48 @@ describe("RecommendPage", () => {
       expect(screen.getByText("곡-10")).toBeInTheDocument();
     });
 
+    // closes #1799 — 음역곡 풀이 작으면 다음 페이지에 같은 곡이 재등장한다. 평탄화 단계에서
+    // song.id 로 중복 제거되어 같은 곡 카드가 두 번 그려지지 않아야 한다.
+    it("다음 페이지에 같은 곡이 재등장해도 중복 카드 없이 한 번만 렌더한다", async () => {
+      sessionMock.set({ sessionId: "sess-dedup", voiceRangeId: 44 });
+      wireAppendExcluded();
+
+      readVoiceRangeMock.mockResolvedValue({
+        id: 44,
+        sessionId: "sess-dedup",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [10, 20]))
+        // 2차 페이지가 20 을 재surface — dedup 이 없으면 곡-20 카드가 둘이 된다.
+        .mockResolvedValueOnce(buildResponseWithSongIds(2, [20, 30]));
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-10")).toBeInTheDocument();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("recommend-sentinel")).toBeInTheDocument();
+      });
+      await act(async () => {
+        triggerIntersection();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-30")).toBeInTheDocument();
+      });
+
+      // 재등장한 곡-20 은 정확히 한 번만 렌더된다.
+      expect(screen.getAllByText("곡-20")).toHaveLength(1);
+    });
+
     it("두 번째 sentinel 진입에서 1차+2차 페이지 곡 ID들이 모두 누적 전달된다", async () => {
       sessionMock.set({ sessionId: "sess-accum", voiceRangeId: 22 });
       wireAppendExcluded();

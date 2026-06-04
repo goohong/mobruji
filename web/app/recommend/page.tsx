@@ -488,11 +488,22 @@ function RecommendationFeed({
   const [sortKey, setSortKey] = useState<RecommendationSortKey>("composite");
 
   // 모든 페이지의 추천 곡을 평탄화. 페이지 경계 정보는 사용자에게 노출하지 않는다.
+  // closes #1799 — 소규모 음역곡 풀(음역곡 100)에서 다음 페이지에 같은 곡이 재등장할 수
+  // 있어 song.id 로 중복 제거한다(첫 등장 유지). 미적용 시 스와이프 덱에 같은 곡이 두 번 뜬다.
   const allRecommendations = useMemo(() => {
     if (!data) {
       return [];
     }
-    return data.pages.flatMap((page) => page.recommendations);
+    const seen = new Set<number>();
+    return data.pages
+      .flatMap((page) => page.recommendations)
+      .filter((item) => {
+        if (seen.has(item.song.id)) {
+          return false;
+        }
+        seen.add(item.song.id);
+        return true;
+      });
   }, [data]);
 
   /**
