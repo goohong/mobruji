@@ -67,6 +67,10 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { midiToKoreanNoteName } from "@/lib/notes";
+import {
+  computeVoiceFitRatio,
+  type UserVoiceRange,
+} from "@/lib/scoreBreakdown";
 import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
@@ -89,6 +93,66 @@ const SKELETON_COUNT = 4;
  * 두 번째 페이지가 즉시 페치돼서 의도와 어긋날 수 있으니 적당히 400px 만 둔다.
  */
 const SENTINEL_ROOT_MARGIN = "400px";
+
+/**
+ * 결과 정렬 기준(이슈 #1765).
+ *
+ * - `composite` 추천순(종합): BE 가 음역 적합·분위기·인기·템포·세대 가중을 종합해 매긴
+ *   `score` 순서(= 피드 도착 순서)를 그대로 유지하는 기본값. 회귀 0 을 위해 재정렬하지 않는다.
+ * - `voiceFit` 음역 적합순 / `moodFit` 분위기 적합순: 이미 로드된 결과를 해당 축으로
+ *   클라이언트에서 내림차순 재정렬한다(추가 BE 호출 없음).
+ *
+ * 인기순은 클라이언트에 곡 단위 인기 신호가 없어(종합 `score` 에만 녹아 있음) 별도 BE 정렬
+ * 파라미터/필드가 필요하므로 1차 범위에서 제외한다. 서비스 특성상 "내 음역대에 맞나"·"고른
+ * 분위기에 맞나"가 노래방 선곡에서 가장 의미 있는 축이라 이 둘만 노출한다.
+ */
+type RecommendationSortKey = "composite" | "voiceFit" | "moodFit";
+
+const SORT_OPTIONS = [
+  {
+    key: "composite",
+    label: "추천순",
+    caption: "음역 적합도·분위기·인기 등을 종합한 점수순으로 정렬했어요.",
+  },
+  {
+    key: "voiceFit",
+    label: "음역 적합순",
+    caption: "내 음역대에 잘 맞는 곡부터 정렬했어요.",
+  },
+  {
+    key: "moodFit",
+    label: "분위기 적합순",
+    caption: "고른 분위기에 잘 맞는 곡부터 정렬했어요.",
+  },
+] as const satisfies ReadonlyArray<{
+  key: RecommendationSortKey;
+  label: string;
+  caption: string;
+}>;
+
+/**
+ * 정렬 축별 비교값(내림차순 기준, 높을수록 앞). 값이 없는 곡은 `-1` 로 항상 뒤로 보낸다.
+ *
+ * `voiceFit` 은 BE 설명가능성 필드(#1484)를 우선 쓰고, 없으면(과거 재조회 경로 등) 곡 음역과
+ * 사용자 음역의 겹침 비율(`computeVoiceFitRatio`, /songs 음역 적합 배지와 동일 직관)로 추정한다.
+ */
+function sortValueFor(
+  item: RecommendedSongResponse,
+  sortKey: "voiceFit" | "moodFit",
+  userRange: UserVoiceRange,
+): number {
+  if (sortKey === "moodFit") {
+    return typeof item.moodFit === "number" ? item.moodFit : -1;
+  }
+  if (typeof item.voiceFit === "number") {
+    return item.voiceFit;
+  }
+  const { lowMidi, highMidi } = item.song;
+  if (typeof lowMidi === "number" && typeof highMidi === "number") {
+    return computeVoiceFitRatio(userRange, lowMidi, highMidi);
+  }
+  return -1;
+}
 
 export default function RecommendPage() {
   const sessionId = useSessionStore((state) => state.sessionId);
@@ -420,6 +484,9 @@ function RecommendationFeed({
   // 기본은 기존 리스트 — 회귀 0. 스와이프는 같은 무한 쿼리를 한 곡씩 소비한다.
   const [viewMode, setViewMode] = useState<"list" | "swipe">("list");
 
+  // closes #1765 — 결과 정렬 기준 선택. 기본은 종합 추천순(BE 도착 순서 유지) → 회귀 0.
+  const [sortKey, setSortKey] = useState<RecommendationSortKey>("composite");
+
   // 모든 페이지의 추천 곡을 평탄화. 페이지 경계 정보는 사용자에게 노출하지 않는다.
   const allRecommendations = useMemo(() => {
     if (!data) {
@@ -427,6 +494,32 @@ function RecommendationFeed({
     }
     return data.pages.flatMap((page) => page.recommendations);
   }, [data]);
+
+  /**
+   * (closes #1765) 선택한 정렬 기준으로 재정렬한 목록.
+   *
+   * `composite` 는 BE 종합 점수 순서(피드 도착 순서)를 그대로 유지한다. `voiceFit`/`moodFit`
+   * 은 이미 로드된 전체 목록을 해당 축 내림차순으로 클라이언트 재정렬한다 — 동점이면 원래
+   * 추천(종합) 순서를 유지(stable)해 결과가 임의로 흔들리지 않게 한다.
+   */
+  const sortedRecommendations = useMemo(() => {
+    if (sortKey === "composite") {
+      return allRecommendations;
+    }
+    const userRange: UserVoiceRange = {
+      lowMidi: userVoiceRangeLow,
+      highMidi: userVoiceRangeHigh,
+    };
+    return allRecommendations
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => {
+        const diff =
+          sortValueFor(b.item, sortKey, userRange) -
+          sortValueFor(a.item, sortKey, userRange);
+        return diff !== 0 ? diff : a.index - b.index;
+      })
+      .map((entry) => entry.item);
+  }, [allRecommendations, sortKey, userVoiceRangeLow, userVoiceRangeHigh]);
 
   /**
    * (closes #426 / closes #443) 스크린 리더용 라이브 영역 메시지.
@@ -579,12 +672,14 @@ function RecommendationFeed({
     return (
       <div className="flex flex-col gap-4">
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+        <SortControl sortKey={sortKey} onChange={setSortKey} />
         <ResultSummary
           count={allRecommendations.length}
           appliedFilterCount={appliedFilterCount}
+          sortKey={sortKey}
         />
         <SwipeDeck
-          recommendations={allRecommendations}
+          recommendations={sortedRecommendations}
           userVoiceRange={userRange}
           hasMore={hasNextPage}
           isFetchingMore={isFetchingNextPage}
@@ -598,9 +693,11 @@ function RecommendationFeed({
   return (
     <div className="flex flex-col gap-4">
       <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+      <SortControl sortKey={sortKey} onChange={setSortKey} />
       <ResultSummary
         count={allRecommendations.length}
         appliedFilterCount={appliedFilterCount}
+        sortKey={sortKey}
       />
       {/*
         (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
@@ -618,7 +715,7 @@ function RecommendationFeed({
         {liveMessage}
       </div>
       <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {allRecommendations.map((item, index) => (
+        {sortedRecommendations.map((item, index) => (
           <SongCard
             key={item.song.id}
             item={item}
@@ -693,6 +790,7 @@ function RecommendationFeed({
 type ResultSummaryProps = {
   count: number;
   appliedFilterCount: number;
+  sortKey: RecommendationSortKey;
 };
 
 /**
@@ -701,15 +799,25 @@ type ResultSummaryProps = {
  * 오면 이 줄의 곡 수/적용 문구가 갱신돼 "조건이 결과에 반영됐다"가 한눈에 보인다.
  * (스크린 리더 안내는 별도 aria-live 영역이 담당 — 여기는 시각 신호.)
  *
- * (이슈 #1764) 정렬 기준 한 줄 안내를 함께 노출한다 — 추천 순서가 "음역대만" 본 결과인지
- * 종합 점수 순인지 불명확하다는 피드백에 대응. 실제 BE 정렬은 음역 적합·분위기·인기 등을
- * 가중 합산한 종합 점수 순이라, 사용자가 "왜 이 순서인지"를 이해하도록 결과 영역에 드러낸다.
+ * closes #1765 — 현재 정렬 기준을 한 줄 캡션으로 노출한다. 음역만 본다는 오해를 막고
+ * (기본 종합 정렬), 정렬 칩을 바꾸면 캡션도 함께 바뀌어 "지금 무슨 순서인지"가 보인다.
+ * (이슈 #1764) 종합 정렬 기준 노출의 후속 — 정적 안내를 정렬 선택 캡션으로 확장하며
  * 상세 모달 FitBadge(#1484) 설명가능성과 결을 맞춘다.
  */
-function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
+function ResultSummary({
+  count,
+  appliedFilterCount,
+  sortKey,
+}: ResultSummaryProps) {
+  const sortCaption =
+    SORT_OPTIONS.find((option) => option.key === sortKey)?.caption ??
+    SORT_OPTIONS[0].caption;
   return (
-    <div data-testid="recommend-result-summary" className="flex flex-col gap-1">
-      <p className="text-xs text-[var(--text-caption)]">
+    <div className="flex flex-col gap-1">
+      <p
+        data-testid="recommend-result-summary"
+        className="text-xs text-[var(--text-caption)]"
+      >
         <span className="font-medium text-[var(--text-secondary)]">
           추천 {count}곡
         </span>
@@ -721,8 +829,50 @@ function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
         data-testid="recommend-sort-criteria"
         className="text-xs text-[var(--text-caption)]"
       >
-        음역 적합도·분위기·인기 등을 종합한 점수 순서로 추천합니다.
+        {sortCaption}
       </p>
+    </div>
+  );
+}
+
+type SortControlProps = {
+  sortKey: RecommendationSortKey;
+  onChange: (key: RecommendationSortKey) => void;
+};
+
+/**
+ * 추천 결과 정렬 기준 선택 칩 (closes #1765).
+ *
+ * `role="radiogroup"` + 각 칩 `aria-checked` 로 스크린 리더가 현재 정렬을 읽게 한다.
+ * 전환 애니메이션은 `motion-reduce:transition-none` 으로 prefers-reduced-motion 을 존중한다.
+ */
+function SortControl({ sortKey, onChange }: SortControlProps) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="추천 정렬 기준"
+      data-testid="recommend-sort-control"
+      className="flex flex-wrap items-center gap-1 self-start"
+    >
+      {SORT_OPTIONS.map(({ key, label }) => {
+        const active = sortKey === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(key)}
+            className={`min-h-9 rounded-full px-3 text-sm font-medium transition-colors duration-[var(--duration-base)] motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] ${
+              active
+                ? "bg-[var(--brand-500)] text-white"
+                : "bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

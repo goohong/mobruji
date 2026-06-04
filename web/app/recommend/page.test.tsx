@@ -305,31 +305,100 @@ describe("RecommendPage", () => {
     );
   });
 
-  // closes #1764 — 추천 순서가 '음역대만' 본 것인지 불명확하다는 피드백에 대응해
-  // 결과 영역에 종합 점수 정렬 기준을 한 줄 안내로 노출한다.
-  it("결과 영역에 종합 점수 정렬 기준 안내가 노출된다 (#1764)", async () => {
-    sessionMock.set({ sessionId: "sess-abc", voiceRangeId: 42 });
+  // ---------- 결과 정렬 기준 선택 (closes #1765) ----------
+  it("정렬 칩(음역 적합순/분위기 적합순) 선택 시 결과 순서와 기준 캡션이 바뀐다", async () => {
+    const user = userEvent.setup();
+    sessionMock.set({ sessionId: "sess-sort", voiceRangeId: 7 });
 
     readVoiceRangeMock.mockResolvedValue({
-      id: 42,
-      sessionId: "sess-abc",
+      id: 7,
+      sessionId: "sess-sort",
       lowestNoteMidi: 48,
       highestNoteMidi: 69,
       sourceMethod: "OCTAVE_PICK",
       createdAt: "2026-05-21T00:00:00Z",
       updatedAt: "2026-05-21T00:00:00Z",
     });
-    createRecommendationMock.mockResolvedValueOnce(
-      buildResponseWithSongIds(100, [1, 2]),
-    );
+
+    // 세 곡의 종합/음역/분위기 적합이 서로 달라 정렬 축마다 순서가 달라진다.
+    //   composite(도착순): 1, 2, 3
+    //   voiceFit desc    : 2(0.9), 3(0.5), 1(0.2)
+    //   moodFit desc     : 1(0.9), 3(0.5), 2(0.1)
+    const baseSong = {
+      artist: "가수",
+      releaseYear: 2024,
+      keyOriginal: "C_MAJOR" as const,
+      bpm: 110,
+      mood: "UPBEAT" as const,
+      language: "ko",
+      genre: "POP",
+      metadataSource: "MANUAL_SEED" as const,
+    };
+    createRecommendationMock.mockResolvedValueOnce({
+      requestId: ridFromSeed(700),
+      recommendations: [
+        {
+          rankPosition: 1,
+          score: 0.9,
+          matchReason: "음역 매칭",
+          voiceFit: 0.2,
+          moodFit: 0.9,
+          song: { id: 1, title: "곡-1", tjNumber: "T-1", kyNumber: "K-1", ...baseSong },
+        },
+        {
+          rankPosition: 2,
+          score: 0.8,
+          matchReason: "음역 매칭",
+          voiceFit: 0.9,
+          moodFit: 0.1,
+          song: { id: 2, title: "곡-2", tjNumber: "T-2", kyNumber: "K-2", ...baseSong },
+        },
+        {
+          rankPosition: 3,
+          score: 0.7,
+          matchReason: "음역 매칭",
+          voiceFit: 0.5,
+          moodFit: 0.5,
+          song: { id: 3, title: "곡-3", tjNumber: "T-3", kyNumber: "K-3", ...baseSong },
+        },
+      ],
+    });
 
     renderWithQueryClient(<RecommendPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
-        "음역 적합도·분위기·인기 등을 종합한 점수 순서로 추천합니다.",
-      );
+      expect(screen.getByText("곡-1")).toBeInTheDocument();
     });
+
+    const titleOrder = () =>
+      screen.getAllByText(/^곡-\d+$/).map((el) => el.textContent);
+
+    // 기본은 종합 추천순(도착 순서) + 종합 정렬 캡션.
+    expect(titleOrder()).toEqual(["곡-1", "곡-2", "곡-3"]);
+    expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
+      "음역 적합도·분위기·인기 등을 종합한 점수순으로 정렬했어요.",
+    );
+
+    // 음역 적합순 → voiceFit 내림차순 재정렬 + 캡션 갱신.
+    await user.click(screen.getByRole("radio", { name: "음역 적합순" }));
+    expect(titleOrder()).toEqual(["곡-2", "곡-3", "곡-1"]);
+    expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
+      "내 음역대에 잘 맞는 곡부터 정렬했어요.",
+    );
+
+    // 분위기 적합순 → moodFit 내림차순 재정렬 + 캡션 갱신.
+    await user.click(screen.getByRole("radio", { name: "분위기 적합순" }));
+    expect(titleOrder()).toEqual(["곡-1", "곡-3", "곡-2"]);
+    expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
+      "고른 분위기에 잘 맞는 곡부터 정렬했어요.",
+    );
+
+    // 다시 추천순 → 도착 순서 복귀.
+    await user.click(screen.getByRole("radio", { name: "추천순" }));
+    expect(titleOrder()).toEqual(["곡-1", "곡-2", "곡-3"]);
+
+    // 정렬은 클라이언트 재정렬이라 추가 추천 호출이 없다.
+    expect(createRecommendationMock).toHaveBeenCalledTimes(1);
   });
 
   // ---------- 분위기/나이대 필터 (roadmap-mood-age-ui) ----------
