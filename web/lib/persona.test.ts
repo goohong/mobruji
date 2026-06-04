@@ -112,4 +112,54 @@ describe("resolvePersonaReason", () => {
       text: "BE 안심 사유",
     });
   });
+
+  // closes #1715 — 안심 사유 ↔ 카드 신호 정합. 카드 배지가 "어려움/낮은 적합"을 가리키는
+  // 곡엔 BE personaReason 이 있어도 안심 사유를 붙이지 않는다.
+  describe("안전곡 정합 가드 (#1715)", () => {
+    it("HARD 난이도 곡은 BE personaReason 이 있어도 안심 사유를 생략한다", () => {
+      const item = buildItem(
+        { persona: "P-E", personaReason: "BE 가 내려준 안심 사유" },
+        { difficulty: "HARD" },
+      );
+      expect(resolvePersonaReason(item, "P-E")).toBeNull();
+    });
+
+    it("음역 적합도가 낮은(<0.4) 곡은 BE personaReason 이 있어도 안심 사유를 생략한다", () => {
+      const item = buildItem(
+        {
+          persona: "P-E",
+          personaReason: "BE 가 내려준 안심 사유",
+          voiceFit: 0.42 - 0.1,
+        },
+        { difficulty: "EASY" },
+      );
+      expect(resolvePersonaReason(item, "P-E")).toBeNull();
+    });
+
+    it("EASY + 충분한 음역 적합도면 안심 사유를 그대로 노출한다", () => {
+      const item = buildItem(
+        {
+          persona: "P-E",
+          personaReason: "BE 가 내려준 안심 사유",
+          voiceFit: 0.8,
+        },
+        { difficulty: "EASY" },
+      );
+      expect(resolvePersonaReason(item, "P-E")).toEqual({
+        label: "안심 포인트",
+        text: "BE 가 내려준 안심 사유",
+      });
+    });
+
+    it("안전곡(P-E)이 아닌 페르소나는 정합 가드의 영향을 받지 않는다", () => {
+      const item = buildItem(
+        { persona: "P-A", personaReason: "연습 사유" },
+        { difficulty: "HARD" },
+      );
+      expect(resolvePersonaReason(item, "P-A")).toEqual({
+        label: "이 곡을 고른 이유",
+        text: "연습 사유",
+      });
+    });
+  });
 });

@@ -40,7 +40,14 @@
  *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
@@ -65,8 +72,8 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
-import { IntentModeToggle } from "./components/IntentModeToggle";
-import { RecommendFilters } from "./components/RecommendFilters";
+import { RecommendModeGroup } from "./components/RecommendModeGroup";
+import { RecommendRefinePanel } from "./components/RecommendRefinePanel";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 import { SongDetailSheet } from "./components/SongDetailSheet";
 import { SongDetailContent } from "./components/SongDetailContent";
@@ -118,6 +125,18 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   // createRecommendation 에서 persona 를 생략 → 현행 default 추천(하위호환).
   const [selectedPersona, setSelectedPersona] =
     useState<RecommendationPersona | null>(null);
+
+  // closes #1715 — 분위기·나이대 필터를 한 번에 비우는 "모두 해제". 의도 모드(persona)는
+  // 별개의 "추천 방식 진입"이라 RecommendModeGroup 에 분리돼 있어 여기서 비우지 않는다.
+  const clearFilters = useCallback(() => {
+    setSelectedMood(null);
+    setSelectedAgeGroup(null);
+  }, []);
+  // closes #1715 — 결과에 영향을 주는(쿼리 재발화) 적용 조건 수. 결과 요약 "조건 N개 적용됨"에 쓴다.
+  const appliedFilterCount =
+    (selectedMood !== null ? 1 : 0) +
+    (selectedAgeGroup !== null ? 1 : 0) +
+    (selectedPersona !== null ? 1 : 0);
 
   const isVoiceRangeReady =
     voiceRangeQuery.isSuccess &&
@@ -301,7 +320,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
    */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl flex flex-col gap-8">
+      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Step 2
@@ -309,60 +328,18 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             추천 결과
           </h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-[var(--text-secondary)]">
-              내 음역대: {midiToKoreanNoteName(voiceRange.lowestNoteMidi)} ~{" "}
-              {midiToKoreanNoteName(voiceRange.highestNoteMidi)}
-            </p>
-            <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
-          </div>
-          <VoiceRangeIntuition
-            lowMidi={voiceRange.lowestNoteMidi}
-            highMidi={voiceRange.highestNoteMidi}
-          />
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
-            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
-                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
-                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
-            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
-              <Link
-                href="/voice-range/auto"
-                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
-              >
-                마이크로 다시 측정
-              </Link>
-            ) : null}
-            <Link
-              href="/voice-range"
-              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
-            >
-              음역대 다시 입력
-            </Link>
-          </div>
+          <VoiceRangeHeaderSummary voiceRange={voiceRange} />
         </header>
 
-        {/* (closes #1601) 모임 사회자(P-D) 모드 진입 — "다 같이 즐길 곡" 시퀀스 화면으로
-            이동한다. 이 링크를 누르지 않으면 기존 단일 곡 추천 흐름은 불변(하위호환). */}
-        <Link
-          href="/recommend/host"
-          className="flex flex-col items-start gap-0.5 self-start rounded-[var(--radius-md)] bg-[var(--badge-neutral-bg)] px-4 py-2.5 text-left text-[var(--badge-neutral-fg)] transition-colors duration-[var(--duration-base)] hover:bg-[var(--bg-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
-        >
-          <span className="text-sm font-semibold">다 같이 즐길 곡 추천받기</span>
-          <span className="text-xs text-[var(--text-caption)]">
-            모임 사회자용 — 도입·고조·마무리 단계별 흐름으로
-          </span>
-        </Link>
-
-        <IntentModeToggle
-          selectedPersona={selectedPersona}
-          onPersonaChange={setSelectedPersona}
-        />
-
-        <RecommendFilters
+        {/* (성격별 그룹화 #1712) 필터 그룹 — 분위기/나이대만 묶은 접이식 "추천 다듬기".
+            "지금 결과를 그 자리에서 좁히는" 필터로, 결과 위에 둔다. 모드 진입(의도·호스트)은
+            결과 아래 RecommendModeGroup 으로 분리한다. */}
+        <RecommendRefinePanel
           selectedMood={selectedMood}
           selectedAgeGroup={selectedAgeGroup}
           onMoodChange={setSelectedMood}
           onAgeGroupChange={setSelectedAgeGroup}
+          onClearAll={clearFilters}
         />
 
         <RecommendationFeed
@@ -370,6 +347,14 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
           activePersona={selectedPersona}
+          appliedFilterCount={appliedFilterCount}
+        />
+
+        {/* (성격별 그룹화 #1712) 모드 진입 그룹 — "다른 방식으로 추천받기": 의도 모드 토글
+            + 호스트 모드 이동을 한 섹션 제목 아래 묶어 "필터 조정"과 별개로 인지하게 한다. */}
+        <RecommendModeGroup
+          selectedPersona={selectedPersona}
+          onPersonaChange={setSelectedPersona}
         />
       </div>
     </main>
@@ -395,6 +380,11 @@ type RecommendationFeedProps = {
    * fallback 근거로 전달한다. 미선택(null)이면 카드는 페르소나 사유 줄을 생략한다.
    */
   activePersona: RecommendationPersona | null;
+  /**
+   * 결과에 적용된 조건(분위기·나이대·의도) 수(이슈 #1715). 결과 요약에 "조건 N개 적용됨"
+   * 신호로 노출한다. 0 이면 적용 문구를 생략한다.
+   */
+  appliedFilterCount: number;
 };
 
 function RecommendationFeed({
@@ -402,6 +392,7 @@ function RecommendationFeed({
   userVoiceRangeLow,
   userVoiceRangeHigh,
   activePersona,
+  appliedFilterCount,
 }: RecommendationFeedProps) {
   const {
     data,
@@ -523,7 +514,7 @@ function RecommendationFeed({
       <ul
         aria-busy="true"
         aria-label="추천 결과 로딩 중"
-        className="flex flex-col gap-3"
+        className="grid grid-cols-1 gap-3 lg:grid-cols-2"
       >
         {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
           <SongCardSkeleton key={idx} />
@@ -582,6 +573,10 @@ function RecommendationFeed({
     return (
       <div className="flex flex-col gap-4">
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+        <ResultSummary
+          count={allRecommendations.length}
+          appliedFilterCount={appliedFilterCount}
+        />
         <SwipeDeck
           recommendations={allRecommendations}
           userVoiceRange={userRange}
@@ -596,6 +591,10 @@ function RecommendationFeed({
   return (
     <div className="flex flex-col gap-4">
       <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+      <ResultSummary
+        count={allRecommendations.length}
+        appliedFilterCount={appliedFilterCount}
+      />
       {/*
         (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
         시각적으로는 `sr-only` 로 숨기지만 SR 은 polite 큐로 안내 메시지를 읽는다.
@@ -611,7 +610,7 @@ function RecommendationFeed({
       >
         {liveMessage}
       </div>
-      <ul className="flex flex-col gap-3">
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {allRecommendations.map((item, index) => (
           <SongCard
             key={item.song.id}
@@ -644,7 +643,7 @@ function RecommendationFeed({
             <ul
               aria-busy="true"
               aria-label="다음 추천 결과 로딩 중"
-              className="flex flex-col gap-3"
+              className="grid grid-cols-1 gap-3 lg:grid-cols-2"
             >
               {Array.from({ length: 2 }).map((_, idx) => (
                 <SongCardSkeleton key={idx} />
@@ -681,6 +680,33 @@ function RecommendationFeed({
         </div>
       )}
     </div>
+  );
+}
+
+type ResultSummaryProps = {
+  count: number;
+  appliedFilterCount: number;
+};
+
+/**
+ * 결과 요약 줄 (이슈 #1715) — 지금까지 불러온 추천 곡 수 + 적용된 조건 수를 시각적으로
+ * 노출한다. 필터를 토글하면 쿼리가 재발화돼 스켈레톤(로딩 신호)이 잠깐 뜨고, 새 결과가
+ * 오면 이 줄의 곡 수/적용 문구가 갱신돼 "조건이 결과에 반영됐다"가 한눈에 보인다.
+ * (스크린 리더 안내는 별도 aria-live 영역이 담당 — 여기는 시각 신호.)
+ */
+function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
+  return (
+    <p
+      data-testid="recommend-result-summary"
+      className="text-xs text-[var(--text-caption)]"
+    >
+      <span className="font-medium text-[var(--text-secondary)]">
+        추천 {count}곡
+      </span>
+      {appliedFilterCount > 0 ? (
+        <span> · 조건 {appliedFilterCount}개 적용됨</span>
+      ) : null}
+    </p>
   );
 }
 
@@ -772,6 +798,80 @@ function NoSessionFallback() {
       ctaHref="/voice-range"
       ctaLabel="음역대 입력하러 가기"
     />
+  );
+}
+
+type VoiceRangeHeaderSummaryProps = {
+  voiceRange: VoiceRangeResponse;
+};
+
+/**
+ * 헤더 음역대 요약 + 접이식 보조 정보 (recommend-page-visual-ux-audit #1711).
+ *
+ * 결과 우선 노출을 위해 헤더에는 "내 음역대: X ~ Y" + 소스 뱃지만 상시 노출하고,
+ * 음역 직관 막대(VoiceRangeIntuition)·재측정/재입력 링크 등 보조 정보는 "음역대 자세히"
+ * disclosure(기본 접힘) 안으로 내린다 → 모바일에서 첫 곡 카드가 더 위로 올라온다.
+ */
+function VoiceRangeHeaderSummary({ voiceRange }: VoiceRangeHeaderSummaryProps) {
+  const [expanded, setExpanded] = useState(false);
+  const detailId = useId();
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm text-[var(--text-secondary)]">
+          내 음역대: {midiToKoreanNoteName(voiceRange.lowestNoteMidi)} ~{" "}
+          {midiToKoreanNoteName(voiceRange.highestNoteMidi)}
+        </p>
+        <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          onClick={() => setExpanded((prev) => !prev)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--text-caption)] underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
+        >
+          음역대 자세히
+          <span
+            aria-hidden="true"
+            className={`transition-transform duration-[var(--duration-base)] ${
+              expanded ? "rotate-180" : ""
+            }`}
+          >
+            ⌄
+          </span>
+        </button>
+      </div>
+
+      {expanded ? (
+        <div id={detailId} className="space-y-2">
+          <VoiceRangeIntuition
+            lowMidi={voiceRange.lowestNoteMidi}
+            highMidi={voiceRange.highestNoteMidi}
+            compact
+          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
+            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
+                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
+                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
+            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
+              <Link
+                href="/voice-range/auto"
+                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
+              >
+                마이크로 다시 측정
+              </Link>
+            ) : null}
+            <Link
+              href="/voice-range"
+              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
+            >
+              음역대 다시 입력
+            </Link>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -15,6 +15,7 @@ from pathlib import Path
 import batch_analyze as ba
 
 VALIDATION_SET = Path(__file__).parent / "tests" / "validation_set.json"
+NEW_SONGS_SET = Path(__file__).parent / "tests" / "new-songs-verification.json"
 
 
 class TestLoadSeed(unittest.TestCase):
@@ -58,6 +59,17 @@ class TestLoadSeed(unittest.TestCase):
             self.assertIn("label", song)
             self.assertIn("lowMidi", song["label"])
             self.assertIn("highMidi", song["label"])
+
+    def test_shipped_new_songs_set_is_valid(self) -> None:
+        # directive #1716 신규곡 검증 fixture — 라벨 없음(plausibility 가드 대상).
+        songs = ba.load_seed(str(NEW_SONGS_SET))
+        self.assertGreaterEqual(len(songs), 5)
+        self.assertLessEqual(len(songs), 10)
+        ids = [song["id"] for song in songs]
+        self.assertEqual(len(ids), len(set(ids)))  # id 중복 없음
+        for song in songs:
+            self.assertIn("title", song)
+            self.assertNotIn("label", song)  # 신규곡 = ground truth 없음
 
 
 class TestAbsSemitoneError(unittest.TestCase):
@@ -163,6 +175,108 @@ class TestAccuracyWithinTolerance(unittest.TestCase):
         self.assertFalse(ba.accuracy_within_tolerance({"songsCompared": 0}))
 
 
+class TestRangePlausibility(unittest.TestCase):
+    def _ok(self) -> dict:
+        return {"id": "a", "status": "success", "lowMidi": 55, "highMidi": 77}
+
+    def test_plausible_range(self) -> None:
+        row = ba.range_plausibility(self._ok())
+        self.assertTrue(row["plausible"])
+        self.assertEqual(row["reasons"], [])
+
+    def test_failed_status_implausible(self) -> None:
+        row = ba.range_plausibility({"id": "a", "status": "failed", "error": "x"})
+        self.assertFalse(row["plausible"])
+
+    def test_missing_midi_implausible(self) -> None:
+        row = ba.range_plausibility({"id": "a", "status": "success", "lowMidi": 55})
+        self.assertFalse(row["plausible"])
+
+    def test_low_ge_high(self) -> None:
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 70, "highMidi": 60}
+        )
+        self.assertFalse(row["plausible"])
+        self.assertTrue(any(">=" in r for r in row["reasons"]))
+
+    def test_low_below_floor(self) -> None:
+        # 반주 저음 오검출 — C2 미만.
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 24, "highMidi": 60}
+        )
+        self.assertFalse(row["plausible"])
+
+    def test_high_above_ceil(self) -> None:
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 55, "highMidi": 100}
+        )
+        self.assertFalse(row["plausible"])
+
+    def test_span_too_wide(self) -> None:
+        # 옥타브 폴딩 등으로 음역폭이 비현실적으로 넓음.
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 40, "highMidi": 85}
+        )
+        self.assertFalse(row["plausible"])
+        self.assertTrue(any("음역폭" in r for r in row["reasons"]))
+
+    def test_span_too_narrow(self) -> None:
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 60, "highMidi": 62}
+        )
+        self.assertFalse(row["plausible"])
+
+    def test_validation_labels_are_plausible(self) -> None:
+        # 운영자 PoC 라벨은 모두 합리적 범위여야 한다(가드 보정 sanity).
+        songs = ba.load_seed(str(VALIDATION_SET))
+        for song in songs:
+            label = song["label"]
+            row = ba.range_plausibility(
+                {
+                    "id": song["id"],
+                    "status": "success",
+                    "lowMidi": label["lowMidi"],
+                    "highMidi": label["highMidi"],
+                }
+            )
+            self.assertTrue(row["plausible"], f"{song['id']} {row['reasons']}")
+
+
+class TestSummarizePlausibility(unittest.TestCase):
+    def _records(self) -> list[dict]:
+        return [
+            {"id": "a", "status": "success", "lowMidi": 55, "highMidi": 77},
+            {"id": "b", "status": "success", "lowMidi": 24, "highMidi": 60},  # 비합리
+            {"id": "c", "status": "failed", "error": "download"},
+        ]
+
+    def test_counts_and_partition(self) -> None:
+        summary = ba.summarize_plausibility(self._records())
+        self.assertEqual(summary["songsTotal"], 3)
+        self.assertEqual(summary["songsSuccess"], 2)
+        self.assertEqual(summary["plausibleCount"], 1)
+        self.assertEqual(summary["implausibleCount"], 1)  # 실패곡은 제외, b만
+        self.assertEqual(summary["plausibleRate"], 0.5)
+        self.assertEqual(summary["backfillReady"], ["a"])
+        self.assertEqual(summary["blocked"][0]["id"], "b")
+
+    def test_all_plausible_rate_one(self) -> None:
+        records = [{"id": "a", "status": "success", "lowMidi": 50, "highMidi": 70}]
+        summary = ba.summarize_plausibility(records)
+        self.assertEqual(summary["plausibleRate"], 1.0)
+        self.assertEqual(summary["implausibleCount"], 0)
+
+    def test_no_success_rate_none(self) -> None:
+        summary = ba.summarize_plausibility([{"id": "a", "status": "failed"}])
+        self.assertIsNone(summary["plausibleRate"])
+        self.assertEqual(summary["implausibleCount"], 0)
+
+    def test_report_renders(self) -> None:
+        report = ba.format_plausibility_report(ba.summarize_plausibility(self._records()))
+        self.assertIn("음역 타당성", report)
+        self.assertIn("backfill 대상", report)
+
+
 class TestToFeedRecord(unittest.TestCase):
     def test_maps_fields_and_metadata_source(self) -> None:
         class _R:
@@ -201,6 +315,103 @@ class TestResolveTmpdir(unittest.TestCase):
                 self.assertTrue(resolved.exists())
             finally:
                 del os.environ["AUDIO_ANALYSIS_TMPDIR"]
+
+
+class TestResumeExisting(unittest.TestCase):
+    def test_none_path_empty(self) -> None:
+        self.assertEqual(ba.resume_existing(None), [])
+
+    def test_missing_file_empty(self) -> None:
+        # 첫 실행: --resume 와 --out 이 같은 경로라 파일이 아직 없다 → 진척 없음.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(ba.resume_existing(str(Path(tmp) / "nope.ndjson")), [])
+
+    def test_loads_existing_feed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "feed.ndjson"
+            ba.write_feed([{"id": "a", "status": "success"}], str(path))
+            self.assertEqual(ba.resume_existing(str(path)), [{"id": "a", "status": "success"}])
+
+
+class TestDoneIdsFromFeed(unittest.TestCase):
+    def test_only_success_ids(self) -> None:
+        records = [
+            {"id": "a", "status": "success", "lowMidi": 50},
+            {"id": "b", "status": "failed", "error": "x"},
+            {"id": "c", "status": "success", "lowMidi": 55},
+        ]
+        # 실패곡(b)은 재시도 대상이라 done 에서 제외.
+        self.assertEqual(ba.done_ids_from_feed(records), {"a", "c"})
+
+    def test_empty_feed(self) -> None:
+        self.assertEqual(ba.done_ids_from_feed([]), set())
+
+
+class TestSelectPending(unittest.TestCase):
+    def _seed(self) -> list[dict]:
+        return [{"id": str(i), "title": f"t{i}"} for i in range(5)]
+
+    def test_excludes_done(self) -> None:
+        pending = ba.select_pending(self._seed(), {"0", "2"}, None)
+        self.assertEqual([s["id"] for s in pending], ["1", "3", "4"])
+
+    def test_limit_chunks_in_seed_order(self) -> None:
+        pending = ba.select_pending(self._seed(), set(), 2)
+        self.assertEqual([s["id"] for s in pending], ["0", "1"])
+
+    def test_limit_after_excluding_done(self) -> None:
+        # 완료 곡 제외 후 남은 후보(2,3,4) 중 앞 2곡만.
+        pending = ba.select_pending(self._seed(), {"0", "1"}, 2)
+        self.assertEqual([s["id"] for s in pending], ["2", "3"])
+
+    def test_limit_larger_than_pending_returns_all(self) -> None:
+        pending = ba.select_pending(self._seed(), {"0", "1", "2"}, 10)
+        self.assertEqual([s["id"] for s in pending], ["3", "4"])
+
+    def test_all_done_returns_empty(self) -> None:
+        pending = ba.select_pending(self._seed(), {"0", "1", "2", "3", "4"}, 3)
+        self.assertEqual(pending, [])
+
+
+class TestMergeFeed(unittest.TestCase):
+    def test_fresh_overrides_same_id(self) -> None:
+        existing = [{"id": "a", "status": "failed", "error": "x"}]
+        fresh = [{"id": "a", "status": "success", "lowMidi": 50}]
+        merged = ba.merge_feed(existing, fresh)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["status"], "success")
+
+    def test_appends_new_ids_preserving_order(self) -> None:
+        existing = [{"id": "a", "status": "success"}, {"id": "b", "status": "success"}]
+        fresh = [{"id": "c", "status": "success"}]
+        merged = ba.merge_feed(existing, fresh)
+        self.assertEqual([r["id"] for r in merged], ["a", "b", "c"])
+
+    def test_empty_existing(self) -> None:
+        fresh = [{"id": "a", "status": "success"}]
+        self.assertEqual(ba.merge_feed([], fresh), fresh)
+
+
+class TestResumeRoundtrip(unittest.TestCase):
+    def test_resume_skips_done_and_accumulates(self) -> None:
+        # 반복 실행 시나리오: 1차 feed 의 성공 곡을 skip, 남은 후보만 다음 chunk 로.
+        seed = [{"id": str(i), "title": f"t{i}"} for i in range(4)]
+        first_feed = [
+            {"id": "0", "status": "success", "lowMidi": 50, "highMidi": 70},
+            {"id": "1", "status": "failed", "error": "download"},
+        ]
+        done_ids = ba.done_ids_from_feed(first_feed)
+        pending = ba.select_pending(seed, done_ids, 2)
+        # 0 성공 → skip, 1 실패 → 재시도 대상, 2 신규 → 앞 2곡(1,2).
+        self.assertEqual([s["id"] for s in pending], ["1", "2"])
+        fresh = [
+            {"id": "1", "status": "success", "lowMidi": 52, "highMidi": 72},
+            {"id": "2", "status": "success", "lowMidi": 48, "highMidi": 68},
+        ]
+        merged = ba.merge_feed(first_feed, fresh)
+        by_id = {r["id"]: r for r in merged}
+        self.assertEqual(by_id["1"]["status"], "success")  # 실패 → 성공으로 갱신
+        self.assertEqual(set(by_id), {"0", "1", "2"})
 
 
 class TestLoadResultsRoundtrip(unittest.TestCase):

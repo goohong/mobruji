@@ -169,6 +169,7 @@ class RecommendationMoodSensitivityTest {
         return Song.builder()
                 .title(title).artist(artist).releaseYear(2020)
                 .keyOriginal(MusicalKey.C_MAJOR).bpm(120).mood(mood)
+                .lowMidi(53).highMidi(67)
                 .language("ko").genre("팝")
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();

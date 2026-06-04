@@ -80,7 +80,7 @@ class RecommendationServiceBatchPersistTest {
                 buildSong(1L, "s1", "A1"),
                 buildSong(2L, "s2", "A2"),
                 buildSong(3L, "s3", "A3"));
-        given(songRepository.findAll()).willReturn(catalog);
+        given(songRepository.findAllWithVocalRange()).willReturn(catalog);
 
         final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0);
         given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any()))

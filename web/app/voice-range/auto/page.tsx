@@ -33,7 +33,7 @@ import {
 } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
-import { Button } from "@/components/ui";
+import { Button, VoiceRangeSlider } from "@/components/ui";
 import { PitchWaveRing } from "@/components/voice/PitchWaveRing";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import {
@@ -387,8 +387,10 @@ export default function AutoVoiceRangePage({
               highResult={highResult}
               lowMidi={lowMidi}
               highMidi={highMidi}
-              onLowChange={setLowMidi}
-              onHighChange={setHighMidi}
+              onRangeChange={({ lowMidi: nextLow, highMidi: nextHigh }) => {
+                setLowMidi(nextLow);
+                setHighMidi(nextHigh);
+              }}
               onSave={handleSave}
               saving={mutation.isPending}
               validationError={validationError}
@@ -605,8 +607,7 @@ interface ResultStepProps {
   highResult: MeasurementResult | null;
   lowMidi: number;
   highMidi: number;
-  onLowChange: (next: number) => void;
-  onHighChange: (next: number) => void;
+  onRangeChange: (next: { lowMidi: number; highMidi: number }) => void;
   onSave: () => void;
   saving: boolean;
   validationError: string | null;
@@ -619,8 +620,7 @@ function ResultStep({
   highResult,
   lowMidi,
   highMidi,
-  onLowChange,
-  onHighChange,
+  onRangeChange,
   onSave,
   saving,
   validationError,
@@ -639,20 +639,20 @@ function ResultStep({
         </p>
       </div>
 
-      <ConfidenceBadge label="최저음 신뢰도" result={lowResult} />
-      <RangeSlider
-        label="최저음"
-        value={lowMidi}
-        onChange={onLowChange}
-        testId="low-midi-slider"
-      />
+      <div className="flex flex-col gap-2">
+        <ConfidenceBadge label="최저음 신뢰도" result={lowResult} />
+        <ConfidenceBadge label="최고음 신뢰도" result={highResult} />
+      </div>
 
-      <ConfidenceBadge label="최고음 신뢰도" result={highResult} />
-      <RangeSlider
-        label="최고음"
-        value={highMidi}
-        onChange={onHighChange}
-        testId="high-midi-slider"
+      {/*
+        수동 보정 UI 를 두 손잡이 트림 슬라이더로 통일(이슈 #1706). /voice-range
+        수동 입력 화면과 동일한 VoiceRangeSlider 를 써서 모든 음역대 입력 경험을
+        일관되게 한다. 최저음 ≤ 최고음 클램프가 슬라이더에 내장돼 교차가 원천 차단된다.
+      */}
+      <VoiceRangeSlider
+        lowMidi={lowMidi}
+        highMidi={highMidi}
+        onChange={onRangeChange}
       />
 
       {validationError === null ? (
@@ -720,32 +720,3 @@ function ConfidenceBadge({ label, result }: ConfidenceBadgeProps) {
   );
 }
 
-interface RangeSliderProps {
-  label: string;
-  value: number;
-  onChange: (next: number) => void;
-  testId: string;
-}
-
-function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
-  return (
-    <label className="flex flex-col gap-2 text-sm">
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-[var(--text-label)]">{label}</span>
-        <span className="tabular-nums text-[var(--text-primary)]">
-          {midiToKoreanNoteName(value)} · MIDI {value}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={MIN_MIDI}
-        max={MAX_MIDI}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        data-testid={testId}
-        aria-label={label}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--border)] accent-[var(--cta-neutral-bg)]"
-      />
-    </label>
-  );
-}

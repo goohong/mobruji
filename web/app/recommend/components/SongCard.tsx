@@ -30,8 +30,7 @@
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
  *   - matchReason 한 줄 — 추천 컨텍스트에서만
- *   - 키(키 원본) 라벨
- *   - score — 추천 컨텍스트에서만
+ *   - 키 라벨 (한글 장조/단조)
  *   - 좋아요/북마크 액션
  *
  * 호버/포커스 상태는 ring/shadow 변화로 표현. 모바일 우선.
@@ -247,17 +246,18 @@ export function SongCard(props: SongCardProps) {
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {/*
            * closes #1484 — 음역 적합도 배지. BE 가 voiceFit 을 내려준 추천 컨텍스트에서만
-           * 노출하며, 카드 표면에서는 짧은 라벨("음역")로 폭을 아낀다. 모달 모드에서도
-           * 한눈에 보이는 핵심 신호라 그대로 유지한다.
+           * 노출한다. 라벨은 "내 음역 적합" — 곡 자체의 음역이 아니라 내 음역대와의
+           * 적합도임을 표면에서 분명히 한다 (V8, recommend-page-visual-ux-audit-1708).
            */}
           {item && typeof item.voiceFit === "number" ? (
-            <FitBadge label="음역" fit={item.voiceFit} />
+            <FitBadge label="내 음역 적합" fit={item.voiceFit} />
           ) : null}
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {/*
-           * matchReason / score 는 모달 모드에서는 카드 표면이 아닌 상세 모달에서
-           * 노출한다 (closes #323). 카드는 "한눈에 보이는 정보" 만 남기는 게 검수
-           * 피드백의 핵심.
+           * matchReason 은 모달 모드에서는 카드 표면이 아닌 상세 모달에서 노출한다
+           * (closes #323). 카드는 "한눈에 보이는 정보" 만 남긴다. score 원값은 일반
+           * 사용자에게 의미 불명이라 카드 표면에 노출하지 않는다 (closes #1719) —
+           * 적합도는 FitBadge("내 음역 적합")가 사용자 친화 표현으로 대신한다.
            */}
           {item && !isModalMode ? (
             <span className="truncate text-xs text-[var(--text-tertiary)]">
@@ -265,11 +265,6 @@ export function SongCard(props: SongCardProps) {
             </span>
           ) : null}
         </div>
-        {item && !isModalMode ? (
-          <span className="shrink-0 font-mono text-xs text-[var(--text-secondary)]">
-            score {item.score.toFixed(2)}
-          </span>
-        ) : null}
       </div>
 
       {/*
@@ -689,22 +684,21 @@ export function resolveDifficulty(
 
 /**
  * BE `MusicalKey` enum 값(`C_SHARP_MAJOR` 등)을 UI 표시용 문자열로 변환한다.
- * `_SHARP` → `#`, 나머지 `_` → 공백, 단어 첫 글자만 대문자.
- * 특수값 `UNKNOWN`은 한국식 표기 대신 `Unknown` 으로 고정.
+ * `_SHARP` → `#`, `MAJOR` → `장조`, `MINOR` → `단조`.
+ * 특수값 `UNKNOWN`은 `정보 없음` 으로 고정.
  *
  * 회귀 가드(이슈 #512): 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
  */
 export function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
-  // ex) C_SHARP_MAJOR → C# Major
+  // ex) C_SHARP_MAJOR → C# 장조 (closes #1719 — 영어 음악 용어 대신 평이한 한글 표기)
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
 }
 
 /**

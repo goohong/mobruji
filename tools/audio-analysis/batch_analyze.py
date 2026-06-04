@@ -26,6 +26,18 @@ Spec: docs/features/song-self-analysis-pipeline.md
   # 네트워크/의존성 없이 사전 feed 로 정확도만 재계산 (offline)
   python batch_analyze.py --seed tests/validation_set.json \
     --from-results /data/tmp/feed.ndjson --ground-truth
+
+  # 라벨 없는 신규 임포트 곡 — 음역 합리성(가창 범위) 검증 후 backfill (directive #1716)
+  python batch_analyze.py --seed tests/new-songs-verification.json \
+    --out /data/tmp/new-feed.ndjson --plausibility
+
+  # 음역 미보유 곡 대량 backfill — 안전 단위(20곡) chunk + rate 대기로 반복 실행 (directive #1734)
+  # 같은 명령을 반복하면 --resume 가 완료 곡을 skip 해 진척이 누적되고, --limit 으로
+  # invocation 당 처리량을 한정해 디스크/rate 폭주를 막는다. 시드(미보유 곡 id+YouTube)는
+  # DB 후보(SongAudioBackfillCommand findCandidatesForBackfill) 에서 운영 단계에 생성한다.
+  python batch_analyze.py --seed /data/tmp/missing-range-candidates.json \
+    --out /data/tmp/backfill.ndjson --resume /data/tmp/backfill.ndjson \
+    --limit 20 --sleep-seconds 3 --plausibility
 """
 from __future__ import annotations
 
@@ -47,6 +59,17 @@ DEFAULT_TMPDIR = "/data/tmp"
 TOLERANCE_MAE_SEMITONE = 2.0
 TOLERANCE_MAX_SEMITONE = 4.0
 TOLERANCE_CONFIDENCE_MEAN = 0.6
+
+# 라벨 없는 신규곡 backfill 가드 — 사람 가창 음역의 물리적 타당 범위(MIDI).
+# 신규 임포트 곡은 ground truth 라벨이 없어 compute_accuracy 로 검증할 수 없다.
+# 자체분석 결과를 추천에 적재(backfill)하기 전, 범위가 가창적으로 합리적인지 판정해
+# 분석 오류(예: 반주 저음 오검출, 옥타브 폴딩)를 걸러낸다. directive #1716.
+PLAUSIBLE_MIDI_FLOOR = 36   # C2 — 이 미만 lowMidi 는 가창 음역 밖(반주 저음 의심)
+PLAUSIBLE_MIDI_CEIL = 88    # E6 — 이 초과 highMidi 는 가창 음역 밖
+PLAUSIBLE_LOW_MAX = 67      # G4 — "최저음"이 이보다 높으면 분석 오류 의심
+PLAUSIBLE_HIGH_MIN = 52     # E3 — "최고음"이 이보다 낮으면 분석 오류 의심
+PLAUSIBLE_SPAN_MIN = 5      # 단4도 미만 음역폭은 멜로디로 비현실적
+PLAUSIBLE_SPAN_MAX = 40     # 3옥타브+ 음역폭은 단일 멜로디로 비현실적
 
 
 # ----------------------------------------------------------------------
@@ -213,6 +236,97 @@ def format_accuracy_report(metrics: dict) -> str:
     return "\n".join(lines)
 
 
+def range_plausibility(record: dict) -> dict:
+    """단일 feed 레코드의 음역(lowMidi/highMidi)이 가창적으로 합리적인지 판정한다(순수 함수).
+
+    신규 임포트 곡은 ground truth 라벨이 없어 compute_accuracy 로 검증할 수 없다.
+    자체분석 결과를 추천에 backfill 하기 전, 사람 가창 음역의 물리적 한계와 멜로디
+    음역폭 상식 안에 드는지(=합리적 범위) 확인해 분석 오류를 걸러낸다.
+
+    반환: {"id", "plausible": bool, "reasons": [str, ...]}.
+    status != success 또는 MIDI 누락 시 plausible=False.
+    """
+    song_id = record.get("id")
+    if record.get("status") != "success":
+        return {"id": song_id, "plausible": False, "reasons": ["status != success"]}
+    low = record.get("lowMidi")
+    high = record.get("highMidi")
+    if low is None or high is None:
+        return {"id": song_id, "plausible": False, "reasons": ["lowMidi/highMidi 누락"]}
+    low = int(low)
+    high = int(high)
+    reasons: list[str] = []
+    if low >= high:
+        reasons.append(f"lowMidi({low}) >= highMidi({high})")
+    if low < PLAUSIBLE_MIDI_FLOOR:
+        reasons.append(f"lowMidi({low}) < {PLAUSIBLE_MIDI_FLOOR}(C2)")
+    if low > PLAUSIBLE_LOW_MAX:
+        reasons.append(f"lowMidi({low}) > {PLAUSIBLE_LOW_MAX}(G4)")
+    if high > PLAUSIBLE_MIDI_CEIL:
+        reasons.append(f"highMidi({high}) > {PLAUSIBLE_MIDI_CEIL}(E6)")
+    if high < PLAUSIBLE_HIGH_MIN:
+        reasons.append(f"highMidi({high}) < {PLAUSIBLE_HIGH_MIN}(E3)")
+    if low < high:  # 음역폭은 low < high 일 때만 의미가 있다
+        span = high - low
+        if span < PLAUSIBLE_SPAN_MIN:
+            reasons.append(f"음역폭({span}) < {PLAUSIBLE_SPAN_MIN} 반음")
+        if span > PLAUSIBLE_SPAN_MAX:
+            reasons.append(f"음역폭({span}) > {PLAUSIBLE_SPAN_MAX} 반음")
+    return {"id": song_id, "plausible": not reasons, "reasons": reasons}
+
+
+def summarize_plausibility(records: list[dict]) -> dict:
+    """feed 전체의 음역 타당성을 집계한다(라벨 불요 — 신규곡 backfill 검증용).
+
+    분석은 성공했으나 범위가 비합리적인 곡(implausible)은 추천 backfill 에서
+    제외해야 한다 — 잘못된 음역이 추천 결과를 오염시키지 않도록.
+    """
+    per_song = [range_plausibility(item) for item in records]
+    status_by_id = {item.get("id"): item.get("status") for item in records}
+    success_count = sum(1 for item in records if item.get("status") == "success")
+    plausible = [row for row in per_song if row["plausible"]]
+    implausible_success = [
+        row
+        for row in per_song
+        if not row["plausible"] and status_by_id.get(row["id"]) == "success"
+    ]
+    return {
+        "songsTotal": len(records),
+        "songsSuccess": success_count,
+        "plausibleCount": len(plausible),
+        "implausibleCount": len(implausible_success),
+        "plausibleRate": (
+            round(len(plausible) / success_count, 3) if success_count else None
+        ),
+        "backfillReady": [row["id"] for row in plausible],
+        "blocked": [
+            {"id": row["id"], "reasons": row["reasons"]} for row in implausible_success
+        ],
+        "perSong": per_song,
+    }
+
+
+def format_plausibility_report(summary: dict) -> str:
+    """음역 타당성 집계를 사람이 읽는 로그 블록으로 포맷한다."""
+    lines = [
+        "=== audio-analysis 음역 타당성(합리적 범위) 리포트 ===",
+        f"곡 수: 전체 {summary['songsTotal']} / 분석성공 {summary['songsSuccess']}",
+        f"타당(backfill 안전): {summary['plausibleCount']} / 비합리(차단): {summary['implausibleCount']}",
+        f"타당 비율: {summary['plausibleRate']}",
+        (
+            f"가창 음역 한계: low∈[{PLAUSIBLE_MIDI_FLOOR},{PLAUSIBLE_LOW_MAX}] "
+            f"high∈[{PLAUSIBLE_HIGH_MIN},{PLAUSIBLE_MIDI_CEIL}] "
+            f"span∈[{PLAUSIBLE_SPAN_MIN},{PLAUSIBLE_SPAN_MAX}]"
+        ),
+    ]
+    if summary["blocked"]:
+        lines.append("차단된 곡(분석 성공이나 범위 비합리 — backfill 제외):")
+        for row in summary["blocked"]:
+            lines.append(f"  - {row['id']}: {', '.join(row['reasons'])}")
+    lines.append(f"backfill 대상 id: {summary['backfillReady']}")
+    return "\n".join(lines)
+
+
 def to_feed_record(song_id: str, result: object, method: str) -> dict:
     """analyze.AnalysisResult 를 backfill-ready feed 레코드로 변환한다.
 
@@ -233,6 +347,51 @@ def to_feed_record(song_id: str, result: object, method: str) -> dict:
     }
 
 
+def resume_existing(resume_path: Optional[str]) -> list[dict]:
+    """resume feed 를 로드한다. 경로 미지정 또는 첫 실행(파일 없음)이면 빈 리스트.
+
+    반복 실행에서는 --resume 와 --out 을 같은 경로로 두므로 첫 invocation 에는
+    파일이 아직 없다 — 이를 "진척 없음"으로 취급해 정상 진행한다.
+    """
+    if not resume_path or not Path(resume_path).exists():
+        return []
+    return load_results(resume_path)
+
+
+def done_ids_from_feed(records: list[dict]) -> set:
+    """resume 시 재분석을 건너뛸 곡 id 집합 — status success 인 곡만.
+
+    실패(status != success)곡은 포함하지 않아 다음 invocation 에서 재시도된다.
+    """
+    return {record.get("id") for record in records if record.get("status") == "success"}
+
+
+def select_pending(seed: list[dict], done_ids: set, limit: Optional[int]) -> list[dict]:
+    """이번 invocation 에서 분석할 곡을 고른다(순수 함수 — 안전 단위 반복의 핵심).
+
+    이미 완료된 곡(done_ids)을 제외하고, limit 이 주어지면 시드 순서 앞에서 N곡만
+    chunk 한다. 미보유 곡 수백 곡을 한 번에 돌려 디스크/rate 가 폭주하지 않도록
+    invocation 당 처리량을 한정하고, resume(done_ids)으로 반복 실행 시 진척이
+    누적되게 한다. directive #1734.
+    """
+    pending = [song for song in seed if song["id"] not in done_ids]
+    if limit is not None:
+        pending = pending[:limit]
+    return pending
+
+
+def merge_feed(existing: list[dict], fresh: list[dict]) -> list[dict]:
+    """기존 feed 와 이번 invocation 결과를 id 기준 병합한다(새 결과 우선).
+
+    같은 id 는 새 결과로 갱신(실패→성공 재시도 반영), 기존 곡의 순서는 보존하고
+    신규 곡은 뒤에 덧붙인다. 반복 실행이 단일 누적 feed 로 모이게 한다.
+    """
+    by_id: dict = {record.get("id"): record for record in existing}
+    for record in fresh:
+        by_id[record.get("id")] = record
+    return list(by_id.values())
+
+
 def load_results(path: str) -> list[dict]:
     """NDJSON feed 를 레코드 리스트로 로드한다(offline 정확도 재계산용)."""
     records: list[dict] = []
@@ -251,15 +410,21 @@ def run_batch(
     seed: list[dict],
     clip_seconds: int,
     vocal_separation: bool,
+    sleep_seconds: float = 0.0,
 ) -> list[dict]:
-    """시드 곡을 순차 분석한다. 곡 단위 실패는 격리되어 batch 가 중단되지 않는다."""
+    """시드 곡을 순차 분석한다. 곡 단위 실패는 격리되어 batch 가 중단되지 않는다.
+
+    sleep_seconds > 0 이면 곡 사이에 대기해 YouTube rate limit 을 완화한다(directive #1734).
+    """
     import analyze  # 외부 의존성(yt-dlp/librosa)은 analyze 내부에서 lazy import
 
     method = analyze.analysis_method_label(vocal_separation)
     records: list[dict] = []
     successful = 0
     failed = 0
-    for song in seed:
+    for index, song in enumerate(seed):
+        if index > 0 and sleep_seconds > 0:
+            time.sleep(sleep_seconds)
         song_id = song["id"]
         started = time.time()
         try:
@@ -328,6 +493,29 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="시드 label 과 비교해 정확도 리포트 로깅",
     )
+    parser.add_argument(
+        "--plausibility",
+        action="store_true",
+        help="라벨 없는 신규곡 — 음역 합리성(가창 범위) 리포트 로깅 + 비합리 곡 차단",
+    )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="기존 feed NDJSON — 이미 성공한 곡은 skip 하고 결과를 누적(반복 실행)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="이번 invocation 에서 분석할 최대 곡 수(안전 단위 chunk, 미지정 시 남은 전체)",
+    )
+    parser.add_argument(
+        "--sleep-seconds",
+        dest="sleep_seconds",
+        type=float,
+        default=0.0,
+        help="곡 사이 대기 초(YouTube rate limit 완화)",
+    )
     parser.add_argument("--tmpdir", default=None, help="임시 작업 경로(default /data/tmp)")
     parser.add_argument(
         "--clip-seconds", dest="clip_seconds", type=int, default=45, help="clip 길이(초)"
@@ -351,12 +539,31 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     seed = load_seed(args.seed)
 
+    if args.limit is not None and args.limit <= 0:
+        raise ValueError("--limit 은 양의 정수여야 합니다")
+    if args.sleep_seconds < 0:
+        raise ValueError("--sleep-seconds 는 음수일 수 없습니다")
+
     if args.from_results:
         records = load_results(args.from_results)
         LOG.info("offline mode: loaded %d records from %s", len(records), args.from_results)
     else:
         resolve_tmpdir(args.tmpdir)
-        records = run_batch(seed, args.clip_seconds, args.vocal_separation)
+        existing = resume_existing(args.resume)
+        done_ids = done_ids_from_feed(existing)
+        pending = select_pending(seed, done_ids, args.limit)
+        LOG.info(
+            "chunk: 시드 %d곡 / 완료 skip %d곡 / 이번 분석 %d곡 (남은 후보 %d, limit=%s)",
+            len(seed),
+            len(done_ids),
+            len(pending),
+            len(seed) - len(done_ids),
+            args.limit,
+        )
+        fresh = run_batch(
+            pending, args.clip_seconds, args.vocal_separation, args.sleep_seconds
+        )
+        records = merge_feed(existing, fresh)
         write_feed(records, args.out)
 
     if args.ground_truth:
@@ -364,6 +571,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         LOG.info("\n%s", format_accuracy_report(metrics))
         if not metrics["withinTolerance"]:
             LOG.warning("정확도 회귀 가드 미통과 — 라벨 대비 오차 확인 필요")
+
+    if args.plausibility:
+        summary = summarize_plausibility(records)
+        LOG.info("\n%s", format_plausibility_report(summary))
+        if summary["implausibleCount"] > 0:
+            LOG.warning(
+                "%d 곡 음역 비합리 — 추천 backfill 에서 제외 필요",
+                summary["implausibleCount"],
+            )
     return 0
 
 
