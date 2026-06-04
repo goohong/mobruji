@@ -361,9 +361,9 @@ describe("SongCard", () => {
           "사용자 도3-솔4 vs 곡 솔3-파5",
         ),
       ).toBeInTheDocument();
-      // 추정값 안내 footnote
+      // 추정값 안내 footnote (#1764 — 서버/기술 용어 '클라이언트·백엔드' 제거)
       expect(
-        screen.getByText(/클라이언트 추정값입니다/),
+        screen.getByText(/대략적인 추정값/),
       ).toBeInTheDocument();
     });
 

@@ -301,6 +301,33 @@ describe("RecommendPage", () => {
     expect(screen.getByText("곡-2")).toBeInTheDocument();
   });
 
+  // closes #1764 — 추천 순서가 '음역대만' 본 것인지 불명확하다는 피드백에 대응해
+  // 결과 영역에 종합 점수 정렬 기준을 한 줄 안내로 노출한다.
+  it("결과 영역에 종합 점수 정렬 기준 안내가 노출된다 (#1764)", async () => {
+    sessionMock.set({ sessionId: "sess-abc", voiceRangeId: 42 });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 42,
+      sessionId: "sess-abc",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValueOnce(
+      buildResponseWithSongIds(100, [1, 2]),
+    );
+
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
+        "음역 적합도·분위기·인기 등을 종합한 점수 순서로 추천합니다.",
+      );
+    });
+  });
+
   // ---------- 분위기/나이대 필터 (roadmap-mood-age-ui) ----------
   it("분위기 칩 선택 시 mood 를 포함해 추천을 다시 요청한다", async () => {
     const user = userEvent.setup();

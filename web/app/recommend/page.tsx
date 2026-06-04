@@ -700,20 +700,30 @@ type ResultSummaryProps = {
  * 노출한다. 필터를 토글하면 쿼리가 재발화돼 스켈레톤(로딩 신호)이 잠깐 뜨고, 새 결과가
  * 오면 이 줄의 곡 수/적용 문구가 갱신돼 "조건이 결과에 반영됐다"가 한눈에 보인다.
  * (스크린 리더 안내는 별도 aria-live 영역이 담당 — 여기는 시각 신호.)
+ *
+ * (이슈 #1764) 정렬 기준 한 줄 안내를 함께 노출한다 — 추천 순서가 "음역대만" 본 결과인지
+ * 종합 점수 순인지 불명확하다는 피드백에 대응. 실제 BE 정렬은 음역 적합·분위기·인기 등을
+ * 가중 합산한 종합 점수 순이라, 사용자가 "왜 이 순서인지"를 이해하도록 결과 영역에 드러낸다.
+ * 상세 모달 FitBadge(#1484) 설명가능성과 결을 맞춘다.
  */
 function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
   return (
-    <p
-      data-testid="recommend-result-summary"
-      className="text-xs text-[var(--text-caption)]"
-    >
-      <span className="font-medium text-[var(--text-secondary)]">
-        추천 {count}곡
-      </span>
-      {appliedFilterCount > 0 ? (
-        <span> · 조건 {appliedFilterCount}개 적용됨</span>
-      ) : null}
-    </p>
+    <div data-testid="recommend-result-summary" className="flex flex-col gap-1">
+      <p className="text-xs text-[var(--text-caption)]">
+        <span className="font-medium text-[var(--text-secondary)]">
+          추천 {count}곡
+        </span>
+        {appliedFilterCount > 0 ? (
+          <span> · 조건 {appliedFilterCount}개 적용됨</span>
+        ) : null}
+      </p>
+      <p
+        data-testid="recommend-sort-criteria"
+        className="text-xs text-[var(--text-caption)]"
+      >
+        음역 적합도·분위기·인기 등을 종합한 점수 순서로 추천합니다.
+      </p>
+    </div>
   );
 }
 
