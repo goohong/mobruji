@@ -26,6 +26,7 @@ import {
 import Home from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
+import { useAuthStore } from "@/store/auth";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 vi.mock("@/lib/api/voice-range", async () => {
@@ -66,7 +67,15 @@ beforeEach(() => {
   });
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem("mobruji-session");
+    localStorage.removeItem("mobruji-auth");
   }
+  // 기본은 비로그인 — 계정 진입점이 로그인/회원가입 링크로 노출되어야 한다.
+  useAuthStore.setState({
+    token: null,
+    tokenExpiresAt: null,
+    userId: null,
+    email: null,
+  });
 });
 
 afterEach(() => {
@@ -102,6 +111,17 @@ describe("Home — 공통", () => {
       "href",
       "/bookmarks",
     );
+  });
+
+  it("비로그인 시 계정 진입점에 로그인·회원가입 링크가 노출된다 (#1800)", async () => {
+    renderWithQueryClient(<Home />);
+    const accountNav = screen.getByRole("navigation", { name: "계정" });
+    expect(
+      within(accountNav).getByRole("link", { name: "로그인" }),
+    ).toHaveAttribute("href", "/login");
+    expect(
+      within(accountNav).getByRole("link", { name: "회원가입" }),
+    ).toHaveAttribute("href", "/signup");
   });
 });
 

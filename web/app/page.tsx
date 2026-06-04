@@ -25,6 +25,7 @@ import { midiToKoreanNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
 import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
+import { HomeAccountNav } from "@/app/components/HomeAccountNav";
 import { BrandWordmark } from "@/components/brand/BrandWordmark";
 
 /**
@@ -90,8 +91,11 @@ export default function Home() {
 
         <SecondaryNav />
 
+        <HomeAccountNav />
+
         <p className="text-xs text-[var(--text-disclaimer)]">
-          익명 세션으로 동작합니다. 회원가입 없음.
+          가입 없이 익명으로 바로 쓸 수 있어요. 로그인하면 음역대·취향이 기기를 옮겨도
+          유지됩니다.
         </p>
       </div>
     </main>
