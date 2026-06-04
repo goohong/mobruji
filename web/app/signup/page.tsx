@@ -8,7 +8,8 @@
  * 이라 가입 화면에서는 받지 않고, 기존 익명 흐름(측정·추천)을 그대로 둔다 — 가입은
  * 익명 세션을 건드리지 않으므로 측정 기록도 유지된다.
  *
- * 성공하면 홈("/")으로 라우팅한다.
+ * 성공하면 선택형 온보딩("/onboarding", closes #1814)으로 보내 나이대·성별·분위기를
+ * (각 스킵 가능) 한 번 받아 추천 기본값으로 영속한다.
  */
 
 import Link from "next/link";
@@ -28,7 +29,7 @@ export default function SignupPage() {
     mutationFn: (request) => signup(request),
     onSuccess: (session) => {
       setSession(session);
-      router.push("/");
+      router.push("/onboarding");
     },
   });
 

@@ -35,6 +35,7 @@ import userEvent from "@testing-library/user-event";
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import { createRecommendation } from "@/lib/api/recommendation";
+import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 const { sessionMock, historyMock } = await vi.hoisted(async () => {
@@ -208,6 +209,8 @@ beforeEach(() => {
   createRecommendationMock.mockReset();
   resetObserverRegistry();
   installIntersectionObserverMock();
+  // 온보딩 취향 pre-fill(#1814) 격리 — 기본은 빈 값이라 기존 테스트는 영향 없음.
+  useOnboardingPrefsStore.setState({ mood: null, ageGroup: null, gender: null });
 });
 
 afterEach(() => {
@@ -303,6 +306,51 @@ describe("RecommendPage", () => {
     expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
       "음역 적합도·분위기·인기 등을 종합한 점수순으로 정렬했어요.",
     );
+  });
+
+  // ---------- 온보딩 취향 pre-fill (closes #1814) ----------
+  it("온보딩에서 영속한 분위기·나이대·성별을 첫 추천 요청에 pre-fill 한다", async () => {
+    sessionMock.set({ sessionId: "sess-pf", voiceRangeId: 9 });
+    useOnboardingPrefsStore.setState({
+      mood: "EMOTIONAL",
+      ageGroup: "THIRTIES",
+      gender: "FEMALE",
+    });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 9,
+      sessionId: "sess-pf",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValueOnce(
+      buildResponseWithSongIds(200, [1, 2]),
+    );
+
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenCalledWith({
+        sessionId: "sess-pf",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 69,
+        excludeSongIds: [],
+        mood: "EMOTIONAL",
+        ageGroup: "THIRTIES",
+        gender: "FEMALE",
+      });
+    });
+
+    // 적용된 조건 3개가 결과 요약 + 접힌 다듬기 배지에 반영된다.
+    await waitFor(() => {
+      expect(screen.getByTestId("recommend-result-summary")).toHaveTextContent(
+        "조건 3개 적용됨",
+      );
+    });
+    expect(screen.getByTestId("refine-active-count")).toHaveTextContent("3");
   });
 
   // ---------- 결과 정렬 기준 선택 (closes #1765) ----------
