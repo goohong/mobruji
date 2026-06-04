@@ -1,0 +1,39 @@
+# dev 오디오 자체분석(self-analysis) overlay — 백엔드 컨테이너가 audio-analysis 컨테이너를
+# 형제(sibling)로 띄우는 Docker-out-of-Docker(DooD) 구성 (#1779).
+#
+# 배경:
+#   AudioAnalysisRunner 는 audio.analysis.use-docker=true 일 때
+#   `docker compose -f <compose> run --rm audio-analysis ...` 를 ProcessBuilder 로 호출한다.
+#   백엔드가 컨테이너 안에서 동작하므로 (1) docker CLI (backend/Dockerfile 에 설치),
+#   (2) 호스트 docker 데몬 소켓, (3) 호스트 경로 미러 마운트가 필요하다.
+#
+# 호스트 경로 미러(${HOST_PROJECT_DIR}:${HOST_PROJECT_DIR})가 핵심이다:
+#   docker compose 의 bind mount source 는 호스트 데몬이 호스트 파일시스템 기준으로 해석한다.
+#   백엔드 컨테이너 내부 경로 == 호스트 경로가 되도록 미러하면, 내부에서 실행한
+#   `docker compose -f ${HOST_PROJECT_DIR}/docker-compose.audio.yml run` 의 상대 bind/build
+#   컨텍스트(./tools/audio-analysis 등)가 호스트에서도 동일 절대경로로 정확히 풀린다.
+#
+# 사용 (base dev compose 와 함께 overlay):
+#   docker compose -f docker-compose.dev.yml -f docker-compose.dev.audio.yml \
+#     --env-file .env.dev up -d --build backend
+#
+# 선행 조건 (ncp-bootstrap-dev.sh 가 멱등 수행):
+#   - mobruji/audio-analysis:dev 이미지 빌드 (docker root=/data/docker)
+#   - /data/tmp (1777) 생성 — 분석 임시 디렉토리
+#   - .env.dev 의 HOST_PROJECT_DIR / DOCKER_GID 채움
+
+services:
+  backend:
+    environment:
+      AUDIO_ANALYSIS_USE_DOCKER: "true"
+      AUDIO_ANALYSIS_TOOL_DIR: ${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR in .env.dev (repo 절대경로)}/tools/audio-analysis
+      AUDIO_ANALYSIS_COMPOSE_FILE: ${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR in .env.dev (repo 절대경로)}/docker-compose.audio.yml
+      AUDIO_ANALYSIS_COMPOSE_SERVICE: audio-analysis
+    # spring(uid 1001) 비-root user 가 root:docker 소유 소켓(660)에 접근하려면 docker 그룹
+    # GID 를 supplementary group 으로 추가해야 한다. GID 는 호스트별로 다르므로 .env.dev 주입.
+    # 값 확인: getent group docker | cut -d':' -f3
+    group_add:
+      - "${DOCKER_GID:?set DOCKER_GID in .env.dev}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR in .env.dev (repo 절대경로)}:${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR in .env.dev (repo 절대경로)}:ro

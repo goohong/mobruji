@@ -21,9 +21,16 @@ services:
       dockerfile: Dockerfile
     image: mobruji/audio-analysis:dev
     # 임시 분석 산출물 디버깅용 마운트. 운영에서는 ADR 0006 에 따라 컨테이너 종료 시 자동 삭제됨.
+    #
+    # /data/tmp: 호스트 root 파일시스템(yt-dlp mp3 다운로드 + librosa wav 변환으로 곡당 수십 MB)
+    # 이 협소한 NCP dev 환경에서 분석 임시 산출물을 여유 있는 /data 디스크로 격리한다 (#1779).
+    # analyze.py 의 tempfile.mkdtemp 가 TMPDIR 를 따르며, 분석 후 shutil.rmtree 로 자동 삭제.
+    # 호스트 /data/tmp 는 sticky world-writable(1777)로 부트스트랩이 생성한다.
     volumes:
       - ./tools/audio-analysis:/workspace:ro
+      - /data/tmp:/data/tmp
     # yt-dlp 다운로드 + librosa 분석은 외부 네트워크 필요 (YouTube).
     # 결정성/PII 정책은 Python tool 측 `mask_url` 가 보장.
     environment:
       - PYTHONUNBUFFERED=1
+      - TMPDIR=/data/tmp
