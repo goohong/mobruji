@@ -4,9 +4,9 @@ slug: rev-qa-protocol
 status: implementing
 owner: @goohong
 scope: infra
-related_issues: []
+related_issues: [1819]
 related_prs: [316, 336, 349, 376, 377]
-last_reviewed: 2026-05-24
+last_reviewed: 2026-06-04
 ---
 
 # rev 세션 QA 실행 검증 프로토콜
@@ -131,6 +131,34 @@ curl -s -X POST http://localhost:8080/api/v1/recommendations \
 # - HTTP 201, requestId 발급, recommendations 배열 non-empty
 # - 결정성: 같은 요청 2회 호출 시 동일 순서 (recommendation-algorithm-v1.md §3)
 # - p95 < spec 정의된 임계 (p95-regression-guard.md)
+```
+
+#### S2-b. 추천 풀 소진 / 무한 스크롤 종료 (recommendation pagination)
+회귀 가드 (이슈 #1819): 후보 풀(`곡 후보 풀`/`SongCandidatePool`, `06-domain-model.md §4`)이 소진된
+뒤 BE 가 이미 제외된 곡을 재surface 하면, FE 무한 스크롤이 **종료되지 못하고 중복이 누적**된다.
+**첫 페이지만 보지 말고 풀 소진까지** 반복 호출해 ①종료(빈 결과) ②중복 0 을 확인한다.
+작은 풀(현재 ~100곡)에서 특히 — 풀이 작을수록 소진 후 재surface 가 빨리 드러난다.
+```bash
+SEEN=$(mktemp); EXCLUDE="[]"; DUP=0; PAGES=0; MAX=30   # MAX = 풀/페이지크기 상한 여유
+while [ "$PAGES" -lt "$MAX" ]; do
+  RESP=$(curl -s -X POST http://localhost:8080/api/v1/recommendations \
+    -H "Content-Type: application/json" \
+    -d "{\"sessionId\":\"$SID\",\"voiceRangeLow\":48,\"voiceRangeHigh\":76,\"mood\":\"UPBEAT\",\"excludeSongIds\":$EXCLUDE}")
+  IDS=$(echo "$RESP" | jq -r '.recommendations[].songId')
+  [ -z "$IDS" ] && break                                # ① 빈 결과 = 정상 종료
+  for id in $IDS; do
+    grep -qx "$id" "$SEEN" && DUP=$((DUP+1)) || echo "$id" >> "$SEEN"
+  done
+  EXCLUDE=$(sort -un "$SEEN" | jq -R . | jq -sc 'map(tonumber)')   # 본 곡 누적 제외
+  PAGES=$((PAGES+1))
+done
+echo "pages=$PAGES dup=$DUP seen=$(wc -l < "$SEEN")"
+
+# Pass 조건:
+# - 종료: 루프가 MAX 도달 전에 break (빈 결과로 자연 종료)
+# - 중복 0: DUP == 0 (이미 본 songId 가 다음 페이지에 재등장하지 않음)
+# - 미종료(PAGES == MAX) 또는 DUP > 0 → 🔴 무한 스크롤 회귀 (이슈 #1819 재현)
+# 비고: dev 배포본(단계 2) 검증 시 endpoint 를 http://101.79.20.94/api/v1/recommendations 로 교체.
 ```
 
 #### S3. 좋아요 / 북마크 (recommendation feedback)

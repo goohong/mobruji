@@ -4,9 +4,9 @@ slug: stage2-dev-deploy-e2e
 status: draft
 owner: @goohong
 scope: infra
-related_issues: [1448, 1453, 1455]
+related_issues: [1448, 1453, 1455, 1819]
 related_prs: []
-last_reviewed: 2026-06-02
+last_reviewed: 2026-06-04
 ---
 
 # 단계 2 재정의 — dev 배포 E2E 검증 (배포본 E2E 점검)
@@ -104,6 +104,8 @@ dev 배포본 검증 대상 endpoint (예시):
 - 변경이 **API 계약·추천 로직·데이터 정합성 등 비가시 동작** → 브라우저 불가 → 프론트 호출·HTTP
 - 한 PR 이 **양쪽 다** 건드리면 두 채널 모두 실행
 - `web/playwright.config.ts` 부재 (아직 미도입) → 브라우저 가능 항목도 잠정 프론트 호출·HTTP fallback (config 도입 시점부터 Playwright 의무) — `web-e2e-playwright.md §10` impl PR 1 머지 의존
+
+**페이지네이션·무한 스크롤 풀 소진 검증 룰 (이슈 #1819)**: 추천·목록 등 더 불러오기(infinite scroll / `excludeSongIds` 누적 / 페이지 토큰)로 항목을 추가 로드하는 화면·엔드포인트는 **첫 페이지 렌더만 확인하지 말고 후보 풀(`곡 후보 풀`/`SongCandidatePool`, `06-domain-model.md §4`) 소진까지** 반복 진행해 두 가지를 확인한다 — ①무한 스크롤이 종료되는가(빈 결과 / `hasNext=false`) ②이미 본 항목이 재등장(중복 누적)하지 않는가. 작은 풀(현재 ~100곡)에서 특히 위험 — 풀 소진 후 BE 가 제외 곡을 재surface 하면 종료 불가 + 중복 폭주(이슈 #1819 원형). 브라우저 가능 분류는 끝까지 스크롤, 브라우저 불가 분류는 `excludeSongIds` 누적 반복 호출. 구체 시나리오·Pass 조건: `rev-qa-protocol.md §5-3 S2-b`.
 
 > 판정 기준의 명확화·자동화 가능성은 **오픈 질문 Q2**.
 
