@@ -8,7 +8,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SAFE_SONG_PERSONA, SAFE_SONG_REASON_LABEL } from "./persona";
+import {
+  SAFE_SONG_PERSONA,
+  SAFE_SONG_REASON_LABEL,
+  SHOWOFF_SONG_PERSONA,
+  SHOWOFF_SONG_REASON_LABEL,
+} from "./persona";
 
 describe("persona 헬퍼", () => {
   it("SAFE_SONG_PERSONA 는 P-E 식별자다", () => {
@@ -17,5 +22,13 @@ describe("persona 헬퍼", () => {
 
   it("SAFE_SONG_REASON_LABEL 은 '안심 포인트' 라벨이다", () => {
     expect(SAFE_SONG_REASON_LABEL).toBe("안심 포인트");
+  });
+
+  it("SHOWOFF_SONG_PERSONA 는 P-F 식별자다", () => {
+    expect(SHOWOFF_SONG_PERSONA).toBe("P-F");
+  });
+
+  it("SHOWOFF_SONG_REASON_LABEL 은 '킬링파트' 라벨이다", () => {
+    expect(SHOWOFF_SONG_REASON_LABEL).toBe("킬링파트");
   });
 });
