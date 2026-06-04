@@ -907,6 +907,7 @@ describe("RecommendPage", () => {
   // ---------- closes #282 ----------
   describe("음역대 source method 헤더 뱃지 (#282)", () => {
     it("MIC_MEASURE 응답이면 '마이크 측정' 뱃지와 '마이크로 다시 측정' 링크가 노출된다", async () => {
+      const user = userEvent.setup();
       sessionMock.set({ sessionId: "sess-mic", voiceRangeId: 7 });
       readVoiceRangeMock.mockResolvedValue({
         id: 7,
@@ -927,14 +928,17 @@ describe("RecommendPage", () => {
         expect(screen.getByText("곡-1")).toBeInTheDocument();
       });
 
+      // 소스 뱃지는 상시 노출. 재측정 링크는 "음역대 자세히" disclosure 안 (#1711).
       const badge = screen.getByTestId("voice-range-source-badge");
       expect(badge).toHaveTextContent("마이크 측정");
+      await user.click(screen.getByRole("button", { name: /음역대 자세히/ }));
       expect(
         screen.getByRole("link", { name: "마이크로 다시 측정" }),
       ).toHaveAttribute("href", "/voice-range/auto");
     });
 
     it("OCTAVE_PICK 응답이면 '직접 선택' 뱃지가 노출되고 '마이크로 다시 측정' 링크는 노출되지 않는다", async () => {
+      const user = userEvent.setup();
       sessionMock.set({ sessionId: "sess-pick", voiceRangeId: 8 });
       readVoiceRangeMock.mockResolvedValue({
         id: 8,
@@ -957,6 +961,8 @@ describe("RecommendPage", () => {
 
       const badge = screen.getByTestId("voice-range-source-badge");
       expect(badge).toHaveTextContent("직접 선택");
+      // 재측정 링크는 "음역대 자세히" disclosure 안 (#1711).
+      await user.click(screen.getByRole("button", { name: /음역대 자세히/ }));
       expect(
         screen.queryByRole("link", { name: "마이크로 다시 측정" }),
       ).not.toBeInTheDocument();
@@ -966,6 +972,7 @@ describe("RecommendPage", () => {
     });
 
     it("SELF_REPORT 응답이면 '자가 보고' 뱃지가 노출되고 '마이크로 다시 측정' 링크는 노출되지 않는다", async () => {
+      const user = userEvent.setup();
       sessionMock.set({ sessionId: "sess-self", voiceRangeId: 9 });
       readVoiceRangeMock.mockResolvedValue({
         id: 9,
@@ -988,9 +995,56 @@ describe("RecommendPage", () => {
 
       const badge = screen.getByTestId("voice-range-source-badge");
       expect(badge).toHaveTextContent("자가 보고");
+      // 재측정 링크는 "음역대 자세히" disclosure 안 (#1711).
+      await user.click(screen.getByRole("button", { name: /음역대 자세히/ }));
       expect(
         screen.queryByRole("link", { name: "마이크로 다시 측정" }),
       ).not.toBeInTheDocument();
+    });
+
+    it("헤더 음역대 보조 정보(막대·재입력 링크)는 기본 접힘이고 '음역대 자세히' 토글로 펼친다 (#1711)", async () => {
+      const user = userEvent.setup();
+      sessionMock.set({ sessionId: "sess-collapse", voiceRangeId: 11 });
+      readVoiceRangeMock.mockResolvedValue({
+        id: 11,
+        sessionId: "sess-collapse",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-22T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      });
+      createRecommendationMock.mockResolvedValueOnce(
+        buildResponseWithSongIds(1, [1]),
+      );
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
+
+      // 요약(음역대 텍스트)은 상시 노출.
+      expect(screen.getByText(/내 음역대:/)).toBeInTheDocument();
+      // 접힌 상태: 직관 막대 헤드라인 + 재입력 링크 미노출.
+      const toggle = screen.getByRole("button", { name: /음역대 자세히/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(
+        screen.queryByTestId("voice-range-relative-headline"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: "음역대 다시 입력" }),
+      ).not.toBeInTheDocument();
+
+      // 펼치면 보조 정보가 노출.
+      await user.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(
+        screen.getByTestId("voice-range-relative-headline"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: "음역대 다시 입력" }),
+      ).toHaveAttribute("href", "/voice-range");
     });
   });
 });
