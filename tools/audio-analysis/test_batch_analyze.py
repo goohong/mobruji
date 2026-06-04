@@ -15,6 +15,7 @@ from pathlib import Path
 import batch_analyze as ba
 
 VALIDATION_SET = Path(__file__).parent / "tests" / "validation_set.json"
+NEW_SONGS_SET = Path(__file__).parent / "tests" / "new-songs-verification.json"
 
 
 class TestLoadSeed(unittest.TestCase):
@@ -58,6 +59,17 @@ class TestLoadSeed(unittest.TestCase):
             self.assertIn("label", song)
             self.assertIn("lowMidi", song["label"])
             self.assertIn("highMidi", song["label"])
+
+    def test_shipped_new_songs_set_is_valid(self) -> None:
+        # directive #1716 신규곡 검증 fixture — 라벨 없음(plausibility 가드 대상).
+        songs = ba.load_seed(str(NEW_SONGS_SET))
+        self.assertGreaterEqual(len(songs), 5)
+        self.assertLessEqual(len(songs), 10)
+        ids = [song["id"] for song in songs]
+        self.assertEqual(len(ids), len(set(ids)))  # id 중복 없음
+        for song in songs:
+            self.assertIn("title", song)
+            self.assertNotIn("label", song)  # 신규곡 = ground truth 없음
 
 
 class TestAbsSemitoneError(unittest.TestCase):
@@ -161,6 +173,108 @@ class TestAccuracyWithinTolerance(unittest.TestCase):
 
     def test_fails_when_no_samples(self) -> None:
         self.assertFalse(ba.accuracy_within_tolerance({"songsCompared": 0}))
+
+
+class TestRangePlausibility(unittest.TestCase):
+    def _ok(self) -> dict:
+        return {"id": "a", "status": "success", "lowMidi": 55, "highMidi": 77}
+
+    def test_plausible_range(self) -> None:
+        row = ba.range_plausibility(self._ok())
+        self.assertTrue(row["plausible"])
+        self.assertEqual(row["reasons"], [])
+
+    def test_failed_status_implausible(self) -> None:
+        row = ba.range_plausibility({"id": "a", "status": "failed", "error": "x"})
+        self.assertFalse(row["plausible"])
+
+    def test_missing_midi_implausible(self) -> None:
+        row = ba.range_plausibility({"id": "a", "status": "success", "lowMidi": 55})
+        self.assertFalse(row["plausible"])
+
+    def test_low_ge_high(self) -> None:
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 70, "highMidi": 60}
+        )
+        self.assertFalse(row["plausible"])
+        self.assertTrue(any(">=" in r for r in row["reasons"]))
+
+    def test_low_below_floor(self) -> None:
+        # 반주 저음 오검출 — C2 미만.
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 24, "highMidi": 60}
+        )
+        self.assertFalse(row["plausible"])
+
+    def test_high_above_ceil(self) -> None:
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 55, "highMidi": 100}
+        )
+        self.assertFalse(row["plausible"])
+
+    def test_span_too_wide(self) -> None:
+        # 옥타브 폴딩 등으로 음역폭이 비현실적으로 넓음.
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 40, "highMidi": 85}
+        )
+        self.assertFalse(row["plausible"])
+        self.assertTrue(any("음역폭" in r for r in row["reasons"]))
+
+    def test_span_too_narrow(self) -> None:
+        row = ba.range_plausibility(
+            {"id": "a", "status": "success", "lowMidi": 60, "highMidi": 62}
+        )
+        self.assertFalse(row["plausible"])
+
+    def test_validation_labels_are_plausible(self) -> None:
+        # 운영자 PoC 라벨은 모두 합리적 범위여야 한다(가드 보정 sanity).
+        songs = ba.load_seed(str(VALIDATION_SET))
+        for song in songs:
+            label = song["label"]
+            row = ba.range_plausibility(
+                {
+                    "id": song["id"],
+                    "status": "success",
+                    "lowMidi": label["lowMidi"],
+                    "highMidi": label["highMidi"],
+                }
+            )
+            self.assertTrue(row["plausible"], f"{song['id']} {row['reasons']}")
+
+
+class TestSummarizePlausibility(unittest.TestCase):
+    def _records(self) -> list[dict]:
+        return [
+            {"id": "a", "status": "success", "lowMidi": 55, "highMidi": 77},
+            {"id": "b", "status": "success", "lowMidi": 24, "highMidi": 60},  # 비합리
+            {"id": "c", "status": "failed", "error": "download"},
+        ]
+
+    def test_counts_and_partition(self) -> None:
+        summary = ba.summarize_plausibility(self._records())
+        self.assertEqual(summary["songsTotal"], 3)
+        self.assertEqual(summary["songsSuccess"], 2)
+        self.assertEqual(summary["plausibleCount"], 1)
+        self.assertEqual(summary["implausibleCount"], 1)  # 실패곡은 제외, b만
+        self.assertEqual(summary["plausibleRate"], 0.5)
+        self.assertEqual(summary["backfillReady"], ["a"])
+        self.assertEqual(summary["blocked"][0]["id"], "b")
+
+    def test_all_plausible_rate_one(self) -> None:
+        records = [{"id": "a", "status": "success", "lowMidi": 50, "highMidi": 70}]
+        summary = ba.summarize_plausibility(records)
+        self.assertEqual(summary["plausibleRate"], 1.0)
+        self.assertEqual(summary["implausibleCount"], 0)
+
+    def test_no_success_rate_none(self) -> None:
+        summary = ba.summarize_plausibility([{"id": "a", "status": "failed"}])
+        self.assertIsNone(summary["plausibleRate"])
+        self.assertEqual(summary["implausibleCount"], 0)
+
+    def test_report_renders(self) -> None:
+        report = ba.format_plausibility_report(ba.summarize_plausibility(self._records()))
+        self.assertIn("음역 타당성", report)
+        self.assertIn("backfill 대상", report)
 
 
 class TestToFeedRecord(unittest.TestCase):
