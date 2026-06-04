@@ -125,6 +125,59 @@ describe("IntentModeToggle", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("'둘이 함께 부를 곡 추천받기'(P-G) 토글을 렌더한다", () => {
+    renderToggle();
+    expect(
+      screen.getByRole("button", { name: /둘이 함께 부를 곡 추천받기/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("꺼진 상태에서 P-G 를 누르면 P-G 로 onPersonaChange 가 호출된다", async () => {
+    const user = userEvent.setup();
+    const { onPersonaChange } = renderToggle();
+
+    await user.click(
+      screen.getByRole("button", { name: /둘이 함께 부를 곡 추천받기/ }),
+    );
+
+    expect(onPersonaChange).toHaveBeenCalledWith("P-G");
+  });
+
+  it("켜진 상태(P-G)에서 누르면 null(해제)로 호출된다", async () => {
+    const user = userEvent.setup();
+    const { onPersonaChange } = renderToggle({ selectedPersona: "P-G" });
+
+    await user.click(
+      screen.getByRole("button", { name: /둘이 함께 부를 곡 추천받기/ }),
+    );
+
+    expect(onPersonaChange).toHaveBeenCalledWith(null);
+  });
+
+  it("상호 배타 — P-E 가 켜진 상태에서 P-G 를 누르면 P-G 로 전환한다", async () => {
+    const user = userEvent.setup();
+    const { onPersonaChange } = renderToggle({ selectedPersona: "P-E" });
+
+    await user.click(
+      screen.getByRole("button", { name: /둘이 함께 부를 곡 추천받기/ }),
+    );
+
+    expect(onPersonaChange).toHaveBeenCalledWith("P-G");
+  });
+
+  it("P-G 선택 상태에서 다른 모드 버튼은 aria-pressed=false 다", () => {
+    renderToggle({ selectedPersona: "P-G" });
+    expect(
+      screen.getByRole("button", { name: /안 망할 곡 추천받기/ }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByRole("button", { name: /고음 질러 박수받기/ }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByRole("button", { name: /둘이 함께 부를 곡 추천받기/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("a11y 위반이 없다", async () => {
     const { container } = render(
       <IntentModeToggle selectedPersona="P-E" onPersonaChange={vi.fn()} />,
