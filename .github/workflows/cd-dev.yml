@@ -20,6 +20,8 @@ on:
       - 'backend/**'
       - 'web/**'
       - 'docker-compose.dev.yml'
+      - 'docker-compose.audio.yml'
+      - 'tools/audio-analysis/**'
       - 'nginx/**'
       - 'tools/deploy/**'
       - '.env.dev.example'
@@ -88,6 +90,32 @@ jobs:
                   echo "[cd-dev] .env.dev 부재 — bootstrap 필요 (tools/deploy/ncp-bootstrap-dev.sh)"
                   exit 2
               fi
+
+              # 오디오 자체분석 DooD(#1797): base docker-compose.dev.yml 이 HOST_PROJECT_DIR/DOCKER_GID 를
+              # :? 로 요구한다. #1783 이전에 생성된 .env.dev 는 이 값이 없을 수 있으므로 멱등 backfill 해
+              # compose fail-fast 를 막는다 (bootstrap 과 동일 로직).
+              DOCKER_GID_VAL="$(getent group docker | cut -d: -f3)"
+              if ! grep -q '^HOST_PROJECT_DIR=..*' .env.dev; then
+                  if grep -q '^HOST_PROJECT_DIR=' .env.dev; then
+                      sed -i "s|^HOST_PROJECT_DIR=.*|HOST_PROJECT_DIR=$(pwd)|" .env.dev
+                  else
+                      echo "HOST_PROJECT_DIR=$(pwd)" >> .env.dev
+                  fi
+                  echo "[cd-dev] .env.dev HOST_PROJECT_DIR backfill → $(pwd)"
+              fi
+              if [ -n "$DOCKER_GID_VAL" ] && ! grep -q '^DOCKER_GID=..*' .env.dev; then
+                  if grep -q '^DOCKER_GID=' .env.dev; then
+                      sed -i "s|^DOCKER_GID=.*|DOCKER_GID=${DOCKER_GID_VAL}|" .env.dev
+                  else
+                      echo "DOCKER_GID=${DOCKER_GID_VAL}" >> .env.dev
+                  fi
+                  echo "[cd-dev] .env.dev DOCKER_GID backfill → ${DOCKER_GID_VAL}"
+              fi
+
+              # 오디오 분석 이미지(DooD sibling) 빌드 — backend 가 use-docker 로 호출하는 mobruji/audio-analysis:dev.
+              # base compose 가 직접 띄우지 않는(ad-hoc `run --rm`) 이미지라 별도 빌드가 필요하다.
+              echo "[cd-dev] building mobruji/audio-analysis:dev"
+              docker compose -f docker-compose.audio.yml build audio-analysis
 
               # 이미지 tag 가 .env.dev 의 GIT_SHA 를 통해 inline.
               # docker compose 가 자동으로 .env.dev + GIT_SHA env 를 합쳐 읽도록 export.
