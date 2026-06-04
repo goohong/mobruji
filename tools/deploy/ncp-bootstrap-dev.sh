@@ -126,7 +126,7 @@ EOF
 
 echo "==> 8) 부트스트랩 완료"
 echo "    가동 명령: docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build"
-echo "    오디오 자체분석(use-docker) 활성 가동: docker compose -f docker-compose.dev.yml -f docker-compose.dev.audio.yml --env-file .env.dev up -d --build"
+echo "    (오디오 자체분석 use-docker 는 base docker-compose.dev.yml 에 흡수됨 — HOST_PROJECT_DIR/DOCKER_GID 필수, #1797)"
 echo "    HTTPS 발급: bash tools/deploy/dev-tls-init.sh  (최초 1회)"
 echo "    상태:     docker compose -f docker-compose.dev.yml ps"
 echo "    로그:     docker compose -f docker-compose.dev.yml logs -f backend"
