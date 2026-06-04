@@ -11,7 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import com.mobruji.song.domain.AudioAnalysisFailedException;
@@ -54,8 +53,9 @@ import io.micrometer.core.instrument.MeterRegistry;
  * --mobruji.backfill-audio.sleep-seconds=3'
  * </pre>
  *
- * <p>인자({@link ApplicationArguments}) 미지정 시 no-op — 평시 부팅에 영향 없음. {@code test} 프로파일에서는
- * Spring Bean 자체를 등록하지 않아 통합 테스트가 영향받지 않는다.
+ * <p>인자({@link ApplicationArguments}) 미지정 시 no-op — 평시 부팅(테스트 포함)에 영향 없음. 본 빈은 on-demand
+ * admin 트리거({@code POST /api/v1/admin/songs/audio-backfill}, 이슈 #1757)가 {@code runBackfill} 을 재사용하므로
+ * 모든 프로파일에서 등록된다.
  *
  * <p>동작:
  * <ol>
@@ -70,7 +70,6 @@ import io.micrometer.core.instrument.MeterRegistry;
  * <p>임시 audio 파일은 Python 측({@code analyze.py})에서 분석 후 즉시 삭제 — ADR 0006.
  */
 @Component
-@Profile("!test")
 public class SongAudioBackfillCommand implements ApplicationRunner {
 
     /** ApplicationArguments 에서 인식할 옵션 키. {@code --mobruji.backfill-audio=true} */
