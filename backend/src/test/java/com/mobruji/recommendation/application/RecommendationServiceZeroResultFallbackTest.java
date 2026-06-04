@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -35,11 +36,12 @@ import com.mobruji.song.infrastructure.SongRepository;
  * {@link RecommendationService#create} 결과 0건(빈 화면) fallback(#1668) service-레벨 가드.
  *
  * <p>추천 파이프라인의 유일한 하드 필터는 {@code excludeSongIds} 다 — 음역대·분위기·연령대는 점수 신호일 뿐 후보를
- * 0건으로 줄이지 않는다. 따라서 0건은 제외 곡 셋이 카탈로그를 전부 덮은 경우(특히 세션 누적 #1549)에만 발생하며,
- * 이 테스트는 (1) 세션 누적만 풀어 채우는 1단계, (2) 사용자 명시 제외까지 푸는 2단계, (3) 정상 매칭은 완화 표기가
- * 없는지(회귀 가드)를 검증한다.
+ * 0건으로 줄이지 않는다. fallback 은 클라이언트가 제외 곡을 명시하지 않은 빈 exclude(=재추천 버튼) 호출에만 적용된다 —
+ * 클라이언트가 제외 곡을 누적해 보내는 페이지네이션(#1835)은 풀 소진 시 fallback 없이 빈 결과로 종료한다. 이 테스트는
+ * (1) 빈 exclude + 세션 누적(#1549)만 풀어 채우는 1단계, (2) 클라이언트 명시 제외 페이지네이션의 풀 소진 종료(#1835),
+ * (3) 정상 매칭은 완화 표기가 없는지(회귀 가드)를 검증한다.
  *
- * <p>spec: 이슈 #1668 — 결과 0건이면 단계적 필터 완화로 최소 결과 보장 + {@code relaxed} 플래그.
+ * <p>spec: 이슈 #1668 — 빈 exclude 결과 0건이면 단계적 필터 완화로 최소 결과 보장 + {@code relaxed} 플래그.
  */
 @ExtendWith(MockitoExtension.class)
 class RecommendationServiceZeroResultFallbackTest {
@@ -66,9 +68,9 @@ class RecommendationServiceZeroResultFallbackTest {
     private RecommendationService recommendationService;
 
     @Test
-    @DisplayName("create: 사용자가 카탈로그 전 곡을 제외하면 2단계 완화(EXCLUDED_SONGS)로 결과를 채운다")
-    void create_allSongsExcluded_relaxesExcludedSongs() throws Exception {
-        // given: 카탈로그 3곡 전부를 사용자가 명시 제외 → 정상 후보는 0건
+    @DisplayName("create: 클라이언트가 제외 곡을 명시(페이지네이션)하고 풀이 소진되면 fallback 없이 빈 결과로 종료한다 (#1835)")
+    void create_clientExcludesPoolExhausted_terminatesEmpty() throws Exception {
+        // given: 카탈로그 3곡 전부를 클라이언트가 명시 제외(무한스크롤로 전부 본 상황) → 정상 후보는 0건
         stubScoringPipeline(3);
         given(recommendationProperties.seedStrategy())
                 .willReturn(RecommendationProperties.SeedStrategy.DERIVED);
@@ -79,10 +81,10 @@ class RecommendationServiceZeroResultFallbackTest {
         final RecommendationResult result = recommendationService.create(
                 command(Mood.UPBEAT, List.of(1L, 2L, 3L), /* excludeSessionHistory */ false));
 
-        // then: 빈 화면 대신 가까운 곡이 채워지고, 어떤 필터가 완화됐는지 표기된다
-        assertThat(result.recommendations()).isNotEmpty();
-        assertThat(result.relaxed()).isTrue();
-        assertThat(result.relaxedFilters()).containsExactly(FilterRelaxation.EXCLUDED_SONGS);
+        // then: 0건 fallback 없이 빈 결과로 종료해 이미 본 곡을 재노출(재surface)하지 않는다
+        assertThat(result.recommendations()).isEmpty();
+        assertThat(result.relaxed()).isFalse();
+        assertThat(result.relaxedFilters()).isEmpty();
     }
 
     @Test
@@ -142,8 +144,10 @@ class RecommendationServiceZeroResultFallbackTest {
         given(recommendationProperties.resultCount()).willReturn(RESULT_COUNT);
 
         final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0);
-        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any(), any()))
-                .willReturn(new Scored(0.9, breakdown));
+        // 풀 소진 종료(#1835) 케이스는 후보가 0건이라 scorer 까지 도달하지 않으므로 lenient — fallback 경로 테스트만 점수를 쓴다.
+        lenient().when(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any(),
+                any()))
+                .thenReturn(new Scored(0.9, breakdown));
         given(diversityPostProcessor.apply(anyList(), anyInt())).willAnswer(invocation -> {
             final List<ScoredSong> candidates = invocation.getArgument(0);
             final int resultCount = invocation.getArgument(1);
