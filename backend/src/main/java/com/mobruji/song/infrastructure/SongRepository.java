@@ -70,6 +70,21 @@ public interface SongRepository extends JpaRepository<Song, Long> {
     List<Song> findCandidatesForBackfill(@Param("threshold") double threshold);
 
     /**
+     * 추천 후보 universe — 음역대 보유({@code lowMidi}/{@code highMidi} 둘 다 not-null) 곡만 반환한다 (이슈 #1744).
+     *
+     * <p>음역대 미보유 곡은 {@link com.mobruji.recommendation.application.RecommendationScorer} 가 voiceFit 을
+     * 실측 band 로 산정할 수 없어 키 휴리스틱/중립(0.5)으로 떨어진다. 키마저 UNKNOWN 인 임포트 곡이 다수면 추천 풀이
+     * voiceFit=0.5 로 오염돼 "추천 곡 전부 음역적합 50%" 사고가 났다. 후보 단계에서 음역대 보유 곡만 추려 voiceFit 이
+     * 실제로 변별되는 곡만 추천하며, backfill 로 음역대가 채워진 곡은 자동으로 다시 후보에 편입된다.
+     *
+     * <p>{@code id} 오름차순 정렬로 jitter 배정 입력 순서를 결정적으로 유지한다(spec §3 비기능 — 결정성).
+     */
+    @Query("select s from Song s "
+            + "where s.lowMidi is not null and s.highMidi is not null "
+            + "order by s.id asc")
+    List<Song> findAllWithVocalRange();
+
+    /**
      * 음역대 미보유 곡 selective query — {@code lowMidi IS NULL OR highMidi IS NULL} 인 곡만 반환한다 (이슈 #1739).
      *
      * <p>{@link #findCandidatesForBackfill(double)} 가 신뢰도/출처 기준의 넓은 후보(이미 음역대가 있는 곡 포함)를

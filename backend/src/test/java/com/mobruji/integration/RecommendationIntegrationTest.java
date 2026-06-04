@@ -21,6 +21,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
+import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
@@ -224,9 +225,23 @@ class RecommendationIntegrationTest {
     }
 
     @Test
-    @DisplayName("E2E (#1494): 음역 미보유 곡은 practiceDifficulty=null + graceful 사유로 처리된다")
-    void e2e_practiceDifficultyGracefulForSongWithoutRange() {
-        // 기본 시드(buildSong)는 lowMidi/highMidi 미설정 → difficulty null
+    @DisplayName("E2E (#1744): 음역대 미보유 곡은 추천 후보에서 제외되고, 음역대 보유 곡만 변별된 voiceFit 으로 노출된다")
+    void e2e_songsWithoutVocalRangeExcludedFromCandidates() {
+        // given: 음역대 보유 곡(band)과 음역대 미보유 곡(UNKNOWN 키·range 없음)을 섞어 시드.
+        //        미보유 곡은 voiceFit 을 실측으로 못 구해 0.5 중립으로 추천 풀을 오염시키던 사고(#1744) — 후보에서 제외돼야 한다.
+        recommendationRepository.deleteAll();
+        recommendationRequestRepository.deleteAll();
+        songRepository.deleteAll();
+        songRepository.save(buildBandSong("음역보유1", "가수A", MusicalKey.C_MAJOR, 55, 67));
+        songRepository.save(buildBandSong("음역보유2", "가수B", MusicalKey.D_MAJOR, 58, 72));
+        // 음역대 미보유 곡 — lowMidi/highMidi 미설정. 추천 후보에서 빠져야 한다.
+        songRepository.save(Song.builder()
+                .title("음역미보유").artist("가수C").releaseYear(2020)
+                .keyOriginal(MusicalKey.UNKNOWN).bpm(120).mood(Mood.UPBEAT)
+                .language("ko").genre("팝")
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build());
+
         final String createBody = """
                 {
                   "sessionId": "550e8400-e29b-41d4-a716-11eeec0e2e07",
@@ -243,9 +258,13 @@ class RecommendationIntegrationTest {
                 .post("/api/v1/recommendations")
                 .then()
                 .statusCode(HttpStatus.CREATED.value())
-                .body("recommendations[0].practiceDifficulty", nullValue())
-                .body("recommendations[0].practiceDifficultyReason",
-                        equalTo("아직 음역대 분석 정보가 없어 난이도를 가늠하기 어려워요"));
+                // 음역대 보유 2곡만 추천 — 미보유 곡은 후보 제외.
+                .body("recommendations.size()", equalTo(2))
+                .body("recommendations.song.title", everyItem(notNullValue()))
+                .body("recommendations.findAll { it.song.title == '음역미보유' }.size()", equalTo(0))
+                // 추천 곡은 모두 실측 band 기반 voiceFit — 0.5 중립 오염이 아니라 변별된 값.
+                .body("recommendations.voiceFit", everyItem(notNullValue()))
+                .body("recommendations[0].practiceDifficulty", notNullValue());
     }
 
     @Test
@@ -449,6 +468,8 @@ class RecommendationIntegrationTest {
         return Song.builder()
                 .title(title).artist(artist).releaseYear(2020)
                 .keyOriginal(key).bpm(120).mood(mood)
+                .lowMidi(MusicalKeyMidiResolver.rootMidi(key) - 7)
+                .highMidi(MusicalKeyMidiResolver.rootMidi(key) + 7)
                 .language("ko").genre(genre)
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();
