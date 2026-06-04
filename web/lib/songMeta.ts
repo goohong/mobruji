@@ -35,3 +35,31 @@ export function formatLanguageLabel(
   const normalized = language.trim().toLowerCase();
   return LANGUAGE_LABELS[normalized] ?? null;
 }
+
+/**
+ * BE Mood enum(SCREAMING_SNAKE) → 한국어 라벨 (closes #1764).
+ *
+ * 상세 등에서 `mood` 를 그대로 그리면 "UPBEAT" 같은 내부 코드값이 사용자에게 노출된다.
+ * 필터 칩(RecommendFilters)·히스토리(MOOD_LABELS)와 같은 톤의 한국어 라벨로 변환한다.
+ */
+const MOOD_LABELS: Readonly<Record<string, string>> = {
+  UPBEAT: "신나는",
+  CALM: "잔잔한",
+  EMOTIONAL: "감성적인",
+  POWERFUL: "파워풀한",
+  GROOVY: "그루비한",
+  NOSTALGIC: "추억의",
+};
+
+/**
+ * Mood 코드를 한국어 라벨로 변환한다. 빈 값/미매핑 코드는 `null` → 호출 측이 칩 자체를
+ * 그리지 않아 내부 코드 원문 노출을 막는다.
+ */
+export function formatMoodLabel(
+  mood: string | null | undefined,
+): string | null {
+  if (!mood) {
+    return null;
+  }
+  return MOOD_LABELS[mood.trim().toUpperCase()] ?? null;
+}
