@@ -67,12 +67,14 @@ import { ApiError } from "@/lib/api/client";
 import {
   AgeGroup,
   createRecommendation,
+  createSafeRecommendation,
   Mood,
   RecommendationCreateRequest,
   RecommendationPersona,
   RecommendationResponse,
   RecommendedSongResponse,
   RequestedGender,
+  SafeRecommendationResponse,
 } from "@/lib/api/recommendation";
 import {
   readVoiceRange,
@@ -87,6 +89,7 @@ import {
 import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
+import { SAFE_SONG_PERSONA } from "@/lib/persona";
 import { useHistoryStore } from "@/store/history";
 import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { useSessionStore } from "@/store/session";
@@ -271,7 +274,10 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     enabled:
       isVoiceRangeReady &&
       voiceRangeLow !== undefined &&
-      voiceRangeHigh !== undefined,
+      voiceRangeHigh !== undefined &&
+      // P-E 안전곡 모드는 단일샷 `/safe` 엔드포인트(SafeRecommendationFeed)가 별도로
+      // 페치하므로 무한 스크롤 default 추천은 멈춘다(중복 페치 방지).
+      selectedPersona !== SAFE_SONG_PERSONA,
     initialPageParam: 0,
     queryFn: () => {
       const request: RecommendationCreateRequest = {
@@ -290,9 +296,6 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       }
       if (selectedGender !== null) {
         request.gender = selectedGender;
-      }
-      if (selectedPersona !== null) {
-        request.persona = selectedPersona;
       }
       return createRecommendation(request);
     },
@@ -455,14 +458,24 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           onClearAll={clearFilters}
         />
 
-        <RecommendationFeed
-          query={recommendQuery}
-          sessionId={sessionId}
-          userVoiceRangeLow={voiceRange.lowestNoteMidi}
-          userVoiceRangeHigh={voiceRange.highestNoteMidi}
-          activePersona={selectedPersona}
-          appliedFilterCount={appliedFilterCount}
-        />
+        {selectedPersona === SAFE_SONG_PERSONA ? (
+          <SafeRecommendationFeed
+            sessionId={sessionId}
+            voiceRangeLow={voiceRange.lowestNoteMidi}
+            voiceRangeHigh={voiceRange.highestNoteMidi}
+            ageGroup={selectedAgeGroup}
+            gender={selectedGender}
+            appliedFilterCount={appliedFilterCount}
+          />
+        ) : (
+          <RecommendationFeed
+            query={recommendQuery}
+            sessionId={sessionId}
+            userVoiceRangeLow={voiceRange.lowestNoteMidi}
+            userVoiceRangeHigh={voiceRange.highestNoteMidi}
+            appliedFilterCount={appliedFilterCount}
+          />
+        )}
 
         {/* (성격별 그룹화 #1712) 모드 진입 그룹 — "다른 방식으로 추천받기": 의도 모드 토글
             + 호스트 모드 이동을 한 섹션 제목 아래 묶어 "필터 조정"과 별개로 인지하게 한다. */}
@@ -495,12 +508,7 @@ type RecommendationFeedProps = {
   userVoiceRangeLow: number;
   userVoiceRangeHigh: number;
   /**
-   * 사용자가 고른 의도 페르소나(P-E 안전곡 등, 이슈 #1600). 결과 카드에 페르소나 사유
-   * fallback 근거로 전달한다. 미선택(null)이면 카드는 페르소나 사유 줄을 생략한다.
-   */
-  activePersona: RecommendationPersona | null;
-  /**
-   * 결과에 적용된 조건(분위기·나이대·의도) 수(이슈 #1715). 결과 요약에 "조건 N개 적용됨"
+   * 결과에 적용된 조건(분위기·나이대·성별) 수(이슈 #1715). 결과 요약에 "조건 N개 적용됨"
    * 신호로 노출한다. 0 이면 적용 문구를 생략한다.
    */
   appliedFilterCount: number;
@@ -511,7 +519,6 @@ function RecommendationFeed({
   sessionId,
   userVoiceRangeLow,
   userVoiceRangeHigh,
-  activePersona,
   appliedFilterCount,
 }: RecommendationFeedProps) {
   const {
@@ -797,7 +804,6 @@ function RecommendationFeed({
             item={item}
             index={index}
             userVoiceRange={userRange}
-            activePersona={activePersona}
             onShowDetail={() => setSelected(item)}
           />
         ))}
@@ -860,6 +866,170 @@ function RecommendationFeed({
           </Link>
         </div>
       )}
+    </div>
+  );
+}
+
+type SafeRecommendationFeedProps = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 좌중/사용자 연령대(선택, RecommendRefinePanel). 미선택이면 BE 로 생략 전달. */
+  ageGroup: AgeGroup | null;
+  /** 성별 필터(선택, RecommendRefinePanel). 미선택이면 BE 로 생략 전달. */
+  gender: RequestedGender | null;
+  /** 결과에 적용된 조건 수(이슈 #1715) — 결과 요약 "조건 N개 적용됨". */
+  appliedFilterCount: number;
+};
+
+/**
+ * P-E 안전곡(be #1840) 결과 피드.
+ *
+ * 의도 모드에서 "안 망할 곡"을 켜면 노출되는 단일샷 추천이다. 단일 추천의 무한 스크롤과 달리
+ * 전용 엔드포인트 `POST /api/v1/recommendations/safe` 는 `difficulty=EASY` 우위로 재정렬한
+ * 한 묶음 + 곡별 "안심 포인트"(`safetyReason`)를 돌려준다(spec §5-4). 무한 스크롤·스와이프·
+ * 정렬은 안전곡의 "짧고 안심되는 추천" 의도와 결이 달라 두지 않고, 결과 카드 + 상세 시트만
+ * 단일 추천과 공유한다. 안심 포인트는 BE 가 곡별로 채워 준 사유를 카드에 그대로 노출한다.
+ */
+function SafeRecommendationFeed({
+  sessionId,
+  voiceRangeLow,
+  voiceRangeHigh,
+  ageGroup,
+  gender,
+  appliedFilterCount,
+}: SafeRecommendationFeedProps) {
+  const [selected, setSelected] = useState<RecommendedSongResponse | null>(null);
+
+  const safeQuery = useQuery<SafeRecommendationResponse, Error>({
+    queryKey: [
+      "safe-recommendations",
+      sessionId,
+      voiceRangeLow,
+      voiceRangeHigh,
+      ageGroup,
+      gender,
+    ],
+    queryFn: () =>
+      createSafeRecommendation({
+        sessionId,
+        voiceRangeLow,
+        voiceRangeHigh,
+        // 미선택(null)이면 필드를 생략해 BE 결정성 seed 입력 정합/하위호환을 유지한다.
+        ...(ageGroup !== null ? { ageGroup } : {}),
+        ...(gender !== null ? { gender } : {}),
+      }),
+  });
+
+  const userRange = {
+    lowMidi: voiceRangeLow,
+    highMidi: voiceRangeHigh,
+  };
+
+  if (safeQuery.isPending) {
+    return (
+      <ul
+        aria-busy="true"
+        aria-label="안전곡 추천 로딩 중"
+        className="grid grid-cols-1 gap-3 lg:grid-cols-2"
+      >
+        {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
+          <SongCardSkeleton key={idx} />
+        ))}
+      </ul>
+    );
+  }
+
+  if (safeQuery.isError) {
+    const error = safeQuery.error;
+    return (
+      <div className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4">
+        <p className="text-sm text-[var(--danger-fg-strong)]">
+          안전곡 추천을 불러오지 못했습니다.{" "}
+          {error instanceof ApiError
+            ? `${error.status}: ${error.message}`
+            : error.message}
+        </p>
+        <button
+          type="button"
+          onClick={() => safeQuery.refetch()}
+          className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-[var(--danger-cta-bg)] px-4 text-sm font-medium text-white hover:bg-[var(--danger-cta-bg-hover)]"
+        >
+          다시 시도
+        </button>
+      </div>
+    );
+  }
+
+  const safeSongs = safeQuery.data.recommendations;
+
+  if (safeSongs.length === 0) {
+    return (
+      <div
+        role="status"
+        className="flex flex-col items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-5"
+      >
+        <p className="text-sm text-[var(--text-secondary)]">
+          안심하고 부를 만한 곡을 찾지 못했어요. 음역대를 다시 입력해 보세요.
+        </p>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--brand-500)] px-4 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
+        >
+          음역대 다시 입력
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <p
+          data-testid="safe-result-summary"
+          className="text-xs text-[var(--text-caption)]"
+        >
+          <span className="font-medium text-[var(--text-secondary)]">
+            안전곡 {safeSongs.length}곡
+          </span>
+          {appliedFilterCount > 0 ? (
+            <span> · 조건 {appliedFilterCount}개 적용됨</span>
+          ) : null}
+        </p>
+        <p className="text-xs text-[var(--text-caption)]">
+          쉬운 난이도·여유 있는 음역으로 안심하고 부를 곡을 골랐어요.
+        </p>
+        {/* be #1668 0건 fallback — 풀이 부족해 일부 조건을 완화해 채웠을 때 알린다. */}
+        {safeQuery.data.relaxed ? (
+          <p
+            data-testid="safe-relaxed-notice"
+            className="text-xs text-[var(--text-caption)]"
+          >
+            안전곡이 부족해 일부 조건을 완화해 채웠어요.
+          </p>
+        ) : null}
+      </div>
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {safeSongs.map((safeSong, index) => (
+          <SongCard
+            key={safeSong.recommendation.song.id}
+            item={safeSong.recommendation}
+            index={index}
+            userVoiceRange={userRange}
+            safetyReason={safeSong.safetyReason}
+            onShowDetail={() => setSelected(safeSong.recommendation)}
+          />
+        ))}
+      </ul>
+      <SongDetailSheet
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
+      >
+        {selected ? (
+          <SongDetailContent item={selected} userVoiceRange={userRange} />
+        ) : null}
+      </SongDetailSheet>
     </div>
   );
 }
