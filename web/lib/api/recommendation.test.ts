@@ -11,9 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import {
   createRecommendation,
+  createSafeRecommendation,
   createSequenceRecommendation,
   readRecommendation,
   type RecommendationResponse,
+  type SafeRecommendationResponse,
   type SequenceRecommendationResponse,
 } from "./recommendation";
 
@@ -143,18 +145,73 @@ describe("recommendation API 경계 가드", () => {
     expect(body).toContain('"mood":null');
   });
 
-  it("persona=P-E 지정 시 body 에 \"persona\":\"P-E\" 로 직렬화된다 (BE #1598 안전곡 프리셋)", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
-    await createRecommendation({ ...base, persona: "P-E" });
-    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
-    expect(JSON.parse(body)).toEqual({ ...base, persona: "P-E" });
+});
+
+// ---------- P-E 안전곡 추천 (#1600, be #1840) ----------
+describe("createSafeRecommendation", () => {
+  const safeResponse: SafeRecommendationResponse = {
+    persona: "P-E",
+    requestId: 42,
+    relaxed: false,
+    relaxedFilters: [],
+    recommendations: [
+      {
+        safetyReason: "쉬운 난이도라 부담 없이 부를 수 있어요",
+        recommendation: {
+          song: {
+            id: 7,
+            title: "안전곡",
+            artist: "아티스트",
+            releaseYear: 2010,
+            keyOriginal: "C_MAJOR",
+            bpm: 80,
+            mood: "CALM",
+            language: "ko",
+            genre: "발라드",
+            tjNumber: null,
+            kyNumber: null,
+            metadataSource: "MANUAL_SEED",
+            difficulty: "EASY",
+          },
+          score: 0.9,
+          matchReason: "음역대가 잘 맞아요",
+          rankPosition: 1,
+        },
+      },
+    ],
+  };
+
+  it("POST /api/v1/recommendations/safe 로 body 를 직렬화해 호출하고 응답을 매핑한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(safeResponse, 201));
+
+    const result = await createSafeRecommendation({
+      sessionId: "sess-safe",
+      voiceRangeLow: 48,
+      voiceRangeHigh: 72,
+      ageGroup: "THIRTIES",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/recommendations\/safe$/);
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      sessionId: "sess-safe",
+      voiceRangeLow: 48,
+      voiceRangeHigh: 72,
+      ageGroup: "THIRTIES",
+    });
+    expect(result).toEqual(safeResponse);
   });
 
-  it("persona 생략 시 body 에서 키 자체가 빠진다 (현행 default 가중 하위호환)", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(sampleResponse, 201));
-    await createRecommendation({ ...base });
-    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as string;
-    expect(body).not.toContain("persona");
+  it("ApiError 를 swallow 하지 않고 그대로 전파한다 (호출 측 에러 UI 분기 근거)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "bad" }, 400));
+    await expect(
+      createSafeRecommendation({
+        sessionId: "sess-safe",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 72,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });
 

@@ -95,8 +95,9 @@ export type VocalGender = "MALE" | "FEMALE" | "MIXED";
  * - `P-A` 연습형 / `P-B` 부른곡 기반 / `P-C` 즉석 분위기·나이대 (개인·실용 축)
  * - `P-D` 모임 사회자형 / `P-E` 안전곡형 / `P-F` 과시·킬링파트형 / `P-G` 듀엣형
  *
- * 추천 요청에서 미지정(null/생략)이면 현행 default 가중으로 동작한다(하위호환).
- * 1차로 web 은 P-D 시퀀스(#1601)·P-E 안전곡(#1600) 모드를 노출한다.
+ * 단일 추천(`/recommendations`)은 페르소나 입력이 없는 현행 default 가중이며, 페르소나별
+ * 추천은 형상이 달라 각자 전용 엔드포인트로 분리돼 있다(P-D 시퀀스 `/sequence` #1601,
+ * P-E 안전곡 `/safe` #1600). 응답의 `persona` 식별자로 어떤 프리셋이 산출했는지 노출한다.
  */
 export type RecommendationPersona =
   | "P-A"
@@ -132,14 +133,6 @@ export type RecommendationCreateRequest = {
    *   그대로 전달한다.
    */
   excludeSongIds?: number[];
-  /**
-   * 추천 의도 페르소나(선택). BE #1598(P-E 안전곡 가중 프리셋)이 받는 필드.
-   *
-   * - `P-E` 지정 → 안전곡 가중 프리셋(`difficulty=EASY` + `rangeFit` 여유 +
-   *   느린 `tempoMatch` + `popularity` 강편향) 적용.
-   * - null/생략 시 현행 default 가중(하위호환). 결정성 seed 입력에도 포함된다.
-   */
-  persona?: RecommendationPersona | null;
 };
 
 /**
@@ -213,16 +206,6 @@ export type RecommendedSongResponse = {
   suggestedTranspose?: number | null;
   transposedVoiceFit?: number | null;
   suggestedTransposeReason?: string | null;
-  /**
-   * 페르소나 설명가능성 필드 (BE #1598 / 이슈 #1600, P-E 안전곡 모드):
-   *   - `persona`: 이 추천을 산출한 가중 프리셋의 페르소나 식별자. 미지정 호출(default
-   *     가중)에서는 `null`/생략.
-   *   - `personaReason`: 페르소나별 사유 텍스트. P-E 안전곡 모드에서는 "안심 포인트"
-   *     (쉬운 이유) 한 줄로 노출한다. BE 가 채워주기 전에는 web 이 곡 난이도 기반으로
-   *     client-side fallback 사유를 만들어 보여준다(lib/persona.ts).
-   */
-  persona?: RecommendationPersona | null;
-  personaReason?: string | null;
   rankPosition: number;
 };
 
@@ -324,6 +307,74 @@ export function createSequenceRecommendation(
 ): Promise<SequenceRecommendationResponse> {
   return apiFetch<SequenceRecommendationResponse>(
     "/api/v1/recommendations/sequence",
+    {
+      method: "POST",
+      body: request,
+    },
+  );
+}
+
+/**
+ * P-E 안전곡 추천 요청. BE `SafeRecommendationCreateRequest`(be #1840)와 1:1 매칭한다.
+ *
+ * 단일 추천과 같은 음역 적합도 산식을 재사용하므로 `voiceRangeLow`/`voiceRangeHigh` 는 필수다.
+ * `ageGroup`(연령대 대표값)·`gender`(성별 필터)·`limit`(노출 곡 수 상한, 1~50)은 모두 선택이며,
+ * 미지정 필드는 생략한다(BE 결정성 seed 입력 정합, 하위호환). 단일 추천의 `persona` 필드 확장이
+ * 아니라 **별도 엔드포인트**(`POST /api/v1/recommendations/safe`)로 분리돼 있다 — 응답 형상이
+ * 곡별 "안심 포인트"를 곡 형상과 함께 내려주는 단일 추천과 달라서다(spec §5-4).
+ */
+export type SafeRecommendationRequest = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 연령대 대표값(선택). 미입력 시 generationFit 신호 기여 0(하위호환). */
+  ageGroup?: AgeGroup | null;
+  /** 성별 필터(선택). 미입력 시 성별 신호 기여 0(하위호환). */
+  gender?: VocalGender | null;
+  /** 노출 곡 수 상한(선택, 1~50). 미입력 시 단일 추천 기본 개수. */
+  limit?: number | null;
+};
+
+/**
+ * 안전곡 추천 1건. BE `SafeRecommendationResponse.SafeSongResponse`(be #1840)와 1:1 매칭한다.
+ *
+ * `recommendation` 은 단일 추천과 같은 곡 형상(`RecommendedSongResponse`)이라 결과 카드 렌더를
+ * 재사용한다. `safetyReason` 은 곡 난이도·음역 적합도에서 결정적으로 파생한 "안심 포인트"(쉬운
+ * 이유) 한 줄로, BE 가 항상 채워 준다(난이도 미상·음역 부재 곡도 graceful 한 기본 사유).
+ */
+export type SafeSongResponse = {
+  safetyReason: string;
+  recommendation: RecommendedSongResponse;
+};
+
+/**
+ * P-E 안전곡 추천 응답. BE `SafeRecommendationResponse`(be #1840)와 1:1 매칭한다.
+ *
+ * `persona` 는 이 추천을 산출한 페르소나 식별자("P-E"). `requestId` 는 단일 추천과 같은 경로로
+ * 영속된 추천 요청 ID(Long)라 곡 피드백·재조회를 단일 추천과 같은 경로로 처리할 수 있다.
+ * `relaxed`/`relaxedFilters` 는 0건 fallback(be #1668) 으로 일부 필터를 완화해 채웠음을 알린다.
+ * `recommendations` 는 안전곡 강편향(EASY 우위)으로 재정렬한 곡 묶음이다.
+ */
+export type SafeRecommendationResponse = {
+  persona: RecommendationPersona;
+  requestId: number;
+  relaxed: boolean;
+  relaxedFilters: string[];
+  recommendations: SafeSongResponse[];
+};
+
+/**
+ * P-E 안전곡 추천 생성.
+ *
+ * 신규 엔드포인트 `POST /api/v1/recommendations/safe`(be #1840, spec §5-4). "안 망하고 무사히
+ * 넘기고 싶다" 의도에 맞춰 `difficulty=EASY` 우위로 재정렬한 곡 묶음 + 곡별 "안심 포인트"를
+ * 돌려준다. 단일 추천과 달리 무한 스크롤이 아닌 단일샷(상한 `limit`)이다.
+ */
+export function createSafeRecommendation(
+  request: SafeRecommendationRequest,
+): Promise<SafeRecommendationResponse> {
+  return apiFetch<SafeRecommendationResponse>(
+    "/api/v1/recommendations/safe",
     {
       method: "POST",
       body: request,

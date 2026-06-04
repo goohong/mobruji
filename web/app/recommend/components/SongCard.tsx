@@ -48,11 +48,10 @@ import {
 } from "react";
 
 import type {
-  RecommendationPersona,
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
-import { resolvePersonaReason } from "@/lib/persona";
+import { SAFE_SONG_REASON_LABEL } from "@/lib/persona";
 import {
   difficultyLabel,
   resolveSongDifficulty,
@@ -112,11 +111,11 @@ type SongCardProps =
       onShowDetail?: () => void;
       index?: number;
       /**
-       * 사용자가 추천 화면에서 고른 의도 페르소나(P-E 안전곡 등). BE 응답에 아직
-       * `persona`/`personaReason` 이 없을 때 결과 카드의 페르소나 사유 fallback 근거가
-       * 된다(lib/persona.resolvePersonaReason). 미지정이면 페르소나 사유 줄을 생략한다.
+       * P-E 안전곡 모드의 "안심 포인트"(쉬운 이유) 한 줄. BE `/safe` 응답이 곡별로 내려준
+       * `safetyReason`(be #1840)을 그대로 전달한다. 지정되면 카드 표면에 "안심 포인트"
+       * 라벨과 함께 노출하고, 미지정(일반 추천)이면 사유 줄을 생략한다.
        */
-      activePersona?: RecommendationPersona | null;
+      safetyReason?: string;
     }
   | {
       song: SongResponse;
@@ -125,7 +124,7 @@ type SongCardProps =
       userVoiceRange?: never;
       onShowDetail?: () => void;
       index?: number;
-      activePersona?: never;
+      safetyReason?: never;
       /**
        * 검색 카드(/songs)에서 BE 추천 컨텍스트 없이도 "내 음역 적합" 배지를 그리기 위한
        * client 산출 적합도(0~1). 호출 측이 세션 음역대 + 곡 음역으로 계산해 넘긴다
@@ -141,8 +140,8 @@ export function SongCard(props: SongCardProps) {
   const href: string | undefined = props.href;
   const userVoiceRange: UserVoiceRange | null =
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
-  const activePersona: RecommendationPersona | null =
-    "item" in props && props.activePersona ? props.activePersona : null;
+  const safetyReason: string | null =
+    "item" in props && props.safetyReason ? props.safetyReason : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
   const index: number = typeof props.index === "number" ? props.index : 0;
   // closes #1484 / #1721 — "내 음역 적합" 적합도. 추천 컨텍스트는 BE voiceFit, 검색
@@ -173,9 +172,9 @@ export function SongCard(props: SongCardProps) {
       className="song-accent-stripe pointer-events-none absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)]"
     />
   );
-  // closes #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트")를 카드 표면에 노출.
-  // BE personaReason 우선, 없으면 활성 페르소나 + 곡 난이도 기반 client fallback.
-  const personaReason = item ? resolvePersonaReason(item, activePersona) : null;
+  // closes #1600 — P-E 안전곡 "안심 포인트"(쉬운 이유)를 카드 표면에 노출. BE `/safe`
+  // 응답이 곡별로 내려준 safetyReason(be #1840)을 그대로 보여준다.
+  const safetyPoint = item && safetyReason ? safetyReason : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
@@ -291,7 +290,7 @@ export function SongCard(props: SongCardProps) {
       </div>
 
       {/*
-       * closes #1721 — 검색 카드 한 줄 적합 사유. 추천(item)은 matchReason/personaReason/
+       * closes #1721 — 검색 카드 한 줄 적합 사유. 추천(item)은 matchReason/safetyReason/
        * FitReasons 가 사유를 담당하므로, 사유 줄은 BE 컨텍스트가 없는 검색 카드에서만
        * client 적합도 레벨로 노출한다.
        */}
@@ -302,17 +301,17 @@ export function SongCard(props: SongCardProps) {
       ) : null}
 
       {/*
-       * closes #1600 — 페르소나 사유("안심 포인트") 한 줄. P-E 안전곡 모드처럼 의도
-       * 페르소나가 활성일 때만 노출하며, 모달 모드에서도 한눈에 보이는 핵심 신호라
-       * 카드 표면에 유지한다. BE personaReason 미보유 시 곡 난이도 기반 fallback.
+       * closes #1600 — P-E 안전곡 "안심 포인트" 한 줄. BE `/safe` 응답이 곡별로 내려준
+       * safetyReason 이 있을 때만 노출하며, 모달 모드에서도 한눈에 보이는 핵심 신호라
+       * 카드 표면에 유지한다.
        */}
-      {personaReason ? (
+      {safetyPoint ? (
         <div className="flex items-start gap-2 rounded-[var(--radius-md)] bg-[var(--badge-success-bg)] px-3 py-2">
           <span className="shrink-0 text-xs font-semibold text-[var(--badge-success-fg)]">
-            {personaReason.label}
+            {SAFE_SONG_REASON_LABEL}
           </span>
           <span className="text-xs text-[var(--text-secondary)]">
-            {personaReason.text}
+            {safetyPoint}
           </span>
         </div>
       ) : null}

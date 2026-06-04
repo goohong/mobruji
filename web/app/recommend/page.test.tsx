@@ -34,7 +34,10 @@ import userEvent from "@testing-library/user-event";
 
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
-import { createRecommendation } from "@/lib/api/recommendation";
+import {
+  createRecommendation,
+  createSafeRecommendation,
+} from "@/lib/api/recommendation";
 import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
@@ -83,11 +86,13 @@ vi.mock("@/lib/api/recommendation", async () => {
   return {
     ...actual,
     createRecommendation: vi.fn(),
+    createSafeRecommendation: vi.fn(),
   };
 });
 
 const readVoiceRangeMock = vi.mocked(readVoiceRange);
 const createRecommendationMock = vi.mocked(createRecommendation);
+const createSafeRecommendationMock = vi.mocked(createSafeRecommendation);
 
 /**
  * 테스트용 IntersectionObserver mock.
@@ -207,6 +212,7 @@ beforeEach(() => {
   historyMock.reset();
   readVoiceRangeMock.mockReset();
   createRecommendationMock.mockReset();
+  createSafeRecommendationMock.mockReset();
   resetObserverRegistry();
   installIntersectionObserverMock();
   // 온보딩 취향 pre-fill(#1814) 격리 — 기본은 빈 값이라 기존 테스트는 영향 없음.
@@ -249,6 +255,41 @@ function buildResponseWithSongIds(seed: number, songIds: number[]) {
         tjNumber: `T-${id}`,
         kyNumber: `K-${id}`,
         metadataSource: "MANUAL_SEED" as const,
+      },
+    })),
+  };
+}
+
+/**
+ * P-E 안전곡 `/safe` 응답 헬퍼 — 곡별 안심 포인트(safetyReason)를 포함한다.
+ */
+function buildSafeResponse(songIds: number[]) {
+  return {
+    persona: "P-E" as const,
+    requestId: 42,
+    relaxed: false,
+    relaxedFilters: [],
+    recommendations: songIds.map((id, idx) => ({
+      safetyReason: `${id}번 곡은 쉬운 난이도라 안심하고 부를 수 있어요`,
+      recommendation: {
+        rankPosition: idx + 1,
+        score: 0.9 - idx * 0.05,
+        matchReason: "음역 매칭",
+        song: {
+          id,
+          title: `안전곡-${id}`,
+          artist: "가수",
+          releaseYear: 2024,
+          keyOriginal: "C_MAJOR" as const,
+          bpm: 80,
+          mood: "CALM" as const,
+          language: "ko",
+          genre: "발라드",
+          tjNumber: `T-${id}`,
+          kyNumber: `K-${id}`,
+          metadataSource: "MANUAL_SEED" as const,
+          difficulty: "EASY" as const,
+        },
       },
     })),
   };
@@ -532,8 +573,8 @@ describe("RecommendPage", () => {
     });
   });
 
-  // ---------- 의도 모드 (P-E 안전곡, #1600) ----------
-  it("'안 망할 곡' 의도 모드 선택 시 persona=P-E 를 포함해 추천을 다시 요청한다", async () => {
+  // ---------- 의도 모드 (P-E 안전곡, #1600 · be #1840) ----------
+  it("'안 망할 곡' 의도 모드 선택 시 /safe 엔드포인트로 안전곡을 받아 안심 포인트를 노출한다", async () => {
     const user = userEvent.setup();
     sessionMock.set({ sessionId: "sess-pe", voiceRangeId: 7 });
 
@@ -549,10 +590,11 @@ describe("RecommendPage", () => {
     createRecommendationMock.mockResolvedValue(
       buildResponseWithSongIds(302, [1]),
     );
+    createSafeRecommendationMock.mockResolvedValue(buildSafeResponse([5]));
 
     renderWithQueryClient(<RecommendPage />);
 
-    // 최초: persona 없이 호출 (하위호환).
+    // 최초: 단일 추천(/recommendations)이 default 가중으로 호출된다.
     await waitFor(() => {
       expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
         sessionId: "sess-pe",
@@ -568,15 +610,21 @@ describe("RecommendPage", () => {
       screen.getByRole("button", { name: /안 망할 곡 추천받기/ }),
     );
 
-    // 의도 모드 선택 → queryKey 변경 → persona 포함 재요청.
+    // P-E 선택 → 별도 `/safe` 엔드포인트(be #1840) 단일샷 호출.
     await waitFor(() => {
-      expect(createRecommendationMock).toHaveBeenCalledWith({
+      expect(createSafeRecommendationMock).toHaveBeenCalledWith({
         sessionId: "sess-pe",
         voiceRangeLow: 48,
         voiceRangeHigh: 69,
-        excludeSongIds: [],
-        persona: "P-E",
       });
+    });
+
+    // 결과 카드에 BE 가 내려준 "안심 포인트"가 표기된다.
+    await waitFor(() => {
+      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
+      expect(
+        screen.getByText("5번 곡은 쉬운 난이도라 안심하고 부를 수 있어요"),
+      ).toBeInTheDocument();
     });
   });
 
