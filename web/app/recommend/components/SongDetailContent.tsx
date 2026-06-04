@@ -44,6 +44,7 @@ import {
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
+import { formatLanguageLabel } from "@/lib/songMeta";
 import { Chip } from "@/components/ui";
 
 import { FitReasons } from "./FitBadge";
@@ -74,6 +75,8 @@ export function SongDetailContent(props: SongDetailContentProps) {
   const lowestNoteName =
     typeof song.lowMidi === "number" ? midiToKoreanNoteName(song.lowMidi) : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
+  const languageLabel = formatLanguageLabel(song.language);
   // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
   // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -120,16 +123,22 @@ export function SongDetailContent(props: SongDetailContentProps) {
         </section>
       ) : null}
 
+      {/*
+       * closes #1715 — 내부 코드값(metadataSource 출처)은 사용자에게 의미 없는 노이즈라
+       * 상세에서 제거하고, 언어는 한국어 라벨로 매핑한다(매핑 불가 코드는 셀 생략).
+       * TJ/KY 번호는 노래방 입력번호라 그대로 유용해 유지한다.
+       */}
       <section
         aria-label="메타 정보"
         className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3"
       >
         <MetaCell label="발매 연도" value={song.releaseYear ?? null} />
         <MetaCell label="BPM" value={song.bpm ?? null} />
-        <MetaCell label="언어" value={song.language ?? null} />
+        {languageLabel ? (
+          <MetaCell label="언어" value={languageLabel} />
+        ) : null}
         <MetaCell label="TJ 번호" value={song.tjNumber ?? null} />
         <MetaCell label="KY 번호" value={song.kyNumber ?? null} />
-        <MetaCell label="출처" value={song.metadataSource} />
       </section>
 
       {item ? (
