@@ -331,6 +331,8 @@ describe("RecommendPage", () => {
       });
     });
 
+    // 필터는 접이식 "추천 다듬기" 안에 있으므로 먼저 펼친다.
+    await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
     await user.click(screen.getByRole("button", { name: "감성적인" }));
 
     // mood 선택 → queryKey 변경 → mood 포함 재요청.
@@ -368,6 +370,7 @@ describe("RecommendPage", () => {
       expect(createRecommendationMock).toHaveBeenCalledTimes(1);
     });
 
+    await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
     await user.click(screen.getByRole("button", { name: "30대" }));
 
     await waitFor(() => {
@@ -411,6 +414,7 @@ describe("RecommendPage", () => {
       });
     });
 
+    await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
     await user.click(
       screen.getByRole("button", { name: /안 망할 곡 추천받기/ }),
     );

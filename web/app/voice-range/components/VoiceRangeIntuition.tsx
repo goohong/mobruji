@@ -19,14 +19,26 @@ type Props = {
   highMidi: number;
   /** 시각화 위 짧은 제목(생략 가능). */
   caption?: string;
+  /** 톤다운(축소) 변형 — VoiceRangeScale 로 전달 (recommend 헤더 V7). */
+  compact?: boolean;
 };
 
-export function VoiceRangeIntuition({ lowMidi, highMidi, caption }: Props) {
+export function VoiceRangeIntuition({
+  lowMidi,
+  highMidi,
+  caption,
+  compact = false,
+}: Props) {
   const relative = describeRelative(lowMidi, highMidi);
 
   return (
     <div className="flex flex-col gap-2 pt-1">
-      <VoiceRangeScale lowMidi={lowMidi} highMidi={highMidi} caption={caption} />
+      <VoiceRangeScale
+        lowMidi={lowMidi}
+        highMidi={highMidi}
+        caption={caption}
+        compact={compact}
+      />
       <p
         data-testid="voice-range-relative-headline"
         className="text-sm font-medium text-[var(--text-secondary)]"

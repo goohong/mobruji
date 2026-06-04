@@ -44,6 +44,12 @@ type Props = {
   benchmark?: VoiceRangeBenchmark;
   /** 시각화 위에 들어갈 짧은 제목(스크린리더 + 시각). 생략 시 라벨 없음. */
   caption?: string;
+  /**
+   * 톤다운(축소) 변형. 결과 페이지 헤더처럼 음역 막대가 보조 정보일 때, 막대의
+   * 렌더 폭(=비례 높이)을 줄이고 사용자 밴드 대비를 낮춰 시선 비중을 절제한다
+   * (recommend-page-visual-ux-audit-1708 V7). 기본 false → 기존 화면 불변.
+   */
+  compact?: boolean;
 };
 
 export function VoiceRangeScale({
@@ -51,6 +57,7 @@ export function VoiceRangeScale({
   highMidi,
   benchmark = NEUTRAL_BENCHMARK,
   caption,
+  compact = false,
 }: Props) {
   // 비유한 입력 가드 (#757/#766 철학) — 의미 없는 막대 대신 안내 텍스트.
   if (!Number.isFinite(lowMidi) || !Number.isFinite(highMidi)) {
@@ -101,7 +108,9 @@ export function VoiceRangeScale({
         role="img"
         aria-label={ariaLabel}
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className="w-full max-w-md text-[var(--text-tertiary)]"
+        className={`w-full text-[var(--text-tertiary)] ${
+          compact ? "max-w-[240px]" : "max-w-md"
+        }`}
       >
         {/* 음계 backdrop(전체 트랙) */}
         <rect
@@ -166,6 +175,7 @@ export function VoiceRangeScale({
           height={userLaneHeight}
           rx={5}
           className="fill-[var(--chart-bar-active-bg)]"
+          opacity={compact ? 0.8 : undefined}
         >
           <title>
             내 음역대 {lowNote} ~ {highNote}
