@@ -46,6 +46,13 @@ SPLEETER_MODEL_ENV = "AUDIO_ANALYSIS_MODEL_DIR"
 PLAYER_CLIENT_CHAIN = ("web", "android", "ios", "tv")
 # 쿠키 파일 경로 환경변수 (#1802). 음악 영상이 인증 없이는 막히는 패턴 완화.
 YTDLP_COOKIES_ENV = "YTDLP_COOKIES_FILE"
+# PO token provider base URL 환경변수 (#1813). 데이터센터 IP 가 모든 player_client 에서
+# 'Video unavailable' 로 봇차단되는 패턴을 무쿠키로 우회한다. bgutil-ytdlp-pot-provider
+# HTTP sidecar 가 proof-of-origin token 을 발급하고, yt-dlp 가 web client + 토큰으로
+# 차단을 푼다. 미설정 시 PO token 없이 진행(기존 쿠키/체인 동작 유지).
+YTDLP_POT_PROVIDER_ENV = "YTDLP_POT_PROVIDER_URL"
+# bgutil PO token provider plugin(1.x GetPOT 프레임워크)의 extractor-args 키.
+POT_EXTRACTOR_KEY = "youtubepot-bgutilhttp"
 
 
 @dataclass
@@ -156,16 +163,33 @@ def youtube_cookies_file() -> Optional[str]:
     return None
 
 
-def harden_ydl_opts(base_opts: dict, player_client: str) -> dict:
-    """base 옵션에 player_client 1개 + (있으면) 쿠키를 입힌 새 dict 를 반환(#1802).
+def youtube_pot_provider_url() -> Optional[str]:
+    """YTDLP_POT_PROVIDER_URL 이 가리키는 bgutil PO token provider base URL(설정 시).
 
-    체인의 각 client 별로 호출해 client 를 고정한다. base_opts 는 변형하지 않는다.
+    데이터센터 IP 봇차단(#1813)을 무쿠키로 우회한다. 미설정·빈 값이면 None
+    (PO token 없이 진행 — 기존 동작 유지).
+    """
+    url = os.environ.get(YTDLP_POT_PROVIDER_ENV)
+    return url.strip() if url and url.strip() else None
+
+
+def harden_ydl_opts(base_opts: dict, player_client: str) -> dict:
+    """base 옵션에 player_client 1개 + (있으면) PO token provider·쿠키를 입힌 새 dict 를 반환.
+
+    체인의 각 client 별로 호출해 client 를 고정한다(#1802). PO token provider URL 이
+    설정돼 있으면 bgutil HTTP sidecar 의 base_url 을 extractor-args 에 주입한다(#1813).
+    base_opts 는 변형하지 않는다.
     """
     hardened = dict(base_opts)
     extractor_args = dict(hardened.get("extractor_args") or {})
     youtube_args = dict(extractor_args.get("youtube") or {})
     youtube_args["player_client"] = [player_client]
     extractor_args["youtube"] = youtube_args
+    pot_url = youtube_pot_provider_url()
+    if pot_url:
+        pot_args = dict(extractor_args.get(POT_EXTRACTOR_KEY) or {})
+        pot_args["base_url"] = [pot_url]
+        extractor_args[POT_EXTRACTOR_KEY] = pot_args
     hardened["extractor_args"] = extractor_args
     cookies = youtube_cookies_file()
     if cookies:
