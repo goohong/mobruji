@@ -638,4 +638,55 @@ class SongTest {
         assertThatThrownBy(() -> song.backfillFromMusicBrainz("mbid", "KR1", -0.1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @DisplayName("applyEstimatedVocalRange: 음역대 미보유 곡에 추정값을 채우고 ESTIMATED 로 표시한다 (#1778)")
+    void applyEstimatedVocalRange_missingRange_fills() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        final boolean changed = song.applyEstimatedVocalRange(new VocalRangeEstimate(53, 69, 0.3));
+
+        assertThat(changed).isTrue();
+        assertThat(song.getLowMidi()).isEqualTo(53);
+        assertThat(song.getHighMidi()).isEqualTo(69);
+        assertThat(song.getDifficulty()).isEqualTo(Difficulty.EASY);
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.ESTIMATED);
+        assertThat(song.getMetadataConfidence()).isEqualTo(0.3);
+    }
+
+    @Test
+    @DisplayName("applyEstimatedVocalRange: 음역대가 이미 있으면 no-op — 기존 값/출처 보존 (자체분석 권위 우선)")
+    void applyEstimatedVocalRange_existingRange_noop() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(72)
+                .build();
+
+        final boolean changed = song.applyEstimatedVocalRange(new VocalRangeEstimate(53, 69, 0.3));
+
+        assertThat(changed).isFalse();
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isEqualTo(72);
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+    }
+
+    @Test
+    @DisplayName("applyEstimatedVocalRange: estimate null 이면 NullPointerException")
+    void applyEstimatedVocalRange_nullEstimate_throws() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .build();
+
+        assertThatThrownBy(() -> song.applyEstimatedVocalRange(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("estimate");
+    }
 }
