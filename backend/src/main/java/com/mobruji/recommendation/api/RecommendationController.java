@@ -18,11 +18,14 @@ import com.mobruji.recommendation.api.dto.SafeRecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.SafeRecommendationResponse;
 import com.mobruji.recommendation.api.dto.SequenceRecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.SequenceRecommendationResponse;
+import com.mobruji.recommendation.api.dto.ShowoffRecommendationCreateRequest;
+import com.mobruji.recommendation.api.dto.ShowoffRecommendationResponse;
 import com.mobruji.recommendation.api.dto.TrendingListResponse;
 import com.mobruji.recommendation.application.TrendingQuery;
 import com.mobruji.recommendation.domain.RecommendationResult;
 import com.mobruji.recommendation.domain.SafeRecommendationResult;
 import com.mobruji.recommendation.domain.SequenceRecommendationResult;
+import com.mobruji.recommendation.domain.ShowoffRecommendationResult;
 import com.mobruji.song.domain.Mood;
 
 import jakarta.validation.Valid;
@@ -92,6 +95,21 @@ public class RecommendationController {
                 safeRecommendationCreateRequest.toCommand());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(SafeRecommendationResponse.from(safeRecommendationResult));
+    }
+
+    /**
+     * 과시·킬링파트형(P-F) 추천(persona-expansion-social-emotional.md §2/§5). "고음 질러 박수받고 싶다" 의도에 맞춰
+     * 사용자 최고음 근접 + 임팩트(에너지) + 어려운 난이도(HARD 우위)로 강편향한 과시 추천을 만든다(안전곡 P-E 의 반대축). 응답에
+     * 페르소나 식별자 + 곡별 "킬링파트 안내"를 함께 노출한다(설명 가능성). 응답 형상이 단일 추천과 달라(페르소나·킬링파트 안내) 기존
+     * {@code POST /recommendations} 확장이 아닌 별도 엔드포인트로 둔다(P-D 시퀀스·P-E 안전곡과 같은 패턴).
+     */
+    @PostMapping("/showoff")
+    public ResponseEntity<ShowoffRecommendationResponse> createShowoff(
+            @Valid @RequestBody final ShowoffRecommendationCreateRequest showoffRecommendationCreateRequest) {
+        final ShowoffRecommendationResult showoffRecommendationResult = recommendationService.createShowoff(
+                showoffRecommendationCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ShowoffRecommendationResponse.from(showoffRecommendationResult));
     }
 
     @GetMapping("/{id}")
