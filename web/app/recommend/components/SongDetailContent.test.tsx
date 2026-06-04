@@ -157,4 +157,20 @@ describe("SongDetailContent", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("분위기 적합도 55%")).toBeInTheDocument();
   });
+
+  // closes #1714 — 리스트 카드 표면과 동일한 "내 음역 적합" 핵심 신호 배지를
+  // 스와이프/모달 헤더에도 노출해 두 뷰의 핵심 정보 세트를 정렬한다.
+  it("추천 컨텍스트 헤더에 리스트 카드와 동일한 '내 음역 적합' 핵심 신호 배지를 노출한다", () => {
+    const item = buildRecommendedSong({ voiceFit: 0.72 });
+    renderWithQueryClient(<SongDetailContent item={item} />);
+    expect(screen.getByLabelText("내 음역 적합 72%")).toBeInTheDocument();
+  });
+
+  it("voiceFit 이 없는(과거 추천) 컨텍스트에서는 '내 음역 적합' 배지를 그리지 않는다", () => {
+    const item = buildRecommendedSong({ voiceFit: undefined });
+    renderWithQueryClient(<SongDetailContent item={item} />);
+    expect(
+      screen.queryByLabelText(/내 음역 적합/),
+    ).not.toBeInTheDocument();
+  });
 });

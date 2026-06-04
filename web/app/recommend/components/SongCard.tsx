@@ -301,15 +301,20 @@ export function SongCard(props: SongCardProps) {
     ) : null;
 
   // 좋아요 + 북마크 — 추천/검색/likes/bookmarks 어디서나 카드 footer 에 유지 (사용자 자주 쓰는 액션).
-  // YouTube 검색 링크(closes #302)는 모달 모드에서는 상세 모달로 위임해서 카드를 가볍게 유지한다.
-  // 모달 모드가 아니면 종전대로 카드에서 직접 새 탭으로 검색.
+  // closes #1714 — 리스트 카드 표면 1차 액션. 노래방 추천의 핵심 전환("이 곡 들어보고 부른다")
+  // 이 좋아요/북마크뿐이라 약했던 문제를 풀기 위해, 모달 모드(=/recommend 리스트)에서도
+  // YouTube 미리듣기를 카드 표면에 prominent 한 1차 CTA 로 끌어올린다. 스와이프/모달은 이미
+  // 미리듣기를 노출하므로 두 뷰의 핵심 전환 경로가 정렬된다.
+  // 모달 모드 외(href/검색)에서는 종전대로 subtle 톤 링크를 유지해 표면을 가볍게 둔다.
   const feedbackPanel = (
     <div className="flex flex-wrap items-center gap-2">
+      <YouTubeSearchLink
+        songTitle={displayTitle}
+        songArtist={song.artist}
+        variant={isModalMode ? "primary" : "subtle"}
+      />
       <LikeButton songId={song.id} songTitle={displayTitle} />
       <BookmarkButton songId={song.id} songTitle={displayTitle} />
-      {!isModalMode ? (
-        <YouTubeSearchLink songTitle={displayTitle} songArtist={song.artist} />
-      ) : null}
     </div>
   );
 
@@ -512,13 +517,32 @@ export function buildYouTubeSearchUrl(title: string, artist: string): string {
   return `https://www.youtube.com/results?${params.toString()}`;
 }
 
+/**
+ * `variant`:
+ *   - `subtle`(기본) — text-only 톤. 검색/href 카드 footer 처럼 표면을 가볍게 둘 때.
+ *   - `primary`(closes #1714) — 채워진 1차 CTA 톤("미리듣기"). 리스트 카드 표면의 핵심
+ *     전환 경로를 분명히 한다. 스와이프/모달의 미리듣기 노출과 정렬된다.
+ */
 type YouTubeSearchLinkProps = {
   songTitle: string;
   songArtist: string;
+  variant?: "subtle" | "primary";
 };
 
-function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
+function YouTubeSearchLink({
+  songTitle,
+  songArtist,
+  variant = "subtle",
+}: YouTubeSearchLinkProps) {
   const href = buildYouTubeSearchUrl(songTitle, songArtist);
+  const isPrimary = variant === "primary";
+  const label = isPrimary ? "미리듣기" : "YouTube에서 듣기";
+  const ariaLabel = isPrimary
+    ? `${songTitle} 미리듣기 (새 탭, YouTube)`
+    : `${songTitle} YouTube에서 듣기 (새 탭)`;
+  const toneClass = isPrimary
+    ? "bg-[var(--cta-neutral-bg)] text-[var(--cta-neutral-fg)] hover:bg-[var(--cta-neutral-bg-hover)]"
+    : "text-[var(--text-secondary)] hover:bg-[var(--cta-secondary-bg-hover)] hover:text-[var(--text-primary)]";
   return (
     <a
       href={href}
@@ -529,11 +553,11 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
         // preventDefault는 호출하지 않음 — 링크 자체는 정상 동작해야 한다.
         event.stopPropagation();
       }}
-      aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
-      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+      aria-label={ariaLabel}
+      className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] ${toneClass}`}
     >
       <span aria-hidden="true">▶</span>
-      <span>YouTube에서 듣기</span>
+      <span>{label}</span>
     </a>
   );
 }

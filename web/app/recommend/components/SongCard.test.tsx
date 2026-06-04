@@ -200,7 +200,7 @@ describe("SongCard", () => {
       expect(onShowDetail).toHaveBeenCalledTimes(1);
     });
 
-    it("모달 모드에서는 score/matchReason/breakdown 패널/YouTube 링크가 카드 표면에 노출되지 않는다", () => {
+    it("모달 모드에서는 score/matchReason/breakdown 패널이 카드 표면에 노출되지 않는다", () => {
       const onShowDetail = vi.fn();
       const item = buildItem({ difficulty: "HARD", lowMidi: 55, highMidi: 77 });
       renderWithQueryClient(
@@ -216,15 +216,46 @@ describe("SongCard", () => {
       expect(screen.getByText("테스트 곡")).toBeInTheDocument();
       expect(screen.getByText("가수")).toBeInTheDocument();
       expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
-      // 상세는 모달로 위임 — 카드 표면에 없어야 한다.
+      // 상세(점수 분해/추천 사유)는 모달로 위임 — 카드 표면에 없어야 한다.
       expect(screen.queryByText(/score/)).not.toBeInTheDocument();
       expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: /자세히 보기/ }),
       ).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("link", { name: /YouTube에서 듣기/ }),
-      ).not.toBeInTheDocument();
+    });
+
+    // closes #1714 — 모달 모드(=/recommend 리스트)에서도 핵심 전환인 미리듣기를
+    // 카드 표면에 1차 CTA 로 끌어올린다. 스와이프/모달의 미리듣기 노출과 정렬.
+    it("모달 모드에서 카드 표면에 '미리듣기' 1차 CTA 가 노출되고 새 탭 YouTube 검색으로 연다", () => {
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const preview = screen.getByRole("link", {
+        name: /테스트 곡 미리듣기 \(새 탭, YouTube\)/,
+      });
+      expect(preview).toHaveAttribute("target", "_blank");
+      expect(preview).toHaveAttribute("rel", "noopener noreferrer");
+      expect(preview.getAttribute("href")).toContain(
+        "youtube.com/results?search_query=",
+      );
+    });
+
+    it("회귀 가드: 미리듣기 CTA 클릭이 onShowDetail(모달)을 트리거하지 않는다 (이벤트 격리)", async () => {
+      const user = userEvent.setup();
+      const onShowDetail = vi.fn();
+      const item = buildItem({ difficulty: "EASY" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} onShowDetail={onShowDetail} />
+        </ul>,
+      );
+      const preview = screen.getByRole("link", { name: /테스트 곡 미리듣기/ });
+      await user.click(preview);
+      expect(onShowDetail).not.toHaveBeenCalled();
     });
 
     it("모달 모드에서도 좋아요/북마크 액션은 카드 footer에 유지된다", () => {

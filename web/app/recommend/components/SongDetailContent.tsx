@@ -46,7 +46,7 @@ import {
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip } from "@/components/ui";
 
-import { FitReasons } from "./FitBadge";
+import { FitBadge, FitReasons } from "./FitBadge";
 
 type SongDetailContentProps =
   | {
@@ -93,6 +93,14 @@ export function SongDetailContent(props: SongDetailContentProps) {
           </p>
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {difficulty ? <DifficultyBadge difficulty={difficulty} /> : null}
+            {/*
+             * closes #1714 — 리스트 카드 표면과 동일한 "내 음역 적합" 핵심 신호 배지를
+             * 스와이프/모달 헤더에도 노출해 두 뷰의 핵심 정보 세트를 정렬한다. 상세 사유
+             * (FitReasons)는 아래 추천 사유 섹션이 그대로 담당 — 여기선 한눈 배지만.
+             */}
+            {item && typeof item.voiceFit === "number" ? (
+              <FitBadge label="내 음역 적합" fit={item.voiceFit} />
+            ) : null}
             <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
               키 {keyLabel}
             </span>
