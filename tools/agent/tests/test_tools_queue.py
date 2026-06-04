@@ -14,6 +14,17 @@ def _no_real_cycle_thread(monkeypatch):
     monkeypatch.setattr(tq, "_create_cycle_thread", lambda *a, **k: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_disk_pressure(request, monkeypatch):
+    """(#1770) 기본: 디스크 압박 없음(여유) — 결정성. 테스트 host root 실사용률(예 94%)에
+    좌우되지 않도록 dispatch 디스크 가드를 평시로 고정. 가드 테스트가 개별 override.
+    `real_disk` 마커 테스트는 실제 root_disk_pct 를 검증하므로 이 패치를 건너뛴다."""
+    if request.node.get_closest_marker("real_disk"):
+        return
+    import tools_queue as tq
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 10)
+
+
 def _seed_directive(directive_id: str, thread_id: str = "T1") -> None:
     import events as ev
 
@@ -228,3 +239,61 @@ def test_dispatch_launch_retry_cap_dequeues(isolated_db, monkeypatch):
         assert wq.peek_next("be") is not None  # MAX 전엔 큐 유지
     tq.dispatch_once()  # MAX 번째 → 제외
     assert wq.peek_next("be") is None
+
+
+# ─── #1770 디스크 가드 ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.real_disk
+def test_root_disk_pct_graceful_on_error(monkeypatch):
+    """shutil.disk_usage 실패 시 0 반환 — 가드 미발동(안전 fallback)."""
+    import tools_queue as tq
+    import shutil as _sh
+
+    def boom(_):
+        raise OSError("no such mount")
+    monkeypatch.setattr(_sh, "disk_usage", boom)
+    assert tq.root_disk_pct() == 0
+
+
+def test_disk_pressure_hold_threshold(monkeypatch):
+    """root 사용률 >= DISK_HOLD_PCT 면 hold True, 미만이면 False."""
+    import tools_queue as tq
+    monkeypatch.setattr(tq, "DISK_HOLD_PCT", 90)
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 92)
+    assert tq.disk_pressure_hold() is True
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 88)
+    assert tq.disk_pressure_hold() is False
+
+
+def test_dispatch_holds_new_launch_under_disk_pressure(isolated_db, monkeypatch):
+    """디스크 압박 시 idle 사이클이어도 신규 launch 보류 (큐 유지)."""
+    import tools_queue as tq, tools_subagent as ts, tools_discord as td, work_queue as wq
+
+    calls: list = []
+    monkeypatch.setattr(ts, "launch_subagent", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 95)  # 압박
+    _seed_directive("d1")
+    tq.enqueue_directive("rev", "d1", "t", "task", thread_id="T1")
+
+    launched = tq.dispatch_once()
+    assert calls == []           # 신규 launch 안 함
+    assert launched == []
+    assert wq.peek_next("rev") is not None  # 큐 유지 (압박 완화 후 재개)
+
+
+def test_dispatch_recovers_stale_even_under_disk_pressure(isolated_db, monkeypatch):
+    """디스크 압박이어도 stale in_flight 회복은 진행 — lock/디스크 정리로 압박 완화."""
+    import tools_queue as tq, tools_subagent as ts, tools_discord as td, events as ev
+
+    monkeypatch.setattr(ts, "launch_subagent", lambda *a, **k: None)
+    monkeypatch.setattr(td, "forum_comment", lambda *a, **k: None)
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 96)  # 압박
+    ev.set_state("in_flight_agents", ["rev"])
+    stale = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    ev.set_state(tq.IN_FLIGHT_STARTED_KEY, {"rev": stale})
+
+    tq.dispatch_once()
+    # stale lock 회복됨(신규 launch 는 보류하더라도).
+    assert "rev" not in set(ev.get_state("in_flight_agents") or [])

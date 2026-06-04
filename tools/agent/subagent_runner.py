@@ -38,6 +38,10 @@ MAIN_CHECKOUT = WORKTREE_ROOT / "mobruji"
 # sub-agent 1 task 최대 실행 시간 — 초과 시 kill + 실패 보고 + lock 해제.
 EXEC_TIMEOUT_SECONDS = 45 * 60
 DEFAULT_MODEL = "claude-opus-4-8"
+# (#1770) 워크트리 setup hook — node_modules/.next/build 를 /data 로 심볼릭 보장해
+# root(/) 폭주 방지. ephemeral 워크트리 생성 직후 호출(매뉴얼 재이전 제거). 배포 standing
+# checkout 경로 고정 (WRAPPER_PATH 와 동일 컨벤션).
+DATA_SYMLINK_SCRIPT = Path("/home/mobruji/mobruji/tools/worktree-data-symlinks.sh")
 
 # (#1413) sub-agent 작업 보고 양식 — Discord 마크다운, AS-IS/TO-BE (나열 금지,
 # 제목/내용 구분, 줄바꿈). 사용자 정정 2026-05-31: "정리라기보다 나열 — AS-IS/TO-BE
@@ -89,7 +93,33 @@ def _ephemeral_worktree_add(directive_id: str) -> Path:
     if result.returncode != 0:
         raise RuntimeError(f"ephemeral worktree add 실패: {(result.stderr or '')[:200]}")
     logger.info("infra ephemeral worktree 생성: %s", wt)
+    _ensure_data_symlinks(wt)
     return wt
+
+
+def _ensure_data_symlinks(worktree: Path) -> None:
+    """(#1770) 워크트리의 node_modules/.next/build 를 /data 심볼릭 보장 — root 폭주 방지.
+
+    graceful: 스크립트 부재/실패/타임아웃이어도 워크트리 사용은 계속(경고만). 심볼릭이
+    안 걸려도 작업 자체는 진행되며 디스크 가드(dispatch_once)가 별도로 보호한다.
+    """
+    if not DATA_SYMLINK_SCRIPT.exists():
+        logger.warning("data-symlink 스크립트 부재 — skip: %s", DATA_SYMLINK_SCRIPT)
+        return
+    try:
+        result = subprocess.run(
+            ["bash", str(DATA_SYMLINK_SCRIPT), str(worktree)],
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "data-symlink rc=%s wt=%s stderr=%s",
+                result.returncode, worktree, (result.stderr or "")[:300],
+            )
+        else:
+            logger.info("data-symlink 보장 완료: %s", worktree)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("data-symlink 실행 실패 wt=%s exc=%r", worktree, exc)
 
 
 def _ephemeral_worktree_remove(wt: Path) -> None:
