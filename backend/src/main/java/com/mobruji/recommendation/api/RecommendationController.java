@@ -14,11 +14,14 @@ import org.springframework.web.server.ResponseStatusException;
 import com.mobruji.recommendation.api.dto.NextRecommendationRequest;
 import com.mobruji.recommendation.api.dto.RecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.RecommendationResponse;
+import com.mobruji.recommendation.api.dto.SafeRecommendationCreateRequest;
+import com.mobruji.recommendation.api.dto.SafeRecommendationResponse;
 import com.mobruji.recommendation.api.dto.SequenceRecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.SequenceRecommendationResponse;
 import com.mobruji.recommendation.api.dto.TrendingListResponse;
 import com.mobruji.recommendation.application.TrendingQuery;
 import com.mobruji.recommendation.domain.RecommendationResult;
+import com.mobruji.recommendation.domain.SafeRecommendationResult;
 import com.mobruji.recommendation.domain.SequenceRecommendationResult;
 import com.mobruji.song.domain.Mood;
 
@@ -74,6 +77,21 @@ public class RecommendationController {
                 sequenceRecommendationCreateRequest.toCommand());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(SequenceRecommendationResponse.from(sequenceRecommendationResult));
+    }
+
+    /**
+     * 안전곡형(P-E) 추천(persona-expansion-social-emotional.md §2/§5). "안 망하고 무사히 넘기고 싶다" 의도에 맞춰
+     * 쉬운 난이도(EASY 우위) + 느린 템포 + 음역 여유로 강편향한 안심 추천을 만든다. 응답에 페르소나 식별자 + 곡별 "안심 포인트"를
+     * 함께 노출한다(설명 가능성). 응답 형상이 단일 추천과 달라(페르소나·안심 포인트) 기존 {@code POST /recommendations} 확장이
+     * 아닌 별도 엔드포인트로 둔다(P-D 시퀀스와 같은 패턴).
+     */
+    @PostMapping("/safe")
+    public ResponseEntity<SafeRecommendationResponse> createSafe(
+            @Valid @RequestBody final SafeRecommendationCreateRequest safeRecommendationCreateRequest) {
+        final SafeRecommendationResult safeRecommendationResult = recommendationService.createSafe(
+                safeRecommendationCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(SafeRecommendationResponse.from(safeRecommendationResult));
     }
 
     @GetMapping("/{id}")
