@@ -2,7 +2,7 @@
  * RecommendFilters 컴포넌트 테스트 (directive roadmap-mood-age-ui).
  *
  * 검증 포인트:
- *   1) 분위기 6종 + 나이대 6종 칩을 모두 렌더한다.
+ *   1) 분위기 6종 + 나이대 6종 + 성별 2종 칩을 모두 렌더한다.
  *   2) 칩 클릭 시 해당 enum 값으로 onChange 가 호출된다.
  *   3) 이미 선택된 칩을 다시 누르면 null(해제)로 onChange 가 호출된다.
  *   4) 선택된 칩은 aria-pressed=true 로 노출된다.
@@ -25,8 +25,10 @@ function renderFilters(
   const props = {
     selectedMood: null,
     selectedAgeGroup: null,
+    selectedGender: null,
     onMoodChange: vi.fn(),
     onAgeGroupChange: vi.fn(),
+    onGenderChange: vi.fn(),
     ...overrides,
   };
   render(<RecommendFilters {...props} />);
@@ -34,7 +36,7 @@ function renderFilters(
 }
 
 describe("RecommendFilters", () => {
-  it("분위기 6종 + 나이대 6종 칩을 렌더한다", () => {
+  it("분위기 6종 + 나이대 6종 + 성별 2종 칩을 렌더한다", () => {
     renderFilters();
     for (const label of [
       "신나는",
@@ -47,6 +49,9 @@ describe("RecommendFilters", () => {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
     for (const label of ["10대", "20대", "30대", "40대", "50대", "60대+"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    for (const label of ["남자곡", "여자곡"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
@@ -67,6 +72,15 @@ describe("RecommendFilters", () => {
     await user.click(screen.getByRole("button", { name: "60대+" }));
 
     expect(onAgeGroupChange).toHaveBeenCalledWith("SIXTIES_PLUS");
+  });
+
+  it("성별 칩 클릭 시 해당 값으로 onGenderChange 가 호출된다", async () => {
+    const user = userEvent.setup();
+    const { onGenderChange } = renderFilters();
+
+    await user.click(screen.getByRole("button", { name: "여자곡" }));
+
+    expect(onGenderChange).toHaveBeenCalledWith("FEMALE");
   });
 
   it("이미 선택된 칩을 다시 누르면 null(해제)로 호출된다", async () => {
@@ -100,8 +114,10 @@ describe("RecommendFilters", () => {
       <RecommendFilters
         selectedMood="POWERFUL"
         selectedAgeGroup={null}
+        selectedGender={null}
         onMoodChange={vi.fn()}
         onAgeGroupChange={vi.fn()}
+        onGenderChange={vi.fn()}
       />,
     );
     await expectNoA11yViolations(container);

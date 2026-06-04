@@ -34,6 +34,16 @@ export type AgeGroup =
   | "FIFTIES"
   | "SIXTIES_PLUS";
 
+/**
+ * 추천 성별 필터(선택 입력).
+ *
+ * BE `RecommendationCreateRequest.gender`(#1767/#1781 genderFit) 와 1:1 매칭. 고른 성별의
+ * 곡(`Song.vocalGender`)에 가중을 주는 신호로, 배타 제외가 아니라 가산이다. 미입력(null/생략)이면
+ * genderFit=0 으로 처리돼 랭킹에 영향이 없다(하위호환). BE 곡측 enum 은 `MIXED` 도 갖지만 요청
+ * 입력은 의미상 `MALE`/`FEMALE` 둘뿐이다.
+ */
+export type RequestedGender = "MALE" | "FEMALE";
+
 export type MusicalKey =
   | "C_MAJOR"
   | "C_SHARP_MAJOR"
@@ -99,6 +109,11 @@ export type RecommendationCreateRequest = {
    * null/생략 시 세대 가중 없음(하위호환). 결정성 seed 입력에도 포함된다.
    */
   ageGroup?: AgeGroup | null;
+  /**
+   * 추천 성별 필터(선택). BE #1767/#1781 genderFit 신호 입력(MALE/FEMALE).
+   * null/생략 시 성별 가중 없음(하위호환). 결정성 seed 입력에도 포함된다.
+   */
+  gender?: RequestedGender | null;
   /**
    * 재추천 시 결과에서 제외할 곡 ID 목록.
    *

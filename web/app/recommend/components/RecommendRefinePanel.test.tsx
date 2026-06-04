@@ -26,8 +26,10 @@ function renderPanel(
   const props = {
     selectedMood: null,
     selectedAgeGroup: null,
+    selectedGender: null,
     onMoodChange: vi.fn(),
     onAgeGroupChange: vi.fn(),
+    onGenderChange: vi.fn(),
     onClearAll: vi.fn(),
     ...overrides,
   };
@@ -73,9 +75,23 @@ describe("RecommendRefinePanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("활성 필터 개수가 접힌 바에 배지로 표시된다", () => {
-    renderPanel({ selectedMood: "EMOTIONAL", selectedAgeGroup: "THIRTIES" });
-    expect(screen.getByTestId("refine-active-count")).toHaveTextContent("2");
+  it("활성 필터 개수가 접힌 바에 배지로 표시된다 (분위기·나이대·성별 합산)", () => {
+    renderPanel({
+      selectedMood: "EMOTIONAL",
+      selectedAgeGroup: "THIRTIES",
+      selectedGender: "MALE",
+    });
+    expect(screen.getByTestId("refine-active-count")).toHaveTextContent("3");
+  });
+
+  it("펼치면 성별 칩(남자곡/여자곡)이 노출된다", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
+
+    expect(screen.getByRole("button", { name: "남자곡" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "여자곡" })).toBeInTheDocument();
   });
 
   it("활성 필터가 없으면 개수 배지가 없다", () => {
@@ -107,8 +123,10 @@ describe("RecommendRefinePanel", () => {
       <RecommendRefinePanel
         selectedMood={null}
         selectedAgeGroup={null}
+        selectedGender={null}
         onMoodChange={vi.fn()}
         onAgeGroupChange={vi.fn()}
+        onGenderChange={vi.fn()}
         onClearAll={vi.fn()}
       />,
     );

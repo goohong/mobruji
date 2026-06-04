@@ -72,6 +72,7 @@ import {
   RecommendationPersona,
   RecommendationResponse,
   RecommendedSongResponse,
+  RequestedGender,
 } from "@/lib/api/recommendation";
 import {
   readVoiceRange,
@@ -87,6 +88,7 @@ import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
+import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { useSessionStore } from "@/store/session";
 
 import { RecommendModeGroup } from "./components/RecommendModeGroup";
@@ -192,12 +194,20 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const appendExcluded = useSessionStore((state) => state.appendExcluded);
   const appendHistory = useHistoryStore((state) => state.appendRecommendation);
 
-  // 즉석 페르소나(P-C) 입력 — 분위기/나이대 (directive roadmap-mood-age-ui).
-  // 영속하지 않는 화면 로컬 상태. 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터
-  // 재발화된다. 미선택(null)은 createRecommendation 에서 필드를 생략 → 기존 동작 유지.
-  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  // 즉석 페르소나(P-C) 입력 — 분위기/나이대/성별 (directive roadmap-mood-age-ui + #1814).
+  // 화면 로컬 상태이되, 가입 온보딩(#1814)에서 영속한 취향이 있으면 기본값으로 pre-fill 한다
+  // (`useOnboardingPrefsStore`, localStorage). 값이 바뀌면 queryKey 가 바뀌어 추천이 첫
+  // 페이지부터 재발화된다. 미선택(null)은 createRecommendation 에서 필드를 생략 → 기존 동작 유지.
+  // getState() 로 마운트 시점 1회만 읽는다 — 이후 사용자의 화면 편집이 우선이라 store 변화를
+  // 구독하지 않는다(온보딩 값은 어디까지나 "기본값").
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(
+    () => useOnboardingPrefsStore.getState().mood,
+  );
   const [selectedAgeGroup, setSelectedAgeGroup] = useState<AgeGroup | null>(
-    null,
+    () => useOnboardingPrefsStore.getState().ageGroup,
+  );
+  const [selectedGender, setSelectedGender] = useState<RequestedGender | null>(
+    () => useOnboardingPrefsStore.getState().gender,
   );
   // 추천 의도 모드(P-E 안전곡 등, 이슈 #1600) — mood/ageGroup 과 동일한 화면 로컬 상태.
   // 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터 재발화된다. null(미선택)은
@@ -210,11 +220,13 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const clearFilters = useCallback(() => {
     setSelectedMood(null);
     setSelectedAgeGroup(null);
+    setSelectedGender(null);
   }, []);
   // closes #1715 — 결과에 영향을 주는(쿼리 재발화) 적용 조건 수. 결과 요약 "조건 N개 적용됨"에 쓴다.
   const appliedFilterCount =
     (selectedMood !== null ? 1 : 0) +
     (selectedAgeGroup !== null ? 1 : 0) +
+    (selectedGender !== null ? 1 : 0) +
     (selectedPersona !== null ? 1 : 0);
 
   const isVoiceRangeReady =
@@ -253,6 +265,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       voiceRangeIdFromStore,
       selectedMood,
       selectedAgeGroup,
+      selectedGender,
       selectedPersona,
     ],
     enabled:
@@ -274,6 +287,9 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       }
       if (selectedAgeGroup !== null) {
         request.ageGroup = selectedAgeGroup;
+      }
+      if (selectedGender !== null) {
+        request.gender = selectedGender;
       }
       if (selectedPersona !== null) {
         request.persona = selectedPersona;
@@ -320,6 +336,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     voiceRangeIdFromStore,
     selectedMood,
     selectedAgeGroup,
+    selectedGender,
     selectedPersona,
   ]);
 
@@ -431,8 +448,10 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
         <RecommendRefinePanel
           selectedMood={selectedMood}
           selectedAgeGroup={selectedAgeGroup}
+          selectedGender={selectedGender}
           onMoodChange={setSelectedMood}
           onAgeGroupChange={setSelectedAgeGroup}
+          onGenderChange={setSelectedGender}
           onClearAll={clearFilters}
         />
 

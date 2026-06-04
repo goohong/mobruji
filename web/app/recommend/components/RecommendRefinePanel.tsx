@@ -18,31 +18,37 @@
 
 import { useId, useState } from "react";
 
-import type { AgeGroup, Mood } from "@/lib/api/recommendation";
+import type { AgeGroup, Mood, RequestedGender } from "@/lib/api/recommendation";
 
 import { RecommendFilters } from "./RecommendFilters";
 
 type RecommendRefinePanelProps = {
   selectedMood: Mood | null;
   selectedAgeGroup: AgeGroup | null;
+  selectedGender: RequestedGender | null;
   onMoodChange: (mood: Mood | null) => void;
   onAgeGroupChange: (ageGroup: AgeGroup | null) => void;
-  /** 선택된 분위기·나이대 필터를 한 번에 비운다(이슈 #1715 "모두 해제"). */
+  onGenderChange: (gender: RequestedGender | null) => void;
+  /** 선택된 분위기·나이대·성별 필터를 한 번에 비운다(이슈 #1715 "모두 해제"). */
   onClearAll: () => void;
 };
 
 export function RecommendRefinePanel({
   selectedMood,
   selectedAgeGroup,
+  selectedGender,
   onMoodChange,
   onAgeGroupChange,
+  onGenderChange,
   onClearAll,
 }: RecommendRefinePanelProps) {
   const [expanded, setExpanded] = useState(false);
   const panelId = useId();
 
   const activeCount =
-    (selectedMood !== null ? 1 : 0) + (selectedAgeGroup !== null ? 1 : 0);
+    (selectedMood !== null ? 1 : 0) +
+    (selectedAgeGroup !== null ? 1 : 0) +
+    (selectedGender !== null ? 1 : 0);
 
   return (
     <section aria-label="추천 필터" className="flex flex-col gap-3">
@@ -67,7 +73,7 @@ export function RecommendRefinePanel({
               </span>
             ) : (
               <span className="text-xs text-[var(--text-caption)]">
-                분위기·나이대 (선택)
+                분위기·나이대·성별 (선택)
               </span>
             )}
           </span>
@@ -101,8 +107,10 @@ export function RecommendRefinePanel({
           <RecommendFilters
             selectedMood={selectedMood}
             selectedAgeGroup={selectedAgeGroup}
+            selectedGender={selectedGender}
             onMoodChange={onMoodChange}
             onAgeGroupChange={onAgeGroupChange}
+            onGenderChange={onGenderChange}
           />
         </div>
       ) : null}
