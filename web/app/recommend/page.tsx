@@ -343,6 +343,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
 
         <RecommendationFeed
           query={recommendQuery}
+          sessionId={sessionId}
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
           activePersona={selectedPersona}
@@ -369,6 +370,11 @@ type RecommendationFeedProps = {
     number
   >>;
   /**
+   * 익명 세션 ID — 스와이프 덱이 좋아요한 곡을 seed 로 `POST /api/v1/recommendations/next`
+   * 를 호출(무한 로드)할 때 필요하다.
+   */
+  sessionId: string;
+  /**
    * 사용자 음역대 — 추천 카드의 "자세히 보기" 패널에서 음역 적합 점수를 계산할 때 사용.
    * (closes #141) 추천 컨텍스트에서는 항상 알 수 있는 값이라 필수로 받는다.
    */
@@ -388,6 +394,7 @@ type RecommendationFeedProps = {
 
 function RecommendationFeed({
   query,
+  sessionId,
   userVoiceRangeLow,
   userVoiceRangeHigh,
   activePersona,
@@ -582,6 +589,7 @@ function RecommendationFeed({
           hasMore={hasNextPage}
           isFetchingMore={isFetchingNextPage}
           onNeedMore={fetchNextPage}
+          sessionId={sessionId}
         />
       </div>
     );
@@ -693,17 +701,15 @@ type ResultSummaryProps = {
  * 오면 이 줄의 곡 수/적용 문구가 갱신돼 "조건이 결과에 반영됐다"가 한눈에 보인다.
  * (스크린 리더 안내는 별도 aria-live 영역이 담당 — 여기는 시각 신호.)
  *
- * closes #1764 — 정렬 기준 한 줄 안내. BE 는 음역 적합뿐 아니라 분위기·인기·템포·세대
- * 가중을 종합한 점수순으로 정렬한다(설명가능성 #1484 정합). 음역만 본다는 오해를 막기
- * 위해 결과 영역에 종합 정렬 기준을 캡션으로 노출한다.
+ * (이슈 #1764) 정렬 기준 한 줄 안내를 함께 노출한다 — 추천 순서가 "음역대만" 본 결과인지
+ * 종합 점수 순인지 불명확하다는 피드백에 대응. 실제 BE 정렬은 음역 적합·분위기·인기 등을
+ * 가중 합산한 종합 점수 순이라, 사용자가 "왜 이 순서인지"를 이해하도록 결과 영역에 드러낸다.
+ * 상세 모달 FitBadge(#1484) 설명가능성과 결을 맞춘다.
  */
 function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
   return (
-    <div className="flex flex-col gap-1">
-      <p
-        data-testid="recommend-result-summary"
-        className="text-xs text-[var(--text-caption)]"
-      >
+    <div data-testid="recommend-result-summary" className="flex flex-col gap-1">
+      <p className="text-xs text-[var(--text-caption)]">
         <span className="font-medium text-[var(--text-secondary)]">
           추천 {count}곡
         </span>
@@ -715,7 +721,7 @@ function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
         data-testid="recommend-sort-criteria"
         className="text-xs text-[var(--text-caption)]"
       >
-        음역 적합도·분위기·인기 등을 종합한 점수순으로 정렬했어요.
+        음역 적합도·분위기·인기 등을 종합한 점수 순서로 추천합니다.
       </p>
     </div>
   );

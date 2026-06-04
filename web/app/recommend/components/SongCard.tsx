@@ -617,7 +617,7 @@ function MatchReasonExpander({
           </dl>
           {hasEstimated ? (
             <p className="text-[11px] text-[var(--text-tertiary)]">
-              ※ 점수 분해는 클라이언트 추정값입니다. 백엔드 산출값이 추가되면 자동으로 교체됩니다.
+              ※ 점수 분해는 대략적인 추정값이며, 정확한 값이 준비되면 자동으로 갱신됩니다.
             </p>
           ) : null}
         </div>

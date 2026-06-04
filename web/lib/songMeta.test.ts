@@ -33,7 +33,7 @@ describe("formatLanguageLabel", () => {
 });
 
 describe("formatMoodLabel", () => {
-  it("Mood enum 6종을 한국어 라벨로 변환한다 (#1764)", () => {
+  it("Mood enum 코드를 한국어 라벨로 변환한다 (#1764)", () => {
     expect(formatMoodLabel("UPBEAT")).toBe("신나는");
     expect(formatMoodLabel("CALM")).toBe("잔잔한");
     expect(formatMoodLabel("EMOTIONAL")).toBe("감성적인");
@@ -42,8 +42,14 @@ describe("formatMoodLabel", () => {
     expect(formatMoodLabel("NOSTALGIC")).toBe("추억의");
   });
 
-  it("빈 값(null/undefined)은 null 을 돌려준다(칩 생략)", () => {
+  it("대소문자·공백을 정규화한다", () => {
+    expect(formatMoodLabel(" upbeat ")).toBe("신나는");
+  });
+
+  it("미매핑 코드·빈 값은 null 을 돌려준다(원문 노출 회피)", () => {
+    expect(formatMoodLabel("UNKNOWN_MOOD")).toBeNull();
     expect(formatMoodLabel(null)).toBeNull();
     expect(formatMoodLabel(undefined)).toBeNull();
+    expect(formatMoodLabel("")).toBeNull();
   });
 });

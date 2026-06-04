@@ -81,6 +81,13 @@ describe("SongDetailContent", () => {
     expect(screen.getByRole("button", { name: /테스트 곡 북마크$/ })).toBeInTheDocument();
   });
 
+  // closes #1764 — mood enum 코드값("UPBEAT")이 아니라 한국어 라벨("신나는")로 노출한다.
+  it("mood 칩은 enum 코드가 아니라 한국어 라벨로 노출한다 (#1764)", () => {
+    renderWithQueryClient(<SongDetailContent song={SONG} />);
+    expect(screen.getByText("신나는")).toBeInTheDocument();
+    expect(screen.queryByText("UPBEAT")).not.toBeInTheDocument();
+  });
+
   it("DetailLikeButton: mutation 실패 시 alert 에 aria-live=\"assertive\" 가 부여된다", async () => {
     const user = userEvent.setup();
     toggleLikeMock.mockRejectedValueOnce(new Error("network down"));
@@ -171,5 +178,15 @@ describe("SongDetailContent", () => {
       screen.getByText("최고음이 편하게 닿는 음역이에요."),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("분위기 적합도 55%")).toBeInTheDocument();
+  });
+
+  // closes #1764 — 'score 0.87' 영어 라벨 + 원값은 사용자에게 의미 없는 서버 용어라
+  // 상세 모달에 노출하지 않는다. 추천 사유 헤더와 적합도 배지만 남는다.
+  it("추천 사유 영역에 'score' 원값을 노출하지 않는다 (#1764)", () => {
+    const item = buildRecommendedSong({ score: 0.87, voiceFit: 0.88 });
+    renderWithQueryClient(<SongDetailContent item={item} />);
+    expect(screen.getByText("추천 사유")).toBeInTheDocument();
+    expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/0\.87/)).not.toBeInTheDocument();
   });
 });

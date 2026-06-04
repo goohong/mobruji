@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, apiFetch } from "./client";
+import { ApiError, apiFetch, setAuthTokenProvider } from "./client";
 
 const fetchMock = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -707,5 +707,47 @@ describe("apiFetch headers Accept:undefined → default 덮어쓰기 lock (#729)
     await apiFetch("/api/v1/probe", { headers: { Accept: undefined as unknown as string } });
     const sentHeaders = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string | undefined>;
     expect(sentHeaders.Accept).toBeUndefined();
+  });
+});
+
+describe("apiFetch Authorization Bearer 자동 첨부 가드 (#1768)", () => {
+  // 로그인 유지: provider 가 토큰을 주면 모든 요청에 Authorization Bearer 자동 첨부,
+  // 없으면(익명) 미첨부. 호출 측 Authorization 헤더가 있으면 그 값이 우선한다.
+  afterEach(() => {
+    // provider leak 방지 — default(null) 로 복원.
+    setAuthTokenProvider(() => null);
+  });
+
+  it("provider 가 토큰을 반환하면 Authorization: Bearer <token> 자동 첨부", async () => {
+    setAuthTokenProvider(() => "tok-xyz");
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/users/me");
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok-xyz");
+  });
+
+  it("provider 가 null 이면(익명) Authorization 헤더를 붙이지 않는다", async () => {
+    setAuthTokenProvider(() => null);
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/songs");
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect("Authorization" in headers).toBe(false);
+  });
+
+  it("호출 측이 Authorization 을 직접 지정하면 provider 토큰보다 우선한다", async () => {
+    setAuthTokenProvider(() => "tok-auto");
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/users/me", { headers: { Authorization: "Bearer tok-explicit" } });
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok-explicit");
+  });
+
+  it("provider 토큰과 함께 X-Session-Id 등 다른 헤더도 공존한다(익명 흐름 호환)", async () => {
+    setAuthTokenProvider(() => "tok-coexist");
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await apiFetch("/api/v1/voice-ranges/abc", { headers: { "X-Session-Id": "abc" } });
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok-coexist");
+    expect(headers["X-Session-Id"]).toBe("abc");
   });
 });
