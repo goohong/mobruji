@@ -16,7 +16,7 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -37,9 +37,19 @@ vi.mock("@/lib/api/feedback", () => ({
   toggleBookmark: vi.fn(),
 }));
 
+vi.mock("@/lib/api/recommendation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/api/recommendation")>();
+  return { ...actual, nextRecommendation: vi.fn() };
+});
+
 import { toggleLike } from "@/lib/api/feedback";
+import { nextRecommendation } from "@/lib/api/recommendation";
 
 const toggleLikeMock = vi.mocked(toggleLike);
+const nextRecommendationMock = vi.mocked(nextRecommendation);
+
+const SESSION_ID = "00000000-0000-4000-8000-000000000001";
 
 function renderWithQueryClient(ui: ReactNode) {
   const client = new QueryClient({
@@ -110,6 +120,11 @@ beforeEach(() => {
   }
   toggleLikeMock.mockReset();
   toggleLikeMock.mockResolvedValue({ liked: true, songId: 1 });
+  nextRecommendationMock.mockReset();
+  nextRecommendationMock.mockResolvedValue({
+    requestId: "11111111-1111-4111-8111-111111111111",
+    recommendations: [],
+  });
 });
 
 afterEach(() => {
@@ -264,7 +279,85 @@ describe("SwipeDeck", () => {
         onNeedMore={onNeedMore}
       />,
     );
-    // remaining(2) <= PREFETCH_THRESHOLD(2) → 마운트 직후 프리페치.
+    // remaining(2) <= PREFETCH_THRESHOLD(2) + seed 없음 → 부모 batch 폴백 프리페치.
     expect(onNeedMore).toHaveBeenCalled();
+  });
+
+  it("첫 카드에 어포던스 힌트와 뒷장 스택(미리보기)을 노출한다", () => {
+    renderWithQueryClient(
+      <SwipeDeck
+        recommendations={[makeItem(1, 1), makeItem(2, 2), makeItem(3, 3)]}
+        userVoiceRange={USER_RANGE}
+        hasMore={false}
+        isFetchingMore={false}
+        onNeedMore={vi.fn()}
+        sessionId={SESSION_ID}
+      />,
+    );
+    expect(screen.getByTestId("swipe-affordance")).toBeInTheDocument();
+    // 윗장 뒤로 다음 2장(STACK_PEEK_COUNT)을 겹쳐 보여준다.
+    expect(screen.getAllByTestId("swipe-peek-card")).toHaveLength(2);
+  });
+
+  it("좋아요한 곡을 seed 로 잔량 임계 이하 시 /next 무한 로드를 호출한다", async () => {
+    const user = userEvent.setup();
+    const onNeedMore = vi.fn();
+    nextRecommendationMock.mockResolvedValue({
+      requestId: "22222222-2222-4222-8222-222222222222",
+      recommendations: [makeItem(3, 3), makeItem(4, 4)],
+    });
+    renderWithQueryClient(
+      <SwipeDeck
+        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
+        userVoiceRange={USER_RANGE}
+        hasMore={false}
+        isFetchingMore={false}
+        onNeedMore={onNeedMore}
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    // 곡1 좋아요 → seed [1] 생성, 잔량(1) ≤ 임계 → seed 기반 /next 호출.
+    await user.click(
+      screen.getByRole("button", { name: /곡 1.*좋아요하고 다음 곡/ }),
+    );
+
+    await waitFor(() => expect(nextRecommendationMock).toHaveBeenCalled());
+    const arg = nextRecommendationMock.mock.calls[0][0];
+    expect(arg.sessionId).toBe(SESSION_ID);
+    expect(arg.seedSongIds).toContain(1);
+    expect(arg.excludeSongIds).toEqual(expect.arrayContaining([1, 2]));
+    // seed 경로가 살아 있으면 부모 batch 폴백은 쓰지 않는다.
+    expect(onNeedMore).not.toHaveBeenCalled();
+  });
+
+  it("seed 기반 결과를 끊김 없이 덱에 이어 붙인다(무한 append)", async () => {
+    const user = userEvent.setup();
+    nextRecommendationMock.mockResolvedValue({
+      requestId: "33333333-3333-4333-8333-333333333333",
+      recommendations: [makeItem(3, 3), makeItem(4, 4)],
+    });
+    renderWithQueryClient(
+      <SwipeDeck
+        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
+        userVoiceRange={USER_RANGE}
+        hasMore={false}
+        isFetchingMore={false}
+        onNeedMore={vi.fn()}
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    // 곡1 좋아요 → /next append(곡3·곡4). 곡2 패스 → 다음은 종료가 아니라 곡3.
+    await user.click(
+      screen.getByRole("button", { name: /곡 1.*좋아요하고 다음 곡/ }),
+    );
+    await waitFor(() => expect(nextRecommendationMock).toHaveBeenCalled());
+    await user.click(
+      screen.getByRole("button", { name: /곡 2.*패스하고 다음 곡/ }),
+    );
+
+    expect(screen.getByText("가수 3")).toBeInTheDocument();
+    expect(screen.queryByTestId("swipe-deck-end")).not.toBeInTheDocument();
   });
 });

@@ -343,6 +343,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
 
         <RecommendationFeed
           query={recommendQuery}
+          sessionId={sessionId}
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
           activePersona={selectedPersona}
@@ -369,6 +370,11 @@ type RecommendationFeedProps = {
     number
   >>;
   /**
+   * 익명 세션 ID — 스와이프 덱이 좋아요한 곡을 seed 로 `POST /api/v1/recommendations/next`
+   * 를 호출(무한 로드)할 때 필요하다.
+   */
+  sessionId: string;
+  /**
    * 사용자 음역대 — 추천 카드의 "자세히 보기" 패널에서 음역 적합 점수를 계산할 때 사용.
    * (closes #141) 추천 컨텍스트에서는 항상 알 수 있는 값이라 필수로 받는다.
    */
@@ -388,6 +394,7 @@ type RecommendationFeedProps = {
 
 function RecommendationFeed({
   query,
+  sessionId,
   userVoiceRangeLow,
   userVoiceRangeHigh,
   activePersona,
@@ -582,6 +589,7 @@ function RecommendationFeed({
           hasMore={hasNextPage}
           isFetchingMore={isFetchingNextPage}
           onNeedMore={fetchNextPage}
+          sessionId={sessionId}
         />
       </div>
     );

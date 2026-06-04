@@ -293,6 +293,39 @@ export function createSequenceRecommendation(
 }
 
 /**
+ * "부른 곡 기반 다음곡 추천"(#1486) 요청.
+ *
+ * BE `POST /api/v1/recommendations/next`(`createFromSeeds`)와 1:1 매칭. seed 곡들의
+ * 음역대·분위기·BPM 을 도출해 이어 부르기 좋은 다음 곡을 결정성 있게 추천한다. 쇼츠식
+ * 스와이프 덱(#1489/#1763)의 무한 로드 토대 — 사용자가 좋아요한 곡을 seed 로, 이미 본 곡을
+ * `excludeSongIds` 로 넘겨 끊김 없이 다음 batch 를 이어 붙인다.
+ *
+ * - `seedSongIds`: 최소 1개(필수). seed 곡 자체는 결과에서 자동 제외된다.
+ * - `excludeSongIds`: seed 외 추가 제외(이미 본/패스한 곡). 미입력 시 빈 리스트로 정규화.
+ * - `excludeSessionHistory` / `useSessionFeedback`: 미입력 시 BE 기본값(false / true).
+ */
+export type NextRecommendationRequest = {
+  sessionId: string;
+  seedSongIds: number[];
+  excludeSongIds?: number[];
+  excludeSessionHistory?: boolean;
+  useSessionFeedback?: boolean;
+};
+
+/**
+ * 부른 곡 기반 다음곡 추천 생성. 응답 envelope 는 단일 추천과 동일한
+ * `{ requestId, recommendations }` 형상이다(`POST /api/v1/recommendations/next`).
+ */
+export function nextRecommendation(
+  request: NextRecommendationRequest,
+): Promise<RecommendationResponse> {
+  return apiFetch<RecommendationResponse>("/api/v1/recommendations/next", {
+    method: "POST",
+    body: request,
+  });
+}
+
+/**
  * 단건 추천 조회.
  *
  * issue #422: id 는 UUIDv7 문자열. `encodeURIComponent` 로 안전 인코딩한다 —
