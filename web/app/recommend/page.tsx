@@ -72,6 +72,7 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
+import { RecommendModeGroup } from "./components/RecommendModeGroup";
 import { RecommendRefinePanel } from "./components/RecommendRefinePanel";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 import { SongDetailSheet } from "./components/SongDetailSheet";
@@ -318,11 +319,10 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           <VoiceRangeHeaderSummary voiceRange={voiceRange} />
         </header>
 
-        {/* (V1·V2·V5) 결과 우선 — 의도 모드 + 분위기/나이대 필터는 접이식 "추천 다듬기"
-            1줄 바로 축소해 결과 카드가 헤더 직후 즉시 보이게 한다. */}
+        {/* (성격별 그룹화 #1712) 필터 그룹 — 분위기/나이대만 묶은 접이식 "추천 다듬기".
+            "지금 결과를 그 자리에서 좁히는" 필터로, 결과 위에 둔다. 모드 진입(의도·호스트)은
+            결과 아래 RecommendModeGroup 으로 분리한다. */}
         <RecommendRefinePanel
-          selectedPersona={selectedPersona}
-          onPersonaChange={setSelectedPersona}
           selectedMood={selectedMood}
           selectedAgeGroup={selectedAgeGroup}
           onMoodChange={setSelectedMood}
@@ -336,25 +336,12 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           activePersona={selectedPersona}
         />
 
-        {/* (V3, closes #1601) 모임 사회자(P-D) 모드 진입 — "다 같이 즐길 곡" 시퀀스 화면으로
-            이동한다. 결과 흐름과 시각적으로 분리된 2차 액션 링크 행으로 강등해(">" 어포던스)
-            혼자 부를 사용자의 오인을 줄인다. 누르지 않으면 단일 곡 추천 흐름은 불변. */}
-        <Link
-          href="/recommend/host"
-          className="flex items-center justify-between gap-3 self-stretch rounded-[var(--radius-md)] border border-[var(--border)] px-4 py-3 text-left text-[var(--text-secondary)] transition-colors duration-[var(--duration-base)] hover:bg-[var(--bg-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
-        >
-          <span className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium text-[var(--text-primary)]">
-              여럿이 함께 부르나요? 모임 사회자 모드
-            </span>
-            <span className="text-xs text-[var(--text-caption)]">
-              도입·고조·마무리 단계별 흐름으로 자리를 띄워 줍니다
-            </span>
-          </span>
-          <span aria-hidden="true" className="text-[var(--text-tertiary)]">
-            ›
-          </span>
-        </Link>
+        {/* (성격별 그룹화 #1712) 모드 진입 그룹 — "다른 방식으로 추천받기": 의도 모드 토글
+            + 호스트 모드 이동을 한 섹션 제목 아래 묶어 "필터 조정"과 별개로 인지하게 한다. */}
+        <RecommendModeGroup
+          selectedPersona={selectedPersona}
+          onPersonaChange={setSelectedPersona}
+        />
       </div>
     </main>
   );

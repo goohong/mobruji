@@ -414,7 +414,8 @@ describe("RecommendPage", () => {
       });
     });
 
-    await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
+    // 의도 모드 토글은 결과 아래 "다른 방식으로 추천받기" 모드 그룹에 상시 노출
+    // (#1712 — 더 이상 접이식 필터 패널 안에 있지 않다).
     await user.click(
       screen.getByRole("button", { name: /안 망할 곡 추천받기/ }),
     );

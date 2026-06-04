@@ -1,11 +1,13 @@
 /**
- * RecommendRefinePanel 테스트 (recommend-page-visual-ux-audit-1708 V1·V2·V5).
+ * RecommendRefinePanel 테스트 (recommend-page-visual-ux-audit-1708 V1·V2·V5,
+ * 선택형 진입 그룹화 #1712 — 필터 전용으로 좁힘).
  *
  * 검증 포인트:
- *   1) 기본은 접힌 상태 — 의도/분위기/나이대 컨트롤이 노출되지 않는다(결과 우선).
- *   2) "추천 다듬기" 바를 누르면 펼쳐져 의도 모드 + 필터 + 안내문이 노출된다.
- *   3) 활성 조건 개수가 접힌 바에 배지로 표시된다.
- *   4) a11y 위반 없음(펼친 상태).
+ *   1) 기본은 접힌 상태 — 분위기/나이대 필터가 노출되지 않는다(결과 우선).
+ *   2) "추천 다듬기" 바를 누르면 펼쳐져 필터 + 안내문이 노출된다.
+ *   3) 모드 진입(의도 모드)은 이 패널에 없다 — RecommendModeGroup 으로 분리.
+ *   4) 활성 필터 개수가 접힌 바에 배지로 표시된다.
+ *   5) a11y 위반 없음(펼친 상태).
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,8 +24,6 @@ function renderPanel(
   overrides: Partial<Parameters<typeof RecommendRefinePanel>[0]> = {},
 ) {
   const props = {
-    selectedPersona: null,
-    onPersonaChange: vi.fn(),
     selectedMood: null,
     selectedAgeGroup: null,
     onMoodChange: vi.fn(),
@@ -35,27 +35,21 @@ function renderPanel(
 }
 
 describe("RecommendRefinePanel", () => {
-  it("기본은 접힌 상태 — 의도/분위기 컨트롤이 노출되지 않는다", () => {
+  it("기본은 접힌 상태 — 분위기 필터가 노출되지 않는다", () => {
     renderPanel();
     const toggle = screen.getByRole("button", { name: /추천 다듬기/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(
-      screen.queryByRole("button", { name: /안 망할 곡 추천받기/ }),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "감성적인" }),
     ).not.toBeInTheDocument();
   });
 
-  it("바를 누르면 펼쳐져 의도 모드 + 필터 + 안내문이 노출된다", async () => {
+  it("바를 누르면 펼쳐져 필터 + 안내문이 노출된다", async () => {
     const user = userEvent.setup();
     renderPanel();
 
     await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
 
-    expect(
-      screen.getByRole("button", { name: /안 망할 곡 추천받기/ }),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "감성적인" }),
     ).toBeInTheDocument();
@@ -67,12 +61,23 @@ describe("RecommendRefinePanel", () => {
     ).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("활성 조건 개수가 접힌 바에 배지로 표시된다", () => {
-    renderPanel({ selectedPersona: "P-E", selectedMood: "EMOTIONAL" });
+  it("모드 진입(의도 모드)은 이 필터 패널에 없다 — RecommendModeGroup 으로 분리", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));
+
+    expect(
+      screen.queryByRole("button", { name: /안 망할 곡 추천받기/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("활성 필터 개수가 접힌 바에 배지로 표시된다", () => {
+    renderPanel({ selectedMood: "EMOTIONAL", selectedAgeGroup: "THIRTIES" });
     expect(screen.getByTestId("refine-active-count")).toHaveTextContent("2");
   });
 
-  it("활성 조건이 없으면 개수 배지가 없다", () => {
+  it("활성 필터가 없으면 개수 배지가 없다", () => {
     renderPanel();
     expect(screen.queryByTestId("refine-active-count")).not.toBeInTheDocument();
   });
@@ -81,8 +86,6 @@ describe("RecommendRefinePanel", () => {
     const user = userEvent.setup();
     const { container } = render(
       <RecommendRefinePanel
-        selectedPersona={null}
-        onPersonaChange={vi.fn()}
         selectedMood={null}
         selectedAgeGroup={null}
         onMoodChange={vi.fn()}
