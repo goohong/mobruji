@@ -28,10 +28,13 @@ import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
 import com.mobruji.recommendation.domain.RecommendationPersona;
 import com.mobruji.recommendation.domain.RecommendationResult;
+import com.mobruji.recommendation.domain.SafeRecommendationResult;
 import com.mobruji.recommendation.domain.ScoredRecommendation;
 import com.mobruji.recommendation.domain.SeedSongsNotFoundException;
 import com.mobruji.recommendation.domain.SequenceRecommendationResult;
 import com.mobruji.recommendation.domain.SequenceStage;
+import com.mobruji.song.domain.Difficulty;
+import com.mobruji.song.domain.Mood;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
 import com.mobruji.recommendation.infrastructure.SessionFeedbackRepository;
@@ -213,6 +216,88 @@ public class RecommendationService {
                 result.requestId(),
                 result.recommendations().subList(0, limit),
                 result.relaxedFilters());
+    }
+
+    /**
+     * 안전곡형(P-E) 추천(persona-expansion-social-emotional.md §2/§5). "안 망하고 무사히 넘기고 싶다" 의도에 맞춰
+     * 좁은 음역 여유 + 느린 템포 + 쉬운 난이도로 강편향한 안심 추천을 만든다. 신규 추천 알고리즘이 아니라 기존 {@link #create}
+     * 파이프라인을 *안전곡 가중 프리셋* 으로 재조합하는 것이다 — 점수 함수·가중치/결정성 불변식을 건드리지 않는다.
+     *
+     * <p>가중 프리셋(기존 신호 재조합, 가중치 변경 없음):
+     * <ul>
+     * <li>입력 분위기를 {@code CALM} 으로 고정해 느린 템포·잔잔 쪽으로 편향한다 — 기존 {@code tempoMatch}(CALM mood
+     * default BPM 이 느림)·{@code moodMatch}(저에너지) 신호를 그대로 재사용한다.</li>
+     * <li>산출된 결과를 {@code difficulty=EASY} 우위로 결정적으로 재정렬한다({@link #applySafePreset}) — "쉬운 쪽으로
+     * 강편향"(P-A 연습형 가중의 거울). EASY 곡이 부족하면 NORMAL/HARD 가 후순위로 채워져 빈 화면을 피한다(graceful).</li>
+     * <li>음역 여유({@code rangeFit})·대중성은 기존 신호를 그대로 둔다 — popularity 는 시드에 컬럼이 없어 모든 곡에 동일
+     * 가산(기여 0, 하위호환). 신규 비결정 신호를 도입하지 않아 같은 입력이면 같은 결과(결정성 보존).</li>
+     * </ul>
+     *
+     * <p>각 추천 곡에는 "안심 포인트"({@code safetyReason}) 한 줄이 난이도·음역 적합도에서 결정적으로 파생되어 붙는다
+     * (§4 설명 가능성). 결과는 단일 추천과 같은 경로로 영속되어 고유 {@code requestId} 로 곡 피드백·재조회를 재사용할 수 있다.
+     */
+    public SafeRecommendationResult createSafe(final SafeRecommendationCommand safeRecommendationCommand) {
+        final CreateRecommendationCommand createCommand = new CreateRecommendationCommand(
+                safeRecommendationCommand.sessionId(),
+                safeRecommendationCommand.voiceRangeLow(),
+                safeRecommendationCommand.voiceRangeHigh(),
+                Mood.CALM,
+                null,
+                safeRecommendationCommand.ageGroup(),
+                safeRecommendationCommand.gender(),
+                List.of(),
+                false);
+        // 빈 화면을 막기 위해 0건 fallback 을 켠다(relaxOnZeroResult=true) — 안전곡 사용자는 항상 부를 곡을 받길 원한다.
+        final RecommendationResult result = create(createCommand, true);
+        final List<SafeRecommendationResult.SafeRecommendation> safeRecommendations = applySafePreset(
+                result.recommendations(), safeRecommendationCommand.limit());
+        log.info(
+                "event=recommendation.safe.created persona={} resultCount={} relaxed={}",
+                RecommendationPersona.P_E.code(),
+                safeRecommendations.size(),
+                result.relaxed());
+        return new SafeRecommendationResult(
+                RecommendationPersona.P_E, result.requestId(), safeRecommendations, result.relaxedFilters());
+    }
+
+    /**
+     * 안전곡 강편향 — 점수 순으로 정렬된 추천을 {@code difficulty=EASY} 우위로 재정렬하고(난이도 미상은 후순위), 노출 곡 수를
+     * {@code limit} 으로 자른다. 난이도 버킷 안에서는 입력 순서(점수 내림차순)를 보존하는 stable sort 라 같은 입력이면 같은 결과
+     * (결정성 보존). 재정렬 후 노출 순서대로 {@code rankPosition} 을 1부터 다시 매겨 "안심 포인트"를 붙인다.
+     */
+    private static List<SafeRecommendationResult.SafeRecommendation> applySafePreset(
+            final List<ScoredRecommendation> recommendations, final Integer limit) {
+        final List<ScoredRecommendation> reranked = new ArrayList<>(recommendations);
+        reranked.sort(Comparator.comparingInt(RecommendationService::safeDifficultyRank));
+        final int bound = limit == null ? reranked.size() : Math.min(limit, reranked.size());
+        final List<SafeRecommendationResult.SafeRecommendation> safeRecommendations = new ArrayList<>(bound);
+        for (int i = 0; i < bound; i++) {
+            final ScoredRecommendation source = reranked.get(i);
+            final ScoredRecommendation ranked = new ScoredRecommendation(
+                    source.song(),
+                    source.score(),
+                    source.matchReason(),
+                    i + 1,
+                    source.breakdown(),
+                    source.transposeSuggestion());
+            safeRecommendations.add(SafeRecommendationResult.SafeRecommendation.of(ranked));
+        }
+        return safeRecommendations;
+    }
+
+    /**
+     * 안전곡 재정렬용 난이도 우선순위 — EASY(0) → NORMAL(1) → HARD(2) → 미상(3). 값이 작을수록 안전(상위 노출).
+     */
+    private static int safeDifficultyRank(final ScoredRecommendation recommendation) {
+        final Difficulty difficulty = recommendation.song().getDifficulty();
+        if (difficulty == null) {
+            return 3;
+        }
+        return switch (difficulty) {
+            case EASY -> 0;
+            case NORMAL -> 1;
+            case HARD -> 2;
+        };
     }
 
     /**
