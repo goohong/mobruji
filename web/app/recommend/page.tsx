@@ -75,6 +75,7 @@ import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
+import { useRecommendDefaultsStore } from "@/store/recommendDefaults";
 import { useSessionStore } from "@/store/session";
 
 import { RecommendModeGroup } from "./components/RecommendModeGroup";
@@ -179,11 +180,15 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const appendHistory = useHistoryStore((state) => state.appendRecommendation);
 
   // 즉석 페르소나(P-C) 입력 — 분위기/나이대 (directive roadmap-mood-age-ui).
-  // 영속하지 않는 화면 로컬 상태. 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터
+  // 화면 로컬 상태지만 초기값은 회원가입 온보딩(#1814)에서 영속한 추천 기본값으로
+  // pre-fill 한다 — getState() 1회 스냅샷이라 이후 store 변경엔 반응하지 않는다(마운트
+  // 시점 기본값 채움 전용). 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터
   // 재발화된다. 미선택(null)은 createRecommendation 에서 필드를 생략 → 기존 동작 유지.
-  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(
+    () => useRecommendDefaultsStore.getState().mood,
+  );
   const [selectedAgeGroup, setSelectedAgeGroup] = useState<AgeGroup | null>(
-    null,
+    () => useRecommendDefaultsStore.getState().ageGroup,
   );
   // 추천 의도 모드(P-E 안전곡 등, 이슈 #1600) — mood/ageGroup 과 동일한 화면 로컬 상태.
   // 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터 재발화된다. null(미선택)은

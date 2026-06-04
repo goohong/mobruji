@@ -35,6 +35,7 @@ import userEvent from "@testing-library/user-event";
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import { createRecommendation } from "@/lib/api/recommendation";
+import { useRecommendDefaultsStore } from "@/store/recommendDefaults";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 const { sessionMock, historyMock } = await vi.hoisted(async () => {
@@ -208,6 +209,8 @@ beforeEach(() => {
   createRecommendationMock.mockReset();
   resetObserverRegistry();
   installIntersectionObserverMock();
+  // 온보딩 추천 기본값 store(#1814)는 실제 store 를 쓰므로 테스트 간 격리를 위해 초기화.
+  useRecommendDefaultsStore.getState().reset();
 });
 
 afterEach(() => {
@@ -480,6 +483,43 @@ describe("RecommendPage", () => {
         voiceRangeHigh: 69,
         excludeSongIds: [],
         ageGroup: "THIRTIES",
+      });
+    });
+  });
+
+  it("온보딩 추천 기본값(#1814)이 있으면 첫 추천부터 mood·ageGroup 을 포함해 요청한다", async () => {
+    // 회원가입 온보딩에서 영속한 기본값이 /recommend 필터로 pre-fill 되는지 검증.
+    useRecommendDefaultsStore.getState().applyOnboarding({
+      ageGroup: "TWENTIES",
+      gender: "FEMALE",
+      mood: "UPBEAT",
+    });
+    sessionMock.set({ sessionId: "sess-prefill", voiceRangeId: 9 });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 9,
+      sessionId: "sess-prefill",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValue(
+      buildResponseWithSongIds(303, [1]),
+    );
+
+    renderWithQueryClient(<RecommendPage />);
+
+    // 사용자가 필터를 손대지 않아도 첫 호출부터 온보딩 기본값이 들어간다.
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
+        sessionId: "sess-prefill",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 69,
+        excludeSongIds: [],
+        mood: "UPBEAT",
+        ageGroup: "TWENTIES",
       });
     });
   });

@@ -2,7 +2,7 @@
  * 회원가입 페이지 테스트 (closes #1800).
  *
  * 범위:
- *  - 제출 성공: signup 호출 → auth store 에 세션 영속(setSession) → router.push("/").
+ *  - 제출 성공: signup 호출 → auth store 에 세션 영속(setSession) → router.push("/onboarding").
  *  - 409(이메일 중복): 사용자 친화 에러 노출 + 라우팅/세션 영속 없음.
  *  - 로그인 진입 링크 노출.
  */
@@ -69,7 +69,7 @@ afterEach(() => {
 });
 
 describe("SignupPage", () => {
-  it("성공 시 signup 호출 → 세션 영속 → /로 라우팅한다", async () => {
+  it("성공 시 signup 호출 → 세션 영속 → /onboarding 으로 라우팅한다", async () => {
     const user = userEvent.setup();
     signupMock.mockResolvedValueOnce({
       userId: 11,
@@ -91,7 +91,7 @@ describe("SignupPage", () => {
       expect(useAuthStore.getState().token).toBe("tok-signup");
     });
     expect(useAuthStore.getState().email).toBe("new@b.com");
-    expect(pushMock).toHaveBeenCalledWith("/");
+    expect(pushMock).toHaveBeenCalledWith("/onboarding");
   });
 
   it("409 면 친화 에러를 노출하고 라우팅/영속하지 않는다", async () => {
