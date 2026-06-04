@@ -72,6 +72,17 @@ describe("VoiceRangeScale", () => {
     expect(width).toBeGreaterThanOrEqual(2);
   });
 
+  it("평균 범위 / 내 음역 레전드를 노출한다 (#1722)", () => {
+    render(<VoiceRangeScale lowMidi={48} highMidi={69} />);
+    expect(screen.getByText("내 음역")).toBeTruthy();
+    expect(screen.getByText("평균 범위")).toBeTruthy();
+  });
+
+  it("compact 변형은 레전드를 생략한다 (#1722)", () => {
+    render(<VoiceRangeScale lowMidi={48} highMidi={69} compact />);
+    expect(screen.queryByText("평균 범위")).toBeNull();
+  });
+
   it("caption 을 figcaption 으로 노출한다", () => {
     render(
       <VoiceRangeScale lowMidi={48} highMidi={69} caption="내 음역대 한눈에" />,
