@@ -76,7 +76,7 @@ describe("FitReasons", () => {
       practiceDifficultyReason: "최고음 라5, 고음·넓은 음역이라 도전적인 곡이에요",
     });
     render(<FitReasons item={item} />);
-    expect(screen.getByLabelText("연습 난이도 Hard")).toBeInTheDocument();
+    expect(screen.getByLabelText("연습 난이도 어려움")).toBeInTheDocument();
     expect(
       screen.getByText("최고음 라5, 고음·넓은 음역이라 도전적인 곡이에요"),
     ).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe("formatTransposeLabel", () => {
 describe("PracticeDifficultyBadge", () => {
   it("난이도 라벨을 aria-label 로 노출한다", () => {
     render(<PracticeDifficultyBadge difficulty="NORMAL" />);
-    expect(screen.getByLabelText("연습 난이도 Normal")).toBeInTheDocument();
+    expect(screen.getByLabelText("연습 난이도 보통")).toBeInTheDocument();
   });
 
   it("난이도가 null 이면 정보 없음으로 노출한다", () => {

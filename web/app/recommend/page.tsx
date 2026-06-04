@@ -323,7 +323,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Step 2
+            2단계
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             추천 결과

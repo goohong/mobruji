@@ -194,7 +194,7 @@ export default function HistoryPage() {
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            History
+            기록
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             받은 추천 다시 보기

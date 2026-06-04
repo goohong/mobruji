@@ -149,7 +149,7 @@ function SongDetailView({ song }: SongDetailViewProps) {
             /history → /songs/[id] 라우트 전환 시 hero morph 한다. */}
         <AlbumCover song={song} viewTransitionName={`album-${song.id}`} />
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-          Song detail
+          곡 상세
         </p>
         <h1 className="text-3xl font-semibold text-[var(--text-primary)]">
           {displayTitle}
