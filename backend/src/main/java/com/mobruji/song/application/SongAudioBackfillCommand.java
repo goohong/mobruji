@@ -184,6 +184,7 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
         int successful = 0;
         int updated = 0;
         int skippedLowConfidence = 0;
+        int skippedImplausibleRange = 0;
         int failed = 0;
         for (final Song song : songs) {
             Objects.requireNonNull(song, "song must not be null");
@@ -209,6 +210,16 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
             }
             successful++;
             backfillSuccessCounter.increment();
+            // 합리성 가드(#1725) — confidence 임계와 무관하게 비합리 음역대(반주 저음 오검출·옥타브 폴딩)는
+            // 추천 풀 진입 전 거부한다. 도메인(backfillFromAudioAnalysis)도 동일 가드를 갖지만, 거부 사유를
+            // 구분해 집계하기 위해 여기서 선판정한다.
+            if (!result.isVocalRangePlausible()) {
+                LOG.warn(
+                        "audio backfill skipped implausible range songId={} title={} lowMidi={} highMidi={}",
+                        song.getId(), song.getTitle(), result.lowMidi(), result.highMidi());
+                skippedImplausibleRange++;
+                continue;
+            }
             final boolean changed;
             try {
                 changed = song.backfillFromAudioAnalysis(result, confidenceThreshold);
@@ -229,10 +240,12 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
             }
         }
         LOG.info(
-                "audio backfill done analyzed={} successful={} updated={} skipped_low_confidence={} failed={}",
-                analyzed, successful, updated, skippedLowConfidence, failed);
+                "audio backfill done analyzed={} successful={} updated={} skipped_low_confidence={} "
+                        + "skipped_implausible_range={} failed={}",
+                analyzed, successful, updated, skippedLowConfidence, skippedImplausibleRange, failed);
         LAST_BACKFILL_COMPLETED_AT.set(Instant.now());
-        return new BackfillSummary(analyzed, successful, updated, skippedLowConfidence, failed);
+        return new BackfillSummary(
+                analyzed, successful, updated, skippedLowConfidence, skippedImplausibleRange, failed);
     }
 
     /**
@@ -311,6 +324,7 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
             int successful,
             int updated,
             int skippedLowConfidence,
+            int skippedImplausibleRange,
             int failed
     ) {
     }

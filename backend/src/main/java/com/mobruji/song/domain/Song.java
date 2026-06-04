@@ -337,7 +337,9 @@ public class Song {
      *
      * <ul>
      * <li>{@code result.confidence() < threshold} → no-op (수기 값 보존, false 반환).</li>
-     * <li>임계 통과 시 lowMidi/highMidi 를 결과로 갱신, {@link Difficulty} 를 재계산, {@link MetadataSource}
+     * <li>{@code !result.isVocalRangePlausible()} → no-op (비합리 음역대 거부, false 반환) — 합리성 가드(#1725).
+     * confidence 임계를 통과해도 반주 저음 오검출·옥타브 폴딩으로 가창 한계를 벗어난 음역은 추천 풀에 진입시키지 않는다.</li>
+     * <li>임계·합리성 통과 시 lowMidi/highMidi 를 결과로 갱신, {@link Difficulty} 를 재계산, {@link MetadataSource}
      * 를 {@link MetadataSource#AUDIO_ANALYSIS} 로 갱신.</li>
      * </ul>
      *
@@ -356,6 +358,9 @@ public class Song {
                     "confidenceThreshold out of [0.0, 1.0]: " + confidenceThreshold);
         }
         if (result.confidence() < confidenceThreshold) {
+            return false;
+        }
+        if (!result.isVocalRangePlausible()) {
             return false;
         }
         boolean changed = false;
