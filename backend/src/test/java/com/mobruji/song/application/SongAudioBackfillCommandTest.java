@@ -10,7 +10,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.OptionalInt;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -283,6 +286,96 @@ class SongAudioBackfillCommandTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
                 "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=abc")))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(runner, never()).analyzeByMetadata(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("run: target=missing-range 면 음역대 미보유 곡 query 경로로 분기 (findAll/findCandidates 미사용, #1739)")
+    void run_withMissingRangeTarget_usesMissingVocalRangeQuery() {
+        final Song m1 = seedSong("m1", null, null);
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findMissingVocalRange()).thenReturn(List.of(m1));
+
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        when(runner.analyzeByMetadata("m1", "artist-m1"))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        cmd.run(new DefaultApplicationArguments(
+                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.target=missing-range"));
+
+        verify(repo, times(1)).findMissingVocalRange();
+        verify(repo, never()).findAll();
+        verify(repo, never()).findCandidatesForBackfill(ArgumentMatchers.anyDouble());
+        verify(runner, times(1)).analyzeByMetadata("m1", "artist-m1");
+    }
+
+    @Test
+    @DisplayName("runMissingVocalRangeBackfill: limit 만큼만 chunk 처리 (id 순 앞 N곡, #1739)")
+    void runMissingVocalRangeBackfill_withLimit_chunksFirstN() {
+        final Song m1 = seedSong("m1", null, null);
+        final Song m2 = seedSong("m2", null, null);
+        final Song m3 = seedSong("m3", null, null);
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findMissingVocalRange()).thenReturn(List.of(m1, m2, m3));
+
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        when(runner.analyzeByMetadata("m1", "artist-m1"))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
+        when(runner.analyzeByMetadata("m2", "artist-m2"))
+                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.80, "v"));
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runMissingVocalRangeBackfill(OptionalInt.of(2),
+                Duration.ZERO, 0.6);
+
+        assertThat(summary.analyzed()).isEqualTo(2);
+        assertThat(summary.updated()).isEqualTo(2);
+        verify(runner, never()).analyzeByMetadata("m3", "artist-m3");
+        assertThat(m3.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+    }
+
+    @Test
+    @DisplayName("runBackfill: delay 지정 시 곡 사이에만 sleep, 마지막 곡 뒤엔 sleep 없음 (rate limit, #1739)")
+    void runBackfill_withDelay_sleepsBetweenSongsOnly() {
+        final Song s1 = seedSong("s1", 60, 70);
+        final Song s2 = seedSong("s2", 60, 70);
+        final Song s3 = seedSong("s3", 60, 70);
+
+        final SongRepository repo = mock(SongRepository.class);
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        when(runner.analyzeByMetadata(anyString(), anyString()))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
+
+        final AtomicInteger sleepCount = new AtomicInteger();
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry()) {
+            @Override
+            protected void sleepBetweenSongs(final Duration delay) {
+                sleepCount.incrementAndGet();
+            }
+        };
+
+        cmd.runBackfill(List.of(s1, s2, s3), 0.6, Duration.ofSeconds(5));
+
+        // 곡 3개면 사이는 2번 — 마지막 곡 뒤엔 대기하지 않는다.
+        assertThat(sleepCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("run: sleep-seconds 값이 음수/비정수면 fail-fast (IllegalArgumentException, #1739)")
+    void run_invalidSleepSeconds_throws() {
+        final SongRepository repo = mock(SongRepository.class);
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
+                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.sleep-seconds=-1")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
+                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.sleep-seconds=abc")))
                 .isInstanceOf(IllegalArgumentException.class);
         verify(runner, never()).analyzeByMetadata(anyString(), anyString());
     }

@@ -1,5 +1,6 @@
 package com.mobruji.song.application;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -43,6 +44,16 @@ import io.micrometer.core.instrument.MeterRegistry;
  * --mobruji.backfill-audio.limit=5'
  * </pre>
  *
+ * <p>음역대 미보유 곡 backfill(이슈 #1739) — {@code --mobruji.backfill-audio.target=missing-range} 추가 시
+ * 신뢰도/출처 기반 넓은 후보 대신 {@code lowMidi/highMidi} 가 비어 추천 풀에서 빠진 곡만 정밀 타겟한다.
+ * {@code --mobruji.backfill-audio.limit=N} 으로 chunk, {@code --mobruji.backfill-audio.sleep-seconds=N} 으로
+ * 곡간 대기(YouTube rate limit)를 둬 271곡을 안전 단위로 반복 backfill 한다 (성공 곡은 다음 실행 후보에서 자동 제외):
+ * <pre>
+ * ./gradlew bootRun --args='--spring.profiles.active=local --mobruji.backfill-audio=true
+ * --mobruji.backfill-audio.target=missing-range --mobruji.backfill-audio.limit=20
+ * --mobruji.backfill-audio.sleep-seconds=3'
+ * </pre>
+ *
  * <p>인자({@link ApplicationArguments}) 미지정 시 no-op — 평시 부팅에 영향 없음. {@code test} 프로파일에서는
  * Spring Bean 자체를 등록하지 않아 통합 테스트가 영향받지 않는다.
  *
@@ -72,6 +83,24 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
      * 옵션 미지정 시 기존 전체 backfill 동작 그대로 유지.
      */
     static final String OPTION_LIMIT_KEY = "mobruji.backfill-audio.limit";
+
+    /**
+     * backfill 대상 선택 옵션 키 — {@code --mobruji.backfill-audio.target=missing-range}. 지정 시 신뢰도/출처 기반
+     * 넓은 후보({@link SongRepository#findCandidatesForBackfill(double)}) 대신 음역대 미보유 곡
+     * ({@link SongRepository#findMissingVocalRange()}) 만 정밀 타겟한다. 이슈 #1739 — 추천 풀에서 빠진 임포트 곡을
+     * YouTube ytsearch 자동매칭 + 자체분석으로 채워 추천 진입시킨다. {@link #OPTION_LIMIT_KEY} 와 합성해 chunk 처리.
+     */
+    static final String OPTION_TARGET_KEY = "mobruji.backfill-audio.target";
+
+    /** {@link #OPTION_TARGET_KEY} 의 음역대 미보유 곡 타겟 값. */
+    static final String TARGET_MISSING_RANGE = "missing-range";
+
+    /**
+     * 곡간 대기(rate limit) 옵션 키 — {@code --mobruji.backfill-audio.sleep-seconds=N}. 곡마다 YouTube
+     * ytsearch/다운로드가 발생하므로 대량 backfill 시 곡 사이에 N초 대기해 rate limit/디스크 부하를 분산한다
+     * (이슈 #1739, batch_analyze.py 의 {@code --sleep-seconds} 와 정합). 미지정/0 이면 대기 없음.
+     */
+    static final String OPTION_SLEEP_SECONDS_KEY = "mobruji.backfill-audio.sleep-seconds";
 
     /**
      * 적용 임계 confidence — 작업 지시 기본 0.6. 임계 미달은 수기 값을 보존한다.
@@ -140,11 +169,38 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
             return;
         }
         final OptionalInt limit = parseLimit(args);
-        if (limit.isPresent()) {
-            runBoundedCandidateBackfill(limit.getAsInt(), DEFAULT_CONFIDENCE_THRESHOLD);
+        final Duration delay = parseSleepSeconds(args);
+        if (isMissingRangeTarget(args)) {
+            runMissingVocalRangeBackfill(limit, delay, DEFAULT_CONFIDENCE_THRESHOLD);
+        } else if (limit.isPresent()) {
+            runBoundedCandidateBackfill(limit.getAsInt(), delay, DEFAULT_CONFIDENCE_THRESHOLD);
         } else {
-            runBackfill(DEFAULT_CONFIDENCE_THRESHOLD);
+            runBackfill(songRepository.findAll(), DEFAULT_CONFIDENCE_THRESHOLD, delay);
         }
+    }
+
+    /**
+     * 음역대 미보유 곡({@link SongRepository#findMissingVocalRange()}) 만 골라 backfill 한다 (이슈 #1739). 추천 풀에서
+     * 빠진 임포트 곡을 YouTube ytsearch 자동매칭 + 자체분석으로 채워 추천 진입시키는 진입점. {@code limit} 이 있으면
+     * id 순 앞에서 그만큼만 처리해 chunk 단위로 안전하게 반복 실행한다 — 한 곡이 성공하면 다음 실행의 후보에서 빠지므로
+     * (lowMidi/highMidi 가 채워져) 자연 resume 된다.
+     *
+     * @param limit     처리할 곡 상한 (미지정 시 전체 미보유 곡)
+     * @param delay     곡간 대기 (rate limit)
+     * @param threshold 적용 임계 confidence
+     * @return 처리 요약
+     */
+    BackfillSummary runMissingVocalRangeBackfill(
+            final OptionalInt limit, final Duration delay, final double threshold) {
+        final List<Song> missing = songRepository.findMissingVocalRange();
+        final List<Song> selected = limit.isPresent()
+                ? missing.stream().limit(limit.getAsInt()).toList()
+                : missing;
+        LOG.info(
+                "audio backfill missing-range batch: missing={} limit={} selected={} delaySeconds={}",
+                missing.size(), limit.isPresent() ? limit.getAsInt() : -1,
+                selected.size(), delay.toSeconds());
+        return runBackfill(selected, threshold, delay);
     }
 
     /**
@@ -157,12 +213,20 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
      * @return 처리 요약
      */
     BackfillSummary runBoundedCandidateBackfill(final int limit, final double confidenceThreshold) {
+        return runBoundedCandidateBackfill(limit, Duration.ZERO, confidenceThreshold);
+    }
+
+    /**
+     * {@link #runBoundedCandidateBackfill(int, double)} 와 동일하되 곡간 대기(rate limit)를 명시한다.
+     */
+    BackfillSummary runBoundedCandidateBackfill(
+            final int limit, final Duration delay, final double confidenceThreshold) {
         final List<Song> candidates = songRepository.findCandidatesForBackfill(confidenceThreshold);
         final List<Song> selected = candidates.stream().limit(limit).toList();
         LOG.info(
-                "audio backfill bounded validation batch: candidates={} limit={} selected={}",
-                candidates.size(), limit, selected.size());
-        return runBackfill(selected, confidenceThreshold);
+                "audio backfill bounded validation batch: candidates={} limit={} selected={} delaySeconds={}",
+                candidates.size(), limit, selected.size(), delay.toSeconds());
+        return runBackfill(selected, confidenceThreshold, delay);
     }
 
     /**
@@ -176,9 +240,19 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
 
     /**
      * 임의 곡 집합에 대해 backfill 실행 — 정기 batch ({@code AudioAnalysisScheduledBackfill}) 가 분석 대상
-     * 곡을 selective 하게 결정해 호출할 수 있도록 노출한다.
+     * 곡을 selective 하게 결정해 호출할 수 있도록 노출한다. 곡간 대기 없이 처리한다.
      */
     BackfillSummary runBackfill(final List<Song> songs, final double confidenceThreshold) {
+        return runBackfill(songs, confidenceThreshold, Duration.ZERO);
+    }
+
+    /**
+     * 임의 곡 집합에 대해 backfill 실행하되 곡 사이에 {@code delay} 만큼 대기한다. 곡마다 YouTube ytsearch/다운로드가
+     * 발생하므로 대량 backfill 시 곡간 대기로 rate limit/디스크 부하를 분산한다 (이슈 #1739). 대기는 마지막 곡 뒤에는
+     * 두지 않으며, {@code delay} 가 0/음수면 대기 없이 처리한다.
+     */
+    BackfillSummary runBackfill(
+            final List<Song> songs, final double confidenceThreshold, final Duration delay) {
         backfillRequestedCounter.increment();
         int analyzed = 0;
         int successful = 0;
@@ -186,8 +260,12 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
         int skippedLowConfidence = 0;
         int skippedImplausibleRange = 0;
         int failed = 0;
-        for (final Song song : songs) {
+        for (int index = 0; index < songs.size(); index++) {
+            final Song song = songs.get(index);
             Objects.requireNonNull(song, "song must not be null");
+            if (index > 0) {
+                sleepBetweenSongs(delay);
+            }
             analyzed++;
             final AudioAnalysisResult result;
             try {
@@ -305,6 +383,62 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
                     "--" + OPTION_LIMIT_KEY + " 는 양의 정수여야 합니다: " + parsed);
         }
         return OptionalInt.of(parsed);
+    }
+
+    /**
+     * {@code --mobruji.backfill-audio.target=missing-range} 여부. 그 외 값/미지정은 false (기존 후보 경로 유지).
+     */
+    private static boolean isMissingRangeTarget(final ApplicationArguments args) {
+        if (args == null || !args.containsOption(OPTION_TARGET_KEY)) {
+            return false;
+        }
+        final List<String> values = args.getOptionValues(OPTION_TARGET_KEY);
+        if (values == null || values.isEmpty()) {
+            return false;
+        }
+        return TARGET_MISSING_RANGE.equalsIgnoreCase(values.get(values.size() - 1).trim());
+    }
+
+    /**
+     * {@code --mobruji.backfill-audio.sleep-seconds=N} 파싱 — 미지정/빈 값이면 {@link Duration#ZERO}.
+     * 0 이상 정수만 허용하며 음수/비정수는 잘못된 수동 trigger 이므로 fail-fast 한다.
+     */
+    private static Duration parseSleepSeconds(final ApplicationArguments args) {
+        if (args == null || !args.containsOption(OPTION_SLEEP_SECONDS_KEY)) {
+            return Duration.ZERO;
+        }
+        final List<String> values = args.getOptionValues(OPTION_SLEEP_SECONDS_KEY);
+        if (values == null || values.isEmpty()) {
+            return Duration.ZERO;
+        }
+        final String raw = values.get(values.size() - 1).trim();
+        final int parsed;
+        try {
+            parsed = Integer.parseInt(raw);
+        } catch (final NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "--" + OPTION_SLEEP_SECONDS_KEY + " 는 0 이상 정수여야 합니다: " + raw, e);
+        }
+        if (parsed < 0) {
+            throw new IllegalArgumentException(
+                    "--" + OPTION_SLEEP_SECONDS_KEY + " 는 0 이상 정수여야 합니다: " + parsed);
+        }
+        return Duration.ofSeconds(parsed);
+    }
+
+    /**
+     * 곡간 rate limit 대기. 테스트가 실제 sleep 없이 호출 횟수만 검증할 수 있도록 seam 으로 분리한다.
+     * {@code delay} 가 null/0/음수면 즉시 반환한다.
+     */
+    protected void sleepBetweenSongs(final Duration delay) {
+        if (delay == null || delay.isZero() || delay.isNegative()) {
+            return;
+        }
+        try {
+            Thread.sleep(delay.toMillis());
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static boolean isOptionTrue(final ApplicationArguments args) {

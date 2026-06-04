@@ -85,6 +85,20 @@ public interface SongRepository extends JpaRepository<Song, Long> {
     List<Song> findAllWithVocalRange();
 
     /**
+     * 음역대 미보유 곡 selective query — {@code lowMidi IS NULL OR highMidi IS NULL} 인 곡만 반환한다 (이슈 #1739).
+     *
+     * <p>{@link #findCandidatesForBackfill(double)} 가 신뢰도/출처 기준의 넓은 후보(이미 음역대가 있는 곡 포함)를
+     * 잡는 반면, 본 query 는 추천 풀에서 빠진 "음역대 미보유 곡" 만 정밀 타겟한다. YouTube ytsearch 자동매칭 +
+     * 자체분석으로 음역대를 채워 추천 진입시키는 backfill 의 대상이며, 결과가 곧 "음역대 보유 곡수 증가" 로 측정된다.
+     *
+     * <p>{@code id} 오름차순 정렬로 chunk(limit) 반복 실행 시 결정적 진행을 보장한다.
+     */
+    @Query("select s from Song s "
+            + "where s.lowMidi is null or s.highMidi is null "
+            + "order by s.id asc")
+    List<Song> findMissingVocalRange();
+
+    /**
      * 앨범 커버 backfill 대상 selective query — {@code albumCoverUrl IS NULL} 인 곡만 반환한다.
      *
      * <p>이슈 #322 — iTunes Search API backfill 은 selective 하게 누락된 곡만 호출해 외부 API 호출
