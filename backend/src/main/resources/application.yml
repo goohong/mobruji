@@ -182,6 +182,32 @@ catalog-import:
   throttle: 1s
   import-confidence: 0.3
 
+# MusicBrainz browse 기반 곡 카탈로그 대량 임포트 설정 — spec docs/features/song-catalog-expansion.md (#1705).
+# 수기 큐레이션 한국 아티스트 시드(korean-artists-seed.json)를 입력으로 아티스트별 recording 을 페이징 browse 해
+# CC0 메타(title/artist/mbId/isrc/releaseYear/genre)만 Song upsert. metadataSource=EXTERNAL_API·낮은 confidence,
+# 음역대/key/tempo 미설정(자체 분석 #1490 큐 후속). admin endpoint(POST /api/v1/admin/songs/catalog-browse-import)로
+# maxArtists/maxRecordingsPerArtist/dryRun 단계적 트리거. 차트 사이트 자동 크롤 아님 — 아티스트 시드는 수기 참고(#1640).
+# - music-brainz-base-url: recording 검색 webservice 기준. 테스트는 stub 으로 override.
+# - user-agent: MusicBrainz 약관상 contact 포함 식별 User-Agent 의무 — 환경변수로 운영 contact 주입 권장.
+# - request-timeout: 페이지 호출 timeout.
+# - throttle: 호출 직전 per-instance sleep — anonymous 1 req/s rate limit 보수적 준수(1100ms).
+# - max-retries / backoff: 503 응답 시 base × 2^attempt 지수 backoff, 소진 시 batch 전체 중단.
+# - page-size: recording 검색 limit (페이지 크기). offset 으로 페이징.
+# - max-artists: admin/배치 1회 처리 아티스트 수 상한(외부 호출량 통제, 운영자가 점진 상향).
+# - max-recordings-per-artist: 아티스트당 적재 recording 수 상한.
+# - import-confidence: 임포트 곡 초기 metadataConfidence (메타만 → 음역 미상이라 낮게, spec §8 Q4 (a)).
+catalog-browse:
+  music-brainz-base-url: ${MUSICBRAINZ_BASE_URL:https://musicbrainz.org/ws/2}
+  user-agent: ${CATALOG_IMPORT_USER_AGENT:mobruji-backend/0.1 (+https://github.com/goohong/mobruji)}
+  request-timeout: 5s
+  throttle: 1100ms
+  backoff: 1s
+  max-retries: 3
+  page-size: 100
+  max-artists: 10
+  max-recordings-per-artist: 50
+  import-confidence: 0.3
+
 # MusicBrainz Recording mbId/ISRC backfill 설정 — spec docs/features/musicbrainz-integration.md (#267/#268).
 # mbId IS NULL 곡만 selective 매칭(저신뢰도 우선). 음역대/key/tempo 는 채우지 않아 추천 결정성 무영향.
 # 약관 준수 — (a) contact 포함 User-Agent 의무, (b) anonymous 1 req/s rate limit, (c) 503 시 즉시 재시도 금지.
