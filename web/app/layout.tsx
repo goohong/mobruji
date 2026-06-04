@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
+import { AuthSessionRestorer } from "./AuthSessionRestorer";
 import { BottomNav } from "@/components/nav/BottomNav";
 import { DesktopNav } from "@/components/nav/DesktopNav";
 import { RouteTransition } from "@/components/layout/RouteTransition";
@@ -137,6 +138,7 @@ export default function RootLayout({
         <ThemeToggle />
         <BottomNav />
         <ServiceWorkerRegistrar />
+        <AuthSessionRestorer />
       </body>
     </html>
   );
