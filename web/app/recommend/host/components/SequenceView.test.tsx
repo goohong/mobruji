@@ -1,7 +1,7 @@
 /**
  * SequenceView 컴포넌트 테스트 (이슈 #1601).
  *
- * - 최초엔 도입 단계 곡 + 단계 설명을 보여준다.
+ * - 최초엔 워밍업 단계 곡 + 단계 설명(BE stageReason)을 보여준다.
  * - "다음 (고조)으로" 진행 버튼 클릭 시 고조 단계로 흐른다.
  * - 단계 토글로 특정 단계로 점프할 수 있다.
  * - 마지막(마무리) 단계에서는 진행 버튼 대신 마무리 안내가 보인다.
@@ -17,7 +17,9 @@ import userEvent from "@testing-library/user-event";
 
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type {
+  Mood,
   RecommendedSongResponse,
+  SequenceStage,
   SequenceStageBundle,
 } from "@/lib/api/recommendation";
 
@@ -52,6 +54,22 @@ function song(id: number): RecommendedSongResponse {
   };
 }
 
+function bundle(
+  stage: SequenceStage,
+  mood: Mood,
+  recommendations: RecommendedSongResponse[],
+): SequenceStageBundle {
+  return {
+    stage,
+    mood,
+    stageReason: `${stage} 단계 설명`,
+    requestId: 1,
+    relaxed: false,
+    relaxedFilters: [],
+    recommendations,
+  };
+}
+
 function renderView(stages: SequenceStageBundle[]) {
   const client = new QueryClient({
     defaultOptions: {
@@ -74,17 +92,18 @@ function renderView(stages: SequenceStageBundle[]) {
 }
 
 const fullStages: SequenceStageBundle[] = [
-  { stage: "INTRO", songs: [song(1)] },
-  { stage: "PEAK", songs: [song(2)] },
-  { stage: "FINALE", songs: [song(3)] },
+  bundle("WARMUP", "CALM", [song(1)]),
+  bundle("PEAK", "UPBEAT", [song(2)]),
+  bundle("CLOSING", "EMOTIONAL", [song(3)]),
 ];
 
 describe("SequenceView", () => {
-  it("최초엔 도입 단계 곡과 단계 설명을 보여준다", () => {
+  it("최초엔 워밍업 단계 곡과 BE 단계 설명을 보여준다", () => {
     renderView(fullStages);
     expect(
-      screen.getByRole("heading", { name: "도입", level: 2 }),
+      screen.getByRole("heading", { name: "워밍업", level: 2 }),
     ).toBeInTheDocument();
+    expect(screen.getByText("WARMUP 단계 설명")).toBeInTheDocument();
     expect(screen.getByText("곡-1")).toBeInTheDocument();
     // 고조 단계 곡은 아직 안 보인다.
     expect(screen.queryByText("곡-2")).not.toBeInTheDocument();
@@ -131,9 +150,9 @@ describe("SequenceView", () => {
   it("빈 단계는 추천할 곡이 없다는 안내를 보여준다", async () => {
     const user = userEvent.setup();
     renderView([
-      { stage: "INTRO", songs: [song(1)] },
-      { stage: "PEAK", songs: [] },
-      { stage: "FINALE", songs: [song(3)] },
+      bundle("WARMUP", "CALM", [song(1)]),
+      bundle("PEAK", "UPBEAT", []),
+      bundle("CLOSING", "EMOTIONAL", [song(3)]),
     ]);
 
     await user.click(screen.getByRole("radio", { name: /고조/ }));

@@ -3,7 +3,7 @@
 /**
  * 시퀀스 뷰 (이슈 #1601, spec §2 P-D / §3-1 / §5-6).
  *
- * 모임 사회자 모드의 단계별 곡 묶음(도입 → 고조 → 마무리)을 한 단계씩 보여준다. 현재 단계의
+ * 모임 사회자 모드의 단계별 곡 묶음(워밍업 → 고조 → 마무리)을 한 단계씩 보여준다. 현재 단계의
  * 곡 카드를 노출하고, "한 곡 부른 뒤 다음(고조)로 흐름 진행"(이슈 요구사항)을 위한 진행
  * 버튼을 둔다. 단계 점프는 상단 SeatStageToggle 로도 가능하다.
  *
@@ -33,12 +33,14 @@ type SequenceViewProps = {
 };
 
 export function SequenceView({ stages, userVoiceRange }: SequenceViewProps) {
-  const [currentStage, setCurrentStage] = useState<SequenceStage>("INTRO");
+  const [currentStage, setCurrentStage] = useState<SequenceStage>("WARMUP");
   const [selected, setSelected] = useState<RecommendedSongResponse | null>(null);
 
   const currentBundle = stages.find((bundle) => bundle.stage === currentStage);
-  const currentSongs = currentBundle?.songs ?? [];
+  const currentSongs = currentBundle?.recommendations ?? [];
   const { label, description } = stageMeta(currentStage);
+  // BE 가 단계별 사유(stageReason)를 내려주면 우선 노출, 없으면 정적 메타 설명.
+  const stageDescription = currentBundle?.stageReason ?? description;
   const upcoming = nextStage(currentStage);
 
   return (
@@ -53,7 +55,14 @@ export function SequenceView({ stages, userVoiceRange }: SequenceViewProps) {
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           {label}
         </h2>
-        <p className="text-sm text-[var(--text-secondary)]">{description}</p>
+        <p className="text-sm text-[var(--text-secondary)]">
+          {stageDescription}
+        </p>
+        {currentBundle?.relaxed ? (
+          <p className="text-xs text-[var(--text-caption)]">
+            곡이 부족해 조건을 일부 완화해 단계를 채웠어요.
+          </p>
+        ) : null}
       </div>
 
       {currentSongs.length === 0 ? (

@@ -161,24 +161,46 @@ describe("recommendation API 경계 가드", () => {
 // ---------- P-D 시퀀스 추천 (#1601) ----------
 describe("createSequenceRecommendation", () => {
   const sequenceResponse: SequenceRecommendationResponse = {
-    requestId: SAMPLE_REQUEST_ID,
     persona: "P-D",
     stages: [
-      { stage: "INTRO", songs: [] },
-      { stage: "PEAK", songs: [] },
-      { stage: "FINALE", songs: [] },
+      {
+        stage: "WARMUP",
+        mood: "CALM",
+        stageReason: "다 같이 편하게 시작할 워밍업 단계예요",
+        requestId: 1,
+        relaxed: false,
+        relaxedFilters: [],
+        recommendations: [],
+      },
+      {
+        stage: "PEAK",
+        mood: "UPBEAT",
+        stageReason: "분위기를 끌어올릴 고조 단계예요",
+        requestId: 2,
+        relaxed: false,
+        relaxedFilters: [],
+        recommendations: [],
+      },
+      {
+        stage: "CLOSING",
+        mood: "EMOTIONAL",
+        stageReason: "감성적으로 마무리하는 단계예요",
+        requestId: 3,
+        relaxed: false,
+        relaxedFilters: [],
+        recommendations: [],
+      },
     ],
   };
 
-  it("POST /api/v1/recommendations/sequence 로 persona+ageGroups 를 직렬화해 호출한다", async () => {
+  it("POST /api/v1/recommendations/sequence 로 단일 ageGroup 을 직렬화해 호출한다", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(sequenceResponse, 201));
 
     const result = await createSequenceRecommendation({
       sessionId: "sess-host",
       voiceRangeLow: 48,
       voiceRangeHigh: 72,
-      persona: "P-D",
-      ageGroups: ["TWENTIES", "THIRTIES"],
+      ageGroup: "THIRTIES",
     });
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -188,20 +210,18 @@ describe("createSequenceRecommendation", () => {
       sessionId: "sess-host",
       voiceRangeLow: 48,
       voiceRangeHigh: 72,
-      persona: "P-D",
-      ageGroups: ["TWENTIES", "THIRTIES"],
+      ageGroup: "THIRTIES",
     });
     expect(result).toEqual(sequenceResponse);
   });
 
-  it("ApiError 를 swallow 하지 않고 그대로 전파한다 (be #1599 미머지 시 fallback 분기 근거)", async () => {
+  it("ApiError 를 swallow 하지 않고 그대로 전파한다 (호출 측 에러 UI 분기 근거)", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ message: "no route" }, 404));
     await expect(
       createSequenceRecommendation({
         sessionId: "sess-host",
         voiceRangeLow: 48,
         voiceRangeHigh: 72,
-        persona: "P-D",
       }),
     ).rejects.toBeInstanceOf(ApiError);
   });
