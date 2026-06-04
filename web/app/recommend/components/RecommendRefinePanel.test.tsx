@@ -28,6 +28,7 @@ function renderPanel(
     selectedAgeGroup: null,
     onMoodChange: vi.fn(),
     onAgeGroupChange: vi.fn(),
+    onClearAll: vi.fn(),
     ...overrides,
   };
   render(<RecommendRefinePanel {...props} />);
@@ -82,6 +83,24 @@ describe("RecommendRefinePanel", () => {
     expect(screen.queryByTestId("refine-active-count")).not.toBeInTheDocument();
   });
 
+  // closes #1715 — 필터 적용 피드백/해제.
+  it("활성 필터가 없으면 '모두 해제'가 노출되지 않는다", () => {
+    renderPanel();
+    expect(screen.queryByTestId("refine-clear-all")).not.toBeInTheDocument();
+  });
+
+  it("활성 필터가 있으면 '모두 해제'가 노출되고 클릭 시 onClearAll 을 호출한다", async () => {
+    const user = userEvent.setup();
+    const props = renderPanel({
+      selectedMood: "EMOTIONAL",
+      selectedAgeGroup: "THIRTIES",
+    });
+    const clear = screen.getByTestId("refine-clear-all");
+    expect(clear).toBeInTheDocument();
+    await user.click(clear);
+    expect(props.onClearAll).toHaveBeenCalledTimes(1);
+  });
+
   it("a11y 위반이 없다 (펼친 상태)", async () => {
     const user = userEvent.setup();
     const { container } = render(
@@ -90,6 +109,7 @@ describe("RecommendRefinePanel", () => {
         selectedAgeGroup={null}
         onMoodChange={vi.fn()}
         onAgeGroupChange={vi.fn()}
+        onClearAll={vi.fn()}
       />,
     );
     await user.click(screen.getByRole("button", { name: /추천 다듬기/ }));

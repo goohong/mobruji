@@ -126,6 +126,18 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const [selectedPersona, setSelectedPersona] =
     useState<RecommendationPersona | null>(null);
 
+  // closes #1715 — 분위기·나이대 필터를 한 번에 비우는 "모두 해제". 의도 모드(persona)는
+  // 별개의 "추천 방식 진입"이라 RecommendModeGroup 에 분리돼 있어 여기서 비우지 않는다.
+  const clearFilters = useCallback(() => {
+    setSelectedMood(null);
+    setSelectedAgeGroup(null);
+  }, []);
+  // closes #1715 — 결과에 영향을 주는(쿼리 재발화) 적용 조건 수. 결과 요약 "조건 N개 적용됨"에 쓴다.
+  const appliedFilterCount =
+    (selectedMood !== null ? 1 : 0) +
+    (selectedAgeGroup !== null ? 1 : 0) +
+    (selectedPersona !== null ? 1 : 0);
+
   const isVoiceRangeReady =
     voiceRangeQuery.isSuccess &&
     voiceRangeQuery.data !== undefined &&
@@ -327,6 +339,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           selectedAgeGroup={selectedAgeGroup}
           onMoodChange={setSelectedMood}
           onAgeGroupChange={setSelectedAgeGroup}
+          onClearAll={clearFilters}
         />
 
         <RecommendationFeed
@@ -334,6 +347,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
           activePersona={selectedPersona}
+          appliedFilterCount={appliedFilterCount}
         />
 
         {/* (성격별 그룹화 #1712) 모드 진입 그룹 — "다른 방식으로 추천받기": 의도 모드 토글
@@ -366,6 +380,11 @@ type RecommendationFeedProps = {
    * fallback 근거로 전달한다. 미선택(null)이면 카드는 페르소나 사유 줄을 생략한다.
    */
   activePersona: RecommendationPersona | null;
+  /**
+   * 결과에 적용된 조건(분위기·나이대·의도) 수(이슈 #1715). 결과 요약에 "조건 N개 적용됨"
+   * 신호로 노출한다. 0 이면 적용 문구를 생략한다.
+   */
+  appliedFilterCount: number;
 };
 
 function RecommendationFeed({
@@ -373,6 +392,7 @@ function RecommendationFeed({
   userVoiceRangeLow,
   userVoiceRangeHigh,
   activePersona,
+  appliedFilterCount,
 }: RecommendationFeedProps) {
   const {
     data,
@@ -553,6 +573,10 @@ function RecommendationFeed({
     return (
       <div className="flex flex-col gap-4">
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+        <ResultSummary
+          count={allRecommendations.length}
+          appliedFilterCount={appliedFilterCount}
+        />
         <SwipeDeck
           recommendations={allRecommendations}
           userVoiceRange={userRange}
@@ -567,6 +591,10 @@ function RecommendationFeed({
   return (
     <div className="flex flex-col gap-4">
       <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+      <ResultSummary
+        count={allRecommendations.length}
+        appliedFilterCount={appliedFilterCount}
+      />
       {/*
         (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
         시각적으로는 `sr-only` 로 숨기지만 SR 은 polite 큐로 안내 메시지를 읽는다.
@@ -652,6 +680,33 @@ function RecommendationFeed({
         </div>
       )}
     </div>
+  );
+}
+
+type ResultSummaryProps = {
+  count: number;
+  appliedFilterCount: number;
+};
+
+/**
+ * 결과 요약 줄 (이슈 #1715) — 지금까지 불러온 추천 곡 수 + 적용된 조건 수를 시각적으로
+ * 노출한다. 필터를 토글하면 쿼리가 재발화돼 스켈레톤(로딩 신호)이 잠깐 뜨고, 새 결과가
+ * 오면 이 줄의 곡 수/적용 문구가 갱신돼 "조건이 결과에 반영됐다"가 한눈에 보인다.
+ * (스크린 리더 안내는 별도 aria-live 영역이 담당 — 여기는 시각 신호.)
+ */
+function ResultSummary({ count, appliedFilterCount }: ResultSummaryProps) {
+  return (
+    <p
+      data-testid="recommend-result-summary"
+      className="text-xs text-[var(--text-caption)]"
+    >
+      <span className="font-medium text-[var(--text-secondary)]">
+        추천 {count}곡
+      </span>
+      {appliedFilterCount > 0 ? (
+        <span> · 조건 {appliedFilterCount}개 적용됨</span>
+      ) : null}
+    </p>
   );
 }
 

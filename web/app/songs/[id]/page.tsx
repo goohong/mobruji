@@ -12,7 +12,7 @@
  *   - 가창 난이도 라벨 (`difficulty.ts` 재사용, BE 필드 우선 → 없으면 lowMidi/highMidi 기반)
  *   - 최고음/최저음 음표명 (notes.ts MIDI → 음표 변환)
  *   - 키, 장르 칩, mood
- *   - 발매 연도, 언어, BPM, ISRC/TJ/KY 번호, 메타데이터 출처
+ *   - 발매 연도, 언어(한국어 라벨), BPM, TJ/KY 번호 (내부 출처 코드는 노이즈라 비노출, #1715)
  *
  * 데이터 로딩:
  *   - `readSongById(id)` (GET /api/v1/songs/{id})를 React Query로 호출.
@@ -43,6 +43,7 @@ import {
 } from "@/lib/difficulty";
 import { midiToKoreanNoteName } from "@/lib/notes";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
+import { formatLanguageLabel } from "@/lib/songMeta";
 import { useLikesStore } from "@/store/likes";
 import { AlbumCover } from "@/app/recommend/components/SongDetailContent";
 
@@ -125,6 +126,8 @@ function SongDetailView({ song }: SongDetailViewProps) {
       ? midiToKoreanNoteName(song.lowMidi)
       : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
+  const languageLabel = formatLanguageLabel(song.language);
   // closes #1284 — 한국 곡 한국어 표시 우선 (heading + 좋아요 aria-label 동일 표시).
   const displayTitle = formatSongDisplayTitle(song);
 
@@ -210,12 +213,14 @@ function SongDetailView({ song }: SongDetailViewProps) {
           메타 정보
         </h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+          {/* closes #1715 — 내부 출처(metadataSource) 노이즈 제거 + 언어 한국어 라벨(매핑 불가 시 셀 생략). */}
           <MetaCell label="발매 연도" value={song.releaseYear ?? null} />
           <MetaCell label="BPM" value={song.bpm ?? null} />
-          <MetaCell label="언어" value={song.language ?? null} />
+          {languageLabel ? (
+            <MetaCell label="언어" value={languageLabel} />
+          ) : null}
           <MetaCell label="TJ 번호" value={song.tjNumber ?? null} />
           <MetaCell label="KY 번호" value={song.kyNumber ?? null} />
-          <MetaCell label="출처" value={song.metadataSource} />
         </dl>
       </section>
 
