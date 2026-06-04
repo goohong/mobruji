@@ -162,6 +162,28 @@ class CatalogBrowseImportCommandTest {
     }
 
     @Test
+    @DisplayName("runBrowseImport: 공백 경계만 다른 (title, artist) 두 건은 같은 실행에서 충돌 없이 모두 적재")
+    void run_titleArtistBoundaryAmbiguity_doesNotCollide() {
+        final SongRepository repository = mock(SongRepository.class);
+        final CatalogBrowseClient client = mock(CatalogBrowseClient.class);
+        when(repository.findByMbId(any())).thenReturn(Optional.empty());
+        when(repository.findByIsrc(any())).thenReturn(Optional.empty());
+        when(repository.findByTitleAndArtist(any(), any())).thenReturn(Optional.empty());
+        // ("a b","c") 와 ("a","b c") 는 공백 구분자라면 동일 dedup 키("a b c") 가 되어 둘째가 잘못 skip 된다.
+        when(client.browseByArtist(eq("x"), anyInt(), eq(0)))
+                .thenReturn(List.of(recording("m1", "a b", "c"), recording("m2", "a", "b c")));
+
+        final CatalogBrowseImportCommand command = new CatalogBrowseImportCommand(
+                repository, client, properties(100));
+
+        final BrowseSummary summary = command.runBrowseImport(List.of("x"), 10, 50, false);
+
+        assertThat(summary.inserted()).isEqualTo(2);
+        assertThat(summary.skipped()).isZero();
+        verify(repository, times(2)).save(any());
+    }
+
+    @Test
     @DisplayName("runBrowseImport: 제목/아티스트 누락 recording 은 failed 카운트")
     void run_blankTitleOrArtist_counted() {
         final SongRepository repository = mock(SongRepository.class);
