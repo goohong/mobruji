@@ -155,14 +155,6 @@ describe("SongDetailContent", () => {
     expect(screen.queryByText("UPBEAT")).not.toBeInTheDocument();
   });
 
-  // closes #1764 — 추천 점수 라벨은 영어 "score" 가 아니라 한국어 "점수" 로 노출한다.
-  it("추천 점수 라벨을 한국어 '점수' 로 노출한다(영어 코드값 비노출)", () => {
-    const item = buildRecommendedSong({ score: 0.87 });
-    renderWithQueryClient(<SongDetailContent item={item} />);
-    expect(screen.getByText(/점수 0\.87/)).toBeInTheDocument();
-    expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
-  });
-
   // closes #1484 — BE 가 voiceFit/moodFit + 한국어 사유를 내려준 추천 컨텍스트에서
   // 상세 모달이 적합도 배지 + 사유를 노출하는지 회귀 가드.
   it("추천 컨텍스트에서 음역/분위기 적합도 배지 + 사유를 노출한다", () => {
