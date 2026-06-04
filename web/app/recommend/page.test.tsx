@@ -672,6 +672,89 @@ describe("RecommendPage", () => {
       expect(screen.getByText("곡-10")).toBeInTheDocument();
     });
 
+    // closes #1822 — 페치 폭주 방지: sentinel observer 는 페치 상태(isFetchingNextPage)
+    // 토글로 재생성되지 않아야 한다. 직전 구현은 상태 의존 ref 콜백이 매 토글마다 새
+    // 함수로 발급돼 observer 가 재생성(이전 것 disconnect + 새로 생성)됐고, 재연결
+    // 직후 교차가 즉시 재평가돼 페치가 폭주했다. 안정 observer 는 sentinel mount 시
+    // 한 번만 생성돼 같은 인스턴스가 토글 너머로 살아남는다.
+    // (registry 총량은 next/link prefetch observer 가 섞여 비결정적이므로, sentinel 을
+    //  관찰 중인 "그 observer 인스턴스" 의 동일성/생존만 본다.)
+    it("페치 상태가 토글돼도 sentinel observer 가 재생성되지 않는다", async () => {
+      sessionMock.set({ sessionId: "sess-stable", voiceRangeId: 33 });
+      wireAppendExcluded();
+
+      readVoiceRangeMock.mockResolvedValue({
+        id: 33,
+        sessionId: "sess-stable",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+
+      // 2페이지는 수동 resolve 로 in-flight 상태(isFetchingNextPage=true)를 commit 시킨다.
+      // (즉시 resolve 하면 토글이 paint 되기 전에 끝나 재생성 여부를 가릴 수 없다.)
+      let resolveSecond!: (value: ReturnType<typeof buildResponseWithSongIds>) => void;
+      const secondPending = new Promise<ReturnType<typeof buildResponseWithSongIds>>(
+        (resolve) => {
+          resolveSecond = resolve;
+        },
+      );
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [10, 20]))
+        .mockReturnValueOnce(secondPending);
+
+      // sentinel 을 관찰 중(미disconnect)인 observer 엔트리를 찾는다.
+      const sentinelObserver = () =>
+        observerRegistry.find(
+          (entry) =>
+            !entry.disconnected &&
+            Array.from(entry.nodes).some(
+              (node) =>
+                (node as Element).getAttribute?.("data-testid") ===
+                "recommend-sentinel",
+            ),
+        );
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("recommend-sentinel")).toBeInTheDocument();
+      });
+      const before = sentinelObserver();
+      expect(before).toBeDefined();
+
+      // 진입 → 2페이지 페치 시작 후 in-flight 로 머문다.
+      await act(async () => {
+        triggerIntersection();
+      });
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+      });
+      // isFetchingNextPage=true 가 commit 됐음을 푸터 aria-busy 로 확인.
+      await waitFor(() => {
+        expect(screen.getByTestId("recommend-sentinel")).toHaveAttribute(
+          "aria-busy",
+          "true",
+        );
+      });
+
+      // 안정 observer: 페치 토글이 commit 된 뒤에도 같은 인스턴스가 sentinel 을 계속
+      // 관찰한다(재생성 X). 재생성 구현이라면 before 는 disconnect 돼 sentinelObserver()
+      // 가 다른 엔트리를 돌려준다.
+      expect(sentinelObserver()).toBe(before);
+      expect(before?.disconnected).toBe(false);
+
+      // 마무리: 2페이지 resolve → 곡-30 노출.
+      await act(async () => {
+        resolveSecond(buildResponseWithSongIds(2, [30, 40]));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("곡-30")).toBeInTheDocument();
+      });
+    });
+
     // closes #1799 — 음역곡 풀이 작으면 다음 페이지에 같은 곡이 재등장한다. 평탄화 단계에서
     // song.id 로 중복 제거되어 같은 곡 카드가 두 번 그려지지 않아야 한다.
     it("다음 페이지에 같은 곡이 재등장해도 중복 카드 없이 한 번만 렌더한다", async () => {
@@ -859,6 +942,62 @@ describe("RecommendPage", () => {
       ).not.toBeInTheDocument();
       // 1차 페이지 곡은 여전히 노출.
       expect(screen.getByText("곡-1")).toBeInTheDocument();
+    });
+
+    // closes #1818 (#1822 흡수) — 풀 소진 후 BE 가 빈 페이지 대신 "이미 본 곡"으로만
+    // 채운 n건 페이지를 응답해도 신규 고유 0건이면 무한스크롤이 멈추고 끝 상태로 전환된다.
+    it("두 번째 페이지가 이미 본 곡으로만 채워지면(신규 고유 0건) sentinel이 사라지고 추가 페치를 멈춘다", async () => {
+      sessionMock.set({ sessionId: "sess-dup", voiceRangeId: 55 });
+      wireAppendExcluded();
+
+      readVoiceRangeMock.mockResolvedValue({
+        id: 55,
+        sessionId: "sess-dup",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+
+      // 2차 페이지는 비어있지 않지만 1차 페이지와 동일한 곡 ID 만 재등장(풀 소진).
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [1, 2]))
+        .mockResolvedValueOnce(buildResponseWithSongIds(2, [1, 2]));
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        triggerIntersection();
+      });
+
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+      });
+
+      // 신규 고유 0건 → hasNextPage=false → 끝 안내 + sentinel 제거.
+      await waitFor(() => {
+        expect(
+          screen.getByText(/추천할 수 있는 곡을 모두 보여드렸어요\./),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("recommend-sentinel"),
+      ).not.toBeInTheDocument();
+
+      // 추가 sentinel 진입을 흉내내도 더 이상 페치하지 않는다(미종료 회귀 가드).
+      await act(async () => {
+        triggerIntersection();
+      });
+      expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+
+      // 중복은 누적되지 않고 1·2번 곡이 한 번씩만 노출된다.
+      expect(screen.getAllByText("곡-1")).toHaveLength(1);
+      expect(screen.getAllByText("곡-2")).toHaveLength(1);
     });
   });
 
