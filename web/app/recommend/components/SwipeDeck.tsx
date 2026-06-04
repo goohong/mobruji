@@ -4,8 +4,10 @@
  * 추천 결과를 무한 리스트 대신 **한 곡씩 카드로** 보여주고, 좌/우 스와이프(또는 하단
  * 버튼)로 빠르게 좋아요/패스를 결정하게 한다. 한 손 모바일 UX 를 1차 목표로 한다.
  *
- * 재사용: 카드 본문은 기존 `SongDetailContent`(앨범 커버/메타/추천 사유/좋아요·북마크)
- * 를 그대로 사용한다 — 리스트 모드의 상세 모달과 동일한 정보 밀도를 유지한다.
+ * 카드 표면(#1808): 컴팩트 요약(축소 앨범 커버 + 제목/아티스트 + 적합 배지)만 렌더해
+ * 모바일에서 카드가 과도하게 길어지지 않게 한다. 풀상세(`SongDetailContent`)는 카드 탭
+ * 또는 "상세 보기" 버튼으로 `SongDetailSheet`(바텀시트, #323/#1696 재사용)에서 노출한다.
+ * 드래그(스와이프)와 탭(상세 열기)은 포인터 총 이동 임계로 구분한다.
  *
  * 신호 적재:
  *   - 우 스와이프(좋아요) → `useLikeToggleMutation` 으로 실제 좋아요 반영(+/likes 동기화)
@@ -63,7 +65,9 @@ import {
   type SwipeReaction,
 } from "@/store/swipeReactions";
 
-import { SongDetailContent } from "./SongDetailContent";
+import { collectFitRows, FitBadge } from "./FitBadge";
+import { AlbumCoverThumbnail, SongDetailContent } from "./SongDetailContent";
+import { SongDetailSheet } from "./SongDetailSheet";
 
 /**
  * 다음 batch 프리페치 임계. 남은 카드가 이 수 이하이면 미리 페치(seed 기반 또는 폴백).
@@ -87,6 +91,12 @@ export const SWIPE_COMMIT_MIN_PX = 80;
 export const SWIPE_FLICK_VELOCITY = 0.5;
 /** 플릭 커밋에 필요한 최소 변위(px) — 정지 상태의 미세 떨림이 오발화하지 않도록. */
 export const SWIPE_FLICK_MIN_PX = 24;
+
+/**
+ * 탭(상세 열기) 판정 임계(px) — 포인터 다운→업 사이 총 이동이 이 값 미만이면 스와이프가
+ * 아니라 탭으로 보고 상세 시트를 연다 (드래그 vs 탭 제스처 충돌 가드, #1808).
+ */
+export const SWIPE_TAP_MAX_MOVE_PX = 10;
 /** exit 지속이 최소값에 수렴하는 속도(px/ms). */
 const SWIPE_EXIT_FAST_VELOCITY = 2.5;
 
@@ -372,9 +382,14 @@ function SwipeCard({
   // 속도 추적용 — 마지막 포인터 표본 + 평활된 속도(px/ms).
   const lastSampleRef = useRef<{ x: number; t: number } | null>(null);
   const velocityRef = useRef(0);
+  // 탭 vs 드래그 판정용 — 포인터 다운 좌표 + 임계 초과 이동 여부(latch).
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const movedRef = useRef(false);
 
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  // 카드 탭/"상세 보기" 시 풀상세를 노출하는 바텀시트 열림 상태.
+  const [detailOpen, setDetailOpen] = useState(false);
   const [exitDirection, setExitDirection] = useState<"left" | "right" | null>(
     null,
   );
@@ -417,6 +432,8 @@ function SwipeCard({
       return;
     }
     dragStartXRef.current = event.clientX;
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    movedRef.current = false;
     lastSampleRef.current = { x: event.clientX, t: performance.now() };
     velocityRef.current = 0;
     setIsDragging(true);
@@ -438,23 +455,38 @@ function SwipeCard({
         lastSampleRef.current = { x: event.clientX, t: now };
       }
     }
+    // 총 이동이 탭 임계를 넘으면 latch — 이후 pointerup 을 탭으로 오판하지 않게 한다.
+    const start = pointerStartRef.current;
+    if (start && !movedRef.current) {
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (Math.hypot(dx, dy) > SWIPE_TAP_MAX_MOVE_PX) {
+        movedRef.current = true;
+      }
+    }
     setDragX(event.clientX - dragStartXRef.current);
   };
 
-  const endDrag = () => {
+  // allowTap: pointerup 은 탭 판정 허용, pointercancel(스크롤 등 중단)은 스냅백만.
+  const endDrag = (allowTap: boolean) => {
     if (!isDragging) {
       return;
     }
     setIsDragging(false);
     dragStartXRef.current = null;
+    pointerStartRef.current = null;
     const velocityX = velocityRef.current;
     const width = cardRef.current?.offsetWidth ?? 0;
     const intent = resolveSwipeIntent(dragX, width, velocityX);
     if (intent) {
       commit(intent, velocityX);
-    } else {
-      setDragX(0);
+      return;
     }
+    // 스와이프로 판정되지 않았고 이동이 탭 임계 미만이면 풀상세 시트를 연다.
+    if (allowTap && !movedRef.current) {
+      setDetailOpen(true);
+    }
+    setDragX(0);
   };
 
   // 드래그 변위에 따른 좋아요/패스 힌트 강도 (0~1).
@@ -506,12 +538,12 @@ function SwipeCard({
             ref={cardRef}
             role="group"
             aria-roledescription="스와이프 선곡 카드"
-            aria-label={`${displayTitle} — 오른쪽으로 밀면 좋아요, 왼쪽으로 밀면 패스`}
+            aria-label={`${displayTitle} — 오른쪽으로 밀면 좋아요, 왼쪽으로 밀면 패스, 탭하면 상세 보기`}
             data-testid="swipe-card"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            onPointerUp={() => endDrag(true)}
+            onPointerCancel={() => endDrag(false)}
             style={{
               transform,
               opacity: exitDirection ? 0 : 1,
@@ -520,7 +552,11 @@ function SwipeCard({
             }}
             className={`select-none rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] shadow-[var(--shadow-md)] ring-1 ring-[var(--border)] ${wiggle}`}
           >
-            <SongDetailContent item={item} userVoiceRange={userVoiceRange} />
+            <SwipeCardSummary
+              item={item}
+              displayTitle={displayTitle}
+              onOpenDetail={() => setDetailOpen(true)}
+            />
           </div>
         </div>
         {/* 스와이프 방향 힌트 — 드래그 중에만 보인다. */}
@@ -562,6 +598,69 @@ function SwipeCard({
           <span>좋아요</span>
         </button>
       </div>
+
+      {/* 풀상세 — 카드 탭 또는 "상세 보기"로 열리는 바텀시트(#323/#1696 재사용). */}
+      <SongDetailSheet
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        titleLabel={displayTitle}
+      >
+        <SongDetailContent item={item} userVoiceRange={userVoiceRange} />
+      </SongDetailSheet>
+    </div>
+  );
+}
+
+type SwipeCardSummaryProps = {
+  item: RecommendedSongResponse;
+  displayTitle: string;
+  onOpenDetail: () => void;
+};
+
+/**
+ * 카드 표면 컴팩트 요약 (#1808) — 축소 앨범 커버 + 제목/아티스트 + 적합 배지만 노출해
+ * 모바일에서 카드 높이를 줄인다. 풀상세는 카드 탭 또는 "상세 보기" 버튼으로 바텀시트에서
+ * 펼친다. 버튼은 reduced-motion/키보드 사용자의 상세 접근 경로(포인터 탭 가드 우회)다.
+ */
+function SwipeCardSummary({
+  item,
+  displayTitle,
+  onOpenDetail,
+}: SwipeCardSummaryProps) {
+  const { song } = item;
+  const fitRows = collectFitRows(item);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-4">
+        <AlbumCoverThumbnail song={song} />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="text-xs font-medium text-[var(--text-caption)]">
+            #{item.rankPosition}
+          </p>
+          <p className="truncate text-base font-semibold text-[var(--text-primary)]">
+            {displayTitle}
+          </p>
+          <p className="truncate text-sm text-[var(--text-body-strong)]">
+            {song.artist}
+          </p>
+        </div>
+      </div>
+      {fitRows.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {fitRows.map((row) => (
+            <FitBadge key={row.key} label={row.label} fit={row.fit} />
+          ))}
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={onOpenDetail}
+        aria-label={`${displayTitle} 상세 정보 보기`}
+        className="inline-flex min-h-11 w-fit items-center gap-1.5 self-start rounded-full border border-[var(--cta-secondary-border)] px-4 py-2 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+      >
+        <span>상세 보기</span>
+        <span aria-hidden="true">›</span>
+      </button>
     </div>
   );
 }

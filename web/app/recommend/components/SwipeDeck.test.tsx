@@ -299,6 +299,47 @@ describe("SwipeDeck", () => {
     expect(screen.getAllByTestId("swipe-peek-card")).toHaveLength(2);
   });
 
+  it("카드 표면은 컴팩트 요약만 노출하고 풀상세는 감춘다 (#1808)", () => {
+    renderWithQueryClient(
+      <SwipeDeck
+        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
+        userVoiceRange={USER_RANGE}
+        hasMore={false}
+        isFetchingMore={false}
+        onNeedMore={vi.fn()}
+      />,
+    );
+    // 요약: 제목/아티스트는 보인다.
+    expect(screen.getByText("곡 1")).toBeInTheDocument();
+    expect(screen.getByText("가수 1")).toBeInTheDocument();
+    // 풀상세(추천 사유/음역 셀)는 시트를 열기 전엔 카드 표면에 없다.
+    expect(screen.queryByText("추천 사유")).not.toBeInTheDocument();
+    expect(screen.queryByText("사유 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("최고음")).not.toBeInTheDocument();
+  });
+
+  it("'상세 보기' 탭하면 바텀시트에 풀상세가 노출된다 (#1808)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(
+      <SwipeDeck
+        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
+        userVoiceRange={USER_RANGE}
+        hasMore={false}
+        isFetchingMore={false}
+        onNeedMore={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /곡 1 상세 정보 보기/ }),
+    );
+
+    // 시트(dialog) + 풀상세 컨텐츠 노출.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("추천 사유")).toBeInTheDocument();
+    expect(screen.getByText("사유 1")).toBeInTheDocument();
+  });
+
   it("좋아요한 곡을 seed 로 잔량 임계 이하 시 /next 무한 로드를 호출한다", async () => {
     const user = userEvent.setup();
     const onNeedMore = vi.fn();
