@@ -111,6 +111,52 @@ vocal stem 에만 librosa pyin 을 적용한다. 반주·드럼 harmonics 가 pi
 
 실패 시 exit code 1 + stdout JSON `{"error": "...", "toolingVersion": "..."}`.
 
+## YouTube URL 자동매칭 (resolve_urls.py)
+
+음역 미보유 곡은 `(title, artist)` 만 있고 YouTube URL 이 없어 분석에 곧장 넣을 수
+없다. MusicBrainz 대량 임포트(#1705/#1707)로 곡이 100→371 로 늘면서 신규곡 대량이
+이 상태다. `resolve_urls.py` 는 `(title, artist)` 로 yt-dlp `ytsearch1` 검색을 돌려
+후보 영상을 찾고 **매칭 신뢰도**(질의어 ↔ 후보 제목/업로더 토큰 일치 + 영상 길이
+타당성)를 산출한다. 임계 미만이면 잘못된 영상(라이브/커버/리액션/무관)을 분석에
+넣지 않도록 **skip + 로그**하고, 신뢰도가 충분한 곡만 분석용 seed 로 내보낸다
+(directive #1739).
+
+```bash
+cd tools/audio-analysis
+
+# 1) 미보유 곡 → URL 자동매칭 → 감사용 feed(NDJSON) + 분석용 seed(JSON)
+python resolve_urls.py --seed tests/new-songs-verification.json \
+  --out /data/tmp/resolved-feed.ndjson \
+  --seed-out /data/tmp/resolved-seed.json --sleep-seconds 2
+
+# 2) 안전 단위 chunk + 반복 resume — invocation 당 20곡씩 누적(수백 곡 대량)
+python resolve_urls.py --seed /data/tmp/missing-range.json \
+  --out /data/tmp/resolved-feed.ndjson --resume /data/tmp/resolved-feed.ndjson \
+  --seed-out /data/tmp/resolved-seed.json --limit 20 --sleep-seconds 2
+
+# 3) 자동매칭 seed 를 batch_analyze 에 그대로 넣어 음역 backfill(#1735 chunk/resume)
+python batch_analyze.py --seed /data/tmp/resolved-seed.json \
+  --out /data/tmp/backfill.ndjson --resume /data/tmp/backfill.ndjson \
+  --limit 20 --sleep-seconds 3 --plausibility
+```
+
+- **검색만, 다운로드 없음**: 본 단계는 `extract_info(download=False)` 로 메타데이터만
+  조회한다. audio 추출·pitch 분석은 후속 `batch_analyze.py`(→`analyze.py`)가 30~60초
+  clip 으로만 수행한 뒤 즉시 삭제한다 — 저작권 원칙은 analyze.py 와 동일.
+- **매칭 신뢰도**(`--min-confidence`, default 0.5): `텍스트 0.8 + 길이 0.2`. 텍스트는
+  제목·아티스트 토큰이 후보 제목/업로더에 재현되는 비율(아티스트 있으면 제목 0.65
+  /아티스트 0.35 가중). 길이는 가창곡 타당 범위 `[60,420]`초 만점, `[20,900]` 바깥은 0.
+- **feed 레코드**: `{id, title, artist, status, matchConfidence, ...}`. status 는
+  `resolved`(임계 이상 — youtubeUrl 포함) / `skipped_low_confidence`(임계 미만 — 후보
+  메타 남겨 수기 점검) / `no_search_result` / `failed`(transient — resume 시 재시도).
+- **resume/chunk/rate**: batch_analyze 와 동일 규약 — `--resume`(같은 경로 재실행 시
+  완료 곡 skip·누적), `--limit`(invocation 당 처리량 한정), `--sleep-seconds`(검색 사이
+  대기로 rate 완화), `--tmpdir`(TMPDIR `/data` 고정).
+- **`--seed-out`**: resolved 곡만 `{"songs":[{id,title,artist,youtubeUrl,...}]}` JSON 으로
+  저장 → `batch_analyze.py --seed` 가 그대로 먹는다(resolve → analyze 파이프라인).
+- **live 실행**(실제 yt-dlp 검색·다운로드·추천 노출 확인)은 머지 후 운영 환경에서
+  nmae 가 수행한다 — 인프라 CI 는 단위/순수 로직만 검증한다.
+
 ## Batch 파이프라인 + 정확도 검증 (batch_analyze.py)
 
 단일 곡 분석(analyze.py)을 시드 곡 묶음에 대해 순차 실행하고 backfill-ready feed
