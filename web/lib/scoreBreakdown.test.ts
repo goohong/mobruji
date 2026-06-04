@@ -101,9 +101,9 @@ describe("buildScoreBreakdown", () => {
     );
     // 모든 추정 항목은 estimated=true
     expect(breakdown.every((b) => b.estimated)).toBe(true);
-    // 키 한글 변환 — C_SHARP_MAJOR → "C# Major"
+    // 키 한글 변환 — C_SHARP_MAJOR → "C# 장조"
     const keyMatch = breakdown.find((b) => b.key === "keyMatch");
-    expect(keyMatch?.detail).toBe("C# Major");
+    expect(keyMatch?.detail).toBe("C# 장조");
   });
 
   it("사용자 voiceRange가 없거나 곡 음역 정보가 없으면 rangeFit 항목이 빠진다", () => {

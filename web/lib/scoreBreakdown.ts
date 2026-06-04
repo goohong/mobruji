@@ -30,7 +30,7 @@ import { midiToKoreanNoteName } from "@/lib/notes";
  * 점수 분해 단일 항목.
  *
  * - `score`는 0~1 정규화. UI는 막대 길이 또는 %로 노출한다.
- * - `detail`은 카드에서 점수 옆에 보여줄 한 줄 부연 — 예: "C# Major" 또는
+ * - `detail`은 카드에서 점수 옆에 보여줄 한 줄 부연 — 예: "C# 장조" 또는
  *   "사용자 도3-솔4 vs 곡 솔3-파5" (한국어 단독, #1310 사용자 정정 2026-06-03).
  * - `estimated`가 true이면 client-side 추정값임을 카드에서 명시(자세히 보기 안내)할 수 있다.
  */
@@ -180,12 +180,11 @@ function roundTo(value: number, digits: number): number {
  */
 function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
 }
