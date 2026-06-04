@@ -21,10 +21,11 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
 import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
+import { BrandWordmark } from "@/components/brand/BrandWordmark";
 
 /**
  * zustand persist hydration 완료 여부를 React에 구독시킨다.
@@ -75,10 +76,8 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col items-center gap-8">
-        <header className="space-y-3 text-center">
-          <p className="text-sm font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            mobruji
-          </p>
+        <header className="flex flex-col items-center space-y-3 text-center">
+          <BrandWordmark lang="ko" size="md" theme="auto" />
           <h1 className="text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl">
             오늘 노래방, 뭐 부르지?
           </h1>
@@ -230,8 +229,8 @@ function VoiceRangeSummary({
   isPending,
 }: VoiceRangeSummaryProps) {
   if (voiceRange) {
-    const lowNote = midiToCombinedNoteName(voiceRange.lowestNoteMidi);
-    const highNote = midiToCombinedNoteName(voiceRange.highestNoteMidi);
+    const lowNote = midiToKoreanNoteName(voiceRange.lowestNoteMidi);
+    const highNote = midiToKoreanNoteName(voiceRange.highestNoteMidi);
     return (
       <p
         aria-label="저장된 음역대"
@@ -269,11 +268,15 @@ function VoiceRangeSummary({
  * 측정 여부와 무관하게 노출 — 검색은 측정 없이도 진입 가능한 경로, 좋아요/북마크/이력은
  * 빈 상태(empty)도 친화 메시지를 가지고 있어 측정 안 한 사용자가 눌러도 막다른 길이
  * 아니다. 따라서 분기 바깥에 둔다.
+ *
+ * 라벨은 글로벌 nav(BottomNav/DesktopNav)와 통일한다 (closes #1717) — /history 는
+ * 탭 라벨과 동일하게 "이력". 측정/추천은 위 primary CTA 가 이미 담당하므로 여기서는
+ * 콘텐츠 목적지(검색/이력/좋아요/북마크)만 둔다.
  */
 function SecondaryNav() {
   const items: Array<{ href: string; label: string }> = [
     { href: "/songs", label: "곡 검색" },
-    { href: "/history", label: "받은 추천" },
+    { href: "/history", label: "이력" },
     { href: "/likes", label: "좋아요" },
     { href: "/bookmarks", label: "북마크" },
   ];

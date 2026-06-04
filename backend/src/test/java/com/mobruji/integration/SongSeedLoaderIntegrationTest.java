@@ -114,6 +114,45 @@ class SongSeedLoaderIntegrationTest {
     }
 
     @Test
+    @DisplayName("기존 row의 genre가 시드와 다르면 재분류로 갱신된다 (#1675)")
+    void existingRowWithStaleGenre_isReclassified() throws Exception {
+        // given: 시드 JSON에는 "발라드"인 "Beautiful"/Crush를 구 장르 "R&B"로 미리 저장 (#1672 이전 row 시뮬레이션)
+        final Song legacy = songRepository.save(Song.builder()
+                .title("Beautiful").artist("Crush")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .genre("R&B")
+                .lowMidi(60).highMidi(74)
+                .build());
+        final Long legacyId = legacy.getId();
+        assertThat(legacy.getGenre()).isEqualTo("R&B");
+
+        // when: 시드 로더 실행
+        loader.run(null);
+
+        // then: 같은 row의 genre가 시드 값으로 재분류됨 (새 row 생성 X)
+        final Song reloaded = songRepository.findById(legacyId).orElseThrow();
+        assertThat(reloaded.getGenre()).isEqualTo("발라드");
+    }
+
+    @Test
+    @DisplayName("기존 row의 genre가 시드와 같으면 갱신하지 않는다 (idempotent)")
+    void existingRowWithSameGenre_isNotTouched() throws Exception {
+        // given: 시드 1회 적재 후 같은 row의 updatedAt 기록
+        loader.run(null);
+        final Song afterSeed = songRepository.findByTitleAndArtist("Beautiful", "Crush").orElseThrow();
+        final java.time.LocalDateTime firstUpdatedAt = afterSeed.getUpdatedAt();
+
+        // when: 시드 재적재 (genre 동일)
+        loader.run(null);
+
+        // then: genre 동일 + updatedAt 갱신 없음 (불필요한 dirty write 회피)
+        final Song reloaded = songRepository.findByTitleAndArtist("Beautiful", "Crush").orElseThrow();
+        assertThat(reloaded.getGenre()).isEqualTo("발라드");
+        assertThat(reloaded.getUpdatedAt()).isEqualTo(firstUpdatedAt);
+    }
+
+    @Test
     @DisplayName("2번 연속 실행해도 row 수가 안 늘어남 (idempotent)")
     void runTwice_isIdempotent() throws Exception {
         // when

@@ -1,7 +1,7 @@
 ---
 id: 0018
 title: Design tokens — color/typography/spacing/radius/shadow/motion
-status: implementing
+status: implemented
 date: 2026-05-24
 deciders: [@goohong]
 ---
@@ -14,21 +14,19 @@ deciders: [@goohong]
 |---|---|---|
 | 2026-05-24 | `accepted` | 본 ADR 결정 — `docs/features/ui-ux-redesign.md` 단계 2-3 plan 동반 |
 | 2026-05-26 | `implementing` | 단계 4 PR 1 (#1131 — `web/app/tokens.css` + `lib/theme/tokens.ts`) 머지 |
-| **— 현재 (2026-05-29 기준) —** | `implementing` | 단계 4 PR 14+ 머지 (16+ swap PR 누적). 잔존 zinc 41 활성 / 10 파일 / 4 신규 토큰 결정 대기 |
-| (예정) | `implemented` | 단계 4 swap 완결 게이트 4 통과 — `docs/features/design-tokens-residual-swap-matrix.md §5-3` SoT |
+| 2026-05-29 | `implementing` | 단계 4 PR 14+ 머지 (16+ swap PR 누적). 잔존 zinc 41 활성 / 10 파일 / 신규 토큰 결정 대기 |
+| **2026-06-03 (현재)** | `implemented` | 단계 4 swap 완결 게이트 4 통과 (PR #1659) — 활성 hardcode == 0. `docs/features/design-tokens-residual-swap-matrix.md §5-3` SoT |
 | (예정) | `superseded` | `ui-ux-redesign.md §6` PR 2-9 컴포넌트 redesign 완료 시 ADR 추가 (motion / view-transition-api 등 결정 갱신 시) |
 
-## 단계 4 진행도 (2026-05-29 기준)
+## 단계 4 진행도 (2026-06-03 기준 — 완결)
 
 | 메트릭 | 값 | 출처 |
 |---|---|---|
-| 누적 swap PR | 16+ (PR #1131 ~ #1259) | `git log --grep='ADR-0018\|design tokens\|#1044'` |
-| tokens.css 정의된 토큰 | 119 (color 30+ / typography 15+ / spacing 8 / radius 5 / shadow 5 / motion 8 / surface+cta+ring 다수) | `git show origin/develop:web/app/tokens.css | grep -oE '^[[:space:]]*--[a-z]'` |
-| 잔존 활성 hardcode | 41 / 10 파일 | `design-tokens-residual-swap-matrix.md §5-1` |
-| 잔존 비활성 (주석 마커) | ~75 | swap cleanup 대기 — sub-PR 동시 정리 |
-| 신규 토큰 결정 대기 | 4 (`--modal-backdrop`, `--surface-modal`, `--ring-soft-hover`, `--ring-soft-focus-within`) | `design-tokens-residual-swap-matrix.md §5-2 sub-PR 0` |
-| 다음 sub-PR | 5 (sub-PR 1 modal / 2 primitive / 3 ThemeToggle+BottomNav / 4 recommend container / 5 history 페이지) | `design-tokens-residual-swap-matrix.md §6` |
-| 진행도 % (활성 swap) | 약 92% — 누적 swap 라인 ~500+ / 잔존 41 = (500-41)/500 = 91.8% | grep delta 추정 |
+| 누적 swap PR | 17+ (PR #1131 ~ #1659) | `git log --grep='ADR-0018\|design tokens\|#1044\|#1659'` |
+| tokens.css 정의된 토큰 | 126 (color 30+ / typography 15+ / spacing 8 / radius 5 / shadow 5 / motion 8 / surface+cta+ring 다수 + 단계 4 마감 7종) | `git show origin/develop:web/app/tokens.css | grep -oE '^[[:space:]]*--[a-z]'` |
+| 잔존 활성 hardcode | **0** / 0 파일 | `design-tokens-residual-swap-matrix.md §5-1` (측정 명령 재현 = 빈 출력) |
+| 신규 토큰 (단계 4 마감) | 7 (`--modal-backdrop`, `--surface-modal` [PR #1263] + `--ring-soft-hover`, `--ring-soft-focus-within`, `--surface-floating`, `--surface-floating-hover`, `--surface-nav`, `--surface-nav-blur`, `--border-subtle` [PR #1659]) | 본 ADR §4-2 |
+| 진행도 % (활성 swap) | **100%** — 활성 hardcode == 0 | 측정 명령 재현 |
 
 진행도 추적 SoT: `docs/features/design-tokens-residual-swap-matrix.md` (잔존 매트릭스 + sub-PR 분할 + 완결 게이트). 본 ADR 은 결정값 SoT, swap 추적 spec 은 별도 관리.
 
@@ -245,6 +243,31 @@ font-weight:
 - `--brand-200` 사용 거부 사유: hover ring 이 brand 색이면 "선택됨" 오해 risk + 무채색 hover 가 현 의도.
 - 현 모든 잔존 zinc-300 / zinc-400 / zinc-600 / zinc-500 (hover+focus-within 컨텍스트) 가 본 토큰으로 1:1 swap.
 
+#### Floating / nav 표면 + subtle border (단계 4 마감, 2026-06-03 PR #1659 추가)
+
+floating 버튼 (`ThemeToggle` / `HomeLink`) + 하단 nav (`BottomNav`) 의 배경은 `bg-white/90` · `bg-zinc-950/95` 처럼 **opacity suffix** 를 쓴다. Tailwind 의 `/90` opacity modifier 는 임의 `var()` 값과 안정적으로 결합되지 않으므로, alpha 를 토큰 값 자체에 구워 넣은 (baked-alpha) `rgba()` 토큰으로 고정한다 — 버전 비의존 + 정확 렌더링.
+
+```css
+/* Light mode */
+--surface-floating: rgba(255, 255, 255, 0.9);        /* white/90 — floating 버튼 배경 */
+--surface-floating-hover: #FFFFFF;                   /* white — floating 버튼 hover */
+--surface-nav: rgba(255, 255, 255, 0.95);            /* white/95 — BottomNav 배경 */
+--surface-nav-blur: rgba(255, 255, 255, 0.8);        /* white/80 — backdrop-filter 지원 시 */
+--border-subtle: #F4F4F5;                            /* zinc-100 — Card header/footer divider */
+
+/* Dark mode */
+--surface-floating: rgba(24, 24, 27, 0.9);           /* zinc-900/90 */
+--surface-floating-hover: #18181B;                   /* zinc-900 */
+--surface-nav: rgba(9, 9, 11, 0.95);                 /* zinc-950/95 */
+--surface-nav-blur: rgba(9, 9, 11, 0.8);             /* zinc-950/80 */
+--border-subtle: #27272A;                            /* zinc-800 */
+```
+
+사유:
+- baked-alpha rgba 채택: `var()` + Tailwind opacity modifier 비호환 회피. 이전 PR 들이 "후속 PR 양보" 로 미swap 으로 남겼던 마지막 잔존 카테고리.
+- `--border-subtle` 은 `--border` (zinc-200/zinc-700) 보다 한 단계 옅은 divider 전용 — Card header/footer 구분선이 본문 ring 보다 약해야 하는 의도 보존 (zinc-100/zinc-800).
+- 현 모든 잔존 floating/nav opacity 배경 + Card divider 가 본 토큰으로 1:1 swap → 매트릭스 활성 카운트 0 마감.
+
 ### 5) Shadow token (elevation)
 
 토스 패턴 — 부드러운 `rgba(0,0,0,0.04~0.08)` low-opacity multi-layer.
@@ -302,16 +325,16 @@ spring + cubic-bezier 기반.
 ### 학습 비용
 - fe sub-agent 가 토큰 명명 규칙 (`--brand-*` / `--text-*` / `--space-*`) 학습 필요. 본 ADR + `docs/features/ui-ux-redesign.md` 단계 4 PR 1 prompt 에 cheat sheet 박제.
 
-### 단계 4 swap 완결 게이트 (2026-05-29 추가)
+### 단계 4 swap 완결 게이트 (2026-06-03 통과 — PR #1659)
 
-`docs/features/design-tokens-residual-swap-matrix.md §5-3` SoT. 4 조건 동시 충족 시 본 ADR status `implementing` → `implemented` 전이:
+`docs/features/design-tokens-residual-swap-matrix.md §5-3` SoT. 아래 조건 충족으로 본 ADR status `implementing` → `implemented` 전이 (PR #1659):
 
-1. **활성 hardcode == 0** (매트릭스 §5-1 카운트 합산)
-2. **신규 토큰 4종 결정 + tokens.css 반영** (본 ADR §4-2)
-3. **테스트 assertion 동기 갱신** (`Button.test.tsx` / `Chip.test.tsx`)
-4. **주석 마커 cleanup** (비활성 ~75건 → 0)
+1. **활성 hardcode == 0** ✅ (매트릭스 §5-1 측정 명령 재현 = 빈 출력)
+2. **신규 토큰 정의 + tokens.css 반영** ✅ (본 ADR §4-2 — modal/soft ring [PR #1263] + floating/nav/subtle border 7종 [PR #1659])
+3. **테스트 assertion 동기 갱신** ✅ (`Button.test.tsx` / `Chip.test.tsx` 토큰 클래스 assertion + `tokens.test.ts` 신규 토큰 가드)
+4. **주석 마커 cleanup** ✅ (활성 swap 8 파일의 swap-history 주석 갱신 — 이미 완료된 파일의 설명용 JSDoc 은 문서 가치로 보존)
 
-게이트 통과 후 `ui-ux-redesign.md §6` 의 단계 4 PR 2-9 (Button press scale / SongCard gradient stripe / Bottom Sheet drag handle 등 컴포넌트 redesign goal) 진입 가능. swap 미완 상태로 redesign 진입 = 어떤 토큰이 swap 인지 / 어떤 토큰이 redesign 인지 혼동 사고 risk.
+게이트 통과로 `ui-ux-redesign.md §6` 의 단계 4 PR 2-9 (Button press scale / SongCard gradient stripe / Bottom Sheet drag handle 등 컴포넌트 redesign goal) 진입 가능. swap 미완 상태로 redesign 진입 = 어떤 토큰이 swap 인지 / 어떤 토큰이 redesign 인지 혼동 사고 risk 를 본 게이트로 방지.
 
 ## Alternatives (considered)
 

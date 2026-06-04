@@ -30,7 +30,8 @@ public record NextRecommendationRequest(
         ) String sessionId,
         @NotEmpty List<Long> seedSongIds,
         List<Long> excludeSongIds,
-        Boolean excludeSessionHistory
+        Boolean excludeSessionHistory,
+        Boolean useSessionFeedback
 ) {
 
     /**
@@ -47,8 +48,17 @@ public record NextRecommendationRequest(
         return excludeSessionHistory != null && excludeSessionHistory;
     }
 
+    /**
+     * null-safe 접근자. 미입력(null)은 {@code true}로 정규화 — 기본은 세션 스와이프 반응을 추천 신호로 결합(spec §5-2).
+     * 반응이 0건이면 결과에 영향이 없어(콜드스타트) 기존 호출과 하위호환된다.
+     */
+    public boolean useSessionFeedbackOrTrue() {
+        return useSessionFeedback == null || useSessionFeedback;
+    }
+
     public NextRecommendationCommand toCommand() {
         return new NextRecommendationCommand(
-                sessionId, seedSongIds, excludeSongIdsOrEmpty(), excludeSessionHistoryOrFalse());
+                sessionId, seedSongIds, excludeSongIdsOrEmpty(),
+                excludeSessionHistoryOrFalse(), useSessionFeedbackOrTrue());
     }
 }

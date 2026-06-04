@@ -6,8 +6,8 @@
  * 글로벌 nav 가 필요해 layout.tsx에 글로벌로 끼워넣는다.
  *
  * 노출 정책:
- *  - 모바일 한정(`md:hidden`). 데스크탑은 본문 폭이 충분하고 홈의 SecondaryNav 가
- *    여전히 동작하므로 노출하지 않는다 (후속 PR에서 데스크탑 nav 별도 설계).
+ *  - 모바일 한정(`md:hidden`). 데스크탑은 상단 헤더(DesktopNav)가 동일 목적지를
+ *    영속 노출한다 (closes #1717).
  *  - 모든 라우트에서 노출. 단, 추후 광고/풀스크린 측정 같은 화면이 생기면 해당 페이지가
  *    nav를 숨길 수 있도록 글로벌 노출만 책임진다.
  *
@@ -19,37 +19,23 @@
  *
  * 안전 영역:
  *  - iOS notch/home indicator 대응으로 `pb-[env(safe-area-inset-bottom)]`.
- *  - main 콘텐츠 가림 방지 padding은 layout.tsx에서 책임진다 (`pb-16 md:pb-0`).
+ *  - main 콘텐츠 가림 방지 padding은 layout.tsx에서 책임진다
+ *    (`pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0` — nav 높이 + safe-area 보정, #1718).
  *
- * active 매치 규칙:
- *  - 홈("/")은 정확 매치만 (다른 모든 경로가 "/"로 시작하므로 prefix 매치 시 항상 active).
- *  - 그 외는 `pathname === href || pathname.startsWith(href + "/")` 로 자식 경로 포함.
- *    예: /voice-range/auto 에서 "측정" 탭 active 유지.
- *
- * 의존성:
- *  - lucide-react 같은 외부 아이콘 라이브러리는 package.json 보호영역 변경을 피하려고
- *    의도적으로 사용하지 않는다. SVG 인라인으로 5개만 그린다.
+ * nav 항목·아이콘·active 매치 규칙은 `navItems.tsx` 공통 모듈에 모여 있어 DesktopNav 와
+ * 동일한 목적지·라벨을 공유한다 (IA 통일, closes #1717).
  */
 
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: ReactNode;
-};
+import { NAV_ITEMS, isActive } from "./navItems";
 
-const NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { href: "/", label: "홈", icon: <HomeIcon /> },
-  { href: "/voice-range/auto", label: "측정", icon: <MicIcon /> },
-  { href: "/recommend", label: "추천", icon: <SparkleIcon /> },
-  { href: "/history", label: "이력", icon: <ClockIcon /> },
-  { href: "/bookmarks", label: "북마크", icon: <BookmarkIcon /> },
-];
+// 테스트(`BottomNav.test.tsx`)가 단위로 import 하던 active 매치 유틸 — 공통 모듈로
+// 이관 후에도 기존 import 경로가 깨지지 않도록 re-export 한다.
+export { isActive } from "./navItems";
 
 /**
  * 글로벌 모바일 하단 탭 navigation.
@@ -60,32 +46,10 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
 export function BottomNav() {
   const pathname = usePathname() ?? "/";
 
-  /*
-   * ADR-0018 단계 4 PR 5 — BottomNav 컴포넌트 토큰 swap.
-   *
-   * swap 한 element:
-   *  1) <nav> 상단 border : border-zinc-200 dark:border-zinc-800 → --border
-   *  2) active 탭 text : text-zinc-900 dark:text-zinc-50 → --text-primary
-   *  3) inactive 탭 text : text-zinc-500 dark:text-zinc-400 → --text-tertiary
-   *  4) inactive 탭 hover text : hover:text-zinc-700 dark:hover:text-zinc-200
-   *     → hover:text-[var(--text-secondary)]
-   *
-   * 후속 PR (#1259 / 본 PR) 추가 swap:
-   *  5) focus ring : focus-visible:ring-zinc-500 → --cta-secondary-ring
-   *     (PR #1256 / #1259 동일 패턴 — 균일 outline 토큰)
-   *
-   * 미swap (후속 PR 양보):
-   *  - bg-white/95 + supports-[backdrop-filter]:bg-white/80 (다크 동일) —
-   *    opacity suffix 가 var() 와 호환 안 됨. backdrop-blur 결합 패턴 토큰화
-   *    별도 결정 필요 (PR 6+).
-   *
-   * 다크 모드: tokens.css `:where(html.dark)` selector 자동 swap → swap 한
-   * element 의 `dark:` prefix 모두 제거. 미swap element 는 prefix 유지.
-   */
   return (
     <nav
       aria-label="주요 메뉴"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border)] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:bg-zinc-950/95 dark:supports-[backdrop-filter]:bg-zinc-950/80 md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border)] bg-[var(--surface-nav)] backdrop-blur supports-[backdrop-filter]:bg-[var(--surface-nav-blur)] md:hidden"
     >
       <ul
         className="mx-auto flex max-w-md items-stretch justify-around px-2 pt-1 pb-[env(safe-area-inset-bottom)]"
@@ -119,118 +83,5 @@ export function BottomNav() {
         })}
       </ul>
     </nav>
-  );
-}
-
-/**
- * 현재 경로가 탭의 href와 매치하는지 판정한다.
- *
- * - 홈("/"): 정확 매치만. 다른 모든 경로가 "/"로 시작하므로 prefix 매치 시 항상 active가 되어버린다.
- * - 그 외: 정확 매치 또는 자식 경로 prefix 매치 (예: /voice-range/auto 에서 "측정" 활성).
- *
- * export 한 이유: 테스트에서 단위로 검증하기 위함.
- */
-export function isActive(pathname: string, href: string): boolean {
-  if (href === "/") {
-    return pathname === "/";
-  }
-  return pathname === href || pathname.startsWith(href + "/");
-}
-
-/* --- Icons (lucide-react 의존성 회피, 24x24 stroke 기반) --- */
-
-function HomeIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 10.5L12 3l9 7.5" />
-      <path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5" />
-    </svg>
-  );
-}
-
-function MicIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <line x1="12" y1="18" x2="12" y2="21" />
-      <line x1="9" y1="21" x2="15" y2="21" />
-    </svg>
-  );
-}
-
-function SparkleIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 3l1.8 4.5L18 9l-4.2 1.5L12 15l-1.8-4.5L6 9l4.2-1.5L12 3z" />
-      <path d="M19 14l.8 2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-1L19 14z" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <polyline points="12 7 12 12 15 14" />
-    </svg>
-  );
-}
-
-function BookmarkIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
-    </svg>
   );
 }

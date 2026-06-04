@@ -19,7 +19,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -351,10 +350,13 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
       ).toBeInTheDocument();
     });
 
-    // 측정 결과: low=48(도3/C3), high=69(라4/A4) 가 슬라이더 표시값에 반영.
-    // 이슈 #318: 한국어 음명 병기 + MIDI 숫자.
-    expect(screen.getByText(/도3 \(C3\) · MIDI 48/)).toBeInTheDocument();
-    expect(screen.getByText(/라4 \(A4\) · MIDI 69/)).toBeInTheDocument();
+    // 측정 결과 low=48, high=69 가 두 손잡이 슬라이더(#1706) 기본값에 반영.
+    expect(
+      screen.getByRole("slider", { name: "최저음" }),
+    ).toHaveAttribute("aria-valuenow", "48");
+    expect(
+      screen.getByRole("slider", { name: "최고음" }),
+    ).toHaveAttribute("aria-valuenow", "69");
   });
 
   it("결과 화면의 '다시 측정하기' 버튼을 누르면 PERMISSION 단계로 돌아간다", async () => {
@@ -440,12 +442,12 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
       ).toBeInTheDocument();
     });
 
-    const lowSlider = screen.getByTestId("low-midi-slider") as HTMLInputElement;
-    // userEvent의 range 처리가 환경마다 다르므로 fireEvent.change로 직접 값 설정.
-    fireEvent.change(lowSlider, { target: { value: "50" } });
+    // 두 손잡이 슬라이더(#1706): 최저음 손잡이를 키보드로 48 → 50 으로 올린다.
+    const lowThumb = screen.getByRole("slider", { name: "최저음" });
+    lowThumb.focus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
 
-    // 이슈 #318: 한국어 (SPN) · MIDI 형식.
-    expect(screen.getByText(/레3 \(D3\) · MIDI 50/)).toBeInTheDocument();
+    expect(lowThumb).toHaveAttribute("aria-valuenow", "50");
   });
 });
 

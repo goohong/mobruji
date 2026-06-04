@@ -49,6 +49,7 @@
 | 메타데이터 출처 | MetadataSource | `song` | 곡 메타데이터의 출처 enum — `MANUAL_SEED` / `EXTERNAL_API` / `USER_CONTRIBUTION` / `INFERRED` / `AUDIO_ANALYSIS`(analyze.py 산출, audio-tooling-bootstrap.md PR C) |
 | 오디오 분석 결과 | AudioAnalysisResult | `song` | Python audio analysis tool (`tools/audio-analysis/analyze.py`) 산출물 record — `lowMidi`/`highMidi`/`key`/`tempo`/`durationSec`/`confidence`/`toolingVersion`. audio-tooling-bootstrap.md §3 |
 | 에너지 | Energy (Song.energy) | `song` | 곡의 음향 에너지/강렬함 정도 0.0~1.0 (nullable). 추천 mood 변별·곡 유사도 신호로 소비. 산출 출처는 미정 — 1차는 수기/시드 적재, 자동화(Spotify valence·energy fallback 또는 librosa MFCC)는 후속 결정. song-analysis-data-and-consumers.md §5-1·§8 + song-self-analysis-pipeline.md §10-9 cross-ref |
+| 앨범 커버 | AlbumCover (Song.albumCoverUrl) | `song` | 곡 카드/모달에 표시할 외부 앨범 커버 이미지 URL (nullable). 외부 출처(iTunes Search 1차 → Cover Art Archive 폴백) backfill 결과를 **이미지 바이트 미저장·URL 문자열만** 캐싱한 표시 속성 (라이선스 준수). 추천 결정성 무영향 (UX 표시 전용). 매칭 실패 곡은 null → FE placeholder. 출처 결정 SoT = ADR-0029, 적용 plan = album-cover-art.md. §5-2 |
 | 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
 | 곡 후보 풀 | SongCandidatePool | `song` | 추천/검색/카탈로그가 매칭 대상으로 삼는 곡 집합 — 큐레이션 곡(`MANUAL_SEED`) + 임포트 곡(`EXTERNAL_API`) 합집합. 규모 확장(30→100→수백)의 단위. 영속 엔티티 아님 — `Song` 행 전체의 개념 라벨. song-catalog-expansion.md §5-1 |
 | 메타-only 임포트 | MetadataOnlyImport | `song` | 외부 CC0 출처(MusicBrainz)에서 메타데이터(제목/아티스트/연도/장르/식별자)만 가져와 `Song` 으로 upsert 하는 배치(`MetadataOnlyImportCommand`, `--mobruji.import-catalog`). 음역대/key/tempo 미설정 — 자체 분석(#1490)이 후속. `metadataSource=EXTERNAL_API` + 낮은 confidence. (title, artist)·ISRC 멱등. song-catalog-expansion.md §5-1 |
@@ -84,10 +85,15 @@
 | 사용자 프로필 | UserProfile | `user` | **v0.4 후속 draft (미구현)**. 선호 장르/분위기 다중 영속. #1491 PR1 은 성별/음역대만 `User` 에 직접 두고, 장르/분위기 선호 별도 엔티티는 후속으로 미룬다 (§7). 추천 폼 prefill 로 "재방문 시 재입력 불필요" 보장 (#1491) |
 | 온보딩 | Onboarding | `user` (web) | 신규(첫 진입) 사용자가 진입부터 **첫 추천 도달**까지 거치는 안내 흐름. 신규 BE 엔티티 없이 기존 `VoiceRange`/`RecommendationRequest`/`AnonymousSession` 을 재사용하고, 완료 여부는 클라이언트(localStorage) 상태로만 추적 (PoC). first-user-onboarding-flow.md |
 | 페르소나 진입 경로 | PersonaEntryPath | `user` (web) | 온보딩 첫 화면에서 사용자가 선택하는 의도별 분기 — `BEGINNER`(입문, P-C) / `PRACTICE`(연습, P-A) / `MOOD`(분위기, P-B). 각 경로가 자식 spec(F1 가이드 측정 / F2 고음 뚫기 / F3 분위기 모드)으로 연결. 페르소나 정의 SoT = user-persona-and-pain-points.md §2. first-user-onboarding-flow.md |
+| 진입 face 정책 | EntryFacePolicy | `web` | **설계 단계** 첫 진입 시 사용자에게 보여줄 face 의 정책 enum — `BROWSE_FIRST`(곡 목록 우선, entry-flow-browse-first.md 채택) / `PERSONA_PICKER_FIRST`(페르소나 카드 우선, first-user-onboarding-flow.md §5-6 — 진입 화면 부분 deprecate 대상). 영속 엔티티 아님 — fe 정책 라벨. 사용자 directive 2026-06-03 ("음역대를 먼저 받지 말고 일단 목록 보여주면서 맞춤 추천 받고 싶으면 받도록 유도") 으로 `BROWSE_FIRST` 채택. entry-flow-browse-first.md §5-1 |
+| 측정 prompt trigger | MeasurePromptTrigger | `web` | **설계 단계** 음역대 측정 prompt 가 등장하는 trigger 분류 enum — `HOME_BANNER_TAP` / `SONG_DETAIL_CTA_TAP` / `PERSONA_SUBFLOW_ENTRY` / `HEADER_LINK_TAP`. **시스템 자동 popup 금지** — enum 에 `AUTO_POPUP` 값 없음 (measure-on-intent 정책 강제). 사용자 명시 의도 표현 시점에만 측정 진입. entry-flow-browse-first.md §3 F2 / §5-1 |
+| 측정 prompt dismiss 상태 | MeasurePromptDismissState | `web` | **설계 단계** measure prompt dismiss 상태 — localStorage key (`entryFlow.measurePromptDismissedAt` + `entryFlow.measurePromptShownCount`) + dismissed 시점 + 재노출 임계 (count + cooldown 시간). 영속 엔티티 아님 (클라이언트 전용). 빈도 가드: 같은 세션 안 최대 N 회 노출 (cooldown / count 값은 §5-5 사용자 결정 후 확정). entry-flow-browse-first.md §3 F3 / §5-1 |
 | 추천 페르소나 | RecommendationPersona | `recommendation` | 제품 북극성 페르소나 식별자 — 추천 의도별 사용자 군. 기존 3종(`P-A` 연습형 / `P-B` 부른곡 기반 / `P-C` 즉석 분위기·나이대)은 모두 *개인·실용* 축. 사회적·감정 축 4종 추가(#1591, 채택 2026-06-03): `P-D` 모임 사회자형(여럿 위한 선곡 대행·분위기 흐름) / `P-E` 안전곡형('안 망하는' 무사 통과, P-A 의도 반대) / `P-F` 과시·킬링파트형(고음 도전·임팩트) / `P-G` 듀엣·함께 부르기형. 영속 엔티티 아님 — 추천 의도·랭킹 가중 프리셋의 분류 라벨. 정의 SoT = `docs/roadmap/overnight-2026-06-02.md`(P-A~C) + persona-expansion-social-emotional.md §2(P-D~G). 추천 신호(`ScoreBreakdown`)·`TrendingSong`·`SongAnalysisProfile` 재사용 매핑은 persona-expansion-social-emotional.md §5 |
 | 음역 분류 | VocalRegister | `voice` | **설계 단계** 음역대(low/high MIDI)를 절대 음역 밴드로 분류한 라벨. 비전문 사용자 친화 — 1차는 정식 성악 명칭(테너/소프라노 등) 대신 일상어 밴드(낮은/중간/높은/넓은 음역). 영속 엔티티 아님(`VoiceRange` 파생). 추천 결정성 무영향. voice-range-intuitive-display.md §5-1 |
 | 음역 벤치마크 | VoiceRangeBenchmark | `voice` | **설계 단계** 상대 음역 설명·시각화 비교 기준이 되는 평균 음역 reference. 성별 중립 기본(일반 성인 A2~C4 시드) + 선택적 성별 분기(성별 신호 확보 시 — 현재 미수집). 시드값, 검증·튜닝 대상. voice-range-intuitive-display.md §5-1 |
 | 상대 음역 설명 | RelativeRangeDescriptor | `voice` | **설계 단계** 사용자 음역대를 `VoiceRangeBenchmark` 와 비교해 생성하는 짧은 한국어 설명("고음이 평균보다 약간 높아요"). 고음/저음/음역폭 3축 차이를 버킷(≤2 비슷 / 3~5 약간 / ≥6 훨씬)으로 환산. 1차 FE 파생, BE enrichment 는 재사용 수요 확정 시 후속. voice-range-intuitive-display.md §5-1 |
+| 음역 미입력 추천 피드 | VoiceRangeOptionalFeed | `recommendation` | **설계 단계** 음역대 미입력 사용자에게 음역 측정 전 노출하는 fallback 추천 표면. 본 추천(`POST /recommendations`, voiceRange `@NotNull`)·점수식·결정성을 건드리지 않고 기존 트렌딩(`GET /recommendations/trending`, 음역 옵션)·분위기 필터·곡 카탈로그 큐레이션을 graceful chain 으로 묶은 read-model. 신규 엔티티·마이그레이션 없음. 측정 완료 시 기존 개인화 경로로 전환. voice-range-optional-recommendation-entry.md §5-1 |
+| 음역 입력 유도 | VoiceRangeNudge | `recommendation` (web) | **설계 단계** `VoiceRangeOptionalFeed` 위에서 "더 정확한 맞춤 추천을 원하면 음역대를 알려 주세요" 로 음역 측정을 비강제·점진적으로 유도하는 클라이언트 UX 트리거. 피드를 막지 않음(opt-in) + dismiss/세션 노출 빈도 가드. 측정 완료 시 본 추천(`POST /recommendations`) 개인화 경로로 전환. 신규 BE 엔티티 없음(클라이언트 상태). voice-range-optional-recommendation-entry.md §5-6 |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 도메인 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -100,6 +106,8 @@
 | 사이클 launch thread id | CycleLaunchThreadId | sub-agent launch 시 `tools/agent-launch-wrapper.sh` 가 cycle forum 채널 (be/fe/rev/plan) 에 신설 또는 재사용하는 thread 의 Discord snowflake (18-20자리 정수 문자열). sub-agent 의 모든 진행 / 결과 push 의 단일 대상 (별 thread 생성 금지 — `actors/sub-agent.md §1-11` STRICT). 출처: cycle-forum-operation.md §5-3·§5-4 |
 | launch thread 캐시 파일 | LaunchThreadCacheFile | wrapper ↔ nmae ↔ sub-agent 간 `CycleLaunchThreadId` 인계 채널. 파일 경로 = `~/.mobruji/last-launch-thread.txt`. wrapper 가 atomic write, sub-agent (`--auto-thread`) 가 read. 출처: cycle-forum-placeholder-guard.md (PR #1306) |
 | placeholder thread id | PlaceholderThreadId | 정상 snowflake 가 아닌 임시값 (예: `99999`). 주로 테스트 fixture 가 fake curl mock 으로 박은 값이 production 파일에 오염되어 발생. `validate_snowflake` reject 대상 — `LaunchThreadCacheFile` 에 진입 시 sub-agent push 사일런스 사고 (4 갈래 가드 spec: cycle-forum-placeholder-guard.md F-1~F-6). 출처: PR #1306 |
+| rev 사이클 thread | RevCycleThread | rev **사이클** 1회 (rev sub-agent launch ~ 완료) 를 추적하는 cycle forum thread. `CycleLaunchThreadId` 의 rev 채널 (`REV_FORUM_ID`) 특수형 — 한 사이클 동안 여러 PR 을 검토 보고할 수 있다. 태그 = 사이클 진행 상태 (`대기`/`진행`/`완료`/`차단`, `14-discord-ops.md §8-3`). **`PrReviewThread` (PR 단위) 와 추적 단위가 다른 별도 채널** — 통합 금지 (`14-discord-ops.md §8-9` 역할 구분). 출처: `14-discord-ops.md §8-1·§8-9` |
+| PR 리뷰 thread | PrReviewThread | **개별 PR** 1건 (1 PR = 1 thread) 을 추적하는 pr-review forum (`PR_REVIEW_FORUM_ID`) thread. actor 의 `gh pr create` 호출 시 PostToolUse hook 이 자동 신설. PR 의 전 생애 (open → merge 후 사후 QA 까지) 를 단계 전이로 통합 — 태그 = `🟡 1차 review` (머지 전) → `🔵 사후 E2E QA` (머지 후). `RevCycleThread` (사이클 단위) 와 다른 채널 / 다른 용도 (`14-discord-ops.md §8-9`). cross-ref 만, 코드 결합 X. 출처: `pr-webhook-rev-forum.md §3-1·§5-5` + `14-discord-ops.md §8-9` |
 | PR 격리 dev URL | DevPrIsolatedUrl (`dev_pr_isolated_url`) | PR 브랜치별 격리된 dev 환경 URL (ngrok / fly.io PR app / Vercel preview / 사내 reverse proxy path-based). 단일 NCP dev 서버 (`http://101.79.20.94/`) 에 develop tip 자동 deploy 하는 현 구조의 동시 deploy race 사고를 해소하기 위한 후보 인프라. 후보 spec `dev-pr-branch-deploy-isolation` (rev-direct-qa-extension.md §3 후보 A 단계 1 PR branch deploy 인프라 분리 후보). 격리 URL = rev 단계 1 e2e (PR 머지 전) 의 외부 검증 entrypoint. 출처: `docs/features/rev-direct-qa-extension.md §3 후보 A` + §8 Q2 |
 | visual baseline | VisualBaseline | Playwright screenshot 의 reference 이미지 (`.png`). 페이지 × viewport × colorScheme (light/dark) 조합당 1 파일. CI 가 PR push 시 현재 화면을 캡처해 본 baseline 과 pixelmatch — diff > threshold (proposed 0.1%) 시 fail. 저장 매체 1차 도입 = git 직접 commit (누적 100 MB 도달 시 별 마이그레이션 ADR 트리거 LFS 전환). 갱신은 `npx playwright test --update-snapshots` 명시 PR 만 + PR body `## visual baseline update` 섹션 의무 (ADR-0026 §Decision 2 후보 a). 출처: `docs/features/visual-regression-ci.md §3-2` + ADR-0026 |
 | baseline drift | BaselineDrift | `VisualBaseline` 의 의도된 또는 비의도된 변경. 의도된 drift (ADR-0018 swap / spec 화면 변경) 는 fe sub-agent 가 PR body `## visual baseline update` 섹션에 N 페이지 / 사유 명시 + baseline 갱신 commit. 비의도된 drift (회귀) 는 PR body 섹션 부재 + CI diff > 0.1% — rev sub-agent 가 `rev단계1: 🔴 시각 회귀 의심` 코멘트 + `reviewed:claude` 라벨 부착 차단. rev 자율 판단 표: `visual-regression-ci.md §3-4` SoT. 출처: `docs/features/visual-regression-ci.md §3-3·§3-4` + ADR-0026 §Decision 후보 (a) |
@@ -122,6 +130,13 @@
 | template validation 모듈 | ForumTemplateValidator | `tools/discord-daemon/lib/forum_template_validator.py` 모듈. regex / marker count / pass-fail 판단 SoT. bot.py `_forum_edit_starter` + 단위 테스트 / 향후 nmae digest hook 공유. marker 집합 변경 시 모든 consumer 영향 분석 의무. 출처: `docs/features/forum-starter-template-guard.md §5-2·§5-8` |
 | 합성 directive | SyntheticDirective | nmae 자율 흐름이 자동 생성하는 directive — id prefix `rev-pr-<N>` (sub-agent 완료 후 그 branch 의 열린 PR 을 rev 큐에 자동 적재, `tools_queue.enqueue_rev_for_pr_if_any`) / `pr-review-<N>` (pr-review forum 가시화용 `register_directive_pending(kind=pr_review)`). 사용자 채택 directive 와 달리 `thread_id=None` 으로 박히고 (대화 thread 부재) **자연 보고 채널 = 대상 PR**. work-queue 적재 시 cycle forum thread 는 best-effort 신설 — 신설 실패 시 `ThreadlessReportFallback` 진입. 출처: `docs/features/cycle-thread-launch-race-fix.md §1·§5-1` |
 | threadless 보고 fallback | ThreadlessReportFallback | `SyntheticDirective` 가 cycle forum thread 도 dialogue thread 도 못 가진 상태(thread 신설 race / env 부재)에서, `launch_subagent` 가 pending thread 부재 ValueError 로 launch 를 막지 않고 **빈 pending thread 로 launch 진행 → sub-agent 가 대상 PR 코멘트(rev-gate 문자열 포함)로 보고**하는 경로. 사용자 채택(실) directive 는 본 fallback 대상 아님 — pending thread 누락 ValueError 가드(legacy 사고 fix) 유지. 출처: `docs/features/cycle-thread-launch-race-fix.md §5-2·§5-4` |
+| 외부 API 약관 리스크 매트릭스 | ExternalApiTermsRiskMatrix | 외부 음원·차트·영상 API (멜론 / 지니 / 카카오뮤직 / 벅스 / YouTube Data / MusicBrainz / Cover Art Archive / iTunes Search / TJ / 금영) 의 약관·라이선스 리스크 1차 desk research 표. 행 = API / 출처, 열 = 사용 후보 데이터 / 약관 URL / 리스크 신호 / 권고 조치. **DB 제작자 권리 (저작권법 제93조) + 약관 위반 + 부정경쟁방지법 (데이터부정사용)** 3 축 리스크 식별. 변호사 자문 대체 X — 정식 launch 전 외부 변호사 검토 + 사업자 공식 contact 회신 박제 의무. 출처: `docs/features/license-privacy-risk-audit.md §2` |
+| 사용자 데이터 개인정보 매트릭스 | UserDataPrivacyMatrix | 본 서비스가 현재 spec / 코드 라인 (v0.2-v0.4) 에서 수집 가능성이 박혀 있는 사용자 데이터 항목 전수 정리표. 행 = 데이터 항목 (음역대 / 음역 스냅샷 / 마이크 audio / Like / Bookmark / 추천 history / sessionId / IP / email / OAuth / 성별 / 연령대 / PersonaEntryPath / SwipeReaction / LearnedPreferenceProfile), 열 = 수집 위치 / 식별성 / 보유 기간 / 제 3자 제공 / 개인정보보호법 분류. 비식별 단독 항목도 sessionId / IP 등과 결합 시 결합정보 회색지대 — `CombinedIdentifiabilityRisk` cross-ref. 출처: `docs/features/license-privacy-risk-audit.md §3` |
+| 결합 식별성 리스크 | CombinedIdentifiabilityRisk | 비식별 단독 항목 (예: sessionId / 음역대 / 추천 history) 이 누적·결합 시 재식별 가능성이 발생하는 회색지대. 본 spec 박제 조합 = (sessionId+IP+access log) / (sessionId+음역대+추천 history) / (sessionId+UserId v0.4 머지) / (마이크 audio+메타). 완화 권고 = TTL 단축 / IP 마스킹 / 음성 서버 미전송 / 머지 동의 명시. 본 매트릭스가 ADR-0031 (제안) 데이터 최소화 정책의 입력. 출처: `docs/features/license-privacy-risk-audit.md §3-1` |
+| 개인정보보호법 의무 매트릭스 | PrivacyLawObligationMatrix | 본 서비스에 적용되는 개인정보보호법 의무 항목 1차 정리 — 동의 분리 7 종 (제15-18조), 14세 미만 보호자 동의 (제22조의2), 안전성 확보 조치 (제29조 + 시행령 제30조), 정보주체 권리 (제35-37조), 처리방침 공개 의무 (제30조), CPO 지정 (제31조). 본 매트릭스가 `docs/legal/privacy-policy-draft.md` 의 v1 골격 + 정식화 시 변호사 검토 entry point. 출처: `docs/features/license-privacy-risk-audit.md §5` |
+| 저작권법 리스크 매트릭스 | CopyrightLawRiskMatrix | 본 서비스 처리 데이터에 대한 저작권법 적용 분류 — 곡 메타 (사실 정보 추정, DB 제작자 권리 별도 발생) / 가사 (강력 보호, 미수록 의무) / 음원 (강력 보호, 미수록 의무) / 앨범 커버 (출처별 라이선스 — ADR-0029 정렬) / 노래방 곡 번호 (사실 정보 추정, list 복제 시 DB 권리 risk). DB 제작자 권리 (저작권법 제93조) 회피 권고 = UGC 우선 / CC0 출처 (MusicBrainz) 보조. 출처: `docs/features/license-privacy-risk-audit.md §4` |
+| 법무 리뷰 게이트 | LegalReviewGate | 정식 launch (v1.0 / 회원 모집 / 광고 / 매출 발생) **이전** 충족해야 하는 3 조건 = (1) 외부 변호사 검토 / (2) 외부 API 사업자 공식 contact 회신 박제 / (3) 약관·개인정보처리방침 정식 게시. 미충족 시 launch 보류 의무 (제안 — ADR-0032 안). plan sub-agent 의 1차 desk research (본 spec) 가 자체 법적 결론을 대체하지 않음을 명문화. 출처: `docs/features/license-privacy-risk-audit.md §7 (ADR-0032 후보) + §1 "정식 launch 전 의무"` |
+| 곡 메타 source 전략 | SongMetadataSourceStrategy | 곡 카탈로그 source 의 법적 risk 회피 결정 — (A) 사용자 직접 입력 (UGC) 우선 / (B) CC0 출처 (MusicBrainz) 보조 / (C) 공식 API contact 회신 받은 사업자만 추가, **scraping 영구 금지**. ADR-0030 (제안) SoT 후보. `SongCandidatePool` 의 확장 정책 정렬. 출처: `docs/features/license-privacy-risk-audit.md §7 (ADR-0030 후보)` |
 
 > 코드/PR/문서에서 위 한국어 ↔ 영어 매핑을 일관 사용. 신규 운영 용어는 이 표에 먼저 추가한 뒤 코드에 도입.
 
@@ -180,17 +195,21 @@
 | `genre` | String(32) | nullable | |
 | `tjNumber` | String(16) | nullable | TJ 노래방 번호 |
 | `kyNumber` | String(16) | nullable | 금영 노래방 번호 |
-| `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED |
+| `metadataSource` | enum `MetadataSource` | not null | MANUAL_SEED/EXTERNAL_API/USER_CONTRIBUTION/INFERRED. MusicBrainz 매칭 채택 시 `EXTERNAL_API` 로 갱신 |
+| `mbId` | String(36) | nullable, UNIQUE | MusicBrainz Recording UUID. `MusicBrainzBackfillCommand` 매칭 결과 캐싱. null=미매칭. 같은 mbid 2곡 매칭 방지 UNIQUE(NULL 다중 허용). 음역대/key/tempo 미보강이라 추천 결정성 무영향. V13 마이그레이션(`V13__song_musicbrainz_id.sql`). #267/#268 / musicbrainz-integration.md |
 | `lowMidi` | Integer | nullable | 곡 보컬 멜로디 최저음 (MIDI). 시드부터 적재. PR #96 |
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
 | `energy` | Float | nullable, 0.0~1.0 | 곡 음향 에너지/강렬함. 1차 수기/시드 적재, 자동 산출 후속(§8 Q2). 추천 점수 입력 아님 — null 곡은 소비자 graceful degrade. song-analysis-data-and-consumers.md §5-1, #1490 |
+| `albumCoverUrl` | String(512) | nullable | 곡 카드/모달 표시용 외부 앨범 커버 URL. iTunes(1차)→Cover Art Archive(폴백) backfill 결과를 캐싱(이미지 미저장, URL 만). 비-조회키라 인덱스 없음. 추천 결정성 무영향. V7 마이그레이션(`V7__song_album_cover_url.sql`). 이슈 #322 / ADR-0029 / album-cover-art.md |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
 - 도메인 메서드: `Song.builder()` static factory (필드 다수로 빌더 사용).
 - `Song.deriveDifficulty(int lowMidi, int highMidi)` static — fe `web/lib/difficulty.ts`와 1:1 룰 (HARD: high≥76 또는 span≥17, NORMAL: 71~75, EASY: <71).
 - 시드: `classpath:/songs-seed.json` 30곡, `SongSeedLoader`(`@Profile("!test")`)가 부팅 시 idempotent 적재. 시드 각 곡에 `lowMidi`/`highMidi`가 채워져 있어 적재 시 difficulty 자동 분류된다.
 - `SongRange`는 별 VO로 두지 않고 `Song` 엔티티의 `lowMidi`/`highMidi` 두 필드로 단순화 (spec Q3 보류 결정의 후속 진전).
+- `Song.backfillAlbumCoverUrl(url)` — 외부 backfill 결과 적용. **기존 `albumCoverUrl` 이 null 일 때 + 비-blank URL 일 때만** 채우고 변경 여부를 boolean 반환(큐레이터 수정값을 자동 backfill 이 덮어쓰는 사고 방지, no-overwrite 가드). 출처 chain(iTunes→CAA)·정기 배치·라이선스(이미지 미저장)는 album-cover-art.md §5 / ADR-0029 SoT.
+- `Song.backfillFromMusicBrainz(mbId, isrc, confidence)` — MusicBrainz 매칭 결과 적용. **기존 `mbId` 가 null 일 때만** 채우고(멱등·운영자값 보존, no-overwrite 가드) `isrc` 는 비어 있을 때만 채운다. 채택 시 `metadataConfidence`=score/100, `metadataSource`=`EXTERNAL_API` 로 갱신. 음역대/key/tempo 는 손대지 않아 추천 결정성 무영향. #267/#268 / musicbrainz-integration.md §5-4 SoT.
 
 ### 5-3) `RecommendationRequestEntity`, `Recommendation` (PR #19, recommendation-algorithm-v1.md)
 
@@ -238,6 +257,24 @@
 - 도메인 메서드: `static create(sessionId, songId)`. toggle 로직은 `LikeService`/`BookmarkService`에 위치.
 - **v0.2 비영향 약속**: 추천 알고리즘 입력에 포함되지 않는다 (`RecommendationService` 어떤 코드도 `LikeRepository`/`BookmarkRepository`를 의존하지 않음).
 - **조회 응답 형태** (PR F, #256): `GET /api/v1/sessions/{id}/likes`, `/bookmarks` 는 곡 메타데이터 join + offset 페이지네이션 + `SessionAuthGuard` 적용. application 레이어가 `SongRepository.findAllById(songIds)` batch lookup 으로 N+1 회피, 컨트롤러는 `LikeWithSongResponse(id, song, likedAt)` / `BookmarkWithSongResponse` 로 합쳐 `LikeListResponse(responses, page, size, totalCount, hasNext)` wrapper 로 응답 (Spring Data `Page<>` 직접 노출은 직렬화 안정성 위해 피함). 곡이 삭제된 orphan songId 는 응답에서 제외하되 `totalCount` 는 count 기준이라 차이날 수 있다.
+
+### 5-4-1) `SessionFeedback` (#1545, recommendation-feedback-loop.md PR B)
+
+`recommendation` BC. 스와이프 세션 반응 1건. `feedback` BC 의 `Like`/`Bookmark`(toggle, 추천 비영향)와 달리 **추천 결합 신호로 환류**된다 — `LIKE` 는 부른곡 시드와 함께 선호 집합, `PASS` 는 회피/제외 집합. Song aggregate 참조는 ID-only(ADR-0005 §A-7).
+
+| 필드 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | Long | PK, autoIncrement | |
+| `sessionId` | String(64) | not null, UK(`session_id, song_id`) | 익명 사용자 식별자 |
+| `songId` | Long | not null, UK | FK 없음(application 레벨) |
+| `reaction` | enum `FeedbackReaction` | not null, `STRING`(8) | `LIKE` / `PASS` |
+| `createdAt` | LocalDateTime | not null | 최신 반응 시각(재스와이프 시 갱신) |
+
+- 테이블명: `session_feedback`. 인덱스 `(session_id, created_at)` — 세션별 최신순 조회 + 결합 신호 도출용.
+- **upsert**(toggle 아님): 같은 `(sessionId, songId)` 재스와이프 시 `reaction`/`createdAt` 을 덮어쓴다(현재 상태 설정 의미). 도메인 메서드: `static create(sessionId, songId, reaction)`, `overwriteReaction(reaction)`.
+- **결합 약속**: `RecommendationService.createFromSeeds` 가 `useSessionFeedback`(기본 true) 시 `SessionFeedbackRepository` 로 세션 `LIKE` 곡을 시드에, `PASS` 곡을 제외에 합친다. 반응 0건이면 기여 0(콜드스타트 하위호환).
+- **조회**: `GET /api/v1/sessions/{id}/feedback` — `SessionAuthGuard` + offset 페이지네이션. `SessionFeedbackResponse(id, songId, reaction, reactedAt)` → `SessionFeedbackListResponse(responses, page, size, totalCount, hasNext)` wrapper.
+- ADR-0013 cascade-delete 대상(sessionId revoke 시 함께 삭제).
 
 ### 5-5) `VoiceRangeSnapshot` (PR #231, voice-range-progress.md PR A)
 
@@ -341,10 +378,12 @@ erDiagram
         varchar tj_number
         varchar ky_number
         varchar metadata_source
+        varchar mb_id
         int low_midi
         int high_midi
         varchar difficulty
         decimal energy
+        varchar album_cover_url
         datetime created_at
         datetime updated_at
     }
@@ -384,6 +423,14 @@ erDiagram
         bigint id PK
         varchar session_id UK
         bigint song_id UK
+        datetime created_at
+    }
+
+    SESSION_FEEDBACK {
+        bigint id PK
+        varchar session_id UK
+        bigint song_id UK
+        varchar reaction
         datetime created_at
     }
 
@@ -431,11 +478,13 @@ erDiagram
     VOICE_RANGE }o..|| RECOMMENDATION_REQUEST : "sessionId로 join (FK 없음)"
     SONG ||--o{ LIKE_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
     SONG ||--o{ BOOKMARK_FEEDBACK : "song_id (FK 없음, ID-only 참조)"
+    SONG ||--o{ SESSION_FEEDBACK : "song_id (FK 없음, 추천 결합 신호)"
     VOICE_RANGE ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId로 join (FK 없음, insert-only 시계열)"
     ANONYMOUS_SESSION ||--o{ VOICE_RANGE : "sessionId 라이프사이클 owner (FK 없음, cascade-delete app 레벨)"
     ANONYMOUS_SESSION ||--o{ VOICE_RANGE_SNAPSHOT : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ LIKE_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ BOOKMARK_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
+    ANONYMOUS_SESSION ||--o{ SESSION_FEEDBACK : "sessionId 라이프사이클 owner (FK 없음)"
     ANONYMOUS_SESSION ||--o{ RECOMMENDATION_REQUEST : "sessionId 라이프사이클 owner (FK 없음)"
     USER ||--o{ USER_AUTH_TOKEN : "#1491 — Bearer 토큰 발급 owner (user_id, FK 없음)"
     USER ||--o{ VOICE_RANGE : "v0.4 draft — 머지 후 user owner (sessionId→userId 치환)"
@@ -445,8 +494,8 @@ erDiagram
     USER ||--o{ RECOMMENDATION : "v0.4 draft — 머지 후 user owner"
 ```
 
-- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession`, `User`, `UserAuthToken` — 10개 엔티티.
-- `User`/`UserAuthToken` 은 #1491 PR1 구현 — 이메일(LOCAL) 가입/로그인 + 음역대/성별 프로필 영속 + Bearer 토큰. 소셜(KAKAO/GOOGLE) 인증 흐름, 장르/분위기 선호 영속(`UserProfile`), 익명→계정 머지(sessionId → userId owner 치환)는 후속 PR. 머지 정책 SoT = `anonymous-to-account-conversion.md`.
+- 현재 구현: `VoiceRange`, `VoiceRangeSnapshot`, `Song`, `RecommendationRequest`, `Recommendation`, `Like`, `Bookmark`, `AnonymousSession`, `SessionFeedback`, `User`, `UserAuthToken` — 11개 엔티티.
+- `User`/`UserAuthToken` 은 #1491 PR1 구현 — 이메일(LOCAL) 가입/로그인 + 음역대/성별 프로필 영속 + Bearer 토큰. 소셜(KAKAO/GOOGLE) 인증 흐름, 장르/분위기 선호 영속(`UserProfile`), 익명→계정 머지(sessionId → userId owner 치환)는 후속 PR. 인증 메커니즘 SoT = `user-authentication-and-profile.md`, 머지 정책 SoT = `anonymous-to-account-conversion.md`.
 - 익명 세션 모델에서 sessionId가 사실상의 user 식별자. FK 제약 없이 application 레벨에서만 join. `AnonymousSession` 이 sessionId 라이프사이클(TTL 만료 / 회전 / 머지) 의 단일 owner — cascade-delete 는 `AnonymousSessionTtlCleanup` / `SessionRotationService` 가 application 레벨에서 명시적 DELETE.
 
 ## 7) 오픈 이슈

@@ -12,7 +12,7 @@
  *   - 가창 난이도 라벨 (`difficulty.ts` 재사용, BE 필드 우선 → 없으면 lowMidi/highMidi 기반)
  *   - 최고음/최저음 음표명 (notes.ts MIDI → 음표 변환)
  *   - 키, 장르 칩, mood
- *   - 발매 연도, 언어, BPM, ISRC/TJ/KY 번호, 메타데이터 출처
+ *   - 발매 연도, 언어(한국어 라벨), BPM, TJ/KY 번호 (내부 출처 코드는 노이즈라 비노출, #1715)
  *
  * 데이터 로딩:
  *   - `readSongById(id)` (GET /api/v1/songs/{id})를 React Query로 호출.
@@ -41,9 +41,11 @@ import {
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
+import { formatLanguageLabel } from "@/lib/songMeta";
 import { useLikesStore } from "@/store/likes";
+import { AlbumCover } from "@/app/recommend/components/SongDetailContent";
 
 export default function SongDetailPage() {
   const params = useParams<{ id: string }>();
@@ -117,13 +119,15 @@ function SongDetailView({ song }: SongDetailViewProps) {
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
     typeof song.highMidi === "number"
-      ? midiToCombinedNoteName(song.highMidi)
+      ? midiToKoreanNoteName(song.highMidi)
       : null;
   const lowestNoteName =
     typeof song.lowMidi === "number"
-      ? midiToCombinedNoteName(song.lowMidi)
+      ? midiToKoreanNoteName(song.lowMidi)
       : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
+  const languageLabel = formatLanguageLabel(song.language);
   // closes #1284 — 한국 곡 한국어 표시 우선 (heading + 좋아요 aria-label 동일 표시).
   const displayTitle = formatSongDisplayTitle(song);
 
@@ -139,8 +143,13 @@ function SongDetailView({ song }: SongDetailViewProps) {
       </nav>
 
       <header className="flex flex-col gap-2">
+        {/* closes #1666 — 단건 상세 페이지에도 앨범 커버 노출. 모달과 동일한 large 커버 +
+            placeholder/onError fallback 을 SongDetailContent 에서 재사용한다.
+            closes #1687 (PR7) — 카드 thumbnail 과 같은 view-transition-name 을 줘서
+            /history → /songs/[id] 라우트 전환 시 hero morph 한다. */}
+        <AlbumCover song={song} viewTransitionName={`album-${song.id}`} />
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-          Song detail
+          곡 상세
         </p>
         <h1 className="text-3xl font-semibold text-[var(--text-primary)]">
           {displayTitle}
@@ -204,12 +213,14 @@ function SongDetailView({ song }: SongDetailViewProps) {
           메타 정보
         </h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+          {/* closes #1715 — 내부 출처(metadataSource) 노이즈 제거 + 언어 한국어 라벨(매핑 불가 시 셀 생략). */}
           <MetaCell label="발매 연도" value={song.releaseYear ?? null} />
           <MetaCell label="BPM" value={song.bpm ?? null} />
-          <MetaCell label="언어" value={song.language ?? null} />
+          {languageLabel ? (
+            <MetaCell label="언어" value={languageLabel} />
+          ) : null}
           <MetaCell label="TJ 번호" value={song.tjNumber ?? null} />
           <MetaCell label="KY 번호" value={song.kyNumber ?? null} />
-          <MetaCell label="출처" value={song.metadataSource} />
         </dl>
       </section>
 
@@ -414,16 +425,16 @@ function resolveDifficulty(song: SongResponse): Difficulty | null {
 }
 
 /**
- * SongCard와 동일한 키 표기: `C_SHARP_MAJOR` → `C# Major`, `UNKNOWN` → `Unknown`.
+ * SongCard와 동일한 키 표기: `C_SHARP_MAJOR` → `C# 장조`, `UNKNOWN` → `정보 없음`
+ * (closes #1719 — 영어 음악 용어 대신 평이한 한글 표기).
  */
 function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
 }

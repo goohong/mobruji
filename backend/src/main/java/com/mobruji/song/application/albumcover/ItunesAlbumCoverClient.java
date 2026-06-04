@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  * iTunes Search API ({@code https://itunes.apple.com/search}) 어댑터 — 이슈 #322 PR B.
  *
  * <p>요청: {@code GET {baseUrl}?term={title}+{artist}&entity=song&country={country}&limit=1}.
+ * {@code term} 은 {@link AlbumCoverSearchTerms#normalize(String)} 로 괄호/{@code feat.} 노이즈를 제거한 뒤 결합한다.
  * 응답: {@code {"resultCount": N, "results": [{ "artworkUrl100": "...100x100bb.jpg" }, ...]}}.
  *
  * <p>응답의 {@code artworkUrl100} 의 `100x100` 부분을 properties 의 thumbResolution (기본 `600x600`)
@@ -118,8 +119,10 @@ public class ItunesAlbumCoverClient implements AlbumCoverLookupClient {
     }
 
     private URI buildSearchUri(final String title, final String artist) {
+        final String term = AlbumCoverSearchTerms.normalize(title)
+                + " " + AlbumCoverSearchTerms.normalize(artist);
         return UriComponentsBuilder.fromUriString(properties.baseUrl())
-                .queryParam("term", title + " " + artist)
+                .queryParam("term", term)
                 .queryParam("entity", "song")
                 .queryParam("country", properties.country())
                 .queryParam("limit", 1)

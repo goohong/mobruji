@@ -26,12 +26,11 @@
  *   - 가창 난이도 라벨 (EASY/NORMAL/HARD)
  *     · `song.difficulty`가 있으면 그 값을, 없으면 `deriveDifficulty(lowMidi, highMidi)`로 계산.
  *     · 둘 다 없으면(legacy 응답) 라벨을 숨긴다.
- *   - 최고음 음표명 (예: "라♯5 (F#5)") — `midiToCombinedNoteName(highMidi)` (#318)
+ *   - 최고음 음표명 (예: "라♯5") — `midiToKoreanNoteName(highMidi)` (#318)
  *   - 최저음 음표명 (작게, 부가)
  *   - 장르 칩 (있으면)
  *   - matchReason 한 줄 — 추천 컨텍스트에서만
- *   - 키(키 원본) 라벨
- *   - score — 추천 컨텍스트에서만
+ *   - 키 라벨 (한글 장조/단조)
  *   - 좋아요/북마크 액션
  *
  * 호버/포커스 상태는 ring/shadow 변화로 표현. 모바일 우선.
@@ -43,31 +42,36 @@ import Link from "next/link";
 import {
   useId,
   useState,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode,
 } from "react";
 
 import type {
+  RecommendationPersona,
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
+import { resolvePersonaReason } from "@/lib/persona";
 import {
-  deriveDifficulty,
   difficultyLabel,
+  resolveSongDifficulty,
   type Difficulty,
 } from "@/lib/difficulty";
 import {
   useBookmarkToggleMutation,
   useLikeToggleMutation,
 } from "@/lib/hooks/useFeedbackToggleMutation";
-import { midiToCombinedNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { Chip } from "@/components/ui";
+import { Chip, HeartPop } from "@/components/ui";
+
+import { toFitDisplay, type FitLevel } from "@/lib/recommendationFit";
 
 import { FitBadge, FitReasons } from "./FitBadge";
 import { AlbumCoverThumbnail } from "./SongDetailContent";
@@ -94,6 +98,11 @@ import { AlbumCoverThumbnail } from "./SongDetailContent";
  * 두 경로를 모두 노출하고 싶을 때를 위해 빌드 에러는 띄우지 않는다 — 단, 카드 본문
  * 클릭은 모달로 흘러간다.
  */
+/**
+ * `index`는 리스트 내 카드 위치(0,1,2…)로, stagger 진입 애니메이션의 delay 계산에만
+ * 쓰인다 — `--card-index` 인라인 변수로 흘려 `animate-card-enter` 가 50ms 씩 늦춘다.
+ * 미지정이면 0(즉시 진입). 단일 카드 렌더에서는 생략해도 무방하다.
+ */
 type SongCardProps =
   | {
       item: RecommendedSongResponse;
@@ -101,6 +110,13 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: UserVoiceRange | null;
       onShowDetail?: () => void;
+      index?: number;
+      /**
+       * 사용자가 추천 화면에서 고른 의도 페르소나(P-E 안전곡 등). BE 응답에 아직
+       * `persona`/`personaReason` 이 없을 때 결과 카드의 페르소나 사유 fallback 근거가
+       * 된다(lib/persona.resolvePersonaReason). 미지정이면 페르소나 사유 줄을 생략한다.
+       */
+      activePersona?: RecommendationPersona | null;
     }
   | {
       song: SongResponse;
@@ -108,6 +124,14 @@ type SongCardProps =
       href?: string;
       userVoiceRange?: never;
       onShowDetail?: () => void;
+      index?: number;
+      activePersona?: never;
+      /**
+       * 검색 카드(/songs)에서 BE 추천 컨텍스트 없이도 "내 음역 적합" 배지를 그리기 위한
+       * client 산출 적합도(0~1). 호출 측이 세션 음역대 + 곡 음역으로 계산해 넘긴다
+       * (#1721). 세션 음역대가 없거나 곡 음역 미보유면 미지정 → 배지 생략.
+       */
+      voiceFit?: number;
     };
 
 export function SongCard(props: SongCardProps) {
@@ -117,10 +141,50 @@ export function SongCard(props: SongCardProps) {
   const href: string | undefined = props.href;
   const userVoiceRange: UserVoiceRange | null =
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
+  const activePersona: RecommendationPersona | null =
+    "item" in props && props.activePersona ? props.activePersona : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
+  const index: number = typeof props.index === "number" ? props.index : 0;
+  // closes #1484 / #1721 — "내 음역 적합" 적합도. 추천 컨텍스트는 BE voiceFit, 검색
+  // 컨텍스트(/songs)는 호출 측이 세션 음역대로 산출해 넘긴 voiceFit 을 쓴다. 둘 다 없으면
+  // null → 배지/사유 생략.
+  const searchVoiceFit: number | null =
+    "voiceFit" in props && typeof props.voiceFit === "number"
+      ? props.voiceFit
+      : null;
+  const voiceFit: number | null =
+    item && typeof item.voiceFit === "number" ? item.voiceFit : searchVoiceFit;
+  // closes #1721 — 좌측 보더에 의미 부여. 적합도를 알면 레벨(high/mid/low)로 매핑하고,
+  // 모르면 종전 곡별 hue(#1683) fallback. CSS 가 data-fit 를 받아 보더 색을 바꾼다.
+  const voiceFitLevel: FitLevel | null =
+    voiceFit !== null ? toFitDisplay(voiceFit).level : null;
+  // closes #1683 — stagger 진입 delay(--card-index) + 곡별 deterministic accent hue(--song-hue).
+  const cardStyle = {
+    "--card-index": index,
+    "--song-hue": getSongHue(song.id),
+  } as CSSProperties;
+  // 좌측 4px accent stripe. rounded-l 로 카드 모서리를 따라가 overflow-hidden 없이도
+  // 둥근 코너 밖으로 삐져나오지 않는다(내부 포커스 ring clip 회피).
+  // data-fit 가 있으면 적합도 레벨 색(green=부를 수 있음 / amber / neutral), 없으면 hue.
+  const accentStripe: ReactNode = (
+    <span
+      aria-hidden="true"
+      data-fit={voiceFitLevel ?? undefined}
+      className="song-accent-stripe pointer-events-none absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)]"
+    />
+  );
+  // closes #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트")를 카드 표면에 노출.
+  // BE personaReason 우선, 없으면 활성 페르소나 + 곡 난이도 기반 client fallback.
+  const personaReason = item ? resolvePersonaReason(item, activePersona) : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
+  // closes #1687 (PR7) — hero morph. 카드가 실제로 /songs/[id] 로 라우트 이동하는
+  // href 모드에서만 thumbnail 에 view-transition-name 을 부여해 상세 페이지의 큰
+  // cover 와 morph 시킨다. 모달 모드(라우트 이동 없음)나 plain 모드에서는 부여하지
+  // 않는다 — 같은 곡 cover 가 두 곳에 같은 이름으로 동시에 존재하면 전환이 무시된다.
+  const albumViewTransitionName =
+    href && !isModalMode ? `album-${song.id}` : undefined;
   // closes #1284 — 한국 곡의 한국어 표시 우선 (lib/songTitle.formatSongDisplayTitle SoT).
   // 카드 표면 / aria-label / 자식 컴포넌트 prop 까지 동일한 표시명을 사용해 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -128,11 +192,11 @@ export function SongCard(props: SongCardProps) {
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
     typeof song.highMidi === "number"
-      ? midiToCombinedNoteName(song.highMidi)
+      ? midiToKoreanNoteName(song.highMidi)
       : null;
   const lowestNoteName =
     typeof song.lowMidi === "number"
-      ? midiToCombinedNoteName(song.lowMidi)
+      ? midiToKoreanNoteName(song.lowMidi)
       : null;
 
   const body: ReactNode = (
@@ -145,7 +209,10 @@ export function SongCard(props: SongCardProps) {
          * 유지.
          */}
         <div className="shrink-0">
-          <AlbumCoverThumbnail song={song} />
+          <AlbumCoverThumbnail
+            song={song}
+            viewTransitionName={albumViewTransitionName}
+          />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {item ? (
@@ -202,17 +269,18 @@ export function SongCard(props: SongCardProps) {
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {/*
            * closes #1484 — 음역 적합도 배지. BE 가 voiceFit 을 내려준 추천 컨텍스트에서만
-           * 노출하며, 카드 표면에서는 짧은 라벨("음역")로 폭을 아낀다. 모달 모드에서도
-           * 한눈에 보이는 핵심 신호라 그대로 유지한다.
+           * 노출한다. 라벨은 "내 음역 적합" — 곡 자체의 음역이 아니라 내 음역대와의
+           * 적합도임을 표면에서 분명히 한다 (V8, recommend-page-visual-ux-audit-1708).
            */}
-          {item && typeof item.voiceFit === "number" ? (
-            <FitBadge label="음역" fit={item.voiceFit} />
+          {voiceFit !== null ? (
+            <FitBadge label="내 음역 적합" fit={voiceFit} />
           ) : null}
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {/*
-           * matchReason / score 는 모달 모드에서는 카드 표면이 아닌 상세 모달에서
-           * 노출한다 (closes #323). 카드는 "한눈에 보이는 정보" 만 남기는 게 검수
-           * 피드백의 핵심.
+           * matchReason 은 모달 모드에서는 카드 표면이 아닌 상세 모달에서 노출한다
+           * (closes #323). 카드는 "한눈에 보이는 정보" 만 남긴다. score 원값은 일반
+           * 사용자에게 의미 불명이라 카드 표면에 노출하지 않는다 (closes #1719) —
+           * 적합도는 FitBadge("내 음역 적합")가 사용자 친화 표현으로 대신한다.
            */}
           {item && !isModalMode ? (
             <span className="truncate text-xs text-[var(--text-tertiary)]">
@@ -220,12 +288,34 @@ export function SongCard(props: SongCardProps) {
             </span>
           ) : null}
         </div>
-        {item && !isModalMode ? (
-          <span className="shrink-0 font-mono text-xs text-[var(--text-secondary)]">
-            score {item.score.toFixed(2)}
-          </span>
-        ) : null}
       </div>
+
+      {/*
+       * closes #1721 — 검색 카드 한 줄 적합 사유. 추천(item)은 matchReason/personaReason/
+       * FitReasons 가 사유를 담당하므로, 사유 줄은 BE 컨텍스트가 없는 검색 카드에서만
+       * client 적합도 레벨로 노출한다.
+       */}
+      {!item && voiceFitLevel ? (
+        <p className="text-xs text-[var(--text-secondary)]">
+          {voiceFitSearchReason(voiceFitLevel)}
+        </p>
+      ) : null}
+
+      {/*
+       * closes #1600 — 페르소나 사유("안심 포인트") 한 줄. P-E 안전곡 모드처럼 의도
+       * 페르소나가 활성일 때만 노출하며, 모달 모드에서도 한눈에 보이는 핵심 신호라
+       * 카드 표면에 유지한다. BE personaReason 미보유 시 곡 난이도 기반 fallback.
+       */}
+      {personaReason ? (
+        <div className="flex items-start gap-2 rounded-[var(--radius-md)] bg-[var(--badge-success-bg)] px-3 py-2">
+          <span className="shrink-0 text-xs font-semibold text-[var(--badge-success-fg)]">
+            {personaReason.label}
+          </span>
+          <span className="text-xs text-[var(--text-secondary)]">
+            {personaReason.text}
+          </span>
+        </div>
+      ) : null}
     </>
   );
 
@@ -257,13 +347,17 @@ export function SongCard(props: SongCardProps) {
   // footer(좋아요/북마크)는 본문 button 외부에 둬서 버튼 중첩(HTML 위반) 회피.
   if (isModalMode) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
+      <li
+        style={cardStyle}
+        className="group relative flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]"
+      >
+        {accentStripe}
         <button
           type="button"
           onClick={onShowDetail}
           aria-label={`${displayTitle} 상세 보기`}
           aria-haspopup="dialog"
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] text-left transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </button>
@@ -279,11 +373,15 @@ export function SongCard(props: SongCardProps) {
   // 그대로 곡 상세로 이동한다.
   if (href) {
     return (
-      <li className="group flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]">
+      <li
+        style={cardStyle}
+        className="group relative flex flex-col rounded-[var(--radius-lg)] bg-[var(--bg-base)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)]"
+      >
+        {accentStripe}
         <Link
           href={href}
           aria-label={`${displayTitle} 상세 보기`}
-          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+          className="flex flex-col gap-3 rounded-[var(--radius-lg)] p-[var(--card-padding)] transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
         >
           {body}
         </Link>
@@ -298,8 +396,10 @@ export function SongCard(props: SongCardProps) {
   return (
     <li
       tabIndex={0}
-      className="group flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition hover:ring-zinc-300 hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-zinc-400 focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)] dark:hover:ring-zinc-600 dark:focus-within:ring-[var(--cta-secondary-ring)]"
+      style={cardStyle}
+      className="group relative flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[var(--bg-base)] p-[var(--card-padding)] ring-1 ring-[var(--border)] transition animate-card-enter hover:ring-[var(--ring-soft-hover)] hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-[var(--ring-soft-focus-within)] focus:outline-none focus:ring-2 focus:ring-[var(--cta-secondary-ring)]"
     >
+      {accentStripe}
       {body}
       {breakdownPanel}
       {feedbackPanel}
@@ -333,35 +433,22 @@ type LikeButtonProps = {
 
 function LikeButton({ songId, songTitle }: LikeButtonProps) {
   // closes #846 — mutation 라이프사이클(낙관 토글 + BE 호출 + 응답 보정 + 롤백 + safeLog +
-  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화. 본 컴포넌트는 className/
-  // 라벨 등 표면 표현만 책임진다.
+  // 자동 dismiss 에러)을 `useLikeToggleMutation` 으로 캡슐화.
+  // closes #1685 — 표면 표현(heart pop + sparkle + 햅틱)은 `HeartPop` 으로 분리.
+  // 이벤트 격리(카드 Link/모달 trigger 비전파)도 HeartPop.handleClick 이 담당한다.
   const { liked, toggle, isPending, errorMessage } =
     useLikeToggleMutation(songId);
 
-  function handleClick(event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    toggle();
-  }
-
   return (
     <div className="flex flex-col gap-1">
-      <button
-        type="button"
-        onClick={handleClick}
+      <HeartPop
+        active={liked}
+        onToggle={toggle}
         disabled={isPending}
-        aria-pressed={liked}
-        aria-busy={isPending}
-        aria-label={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
-        className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
-          liked
-            ? "bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900"
-            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        }`}
-      >
-        <span aria-hidden="true">{liked ? "❤️" : "🤍"}</span>
-        <span>{liked ? "좋아요 취소" : "좋아요"}</span>
-      </button>
+        busy={isPending}
+        label={liked ? "좋아요 취소" : "좋아요"}
+        ariaLabel={liked ? `${songTitle} 좋아요 취소` : `${songTitle} 좋아요`}
+      />
       {errorMessage ? (
         <p
           role="alert"
@@ -411,7 +498,7 @@ function BookmarkButton({ songId, songTitle }: BookmarkButtonProps) {
         className={`inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] disabled:cursor-progress disabled:opacity-60 ${
           bookmarked
             ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:hover:bg-amber-900"
-            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            : "text-[var(--text-secondary)] hover:bg-[var(--cta-secondary-bg-hover)]"
         }`}
       >
         <span aria-hidden="true">🔖</span>
@@ -472,7 +559,7 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
         event.stopPropagation();
       }}
       aria-label={`${songTitle} YouTube에서 듣기 (새 탭)`}
-      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+      className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-full px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
     >
       <span aria-hidden="true">▶</span>
       <span>YouTube에서 듣기</span>
@@ -511,7 +598,7 @@ function MatchReasonExpander({
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="inline-flex min-h-11 items-center gap-1 self-start rounded-full px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+        className="inline-flex min-h-11 items-center gap-1 self-start rounded-full px-3 py-2 text-sm font-medium text-[var(--text-body-strong)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
       >
         <span>{expanded ? "접기" : "자세히 보기"}</span>
         <ChevronDownIcon expanded={expanded} />
@@ -626,33 +713,56 @@ function difficultyTone(difficulty: Difficulty): string {
 export function resolveDifficulty(
   song: RecommendedSongResponse["song"],
 ): Difficulty | null {
-  if (song.difficulty) {
-    return song.difficulty;
-  }
-  if (typeof song.lowMidi === "number" && typeof song.highMidi === "number") {
-    return deriveDifficulty(song.lowMidi, song.highMidi);
-  }
-  return null;
+  return resolveSongDifficulty(song);
 }
 
 /**
  * BE `MusicalKey` enum 값(`C_SHARP_MAJOR` 등)을 UI 표시용 문자열로 변환한다.
- * `_SHARP` → `#`, 나머지 `_` → 공백, 단어 첫 글자만 대문자.
- * 특수값 `UNKNOWN`은 한국식 표기 대신 `Unknown` 으로 고정.
+ * `_SHARP` → `#`, `MAJOR` → `장조`, `MINOR` → `단조`.
+ * 특수값 `UNKNOWN`은 `정보 없음` 으로 고정.
  *
  * 회귀 가드(이슈 #512): 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
  */
 export function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
-  // ex) C_SHARP_MAJOR → C# Major
+  // ex) C_SHARP_MAJOR → C# 장조 (closes #1719 — 영어 음악 용어 대신 평이한 한글 표기)
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
+}
+
+/**
+ * 곡 id → 좌측 accent stripe 의 hue(0–359). 같은 곡은 항상 같은 색이 되도록
+ * id 문자열의 char code 합을 360 으로 나눈 나머지를 쓴다(외부 색 추출 없이 hash
+ * 기반 분산). closes #1683.
+ *
+ * 회귀 가드: 단위 테스트는 `SongCard.helpers.test.tsx` 참조.
+ */
+export function getSongHue(songId: number): number {
+  return String(songId)
+    .split("")
+    .reduce((accumulated, character) => accumulated + character.charCodeAt(0), 0) % 360;
+}
+
+/**
+ * 검색 카드(/songs)의 client 적합도 레벨 → 한 줄 사유 (#1721).
+ *
+ * 추천 카드처럼 BE 사유 문장이 없는 검색 컨텍스트에서, 내 음역대 대비 "부를 수 있는지"를
+ * 한 문장으로 풀어 준다. 톤/색은 좌측 보더 + FitBadge 가 담당하고 여기선 문장만 담당한다.
+ */
+export function voiceFitSearchReason(level: FitLevel): string {
+  switch (level) {
+    case "high":
+      return "내 음역대에 잘 맞아 편하게 부를 수 있어요.";
+    case "mid":
+      return "조금 도전적이지만 부를 수 있어요.";
+    case "low":
+      return "음이 높거나 낮아 부르기 버거울 수 있어요.";
+  }
 }
 
 /**

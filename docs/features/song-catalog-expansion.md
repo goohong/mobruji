@@ -163,7 +163,7 @@ last_reviewed: 2026-06-03
 
 - [ ] **PR 1 (docs)** — 본 spec 초안 (현재). pivot 긴장 결론 + 출처 조사 + 단계화 박제.
 - [x] **PR 2 (feat:song)** — `MetadataOnlyImport` 배치 스캐폴드 구현: (title, artist) 후보 JSON → MusicBrainz recording 질의 → `Song` upsert(메타만, `metadataSource=EXTERNAL_API`, key `UNKNOWN`, 음역대 NULL) + (title,artist)·ISRC 멱등 + 실패/skip 격리 + `06-domain-model.md §4-1` 신규 용어(SongCandidatePool/MetadataOnlyImport) 등재 + 성공 E2E(stats EXTERNAL_API 반영). 별도 `catalog-import.*` 설정 + 신규 컬럼/마이그레이션 없음(기존 `Song` 컬럼 재사용). Q1 은 (b) 별 `MetadataOnlyImportCommand`(`song.application.catalogimport`) 로 시작 — `musicbrainz-integration` 미머지 상태에서 후보 풀 확장 경로를 독립 가동, 동일 RestClient 패턴 공유로 중복 최소화.
-- [ ] **PR 3 (chore:song)** — Stage 2 후보 목록 작성(AI 1차 제안 → 운영자 검수) + 임포트 실행 → ~300곡. [[song-self-analysis-pipeline]] backfill 가동 확인.
+- [x] **PR 3 (chore:song)** — Stage 2 후보 목록 1차 확장(AI 1차 제안 → 운영자 검수 대기): `song-import-candidates.json` 8 → 130곡(시드 30곡 비중복, 발라드/가요/트로트/밴드/OST 시대별). 형식/중복/규모 하한(≥100) 회귀 가드 테스트(`SongImportCandidatesValidationTest`) 추가. 실제 임포트 실행(MusicBrainz 질의 → ~수백 적재) + [[song-self-analysis-pipeline]] backfill 가동 확인은 운영자 트리거(`--mobruji.import-catalog=true`) 후속.
 - [ ] **PR 4 (test:song)** — 임포트 멱등성 + `metadataSource` 전이(EXTERNAL_API → AUDIO_ANALYSIS) 회귀 테스트 + 후보 풀 규모 통계 테스트.
 
 **단계 게이트** (각 stage 진입 전 충족 필수):
@@ -214,6 +214,10 @@ last_reviewed: 2026-06-03
   - **Q1 해소 → (b)**: 별 `MetadataOnlyImportCommand` (`song.application.catalogimport`) 로 시작. `musicbrainz-integration` 미머지 상태에서 후보 풀 확장을 독립 가동하고, 임포트(신규 곡 생성)와 backfill(기존 곡 보강)의 관심사를 분리. RestClient/graceful empty/throttle 패턴은 album cover client 와 동일 컨벤션 공유로 중복 최소화.
   - **Q4 해소 → (a)**: 임포트 곡 초기 `metadataConfidence = 0.3` (메타만, 음역 미상 → 낮게). `catalog-import.import-confidence` 로 외부화.
   - **구현 범위**: (title, artist) 후보 JSON(`song-import-candidates.json`) → MusicBrainz `/recording` 질의 → `Song` upsert(`metadataSource=EXTERNAL_API`, key `UNKNOWN`, 음역대/bpm NULL). (title,artist)·ISRC 멱등 skip. 신규 컬럼/마이그레이션 없음(기존 `Song` 컬럼 재사용 — `mbId` 영속은 [[musicbrainz-integration]] 책임이라 본 PR 은 로깅용으로만 보유). 성공 E2E: 임포트 후 `stats.byMetadataSource.EXTERNAL_API` 증가.
+- 2026-06-03: PR 3 — Stage 2 후보 목록 1차 확장 (status 여전히 draft). 출처: #1496
+  - **후보 풀 8 → 130곡**: 스캐폴드(#1572) 8곡 중 3곡이 시드 중복이라 실질 신규 적재량이 미미했음. 시드 30곡과 비중복인 한국 노래방 인기곡(발라드/가요/트로트/밴드/OST, 1980s~현재)을 (title, artist) 메타만으로 큐레이션 확장 — **AI 1차 제안, 운영자 검수 대기**(§2-1 합법 "수기 참고" 경로). 자동 크롤링 아님.
+  - **회귀 가드**: `SongImportCandidatesValidationTest` — 번들 후보 JSON 의 파싱 가능성 + (title, artist) 무중복 + 규모 하한(≥100) 을 빌드에서 검증. 후보 풀이 조용히 비거나 잘못된 형태로 회귀하면 임포트 적재량이 무너지므로 가드.
+  - **임포트 실행은 운영자 후속**: 실제 MusicBrainz 질의·적재(`--mobruji.import-catalog=true`)는 외부 호출이라 본 PR 범위 밖. 본 PR 은 적재의 입력(후보 풀)만 확장.
 
 ## 10) 관련 spec / ADR
 

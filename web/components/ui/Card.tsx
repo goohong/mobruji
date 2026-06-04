@@ -33,8 +33,8 @@ export const Card = forwardRef<HTMLElement, CardProps>(function Card(
 ) {
   const Tag = (as ?? "div") as ElementType;
   const base = flush
-    ? "rounded-2xl bg-white dark:bg-zinc-900"
-    : "rounded-2xl bg-white ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800";
+    ? "rounded-2xl bg-[var(--surface-card-bg)]"
+    : "rounded-2xl bg-[var(--surface-card-bg)] ring-1 ring-[var(--surface-card-ring)]";
   const merged = [base, className ?? ""].filter((v) => v.length > 0).join(" ");
   return (
     <Tag ref={ref} className={merged} {...rest}>
@@ -49,7 +49,7 @@ type CardSectionProps = HTMLAttributes<HTMLDivElement> & {
 
 export function CardHeader({ className, children, ...rest }: CardSectionProps) {
   const merged = [
-    "flex flex-col gap-1 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800",
+    "flex flex-col gap-1 border-b border-[var(--border-subtle)] px-4 py-3",
     className ?? "",
   ]
     .filter((v) => v.length > 0)
@@ -74,7 +74,7 @@ export function CardBody({ className, children, ...rest }: CardSectionProps) {
 
 export function CardFooter({ className, children, ...rest }: CardSectionProps) {
   const merged = [
-    "flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800",
+    "flex flex-col gap-2 border-t border-[var(--border-subtle)] px-4 py-3",
     className ?? "",
   ]
     .filter((v) => v.length > 0)

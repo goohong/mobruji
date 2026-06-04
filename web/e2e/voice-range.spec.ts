@@ -4,12 +4,12 @@
  * spec: docs/features/web-e2e-playwright.md §5-3 시나리오 표 #S5
  *
  * 본 spec 은 두 진입점을 한 번씩 smoke 한다:
- *  - `/voice-range`      → 수동 입력 (OCTAVE_PICK) 페이지. Step 1 caption + 자동/직접 두 섹션.
+ *  - `/voice-range`      → 수동 입력 (OCTAVE_PICK) 페이지. 1단계 caption + 자동/직접 두 섹션.
  *  - `/voice-range/auto` → 자동 측정 wizard. PERMISSION 단계 "측정 시작" CTA + 마이크 권한 안내.
  *
  * 검증:
  *  1. 두 페이지 모두 HTTP 200 응답
- *  2. `/voice-range`: Step 1 caption + h1 "내 음역대를 알려주세요" + 자동 측정 CTA
+ *  2. `/voice-range`: 1단계 caption + h1 "내 음역대를 알려주세요" + 자동 측정 CTA
  *  3. `/voice-range/auto`: h1 "마이크로 음역대 측정하기" + "측정 시작" 버튼 + 마이크 안내 카피
  *  4. 두 페이지 모두 console error 0건
  *
@@ -35,8 +35,8 @@ test.describe("S5: 음역대 입력/측정 진입 smoke", () => {
     expect(response, "GET /voice-range 응답이 존재해야 합니다.").not.toBeNull();
     expect(response!.status()).toBe(200);
 
-    // Step 1 caption + h1.
-    await expect(page.getByText("Step 1", { exact: true })).toBeVisible();
+    // 1단계 caption + h1.
+    await expect(page.getByText("1단계", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { level: 1, name: "내 음역대를 알려주세요" }),
     ).toBeVisible();

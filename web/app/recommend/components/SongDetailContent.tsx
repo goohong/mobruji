@@ -1,7 +1,7 @@
 /**
  * 곡 상세 모달 본문 컨텐츠 (closes #323).
  *
- * SongDetailModal 의 children 으로 들어가 카드 클릭 시 펼쳐지는 풀 상세를 그린다.
+ * SongDetailSheet 의 children 으로 들어가 카드 클릭 시 펼쳐지는 풀 상세를 그린다.
  * 책임:
  *   - 앨범 커버 이미지 자리(또는 placeholder — closes #322 PR 2 에서 src 채움)
  *   - 곡 메타(아티스트/난이도/최고음·최저음/키/장르/mood/BPM/발매년)
@@ -37,13 +37,14 @@ import {
   useBookmarkToggleMutation,
   useLikeToggleMutation,
 } from "@/lib/hooks/useFeedbackToggleMutation";
-import { midiToNoteName } from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import {
   buildScoreBreakdown,
   type RecommendationBreakdownItem,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
+import { formatLanguageLabel } from "@/lib/songMeta";
 import { Chip } from "@/components/ui";
 
 import { FitReasons } from "./FitBadge";
@@ -70,10 +71,12 @@ export function SongDetailContent(props: SongDetailContentProps) {
 
   const difficulty = resolveDifficulty(song);
   const highestNoteName =
-    typeof song.highMidi === "number" ? midiToNoteName(song.highMidi) : null;
+    typeof song.highMidi === "number" ? midiToKoreanNoteName(song.highMidi) : null;
   const lowestNoteName =
-    typeof song.lowMidi === "number" ? midiToNoteName(song.lowMidi) : null;
+    typeof song.lowMidi === "number" ? midiToKoreanNoteName(song.lowMidi) : null;
   const keyLabel = formatMusicalKey(song.keyOriginal);
+  // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
+  const languageLabel = formatLanguageLabel(song.language);
   // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
   // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -120,16 +123,22 @@ export function SongDetailContent(props: SongDetailContentProps) {
         </section>
       ) : null}
 
+      {/*
+       * closes #1715 — 내부 코드값(metadataSource 출처)은 사용자에게 의미 없는 노이즈라
+       * 상세에서 제거하고, 언어는 한국어 라벨로 매핑한다(매핑 불가 코드는 셀 생략).
+       * TJ/KY 번호는 노래방 입력번호라 그대로 유용해 유지한다.
+       */}
       <section
         aria-label="메타 정보"
         className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3"
       >
         <MetaCell label="발매 연도" value={song.releaseYear ?? null} />
         <MetaCell label="BPM" value={song.bpm ?? null} />
-        <MetaCell label="언어" value={song.language ?? null} />
+        {languageLabel ? (
+          <MetaCell label="언어" value={languageLabel} />
+        ) : null}
         <MetaCell label="TJ 번호" value={song.tjNumber ?? null} />
         <MetaCell label="KY 번호" value={song.kyNumber ?? null} />
-        <MetaCell label="출처" value={song.metadataSource} />
       </section>
 
       {item ? (
@@ -162,9 +171,16 @@ export function SongDetailContent(props: SongDetailContentProps) {
  */
 type AlbumCoverProps = {
   song: SongResponse;
+  /**
+   * PR7 (#1687) hero morph 식별자. 카드 thumbnail 과 상세 cover 에 같은 이름을 주면
+   * 라우트 전환 시 브라우저가 두 요소를 morph 한다. 라우트 이동이 없는 모달 컨텍스트
+   * 에서는 생략한다 — 같은 곡 cover 가 화면에 둘 이상 동시에 같은 이름을 쓰면
+   * view-transition-name 중복으로 전환이 무시되기 때문.
+   */
+  viewTransitionName?: string;
 };
 
-function AlbumCover({ song }: AlbumCoverProps) {
+export function AlbumCover({ song, viewTransitionName }: AlbumCoverProps) {
   // closes #322 — BE PR #337 에서 Song.albumCoverUrl 컬럼 + iTunes Search backfill 도입.
   // backfill 미적용/fuzzy match 실패 곡은 null → placeholder. img 로딩 실패(404/CORS)
   // 시에도 onError 로 placeholder 로 fallback. eager 로드는 모달이 열린 직후만
@@ -176,7 +192,13 @@ function AlbumCover({ song }: AlbumCoverProps) {
   const displayTitle = formatSongDisplayTitle(song);
 
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="large" songTitle={displayTitle} />;
+    return (
+      <AlbumCoverPlaceholder
+        size="large"
+        songTitle={displayTitle}
+        viewTransitionName={viewTransitionName}
+      />
+    );
   }
 
   return (
@@ -191,6 +213,7 @@ function AlbumCover({ song }: AlbumCoverProps) {
         src={url}
         alt={`${displayTitle} 앨범 커버`}
         onError={() => setFailed(true)}
+        style={viewTransitionName ? { viewTransitionName } : undefined}
         className="h-48 w-48 rounded-2xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
       />
     </div>
@@ -200,6 +223,8 @@ function AlbumCover({ song }: AlbumCoverProps) {
 type AlbumCoverPlaceholderProps = {
   size: "large" | "thumbnail";
   songTitle: string;
+  /** PR7 (#1687) hero morph 식별자 — AlbumCover/Thumbnail 이 그대로 흘려준다. */
+  viewTransitionName?: string;
 };
 
 /**
@@ -209,6 +234,7 @@ type AlbumCoverPlaceholderProps = {
 export function AlbumCoverPlaceholder({
   size,
   songTitle,
+  viewTransitionName,
 }: AlbumCoverPlaceholderProps) {
   const sizeClass =
     size === "large"
@@ -219,6 +245,7 @@ export function AlbumCoverPlaceholder({
       <div
         role="img"
         aria-label={`${songTitle} 앨범 커버 (이미지 없음)`}
+        style={viewTransitionName ? { viewTransitionName } : undefined}
         className={`flex items-center justify-center bg-gradient-to-br from-[var(--surface-cover-from)] to-[var(--surface-cover-to)] ring-1 ring-[var(--ring-soft-detail)] ${sizeClass}`}
       >
         <MusicNoteIcon size={size === "large" ? 56 : 24} />
@@ -398,14 +425,13 @@ function resolveDifficulty(song: SongResponse): Difficulty | null {
 
 function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
 }
 
 /**
@@ -533,19 +559,28 @@ function YouTubeSearchLink({ songTitle, songArtist }: YouTubeSearchLinkProps) {
 
 /**
  * 외부에서 placeholder 만 단독으로 쓰고 싶을 때 (예: 카드 thumbnail) export.
- * AlbumCover 컴포넌트는 모달 전용이라 export 하지 않고 placeholder 만 노출한다.
+ * 큰 사이즈 `AlbumCover` 는 모달 외에 곡 상세 페이지(`/songs/[id]`)에서도 재사용한다
+ * (closes #1666) — placeholder/onError fallback 동작을 한 곳에서 공유한다.
  */
 export type { AlbumCoverPlaceholderProps };
 
 type AlbumCoverThumbnailProps = {
   song: SongResponse;
+  /**
+   * PR7 (#1687) hero morph 식별자. 카드가 곡 상세 페이지로 라우트 이동하는 모드
+   * (href)에서만 넘긴다 — 상세 페이지의 큰 cover 와 같은 이름이라 전환 시 morph 한다.
+   */
+  viewTransitionName?: string;
 };
 
 /**
  * 카드 요약 thumbnail (closes #322) — SongCard 좌측 sm 영역에 사용.
  * url 이 있으면 lazy load, 실패/없으면 placeholder.
  */
-export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
+export function AlbumCoverThumbnail({
+  song,
+  viewTransitionName,
+}: AlbumCoverThumbnailProps) {
   // closes #322 — SongCard 좌측 small (48~64px) thumbnail. loading="lazy" 로
   // 뷰포트 진입 시점에 페치 — 긴 리스트(추천 무한 스크롤, 검색 결과)에서 초기
   // 네트워크 비용 최소화. onError 시 placeholder 로 fallback.
@@ -555,7 +590,13 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
   const displayTitle = formatSongDisplayTitle(song);
 
   if (!url || failed) {
-    return <AlbumCoverPlaceholder size="thumbnail" songTitle={displayTitle} />;
+    return (
+      <AlbumCoverPlaceholder
+        size="thumbnail"
+        songTitle={displayTitle}
+        viewTransitionName={viewTransitionName}
+      />
+    );
   }
 
   return (
@@ -566,6 +607,7 @@ export function AlbumCoverThumbnail({ song }: AlbumCoverThumbnailProps) {
       loading="lazy"
       alt={`${displayTitle} 앨범 커버`}
       onError={() => setFailed(true)}
+      style={viewTransitionName ? { viewTransitionName } : undefined}
       className="h-14 w-14 rounded-xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
     />
   );

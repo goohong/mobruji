@@ -191,6 +191,7 @@ class RecommendationSessionHistoryDedupTest {
                 .artist("아티스트-" + index)
                 .releaseYear(2000 + (index % 24))
                 .keyOriginal(keys[index % keys.length])
+                .lowMidi(53).highMidi(67)
                 .bpm(120)
                 .mood(Mood.UPBEAT)
                 .language("ko")

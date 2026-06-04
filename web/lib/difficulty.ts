@@ -37,16 +37,37 @@ export function deriveDifficulty(
 }
 
 /**
+ * 곡 응답에서 난이도를 해석한다.
+ *
+ * `difficulty` 가 있으면 그 값을, 없고 `lowMidi`/`highMidi` 가 있으면 client-side
+ * 계산값(`deriveDifficulty`)을, 둘 다 없으면 `null` 을 돌려준다. SongCard 표면 배지와
+ * persona 사유(lib/persona.ts) 가 같은 해석을 공유하도록 lib 레벨에 둔다.
+ */
+export function resolveSongDifficulty(song: {
+  difficulty?: Difficulty | null;
+  lowMidi?: number | null;
+  highMidi?: number | null;
+}): Difficulty | null {
+  if (song.difficulty) {
+    return song.difficulty;
+  }
+  if (typeof song.lowMidi === "number" && typeof song.highMidi === "number") {
+    return deriveDifficulty(song.lowMidi, song.highMidi);
+  }
+  return null;
+}
+
+/**
  * UI 표시용 한국어 라벨. 텍스트만 사용(아이콘/별점 미사용 — 이슈 #75 사용자 권고).
  */
 export function difficultyLabel(difficulty: Difficulty): string {
   switch (difficulty) {
     case "EASY":
-      return "Easy";
+      return "쉬움";
     case "NORMAL":
-      return "Normal";
+      return "보통";
     case "HARD":
-      return "Hard";
+      return "어려움";
   }
 }
 

@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 # discord-reply.sh — helper 가 직접 bot REST API 로 응답 push.
 #
-# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화 + #987 race condition fix):
+# ⚠️ quote-reply (message_reference) 영구 제거 (#1631, 2026-06-03):
+#   본답/ack/choices 모드는 더 이상 사용자 메시지에 답글(message_reference) 형태로
+#   매달지 않는다 — 모두 standalone(plain) 메시지로 push. 근본 원인: bot.py 가
+#   들어오는 모든 사용자 메시지마다 last-user-msg-id.txt 를 덮어써 stale target →
+#   엉뚱한 메시지에 답글 (weeks 째 사용자 신고). 사용자 정정: "제대로 답장 못 할 거
+#   같으면 그 기능 그냥 없애라". bot.py _push_agent_reply (reference=None) 와 정렬.
+#   resolve_reply_to_id 는 항상 빈 문자열을 반환 (함수 시그니처는 호환 유지).
+#   아래 문서의 message_reference 관련 서술은 #1631 이전 동작 기록(historical).
+#   ✍️ writing-marker (#1095) 는 transient UX 라 유지 (resolve_writing_target_id 분리).
+#
+# 사용 (이슈 #807 단순화본 + #880 thread stream 확장 + #946 reply mode + #960 ack reply 확장 + #963 ack 단순화 + #987 race condition fix + #1631 quote-reply 제거):
 #
 #   1) 본답 (메인 채널 push, 기존 호환):
 #       discord-reply.sh "<응답 메시지>"
@@ -91,7 +101,7 @@
 #       discord-reply.sh --forum-comment <thread_id> "<body>"
 #       discord-reply.sh --forum-edit <thread_id> "<new_body>"
 #       discord-reply.sh --forum-retag <thread_id> <forum_env> "<new_tag_name>"
-#         → forum_env: directive | be | fe | rev | plan → 해당 *_FORUM_ID env lookup.
+#         → forum_env: directive | be | fe | rev | plan | infra → 해당 *_FORUM_ID env lookup.
 #         → tag_name: 해당 forum 의 available_tags name (예: "대기" / "진행" / "완료").
 #           GET /channels/{forum_id} 응답의 available_tags 에서 name → id 변환.
 #         → --forum-post: POST /channels/{forum_id}/threads (name + applied_tags +
@@ -276,7 +286,7 @@ PLAN_CHANNEL_VALUE=$(read_env_value PLAN_CHANNEL_ID || true)
 
 # Forum 채널 env (#17 사용자 forum 전환 wave, 2026-05-24) — `--forum-post`,
 # `--forum-comment`, `--forum-edit`, `--forum-retag` mode 의 forum_env 인자가
-# 참조. directive-board / be / fe / rev / plan 5 forum 채널.
+# 참조. directive-board / be / fe / rev / plan / infra 6 forum 채널.
 # 미설정 시 명시 에러 (silent fallback 금지 — forum 전환 의도 무력화 방지).
 # Discord forum 채널 = GUILD_FORUM type (15). 각 forum 안에 thread 가 post 단위로
 # 생성되며 thread 안에 messages + applied_tags 가 붙는다.
@@ -285,6 +295,7 @@ BE_FORUM_VALUE=$(read_env_value BE_FORUM_ID || true)
 FE_FORUM_VALUE=$(read_env_value FE_FORUM_ID || true)
 REV_FORUM_VALUE=$(read_env_value REV_FORUM_ID || true)
 PLAN_FORUM_VALUE=$(read_env_value PLAN_FORUM_ID || true)
+INFRA_FORUM_VALUE=$(read_env_value INFRA_FORUM_ID || true)
 
 # guild_id — forum thread 검색 시 GET /guilds/{guild_id}/threads/active 호출에 필요.
 # DISCORD_GUILD_ID env 우선, 없으면 forum_find_active_thread_by_name 함수가 forum
@@ -529,7 +540,7 @@ CYCLE_CHANNEL=""
 #   호출로 type 확인 → forum (15) 또는 media (16) 시 1.
 CYCLE_FORUM_FALLBACK=0
 # Forum mode 인자 (#17, 2026-05-24).
-# --forum-post / --forum-retag 의 forum_env: directive | be | fe | rev | plan.
+# --forum-post / --forum-retag 의 forum_env: directive | be | fe | rev | plan | infra.
 # --forum-post 의 title (thread name) + tag (available_tags name).
 FORUM_ENV=""
 FORUM_TITLE=""
@@ -543,13 +554,13 @@ if [[ $# -eq 0 ]]; then
   echo "  discord-reply.sh --thread <id> \"<진행 줄>\"" >&2
   echo "  discord-reply.sh --auto-ack-thread \"<ack 문구>\"" >&2
   echo "  discord-reply.sh --auto-thread \"<진행 줄>\"" >&2
-  echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan> \"<title>\" \"<tag>\" \"<body>\"" >&2
-  echo "  discord-reply.sh --forum-post-auto-tag <directive|be|fe|rev|plan> \"<title>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-post <directive|be|fe|rev|plan|infra> \"<title>\" \"<tag>\" \"<body>\"" >&2
+  echo "  discord-reply.sh --forum-post-auto-tag <directive|be|fe|rev|plan|infra> \"<title>\" \"<body>\"" >&2
   echo "  discord-reply.sh --forum-comment <thread_id> \"<body>\"" >&2
   echo "  discord-reply.sh --forum-edit <thread_id> \"<new_body>\"" >&2
-  echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan> \"<new_tag>\"" >&2
+  echo "  discord-reply.sh --forum-retag <thread_id> <directive|be|fe|rev|plan|infra> \"<new_tag>\"" >&2
   echo "  discord-reply.sh --update-status <thread_id> \"<status>\" [pr_url]" >&2
-  echo "  discord-reply.sh --forum-state-dump <directive|be|fe|rev|plan>" >&2
+  echo "  discord-reply.sh --forum-state-dump <directive|be|fe|rev|plan|infra>" >&2
   echo "  discord-reply.sh --writing-marker <user_msg_id>" >&2
   echo "  discord-reply.sh --writing-done <user_msg_id>" >&2
   exit 1
@@ -701,7 +712,7 @@ case "$1" in
   --forum-post)
     # #17 forum 전환 wave (2026-05-24).
     # --forum-post <forum_env> "<title>" "<tag_name>" "<body>"
-    # forum_env: directive | be | fe | rev | plan → *_FORUM_ID lookup.
+    # forum_env: directive | be | fe | rev | plan | infra → *_FORUM_ID lookup.
     # tag_name: 해당 forum 의 available_tags name → tag_id 변환.
     MODE="forum-post"
     if [[ $# -lt 5 ]]; then
@@ -798,14 +809,14 @@ case "$1" in
     # wrapper (helper-turn-start.sh / agent-launch-wrapper.sh) 가 jsonl entry status
     # 와 forum tag 비교해 mismatch detect.
     #
-    # 형식: --forum-state-dump <directive|be|fe|rev|plan>
+    # 형식: --forum-state-dump <directive|be|fe|rev|plan|infra>
     # 출력 (jsonl, 1 줄 per thread):
     #   {"thread_id":"<id>","name":"<thread name>","tags":["<tag name>", ...]}
     # 한계: GET /guilds/{guild_id}/threads/active 가 active thread 만 반환 — archive
     #       된 thread 는 누락 (의도된 동작 — 누락 detect 는 최근 N=20 active entry 만 대상).
     MODE="forum-state-dump"
     if [[ $# -lt 2 ]]; then
-      echo "discord-reply.sh: --forum-state-dump <directive|be|fe|rev|plan> 형태로 입력해주세요" >&2
+      echo "discord-reply.sh: --forum-state-dump <directive|be|fe|rev|plan|infra> 형태로 입력해주세요" >&2
       exit 1
     fi
     FORUM_ENV="$2"
@@ -813,24 +824,12 @@ case "$1" in
     NO_REPLY=1
     ;;
   --cycle-backlog-upsert)
-    # 2026-05-26 — cycle (be/fe/rev/plan) 백로그 forum thread upsert.
+    # DEPRECATED (2026-06-03) — `[BACKLOG] <cycle>` 단일 스레드 방식 폐기.
     # 형식: --cycle-backlog-upsert <be|fe|rev|plan> "<markdown body>"
     #
-    # 동작:
-    #   1) 해당 cycle 의 *_FORUM_ID 에서 active thread 검색 — name == "[BACKLOG] <cycle>".
-    #   2) 있으면 starter message PATCH (forum_edit_starter) — 본문 갱신.
-    #   3) 없으면 신규 thread post (forum_create_thread, tag="대기" — 없으면 첫 available tag).
-    #   4) stdout 으로 thread_id 출력 (호출자가 wrapper 에서 cache 가능).
-    #
-    # 의도:
-    #   각 cycle sub-agent 가 자기 forum 안 단일 [BACKLOG] thread 를 보고 자기
-    #   계획 (작업 안 까먹기) — 사용자 정정 (2026-05-26): "각 agent 가 자기 계획이
-    #   있어야지. 백로그 보면서 작업 안 까먹고 다 진행하고."
-    #
-    # 본문 컨벤션 (권장):
-    #   - markdown checkbox: `- [ ] 작업 1 (#N)` / `- [x] 완료된 작업 (#M)`.
-    #   - 끝줄에 "_갱신: 2026-05-26T12:00Z_" 형태 timestamp.
-    #   - 호출자 (tools/cycle-backlog/upsert.sh wrapper) 가 markdown 빌드 책임.
+    # 인자 검증(cycle/body)은 호환을 위해 유지하되, 실제 mode 처리는 thread 를
+    # 생성/갱신하지 않고 no-op exit 0 (아래 cycle-backlog-upsert mode 블록 참조).
+    # 현 표준은 "작업마다 개별 thread + 4태그" (register-pending / cycle thread).
     MODE="cycle-backlog-upsert"
     if [[ $# -lt 3 ]]; then
       echo "discord-reply.sh: --cycle-backlog-upsert <be|fe|rev|plan> \"<markdown body>\" 형태로 입력해주세요" >&2
@@ -1132,96 +1131,68 @@ read_last_pending_queue_msg_id() {
 #
 # bare body + ack 모드 모두 동일 로직을 공유하기 위해 함수로 분리.
 resolve_reply_to_id() {
+  # 2026-06-03 (#1631) — quote-reply (message_reference) 영구 제거.
+  #
+  # 근본 원인: target message_id 를 state 파일 (last-user-msg-id.txt) 에서 해석하는데
+  # bot.py 가 들어오는 *모든* 사용자 메시지마다 이 파일을 덮어쓴다. helper 응답이
+  # 최신 메시지보다 뒤처지면 (queue lag / turn 지연) 해석된 target 이 stale → 엉뚱한
+  # 메시지에 quote-reply 가 걸린다 (weeks 째 사용자 신고). turn-start freeze /
+  # HELPER_TURN_TARGET_MSG_ID env / helper-queue.jsonl 도 helper LLM 의 wrapper 호출
+  # 타이밍에 의존 (학습 의존) 이라 신뢰 불가. 사용자 정정: "제대로 답장 못 할 거
+  # 같으면 그 기능 그냥 없애라".
+  #
+  # bot.py `_push_agent_reply` 는 2026-05-30 에 이미 quote-reply 폐기 (reference=None).
+  # 본 함수는 그 결정과 정렬 — 항상 빈 문자열 반환 → 모든 답이 standalone(plain)
+  # 메시지로 push. 채널/thread 컨텍스트만으로 어떤 메시지에 대한 답인지 충분히 가시
+  # (Discord plugin 가이드도 최신 메시지엔 reply_to 생략 권장).
+  #
+  # 호출부 호환을 위해 함수 시그니처는 유지 — 빈 문자열 → build_reply_payload 가
+  # message_reference 없는 단순 content payload 빌드. --reply-to / 각종 target 소스는
+  # 더 이상 효력 없음 (회귀 가드 테스트 존재).
+  printf ''
+}
+
+# ✍️ writing-marker hook 전용 target msg id (#1631, 2026-06-03).
+#
+# quote-reply 와 분리: quote-reply (message_reference) 는 영구 제거됐지만, "답
+# 작성 중" ✍️ reaction (#1095) 은 사용자 메시지에 잠깐 붙었다 즉시 제거되는
+# transient UX 라 유지한다 (사용자 신고 = 영구적인 답글 오매칭, not transient ✍️).
+#
+# 대상은 last-user-msg-id.txt 만 사용 — 영구 artifact 가 아니므로 stale 위험이
+# 낮고 (turn 종료 시 제거), payload 의 message_reference 와 무관. NO_REPLY=1 /
+# 파일 부재 / 비-snowflake → 빈 문자열 → hook skip (대상 없음, graceful).
+resolve_writing_target_id() {
   if [[ "$NO_REPLY" -eq 1 ]]; then
     printf ''
     return 0
   fi
-
-  local candidate=""
-
-  # 1) --reply-to override (최우선).
-  if [[ -n "$REPLY_TO_OVERRIDE" ]]; then
-    if candidate=$(validate_snowflake "$REPLY_TO_OVERRIDE" "--reply-to"); then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  fi
-
-  # 2) HELPER_TURN_TARGET_MSG_ID env.
-  if [[ -n "${HELPER_TURN_TARGET_MSG_ID:-}" ]]; then
-    if candidate=$(validate_snowflake \
-        "$HELPER_TURN_TARGET_MSG_ID" \
-        "HELPER_TURN_TARGET_MSG_ID env"); then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  fi
-
-  # 3) helper-current-target.txt (turn-start freeze).
-  if [[ -r "$HELPER_TARGET_FILE" ]]; then
-    local target_raw
-    target_raw=$(head -1 "$HELPER_TARGET_FILE" 2>/dev/null \
-      | tr -d '[:space:]' || true)
-    if [[ -n "$target_raw" ]]; then
-      if candidate=$(validate_snowflake "$target_raw" "helper-current-target.txt"); then
-        printf '%s' "$candidate"
-        return 0
-      fi
-    fi
-  fi
-
-  # 4) helper-queue.jsonl 마지막 pending entry.
-  local queue_id
-  queue_id=$(read_last_pending_queue_msg_id)
-  if [[ -n "$queue_id" ]]; then
-    if candidate=$(validate_snowflake "$queue_id" "helper-queue.jsonl pending entry"); then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  fi
-
-  # 5) last-user-msg-id.txt (기존 fallback).
   if [[ -r "$LAST_USER_MSG_ID_FILE" ]]; then
-    local last_raw
+    local last_raw candidate
     last_raw=$(head -1 "$LAST_USER_MSG_ID_FILE" 2>/dev/null \
       | tr -d '[:space:]' || true)
     if [[ -n "$last_raw" ]]; then
-      if candidate=$(validate_snowflake "$last_raw" "last-user-msg-id.txt"); then
+      if candidate=$(validate_snowflake "$last_raw" "writing-marker target"); then
         printf '%s' "$candidate"
         return 0
       fi
     fi
   fi
-
   printf ''
 }
 
-# reply 적용 payload 빌더 — message_id 있으면 message_reference 포함, 없으면 단순 content (#946, #960).
+# reply payload 빌더 — 항상 message_reference 없는 단순 content (#1631, 2026-06-03).
 #
 # 인자: CONTENT REPLY_TO_ID
 # 출력: jq -nc 로 빌드한 JSON payload (stdout 1줄).
 #
-# fail_if_not_exists: false — referenced message 가 삭제됐어도 본 메시지
-# 자체는 정상 push (standalone 으로 표시). Discord 권장 패턴.
+# 2026-06-03 (#1631): quote-reply (message_reference) 영구 제거. resolve_reply_to_id
+# 가 항상 빈 문자열을 반환하므로 reply_to_id 인자는 실질적으로 비어 있으나, 회귀
+# 방어 (defense in depth) 차원에서 본 함수도 reply_to_id 를 무시하고 단순 content
+# payload 만 빌드한다 — 어떤 경로로 비-빈 id 가 흘러들어와도 stale quote-reply
+# 사고 불가능. (근본 원인 + 결정은 resolve_reply_to_id 주석 참조.)
 build_reply_payload() {
   local content="$1"
-  local reply_to_id="$2"
-  if [[ -n "$reply_to_id" ]]; then
-    jq -nc \
-      --arg c "$content" \
-      --arg mid "$reply_to_id" \
-      --arg cid "$CHANNEL" \
-      '{
-        content: $c,
-        message_reference: {
-          message_id: $mid,
-          channel_id: $cid,
-          fail_if_not_exists: false
-        }
-      }'
-  else
-    jq -nc --arg c "$content" '{content: $c}'
-  fi
+  jq -nc --arg c "$content" '{content: $c}'
 }
 
 # helper-current-thread.txt atomic write (#911 G-5).
@@ -1432,8 +1403,9 @@ resolve_forum_id() {
     fe)        forum_id="$FE_FORUM_VALUE" ;;
     rev)       forum_id="$REV_FORUM_VALUE" ;;
     plan)      forum_id="$PLAN_FORUM_VALUE" ;;
+    infra)     forum_id="$INFRA_FORUM_VALUE" ;;
     *)
-      echo "discord-reply.sh: 알 수 없는 forum_env \"$forum_env\" — directive|be|fe|rev|plan 중 하나여야 합니다" >&2
+      echo "discord-reply.sh: 알 수 없는 forum_env \"$forum_env\" — directive|be|fe|rev|plan|infra 중 하나여야 합니다" >&2
       return 1
       ;;
   esac
@@ -1707,17 +1679,16 @@ case "$MODE" in
     # ack / thread 모드는 짧은 단발성 push 라 미적용.
     MSG=$'​\n'"$MSG"
 
-    # #946: 사용자 메시지에 reply (답장) 형태로 push.
-    # bot.py 가 on_message 시 atomic write 한 LAST_USER_MSG_ID_FILE 에서
-    # message_id 를 읽어 Discord REST `message_reference` 에 포함.
-    # 파일 부재 / 빈 값 / 비숫자 → graceful standalone push (legacy 호환).
-    # --no-reply flag 시에도 standalone.
+    # #1631 (2026-06-03): quote-reply (message_reference) 영구 제거 — REPLY_TO_ID 는
+    # 항상 빈 문자열 → build_reply_payload 가 standalone(plain) payload 빌드.
+    # 근본 원인 + 결정은 resolve_reply_to_id 주석 참조.
     REPLY_TO_ID=$(resolve_reply_to_id)
 
     # #1095 (2026-05-26): 본답 push 직전 ✍️ reaction + typing — 답 작성 시작 가시화.
-    # NO_REPLY=1 (--no-reply / --status-channel / --channel / --cycle-channel 등)
-    # 시 REPLY_TO_ID 가 빈 문자열 → writing_hook_start 도 skip (대상 없음).
-    writing_hook_start "$REPLY_TO_ID"
+    # quote-reply 와 분리 (#1631) — ✍️ 는 transient marker 라 유지. 대상은 전용
+    # resolver (last-user-msg-id.txt) 사용. NO_REPLY=1 / 파일 부재 → 빈 문자열 → skip.
+    WRITING_TARGET_ID=$(resolve_writing_target_id)
+    writing_hook_start "$WRITING_TARGET_ID"
 
     # #1121 (2026-05-26): 본문 길이 ≥ DISCORD_CHUNK_LEN 자동 chunk split + 순차 push.
     # 단일 chunk (cap 이하) 인 경우 단일 push 동작과 동일 (split_long_message 가 1개
@@ -1742,7 +1713,7 @@ case "$MODE" in
 
     # #1095: 본답 push 직후 ✍️ remove — 답 작성 완료 가시화.
     # typing 은 Discord 자체 10초 timeout + 메시지 push 후 자동 종료.
-    writing_hook_end "$REPLY_TO_ID"
+    writing_hook_end "$WRITING_TARGET_ID"
     ;;
 
   ack)
@@ -1907,63 +1878,22 @@ case "$MODE" in
     ;;
 
   cycle-backlog-upsert)
-    # 2026-05-26 — cycle (be/fe/rev/plan) 백로그 forum thread upsert.
+    # DEPRECATED (2026-06-03) — `[BACKLOG] <cycle>` 단일 스레드 방식 폐기.
     #
-    # 절차:
-    #   1) cycle forum id resolve (FORUM_ENV → *_FORUM_ID).
-    #   2) thread name = "[BACKLOG] <cycle>" 검색.
-    #   3) 있으면 starter message PATCH (forum_edit_starter).
-    #      없으면 forum_create_thread 호출 — tag 는 "대기" / "백로그" / 첫 available
-    #      순으로 graceful fallback.
-    #   4) stdout 으로 thread_id 출력.
-    BACKLOG_FORUM_ID=$(resolve_forum_id "$FORUM_ENV")
-    BACKLOG_THREAD_NAME="[BACKLOG] ${FORUM_ENV}"
-
-    EXISTING_THREAD_ID=$(forum_find_active_thread_by_name "$BACKLOG_FORUM_ID" "$BACKLOG_THREAD_NAME")
-
-    if [[ -n "$EXISTING_THREAD_ID" ]]; then
-      # 기존 thread starter PATCH.
-      forum_edit_starter "$EXISTING_THREAD_ID" "$MSG" >/dev/null
-      printf '%s\n' "$EXISTING_THREAD_ID"
-    else
-      # 신규 thread 생성. tag 후보: "대기" → "백로그" → 첫 available.
-      BACKLOG_TAG_ID=""
-      for candidate_tag in "대기" "백로그" "todo" "open"; do
-        if BACKLOG_TAG_ID=$(resolve_forum_tag_id "$BACKLOG_FORUM_ID" "$candidate_tag" 2>/dev/null); then
-          break
-        fi
-        BACKLOG_TAG_ID=""
-      done
-      if [[ -z "$BACKLOG_TAG_ID" ]]; then
-        # 첫 available tag 로 fallback — GET /channels/{forum_id} 응답 첫 entry.
-        FORUM_INFO=$(curl -sS -X GET \
-          "https://discord.com/api/v10/channels/${BACKLOG_FORUM_ID}" \
-          -H "Authorization: Bot ${TOKEN}" 2>/dev/null || true)
-        BACKLOG_TAG_ID=$(printf '%s' "$FORUM_INFO" \
-          | jq -r '.available_tags[0]?.id // empty')
-        if [[ -z "$BACKLOG_TAG_ID" ]]; then
-          echo "discord-reply.sh: forum $FORUM_ENV 에 available_tags 가 없음 — thread 생성 시 tag 미부착 시도" >&2
-        fi
-      fi
-      # forum_create_thread 는 tag_id 필수 — 빈 값이면 별 페이로드 (tag 미부착).
-      if [[ -n "$BACKLOG_TAG_ID" ]]; then
-        NEW_BACKLOG_RESP=$(forum_create_thread "$BACKLOG_FORUM_ID" "$BACKLOG_THREAD_NAME" "$BACKLOG_TAG_ID" "$MSG")
-      else
-        # tag 없이 — body 에서 applied_tags 제외.
-        BODY=$(jq -nc --arg n "$BACKLOG_THREAD_NAME" --arg c "$MSG" \
-          '{ name: $n, message: { content: $c }, auto_archive_duration: 10080 }')
-        NEW_BACKLOG_RESP=$(discord_curl_with_retry POST \
-          "https://discord.com/api/v10/channels/${BACKLOG_FORUM_ID}/threads" \
-          "$BODY")
-      fi
-      NEW_BACKLOG_ID=$(echo "$NEW_BACKLOG_RESP" | jq -r '.id // empty')
-      if [[ -z "$NEW_BACKLOG_ID" ]]; then
-        echo "discord-reply.sh: cycle-backlog-upsert — thread 생성 실패 (forum=$FORUM_ENV)" >&2
-        echo "$NEW_BACKLOG_RESP" >&2
-        exit 1
-      fi
-      printf '%s\n' "$NEW_BACKLOG_ID"
-    fi
+    # 배경: cycle-forum-operation.md §5-7 "backlog deprecate". 현 표준은
+    #   "작업마다 개별 thread + 4태그(대기/진행/완료/실패)" (register-pending /
+    #   cycle thread). 단일 `[BACKLOG] <cycle>` 스레드는 사용자 directive 마다
+    #   옛 양식 스레드를 재생성하는 회귀 원인이었다 (BE/FE 양쪽 동시 신설 관측,
+    #   2026-06-03 사용자 보고). 신설/갱신을 thread-creating tool 단에서 차단해
+    #   어느 호출자(wrapper --refresh-backlog / cycle-backlog/upsert.sh / 수동)가
+    #   호출해도 새 `[BACKLOG]` 스레드가 더 이상 생기지 않게 한다.
+    #
+    # 차단: thread 를 생성/PATCH 하지 않고 deprecation warning 만 emit 후 no-op
+    #   exit 0 (호출자 호환 — 빈 stdout 을 graceful 처리). 개별 스레드 mode
+    #   (register-pending / forum-create-thread / forum-comment) 는 영향 없음.
+    echo "discord-reply.sh: [DEPRECATED] --cycle-backlog-upsert (${FORUM_ENV}) 는 폐기됨 — [BACKLOG] 단일 스레드 방식 중단 (개별 스레드 + 4태그 사용). no-op." >&2
+    # stdout 빈 줄 — 기존 호출자(upsert.sh)는 thread_id 부재를 graceful 하게 처리.
+    exit 0
     ;;
 
   writing-marker)
@@ -2006,7 +1936,8 @@ case "$MODE" in
       CHOICES_BODY+=$'\n'"${CHOICE_KEYCAPS_DISPLAY[$i]} ${CHOICES_OPTS[$i]}"
     done
 
-    # 2) 메시지 post — 사용자 마지막 메시지에 reply 형태 (일관성 + 시각적 연결).
+    # 2) 메시지 post — standalone(plain). quote-reply 제거 (#1631) 로 reply 형태
+    #    미사용. resolve_reply_to_id 는 항상 빈 문자열 (build_reply_payload 무시).
     CHOICES_REPLY_TO=$(resolve_reply_to_id)
     CHOICES_PAYLOAD=$(build_reply_payload "$CHOICES_BODY" "$CHOICES_REPLY_TO")
     CHOICES_RESPONSE=$(post_channel_message "$CHOICES_PAYLOAD")

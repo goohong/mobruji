@@ -29,11 +29,12 @@ import { ApiError } from "@/lib/api/client";
 import {
   MAX_MIDI,
   MIN_MIDI,
-  midiToCombinedNoteName,
+  midiToKoreanNoteName,
 } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
-import { Button } from "@/components/ui";
+import { Button, VoiceRangeSlider } from "@/components/ui";
+import { PitchWaveRing } from "@/components/voice/PitchWaveRing";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import {
   MEASUREMENT_DURATION_MS,
@@ -386,8 +387,10 @@ export default function AutoVoiceRangePage({
               highResult={highResult}
               lowMidi={lowMidi}
               highMidi={highMidi}
-              onLowChange={setLowMidi}
-              onHighChange={setHighMidi}
+              onRangeChange={({ lowMidi: nextLow, highMidi: nextHigh }) => {
+                setLowMidi(nextLow);
+                setHighMidi(nextHigh);
+              }}
               onSave={handleSave}
               saving={mutation.isPending}
               validationError={validationError}
@@ -458,6 +461,10 @@ interface MeasureStepProps {
   elapsedMs: number;
 }
 
+/** PitchWaveRing 표시 음역대 스케일 — C2(36) ~ C6(84), 일반 성악 가시 범위. */
+const RING_DISPLAY_LOW_MIDI = 36;
+const RING_DISPLAY_HIGH_MIDI = 84;
+
 function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
   const phaseLabel = phase === "low" ? "가장 낮은 음" : "가장 높은 음";
   const remainingMs = Math.max(0, MEASUREMENT_DURATION_MS - elapsedMs);
@@ -471,6 +478,12 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
   const levelPercent = Math.min(100, Math.max(0, clarity * 100));
   const hasSignal = clarity >= 0.05;
 
+  // low/high 두 phase 를 0~100% 한 ring 진행으로 매핑(low=0~50, high=50~100).
+  const ringProgress =
+    phase === "low" ? progressPercent / 2 : 50 + progressPercent / 2;
+  const ringFrequencyHz =
+    sample && sample.frequencyHz > 0 ? sample.frequencyHz : null;
+
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold text-[var(--text-primary)]">
@@ -479,6 +492,18 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
       <p className="text-sm text-[var(--text-secondary)]">
         편한 모음(예: &quot;아&quot;) 으로 길게 내주세요.
       </p>
+
+      <PitchWaveRing
+        lowMidi={RING_DISPLAY_LOW_MIDI}
+        highMidi={RING_DISPLAY_HIGH_MIDI}
+        currentFrequencyHz={ringFrequencyHz}
+        progressPercent={ringProgress}
+        amplitude={clarity}
+        stepNumber={phase === "low" ? 1 : 2}
+        totalSteps={2}
+        stepLabel={`${phaseLabel}을 발성`}
+      />
+
       {/*
         #454: 외곽 wrapper 의 aria-live 제거에 맞춰 이 박스도 중첩 aria-live 를
         해제. 카운트다운 <p aria-live="polite"> 와 page 상단 status region 만
@@ -503,7 +528,7 @@ function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
         <div className="flex items-baseline justify-between">
           <span className="text-2xl font-semibold tabular-nums">
             {sample?.midi !== null && sample?.midi !== undefined
-              ? midiToCombinedNoteName(sample.midi)
+              ? midiToKoreanNoteName(sample.midi)
               : "—"}
           </span>
           <span className="text-sm text-[var(--text-caption)]">
@@ -582,8 +607,7 @@ interface ResultStepProps {
   highResult: MeasurementResult | null;
   lowMidi: number;
   highMidi: number;
-  onLowChange: (next: number) => void;
-  onHighChange: (next: number) => void;
+  onRangeChange: (next: { lowMidi: number; highMidi: number }) => void;
   onSave: () => void;
   saving: boolean;
   validationError: string | null;
@@ -596,8 +620,7 @@ function ResultStep({
   highResult,
   lowMidi,
   highMidi,
-  onLowChange,
-  onHighChange,
+  onRangeChange,
   onSave,
   saving,
   validationError,
@@ -616,20 +639,20 @@ function ResultStep({
         </p>
       </div>
 
-      <ConfidenceBadge label="최저음 신뢰도" result={lowResult} />
-      <RangeSlider
-        label="최저음"
-        value={lowMidi}
-        onChange={onLowChange}
-        testId="low-midi-slider"
-      />
+      <div className="flex flex-col gap-2">
+        <ConfidenceBadge label="최저음 신뢰도" result={lowResult} />
+        <ConfidenceBadge label="최고음 신뢰도" result={highResult} />
+      </div>
 
-      <ConfidenceBadge label="최고음 신뢰도" result={highResult} />
-      <RangeSlider
-        label="최고음"
-        value={highMidi}
-        onChange={onHighChange}
-        testId="high-midi-slider"
+      {/*
+        수동 보정 UI 를 두 손잡이 트림 슬라이더로 통일(이슈 #1706). /voice-range
+        수동 입력 화면과 동일한 VoiceRangeSlider 를 써서 모든 음역대 입력 경험을
+        일관되게 한다. 최저음 ≤ 최고음 클램프가 슬라이더에 내장돼 교차가 원천 차단된다.
+      */}
+      <VoiceRangeSlider
+        lowMidi={lowMidi}
+        highMidi={highMidi}
+        onChange={onRangeChange}
       />
 
       {validationError === null ? (
@@ -697,32 +720,3 @@ function ConfidenceBadge({ label, result }: ConfidenceBadgeProps) {
   );
 }
 
-interface RangeSliderProps {
-  label: string;
-  value: number;
-  onChange: (next: number) => void;
-  testId: string;
-}
-
-function RangeSlider({ label, value, onChange, testId }: RangeSliderProps) {
-  return (
-    <label className="flex flex-col gap-2 text-sm">
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-[var(--text-label)]">{label}</span>
-        <span className="tabular-nums text-[var(--text-primary)]">
-          {midiToCombinedNoteName(value)} · MIDI {value}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={MIN_MIDI}
-        max={MAX_MIDI}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        data-testid={testId}
-        aria-label={label}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--border)] accent-[var(--cta-neutral-bg)]"
-      />
-    </label>
-  );
-}
