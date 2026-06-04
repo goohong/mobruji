@@ -136,18 +136,23 @@ public class RecommendationService {
     }
 
     /**
-     * 재추천(create) 버튼 경로의 공개 진입점. 결과 0건이면 제외 필터를 단계적으로 완화해 가까운 곡으로 채우는
-     * 0건 fallback(#1668)을 적용한다(빈 화면 방지 UX). 무한 스와이프(#1763)의 풀 소진 종료(#1817)는
-     * {@link #createFromSeeds} 가 fallback 을 끈 {@link #create(CreateRecommendationCommand, boolean)} 로 처리한다.
+     * 추천 생성(create) 공개 진입점. 클라이언트가 제외 곡을 명시하지 않은 빈 exclude(=재추천 버튼 첫 호출)면 결과 0건일 때
+     * 제외 필터를 단계적으로 완화해 가까운 곡으로 채우는 0건 fallback(#1668)을 적용한다(빈 화면 방지 UX).
+     *
+     * <p>반대로 클라이언트가 제외 곡을 누적해 보내면(=리스트 무한스크롤 페이지네이션 맥락, #1835) fallback 을 끈
+     * {@link #create(CreateRecommendationCommand, boolean)} 로 위임해, 풀 소진 시 이미 본 곡을 재노출(재surface)하지 않고
+     * 빈 응답으로 종료시킨다 — 무한 스와이프(#1763) /next 경로(#1817)와 동일한 계약이다. 세션 단위 자동 누적(#1549)이
+     * 켜져도 분기는 클라이언트가 직접 보낸 {@code excludeSongIds} 만으로 판정해 재추천 버튼의 하위호환을 보존한다.
      */
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
-        return create(createRecommendationCommand, true);
+        final boolean relaxOnZeroResult = createRecommendationCommand.excludeSongIds().isEmpty();
+        return create(createRecommendationCommand, relaxOnZeroResult);
     }
 
     /**
      * {@code relaxOnZeroResult} 가 {@code true} 면 결과 0건일 때 제외 필터를 단계적으로 완화하는 fallback(#1668)을
-     * 적용한다. {@code false} 면 완화 없이 빈 결과를 그대로 돌려준다 — 무한 스와이프(#1763)에서 본/패스한 곡 풀이
-     * 소진되면 이미 본 곡을 재노출하지 않고 빈 응답으로 종료시키기 위함이다(#1817).
+     * 적용한다. {@code false} 면 완화 없이 빈 결과를 그대로 돌려준다 — 무한 스와이프(#1763) /next 경로(#1817) 또는 리스트
+     * 무한스크롤 페이지네이션(#1835)에서 본/패스한 곡 풀이 소진되면 이미 본 곡을 재노출하지 않고 빈 응답으로 종료시키기 위함이다.
      */
     private RecommendationResult create(
             final CreateRecommendationCommand createRecommendationCommand, final boolean relaxOnZeroResult) {

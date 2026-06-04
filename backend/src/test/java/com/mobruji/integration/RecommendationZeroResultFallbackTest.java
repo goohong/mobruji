@@ -3,8 +3,6 @@ package com.mobruji.integration;
 import static io.restassured.RestAssured.given;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.List;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,11 +26,11 @@ import io.restassured.RestAssured;
 import io.restassured.response.Response;
 
 /**
- * 추천 결과 0건(빈 화면) fallback(#1668) E2E.
+ * 추천 결과 0건 처리 E2E — 빈 exclude fallback(#1668) ↔ 페이지네이션 풀 소진 종료(#1835) 분기.
  *
- * <p>spec: 이슈 #1668 — 좁은 필터(여기서는 카탈로그 전 곡 제외)로 정상 후보가 0건이어도, 제외 필터를 완화해 최소
- * 결과를 점수 순(가까운 순)으로 반환하고 {@code relaxed=true} + 완화된 필터를 표기한다. 정상 매칭은
- * {@code relaxed=false} 회귀가 없어야 한다.
+ * <p>클라이언트가 제외 곡을 명시하지 않은 빈 exclude(=재추천 버튼)면 정상 후보가 0건이어도 제외 필터를 완화해 최소 결과를
+ * 반환한다(#1668). 클라이언트가 제외 곡을 누적해 보내는 페이지네이션 맥락(#1835)이면 풀 소진 시 fallback 없이 빈 결과로
+ * 종료해 이미 본 곡을 재노출(재surface)하지 않는다. 정상 매칭은 {@code relaxed=false} 회귀가 없어야 한다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -69,12 +67,12 @@ class RecommendationZeroResultFallbackTest {
     }
 
     @Test
-    @DisplayName("카탈로그 전 곡을 제외해 정상 후보가 0건이어도, 완화 fallback 으로 결과가 채워진다")
-    void allExcluded_relaxesAndReturnsNonEmpty() {
-        // given: 카탈로그 3곡을 전부 제외 → 정상 후보 0건
+    @DisplayName("클라이언트가 카탈로그 전 곡을 제외(페이지네이션 풀 소진)하면 fallback 없이 빈 결과로 종료한다 (#1835)")
+    void clientExcludesPoolExhausted_terminatesEmpty() {
+        // given: 카탈로그 3곡을 전부 명시 제외 → 정상 후보 0건 (무한스크롤로 전부 본 상황)
         final String payload = """
                 {
-                  "sessionId": "550e8400-e29b-41d4-a716-aaaa00001668",
+                  "sessionId": "550e8400-e29b-41d4-a716-aaaa00001835",
                   "voiceRangeLow": 50,
                   "voiceRangeHigh": 80,
                   "mood": "UPBEAT",
@@ -85,12 +83,45 @@ class RecommendationZeroResultFallbackTest {
         // when
         final Response response = post(payload);
 
-        // then: 201 + 비어 있지 않은 결과 + relaxed 표기
+        // then: 201 + 빈 결과로 종료(재surface 금지) + relaxed=false
         response.then().statusCode(HttpStatus.CREATED.value());
-        final List<Integer> songIds = response.jsonPath().getList("recommendations.song.id", Integer.class);
-        assertThat(songIds).isNotEmpty();
-        assertThat(response.jsonPath().getBoolean("relaxed")).isTrue();
-        assertThat(response.jsonPath().getList("relaxedFilters", String.class)).contains("EXCLUDED_SONGS");
+        assertThat(response.jsonPath().getList("recommendations.song.id", Integer.class)).isEmpty();
+        assertThat(response.jsonPath().getBoolean("relaxed")).isFalse();
+        assertThat(response.jsonPath().getList("relaxedFilters", String.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("페이지네이션: 빈 exclude 첫 호출은 결과를 주고, 본 곡을 누적 제외하면 풀 소진 시 n=0 으로 종료한다 (#1835)")
+    void pagination_accumulatesExcludesUntilPoolExhausted() {
+        final String sessionId = "550e8400-e29b-41d4-a716-aaaa00001836";
+
+        // given/when 1: 빈 exclude(재추천 버튼 첫 호출) → 결과를 받는다
+        final Response firstPage = post("""
+                {
+                  "sessionId": "%s",
+                  "voiceRangeLow": 50,
+                  "voiceRangeHigh": 80,
+                  "mood": "UPBEAT",
+                  "excludeSongIds": []
+                }
+                """.formatted(sessionId));
+        firstPage.then().statusCode(HttpStatus.CREATED.value());
+        assertThat(firstPage.jsonPath().getList("recommendations.song.id", Integer.class)).isNotEmpty();
+
+        // when 2: 본 곡(=카탈로그 전 곡)을 excludeSongIds 에 누적 → 풀 소진
+        final Response exhausted = post("""
+                {
+                  "sessionId": "%s",
+                  "voiceRangeLow": 50,
+                  "voiceRangeHigh": 80,
+                  "mood": "UPBEAT",
+                  "excludeSongIds": [%d, %d, %d]
+                }
+                """.formatted(sessionId, song1Id, song2Id, song3Id));
+
+        // then: 빈 결과로 종료 — 이미 본 곡을 다시 노출하지 않는다
+        exhausted.then().statusCode(HttpStatus.CREATED.value());
+        assertThat(exhausted.jsonPath().getList("recommendations.song.id", Integer.class)).isEmpty();
     }
 
     @Test
