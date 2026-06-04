@@ -129,13 +129,14 @@ export default function HistoryPage() {
   // BE source 여부에 따라 "전체 삭제" 버튼의 라벨/확인 문구를 분기하기 위해
   // handleClear 보다 먼저 계산한다(아래 progressSummary 블록과 동일 변수도 별도 산출).
   // BE entry 는 mutation API 미구현(PR F 대기)이라 localStorage 만 비우면 다음
-  // 페이지 진입 시 다시 보임 — 사용자 혼란 방지를 위해 라벨을 "이 기기 캐시 비우기"
-  // 로 분기하고 confirm 문구에 그 사실을 명시한다 (#295 항목 3 후속).
+  // 페이지 진입 시 다시 보임 — 사용자 혼란 방지를 위해 라벨을 "이 기기 기록 지우기"
+  // 로 분기하고 confirm 문구에 그 사실을 명시한다 (#295 항목 3 후속, '캐시' 기술 용어
+  // 제거 #1719).
   const hasBackendEntries =
     (recommendationHistoryQuery.data?.recommendationHistoryResponses?.length ??
       0) > 0;
   const clearButtonLabel = hasBackendEntries
-    ? "이 기기 캐시 비우기"
+    ? "이 기기 기록 지우기"
     : "전체 삭제";
   const clearConfirmMessage = hasBackendEntries
     ? "이 기기에 저장된 히스토리만 지웁니다. 서버에 저장된 추천은 다음 방문 시 다시 보입니다. 계속할까요?"
@@ -215,7 +216,7 @@ export default function HistoryPage() {
             className="text-sm text-[var(--text-secondary)]"
           >
             {isBackendSource
-              ? `세션 ID 기준 ${displayEntries.length}건의 추천을 서버에서 불러왔어요.`
+              ? `지금까지 받은 ${displayEntries.length}건의 추천을 불러왔어요.`
               : `최근 ${displayEntries.length}건의 추천을 기록해두었어요. 최대 20건까지 보관됩니다.`}
           </p>
         </header>
