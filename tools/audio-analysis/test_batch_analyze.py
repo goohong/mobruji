@@ -317,6 +317,103 @@ class TestResolveTmpdir(unittest.TestCase):
                 del os.environ["AUDIO_ANALYSIS_TMPDIR"]
 
 
+class TestResumeExisting(unittest.TestCase):
+    def test_none_path_empty(self) -> None:
+        self.assertEqual(ba.resume_existing(None), [])
+
+    def test_missing_file_empty(self) -> None:
+        # 첫 실행: --resume 와 --out 이 같은 경로라 파일이 아직 없다 → 진척 없음.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(ba.resume_existing(str(Path(tmp) / "nope.ndjson")), [])
+
+    def test_loads_existing_feed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "feed.ndjson"
+            ba.write_feed([{"id": "a", "status": "success"}], str(path))
+            self.assertEqual(ba.resume_existing(str(path)), [{"id": "a", "status": "success"}])
+
+
+class TestDoneIdsFromFeed(unittest.TestCase):
+    def test_only_success_ids(self) -> None:
+        records = [
+            {"id": "a", "status": "success", "lowMidi": 50},
+            {"id": "b", "status": "failed", "error": "x"},
+            {"id": "c", "status": "success", "lowMidi": 55},
+        ]
+        # 실패곡(b)은 재시도 대상이라 done 에서 제외.
+        self.assertEqual(ba.done_ids_from_feed(records), {"a", "c"})
+
+    def test_empty_feed(self) -> None:
+        self.assertEqual(ba.done_ids_from_feed([]), set())
+
+
+class TestSelectPending(unittest.TestCase):
+    def _seed(self) -> list[dict]:
+        return [{"id": str(i), "title": f"t{i}"} for i in range(5)]
+
+    def test_excludes_done(self) -> None:
+        pending = ba.select_pending(self._seed(), {"0", "2"}, None)
+        self.assertEqual([s["id"] for s in pending], ["1", "3", "4"])
+
+    def test_limit_chunks_in_seed_order(self) -> None:
+        pending = ba.select_pending(self._seed(), set(), 2)
+        self.assertEqual([s["id"] for s in pending], ["0", "1"])
+
+    def test_limit_after_excluding_done(self) -> None:
+        # 완료 곡 제외 후 남은 후보(2,3,4) 중 앞 2곡만.
+        pending = ba.select_pending(self._seed(), {"0", "1"}, 2)
+        self.assertEqual([s["id"] for s in pending], ["2", "3"])
+
+    def test_limit_larger_than_pending_returns_all(self) -> None:
+        pending = ba.select_pending(self._seed(), {"0", "1", "2"}, 10)
+        self.assertEqual([s["id"] for s in pending], ["3", "4"])
+
+    def test_all_done_returns_empty(self) -> None:
+        pending = ba.select_pending(self._seed(), {"0", "1", "2", "3", "4"}, 3)
+        self.assertEqual(pending, [])
+
+
+class TestMergeFeed(unittest.TestCase):
+    def test_fresh_overrides_same_id(self) -> None:
+        existing = [{"id": "a", "status": "failed", "error": "x"}]
+        fresh = [{"id": "a", "status": "success", "lowMidi": 50}]
+        merged = ba.merge_feed(existing, fresh)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["status"], "success")
+
+    def test_appends_new_ids_preserving_order(self) -> None:
+        existing = [{"id": "a", "status": "success"}, {"id": "b", "status": "success"}]
+        fresh = [{"id": "c", "status": "success"}]
+        merged = ba.merge_feed(existing, fresh)
+        self.assertEqual([r["id"] for r in merged], ["a", "b", "c"])
+
+    def test_empty_existing(self) -> None:
+        fresh = [{"id": "a", "status": "success"}]
+        self.assertEqual(ba.merge_feed([], fresh), fresh)
+
+
+class TestResumeRoundtrip(unittest.TestCase):
+    def test_resume_skips_done_and_accumulates(self) -> None:
+        # 반복 실행 시나리오: 1차 feed 의 성공 곡을 skip, 남은 후보만 다음 chunk 로.
+        seed = [{"id": str(i), "title": f"t{i}"} for i in range(4)]
+        first_feed = [
+            {"id": "0", "status": "success", "lowMidi": 50, "highMidi": 70},
+            {"id": "1", "status": "failed", "error": "download"},
+        ]
+        done_ids = ba.done_ids_from_feed(first_feed)
+        pending = ba.select_pending(seed, done_ids, 2)
+        # 0 성공 → skip, 1 실패 → 재시도 대상, 2 신규 → 앞 2곡(1,2).
+        self.assertEqual([s["id"] for s in pending], ["1", "2"])
+        fresh = [
+            {"id": "1", "status": "success", "lowMidi": 52, "highMidi": 72},
+            {"id": "2", "status": "success", "lowMidi": 48, "highMidi": 68},
+        ]
+        merged = ba.merge_feed(first_feed, fresh)
+        by_id = {r["id"]: r for r in merged}
+        self.assertEqual(by_id["1"]["status"], "success")  # 실패 → 성공으로 갱신
+        self.assertEqual(set(by_id), {"0", "1", "2"})
+
+
 class TestLoadResultsRoundtrip(unittest.TestCase):
     def test_write_then_load(self) -> None:
         records = [

@@ -134,6 +134,13 @@ python batch_analyze.py --seed tests/validation_set.json \
 # 4) 라벨 없는 신규 임포트 곡 — 음역 합리성(가창 범위) 검증 후 backfill (directive #1716)
 python batch_analyze.py --seed tests/new-songs-verification.json \
   --out /data/tmp/new-feed.ndjson --plausibility
+
+# 5) 음역 미보유 곡 대량 backfill — 안전 단위 chunk + rate 대기로 반복 실행 (directive #1734)
+#    같은 명령을 반복하면 --resume 가 완료 곡을 skip 해 진척이 누적되고, --limit 으로
+#    invocation 당 처리량을 한정해 디스크/rate 폭주를 막는다.
+python batch_analyze.py --seed /data/tmp/missing-range-candidates.json \
+  --out /data/tmp/backfill.ndjson --resume /data/tmp/backfill.ndjson \
+  --limit 20 --sleep-seconds 3 --plausibility
 ```
 
 - **feed 레코드**: `{id, status, metadataSource="AUDIO_ANALYSIS", lowMidi, highMidi,
@@ -155,6 +162,17 @@ python batch_analyze.py --seed tests/new-songs-verification.json \
   `low∈[36(C2),67(G4)]`, `high∈[52(E3),88(E6)]`, `span∈[5,40]` 반음, `low < high`.
   분석은 성공했으나 범위가 비합리적인 곡은 **추천 backfill 에서 제외**(`blocked`)하고,
   타당한 곡 id 만 `backfillReady` 로 보고한다.
+- **안전 단위 반복 실행**(`--resume` / `--limit` / `--sleep-seconds`, directive #1734):
+  음역 미보유 곡 수백 곡을 한 번에 돌리면 디스크/YouTube rate 가 폭주한다. 이를 막기 위해
+  invocation 당 처리량을 한정하고 반복 실행으로 진척을 누적한다.
+  - `--limit N`: 이번 invocation 에서 분석할 최대 곡 수(시드 순서 앞에서 chunk). 미지정 시 남은 전체.
+  - `--resume FEED`: 기존 feed 의 **성공 곡**을 skip(실패 곡은 재시도)하고 결과를 같은
+    feed 에 누적 병합한다. `--out` 과 같은 경로로 두면 반복 실행 시 단일 feed 가 쌓인다
+    (첫 실행에 파일이 없어도 정상 — "진척 없음"으로 시작).
+  - `--sleep-seconds S`: 곡 사이 대기 초 — YouTube rate limit 완화.
+  - 디스크: chunk 한정 + analyze.py 의 곡별 `mkdtemp`→`rmtree` 로 동시 점유 audio 가 1곡으로
+    제한된다. 미보유 곡 시드(id+YouTube)는 DB 후보(`findCandidatesForBackfill`)에서 운영
+    단계에 생성하며, live 실행은 머지 후 운영(nmae) 담당이다.
 
 ### 검증셋
 
@@ -181,7 +199,8 @@ pytest -q                      # 또는 의존성 없는 환경: python3 -m unit
 - `test_analyze.py` — analyze.py 순수 helper (`frequency_to_midi`, `extract_range`,
   `confidence_score`, `mask_url`).
 - `test_batch_analyze.py` — batch_analyze.py 순수 로직 (시드 로드 / 정확도 산출 /
-  회귀 가드 판정 / feed 변환 / TMPDIR 고정). 외부 IO(yt-dlp/librosa) 미호출이라
+  회귀 가드 판정 / 음역 타당성 / feed 변환 / TMPDIR 고정 / chunk·resume 선택). 외부
+  IO(yt-dlp/librosa) 미호출이라
   의존성 없는 환경에서도 `unittest` 로 실행된다.
 
 ## 운영 주의 (저작권 / YouTube ToS)
