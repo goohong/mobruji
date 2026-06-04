@@ -283,7 +283,7 @@ export function SwipeDeck({
 
   if (current) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="mx-auto flex w-full max-w-md flex-col gap-4">
         <DeckProgress
           position={index + 1}
           total={total}
@@ -485,7 +485,9 @@ function SwipeCard({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="relative">
+      {/* z-10 + isolate: exit 카드가 translateX(120%)+rotate 로 날아갈 때 아래 패스/좋아요
+          버튼(뒤 형제)이 위로 덮어 카드를 가리지 않도록 카드면을 버튼보다 위에 쌓는다(#1799). */}
+      <div className="relative isolate z-10">
         {/* 뒷장 스택 — 다음 카드들을 살짝 scale·offset·그림자로 겹쳐 덱 깊이를 만든다.
             가장 뒤(depth 큰 것)부터 렌더해 가까운 카드가 위로 오게 한다. */}
         {upcoming
@@ -627,7 +629,7 @@ function DeckEnd({ likedCount, passedCount, loadingMore }: DeckEndProps) {
       <div
         role="status"
         aria-busy="true"
-        className="flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-8 text-center"
+        className="mx-auto flex w-full max-w-md flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-8 text-center"
       >
         <p className="text-sm text-[var(--text-secondary)]">
           다음 곡을 불러오는 중...
@@ -640,7 +642,7 @@ function DeckEnd({ likedCount, passedCount, loadingMore }: DeckEndProps) {
     <div
       role="status"
       data-testid="swipe-deck-end"
-      className="flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-8 text-center"
+      className="mx-auto flex w-full max-w-md flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-8 text-center"
     >
       <p className="text-base font-semibold text-[var(--text-primary)]">
         오늘은 여기까지예요
