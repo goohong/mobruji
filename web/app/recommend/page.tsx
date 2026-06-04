@@ -65,8 +65,7 @@ import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
 import { useSessionStore } from "@/store/session";
 
-import { IntentModeToggle } from "./components/IntentModeToggle";
-import { RecommendFilters } from "./components/RecommendFilters";
+import { RecommendRefinePanel } from "./components/RecommendRefinePanel";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
 import { SongDetailSheet } from "./components/SongDetailSheet";
 import { SongDetailContent } from "./components/SongDetailContent";
@@ -319,6 +318,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           <VoiceRangeIntuition
             lowMidi={voiceRange.lowestNoteMidi}
             highMidi={voiceRange.highestNoteMidi}
+            compact
           />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
             {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
@@ -341,24 +341,11 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           </div>
         </header>
 
-        {/* (closes #1601) 모임 사회자(P-D) 모드 진입 — "다 같이 즐길 곡" 시퀀스 화면으로
-            이동한다. 이 링크를 누르지 않으면 기존 단일 곡 추천 흐름은 불변(하위호환). */}
-        <Link
-          href="/recommend/host"
-          className="flex flex-col items-start gap-0.5 self-start rounded-[var(--radius-md)] bg-[var(--badge-neutral-bg)] px-4 py-2.5 text-left text-[var(--badge-neutral-fg)] transition-colors duration-[var(--duration-base)] hover:bg-[var(--bg-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
-        >
-          <span className="text-sm font-semibold">다 같이 즐길 곡 추천받기</span>
-          <span className="text-xs text-[var(--text-caption)]">
-            모임 사회자용 — 도입·고조·마무리 단계별 흐름으로
-          </span>
-        </Link>
-
-        <IntentModeToggle
+        {/* (V1·V2·V5) 결과 우선 — 의도 모드 + 분위기/나이대 필터는 접이식 "추천 다듬기"
+            1줄 바로 축소해 결과 카드가 헤더 직후 즉시 보이게 한다. */}
+        <RecommendRefinePanel
           selectedPersona={selectedPersona}
           onPersonaChange={setSelectedPersona}
-        />
-
-        <RecommendFilters
           selectedMood={selectedMood}
           selectedAgeGroup={selectedAgeGroup}
           onMoodChange={setSelectedMood}
@@ -371,6 +358,26 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
           activePersona={selectedPersona}
         />
+
+        {/* (V3, closes #1601) 모임 사회자(P-D) 모드 진입 — "다 같이 즐길 곡" 시퀀스 화면으로
+            이동한다. 결과 흐름과 시각적으로 분리된 2차 액션 링크 행으로 강등해(">" 어포던스)
+            혼자 부를 사용자의 오인을 줄인다. 누르지 않으면 단일 곡 추천 흐름은 불변. */}
+        <Link
+          href="/recommend/host"
+          className="flex items-center justify-between gap-3 self-stretch rounded-[var(--radius-md)] border border-[var(--border)] px-4 py-3 text-left text-[var(--text-secondary)] transition-colors duration-[var(--duration-base)] hover:bg-[var(--bg-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
+        >
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-[var(--text-primary)]">
+              여럿이 함께 부르나요? 모임 사회자 모드
+            </span>
+            <span className="text-xs text-[var(--text-caption)]">
+              도입·고조·마무리 단계별 흐름으로 자리를 띄워 줍니다
+            </span>
+          </span>
+          <span aria-hidden="true" className="text-[var(--text-tertiary)]">
+            ›
+          </span>
+        </Link>
       </div>
     </main>
   );

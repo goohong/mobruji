@@ -247,11 +247,11 @@ export function SongCard(props: SongCardProps) {
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {/*
            * closes #1484 — 음역 적합도 배지. BE 가 voiceFit 을 내려준 추천 컨텍스트에서만
-           * 노출하며, 카드 표면에서는 짧은 라벨("음역")로 폭을 아낀다. 모달 모드에서도
-           * 한눈에 보이는 핵심 신호라 그대로 유지한다.
+           * 노출한다. 라벨은 "내 음역 적합" — 곡 자체의 음역이 아니라 내 음역대와의
+           * 적합도임을 표면에서 분명히 한다 (V8, recommend-page-visual-ux-audit-1708).
            */}
           {item && typeof item.voiceFit === "number" ? (
-            <FitBadge label="음역" fit={item.voiceFit} />
+            <FitBadge label="내 음역 적합" fit={item.voiceFit} />
           ) : null}
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {/*
