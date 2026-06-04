@@ -10,11 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./client";
 import {
+  createDuetRecommendation,
   createRecommendation,
   createSafeRecommendation,
   createSequenceRecommendation,
   createShowoffRecommendation,
   readRecommendation,
+  type DuetRecommendationResponse,
   type RecommendationResponse,
   type SafeRecommendationResponse,
   type SequenceRecommendationResponse,
@@ -280,6 +282,101 @@ describe("createShowoffRecommendation", () => {
         sessionId: "sess-showoff",
         voiceRangeLow: 50,
         voiceRangeHigh: 76,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+// ---------- P-G 듀엣 추천 (#1848) ----------
+describe("createDuetRecommendation", () => {
+  const duetResponse: DuetRecommendationResponse = {
+    persona: "P-G",
+    requestId: 77,
+    relaxed: false,
+    relaxedFilters: [],
+    recommendations: [
+      {
+        partAssignmentReason:
+          "큐레이션 듀엣곡 — 남성 파트 C3~G3 · 여성 파트 G3~C5 로 나눠 부르기 좋아요",
+        recommendation: {
+          song: {
+            id: 21,
+            title: "듀엣곡",
+            artist: "혼성 듀오",
+            releaseYear: 2015,
+            keyOriginal: "C_MAJOR",
+            bpm: 96,
+            mood: "EMOTIONAL",
+            language: "ko",
+            genre: "발라드",
+            tjNumber: null,
+            kyNumber: null,
+            metadataSource: "MANUAL_SEED",
+            difficulty: "NORMAL",
+          },
+          score: 0.81,
+          matchReason: "두 음역을 함께 커버해요",
+          rankPosition: 1,
+        },
+      },
+    ],
+  };
+
+  it("POST /api/v1/recommendations/duet 로 두 사람 음역·성별을 직렬화해 호출하고 응답을 매핑한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(duetResponse, 201));
+
+    const result = await createDuetRecommendation({
+      sessionId: "sess-duet",
+      voiceRangeLow: 50,
+      voiceRangeHigh: 72,
+      partnerVoiceRangeLow: 45,
+      partnerVoiceRangeHigh: 64,
+      gender: "MALE",
+      partnerGender: "FEMALE",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/recommendations\/duet$/);
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      sessionId: "sess-duet",
+      voiceRangeLow: 50,
+      voiceRangeHigh: 72,
+      partnerVoiceRangeLow: 45,
+      partnerVoiceRangeHigh: 64,
+      gender: "MALE",
+      partnerGender: "FEMALE",
+    });
+    expect(result).toEqual(duetResponse);
+  });
+
+  it("성별 미지정이면 gender/partnerGender 필드를 생략해 호출한다 (BE 결정성 seed 정합)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(duetResponse, 201));
+
+    await createDuetRecommendation({
+      sessionId: "sess-duet",
+      voiceRangeLow: 50,
+      voiceRangeHigh: 72,
+      partnerVoiceRangeLow: 45,
+      partnerVoiceRangeHigh: 64,
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body).not.toHaveProperty("gender");
+    expect(body).not.toHaveProperty("partnerGender");
+  });
+
+  it("ApiError 를 swallow 하지 않고 그대로 전파한다 (호출 측 에러 UI 분기 근거)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "bad" }, 400));
+    await expect(
+      createDuetRecommendation({
+        sessionId: "sess-duet",
+        voiceRangeLow: 50,
+        voiceRangeHigh: 72,
+        partnerVoiceRangeLow: 45,
+        partnerVoiceRangeHigh: 64,
       }),
     ).rejects.toBeInstanceOf(ApiError);
   });

@@ -51,7 +51,11 @@ import type {
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
-import { SAFE_SONG_REASON_LABEL, SHOWOFF_SONG_REASON_LABEL } from "@/lib/persona";
+import {
+  DUET_SONG_REASON_LABEL,
+  SAFE_SONG_REASON_LABEL,
+  SHOWOFF_SONG_REASON_LABEL,
+} from "@/lib/persona";
 import {
   difficultyLabel,
   resolveSongDifficulty,
@@ -122,6 +126,12 @@ type SongCardProps =
        * 라벨과 함께 노출하고, 미지정(일반 추천)이면 사유 줄을 생략한다.
        */
       killingPartReason?: string;
+      /**
+       * P-G 듀엣 모드의 "파트 분담" 안내(누가 어느 파트) 한 줄. BE `/duet` 응답이 곡별로 내려준
+       * `partAssignmentReason`(be #1847)을 그대로 전달한다. 지정되면 카드 표면에 "파트 분담"
+       * 라벨과 함께 노출하고, 미지정(일반 추천)이면 사유 줄을 생략한다.
+       */
+      partAssignmentReason?: string;
     }
   | {
       song: SongResponse;
@@ -132,6 +142,7 @@ type SongCardProps =
       index?: number;
       safetyReason?: never;
       killingPartReason?: never;
+      partAssignmentReason?: never;
       /**
        * 검색 카드(/songs)에서 BE 추천 컨텍스트 없이도 "내 음역 적합" 배지를 그리기 위한
        * client 산출 적합도(0~1). 호출 측이 세션 음역대 + 곡 음역으로 계산해 넘긴다
@@ -151,6 +162,10 @@ export function SongCard(props: SongCardProps) {
     "item" in props && props.safetyReason ? props.safetyReason : null;
   const killingPartReason: string | null =
     "item" in props && props.killingPartReason ? props.killingPartReason : null;
+  const partAssignmentReason: string | null =
+    "item" in props && props.partAssignmentReason
+      ? props.partAssignmentReason
+      : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
   const index: number = typeof props.index === "number" ? props.index : 0;
   // closes #1484 / #1721 — "내 음역 적합" 적합도. 추천 컨텍스트는 BE voiceFit, 검색
@@ -187,6 +202,9 @@ export function SongCard(props: SongCardProps) {
   // closes #1844 — P-F 과시 "킬링파트 안내"(임팩트 구간)를 카드 표면에 노출. BE `/showoff`
   // 응답이 곡별로 내려준 killingPartReason(be #1843)을 그대로 보여준다.
   const killingPart = item && killingPartReason ? killingPartReason : null;
+  // closes #1848 — P-G 듀엣 "파트 분담"(누가 어느 파트)을 카드 표면에 노출. BE `/duet`
+  // 응답이 곡별로 내려준 partAssignmentReason(be #1847)을 그대로 보여준다.
+  const partAssignment = item && partAssignmentReason ? partAssignmentReason : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
@@ -340,6 +358,23 @@ export function SongCard(props: SongCardProps) {
           </span>
           <span className="text-xs text-[var(--text-secondary)]">
             {killingPart}
+          </span>
+        </div>
+      ) : null}
+
+      {/*
+       * closes #1848 — P-G 듀엣 "파트 분담" 한 줄. BE `/duet` 응답이 곡별로 내려준
+       * partAssignmentReason 이 있을 때만 노출한다. "둘이 나눠 부르기" 구조 신호라 안심(green)·
+       * 킬링파트(amber)와 톤을 구분해 neutral 톤을 쓰고, 모달 모드에서도 한눈에 보이는 핵심
+       * 신호라 카드 표면에 유지한다.
+       */}
+      {partAssignment ? (
+        <div className="flex items-start gap-2 rounded-[var(--radius-md)] bg-[var(--badge-neutral-bg)] px-3 py-2">
+          <span className="shrink-0 text-xs font-semibold text-[var(--badge-neutral-fg)]">
+            {DUET_SONG_REASON_LABEL}
+          </span>
+          <span className="text-xs text-[var(--text-secondary)]">
+            {partAssignment}
           </span>
         </div>
       ) : null}

@@ -9,6 +9,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DUET_SONG_PERSONA,
+  DUET_SONG_REASON_LABEL,
   SAFE_SONG_PERSONA,
   SAFE_SONG_REASON_LABEL,
   SHOWOFF_SONG_PERSONA,
@@ -30,5 +32,13 @@ describe("persona 헬퍼", () => {
 
   it("SHOWOFF_SONG_REASON_LABEL 은 '킬링파트' 라벨이다", () => {
     expect(SHOWOFF_SONG_REASON_LABEL).toBe("킬링파트");
+  });
+
+  it("DUET_SONG_PERSONA 는 P-G 식별자다", () => {
+    expect(DUET_SONG_PERSONA).toBe("P-G");
+  });
+
+  it("DUET_SONG_REASON_LABEL 은 '파트 분담' 라벨이다", () => {
+    expect(DUET_SONG_REASON_LABEL).toBe("파트 분담");
   });
 });

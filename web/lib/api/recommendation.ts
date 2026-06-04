@@ -454,6 +454,83 @@ export function createShowoffRecommendation(
 }
 
 /**
+ * P-G 듀엣·함께 부르기 추천 요청. BE `DuetRecommendationCreateRequest`(be #1847)와 1:1 매칭한다.
+ *
+ * 단일 추천이 1인 음역만 받는 데 반해 듀엣은 두 사람 음역을 받는다 — `voiceRangeLow`/`voiceRangeHigh`
+ * 는 1인(요청자), `partnerVoiceRangeLow`/`partnerVoiceRangeHigh` 는 2인(파트너) 음역으로 넷 다 필수다.
+ * BE 는 두 음역의 합집합을 후보 생성 입력으로 넣어 둘을 함께 커버하는 곡을 만든 뒤 두 음역 동시
+ * 충족도로 재정렬한다. `gender`/`partnerGender`(선택)는 두 사람 성별로 파트 분담 라벨에만 쓰이고
+ * 후보 필터로는 쓰지 않는다(듀엣은 두 성별이 섞이므로). `ageGroup`(선택)은 공통 연령대, `limit`
+ * (선택, 1~50)은 노출 곡 수 상한이다. 미지정 필드는 생략한다(BE 결정성 seed 입력 정합, 하위호환).
+ */
+export type DuetRecommendationRequest = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 파트너(2인) 최저음 MIDI. 필수. */
+  partnerVoiceRangeLow: number;
+  /** 파트너(2인) 최고음 MIDI. 필수. */
+  partnerVoiceRangeHigh: number;
+  /** 요청자 성별(선택). 파트 분담 라벨용 — 미입력 시 음높이 기준 기본 라벨로 graceful. */
+  gender?: VocalGender | null;
+  /** 파트너 성별(선택). 파트 분담 라벨용 — 미입력 시 음높이 기준 기본 라벨로 graceful. */
+  partnerGender?: VocalGender | null;
+  /** 두 사람 공통 연령대 대표값(선택). 미입력 시 generationFit 신호 기여 0(하위호환). */
+  ageGroup?: AgeGroup | null;
+  /** 노출 곡 수 상한(선택, 1~50). 미입력 시 단일 추천 기본 개수. */
+  limit?: number | null;
+};
+
+/**
+ * 듀엣 추천 1건. BE `DuetRecommendationResponse.DuetSongResponse`(be #1847)와 1:1 매칭한다.
+ *
+ * `recommendation` 은 단일 추천과 같은 곡 형상(`RecommendedSongResponse`)이라 결과 카드 렌더를
+ * 재사용한다. `partAssignmentReason` 은 곡 음역을 중간음에서 둘로 나눠 낮은 파트=저음 가수, 높은
+ * 파트=고음 가수(성별 주어지면 남성/여성 파트 라벨)로 결정적으로 파생한 "파트 분담" 안내 한 줄로,
+ * BE 가 항상 채워 준다(곡 음역 미상도 graceful 한 기본 사유).
+ */
+export type DuetSongResponse = {
+  partAssignmentReason: string;
+  recommendation: RecommendedSongResponse;
+};
+
+/**
+ * P-G 듀엣·함께 부르기 추천 응답. BE `DuetRecommendationResponse`(be #1847)와 1:1 매칭한다.
+ *
+ * `persona` 는 이 추천을 산출한 페르소나 식별자("P-G"). `requestId` 는 단일 추천과 같은 경로로
+ * 영속된 추천 요청 ID(Long)라 곡 피드백·재조회를 단일 추천과 같은 경로로 처리할 수 있다.
+ * `relaxed`/`relaxedFilters` 는 0건 fallback(be #1668) 으로 일부 필터를 완화해 채웠음을 알린다.
+ * `recommendations` 는 듀엣 강편향(MIXED 듀엣곡 우위 + 두 음역 동시 충족)으로 재정렬한 곡 묶음이다.
+ */
+export type DuetRecommendationResponse = {
+  persona: RecommendationPersona;
+  requestId: number;
+  relaxed: boolean;
+  relaxedFilters: string[];
+  recommendations: DuetSongResponse[];
+};
+
+/**
+ * P-G 듀엣·함께 부르기 추천 생성.
+ *
+ * 신규 엔드포인트 `POST /api/v1/recommendations/duet`(be #1847, spec §5-4). "둘이 파트를 나눠
+ * 함께 부르고 싶다" 의도에 맞춰 두 사람 음역 합집합으로 후보를 만든 뒤 MIXED 듀엣곡 우위 + 두 음역
+ * 동시 충족도로 재정렬한 곡 묶음 + 곡별 "파트 분담" 안내를 돌려준다(로드맵 사회 축 마지막 페르소나).
+ * 단일 추천과 달리 무한 스크롤이 아닌 단일샷(상한 `limit`)이다.
+ */
+export function createDuetRecommendation(
+  request: DuetRecommendationRequest,
+): Promise<DuetRecommendationResponse> {
+  return apiFetch<DuetRecommendationResponse>(
+    "/api/v1/recommendations/duet",
+    {
+      method: "POST",
+      body: request,
+    },
+  );
+}
+
+/**
  * "부른 곡 기반 다음곡 추천"(#1486) 요청.
  *
  * BE `POST /api/v1/recommendations/next`(`createFromSeeds`)와 1:1 매칭. seed 곡들의

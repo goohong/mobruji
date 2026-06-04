@@ -1049,6 +1049,35 @@ describe("SongCard", () => {
     });
   });
 
+  // 이슈 #1848 (be #1847) — P-G 듀엣 "파트 분담"(partAssignmentReason) 노출.
+  describe("파트 분담 (#1848)", () => {
+    it("partAssignmentReason 이 주어지면 '파트 분담' 라벨과 함께 노출한다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard
+            item={item}
+            partAssignmentReason="남성 파트 C3~G3 · 여성 파트 G3~C5 로 나눠 부르기 좋아요"
+          />
+        </ul>,
+      );
+      expect(screen.getByText("파트 분담")).toBeInTheDocument();
+      expect(
+        screen.getByText("남성 파트 C3~G3 · 여성 파트 G3~C5 로 나눠 부르기 좋아요"),
+      ).toBeInTheDocument();
+    });
+
+    it("partAssignmentReason 이 없으면(일반 추천) 파트 분담 줄을 그리지 않는다", () => {
+      const item = buildItem({ difficulty: "NORMAL" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      expect(screen.queryByText("파트 분담")).not.toBeInTheDocument();
+    });
+  });
+
   describe("hero morph view-transition-name (closes #1687, PR7)", () => {
     it("href 모드(라우트 이동)에서는 thumbnail 에 album-{id} 이름이 붙는다", () => {
       const item = buildItem();

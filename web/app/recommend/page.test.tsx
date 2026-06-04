@@ -35,6 +35,7 @@ import userEvent from "@testing-library/user-event";
 import RecommendPage from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import {
+  createDuetRecommendation,
   createRecommendation,
   createSafeRecommendation,
   createShowoffRecommendation,
@@ -89,6 +90,7 @@ vi.mock("@/lib/api/recommendation", async () => {
     createRecommendation: vi.fn(),
     createSafeRecommendation: vi.fn(),
     createShowoffRecommendation: vi.fn(),
+    createDuetRecommendation: vi.fn(),
   };
 });
 
@@ -96,6 +98,7 @@ const readVoiceRangeMock = vi.mocked(readVoiceRange);
 const createRecommendationMock = vi.mocked(createRecommendation);
 const createSafeRecommendationMock = vi.mocked(createSafeRecommendation);
 const createShowoffRecommendationMock = vi.mocked(createShowoffRecommendation);
+const createDuetRecommendationMock = vi.mocked(createDuetRecommendation);
 
 /**
  * 테스트용 IntersectionObserver mock.
@@ -217,6 +220,7 @@ beforeEach(() => {
   createRecommendationMock.mockReset();
   createSafeRecommendationMock.mockReset();
   createShowoffRecommendationMock.mockReset();
+  createDuetRecommendationMock.mockReset();
   resetObserverRegistry();
   installIntersectionObserverMock();
   // 온보딩 취향 pre-fill(#1814) 격리 — 기본은 빈 값이라 기존 테스트는 영향 없음.
@@ -328,6 +332,41 @@ function buildShowoffResponse(songIds: number[]) {
           kyNumber: `K-${id}`,
           metadataSource: "MANUAL_SEED" as const,
           difficulty: "HARD" as const,
+        },
+      },
+    })),
+  };
+}
+
+/**
+ * P-G 듀엣 `/duet` 응답 헬퍼 — 곡별 파트 분담 안내(partAssignmentReason)를 포함한다.
+ */
+function buildDuetResponse(songIds: number[]) {
+  return {
+    persona: "P-G" as const,
+    requestId: 88,
+    relaxed: false,
+    relaxedFilters: [],
+    recommendations: songIds.map((id, idx) => ({
+      partAssignmentReason: `${id}번 곡은 후렴을 나눠 부르기 좋아요`,
+      recommendation: {
+        rankPosition: idx + 1,
+        score: 0.88 - idx * 0.05,
+        matchReason: "두 음역 교집합 매칭",
+        song: {
+          id,
+          title: `듀엣곡-${id}`,
+          artist: "가수",
+          releaseYear: 2023,
+          keyOriginal: "C_MAJOR" as const,
+          bpm: 110,
+          mood: "EMOTIONAL" as const,
+          language: "ko",
+          genre: "발라드",
+          tjNumber: `T-${id}`,
+          kyNumber: `K-${id}`,
+          metadataSource: "MANUAL_SEED" as const,
+          difficulty: "NORMAL" as const,
         },
       },
     })),
@@ -718,6 +757,62 @@ describe("RecommendPage", () => {
       expect(screen.getByText("킬링파트")).toBeInTheDocument();
       expect(
         screen.getByText("5번 곡은 후렴 고음이 내 천장 근처라 지르기 좋아요"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // ---------- 의도 모드 (P-G 듀엣·파트분배, #1848 · be #1847) ----------
+  it("'둘이 함께 부를 곡 추천받기' 의도 모드 선택 시 /duet 엔드포인트로 듀엣곡을 받아 파트 분담을 노출한다", async () => {
+    const user = userEvent.setup();
+    sessionMock.set({ sessionId: "sess-pg", voiceRangeId: 11 });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 11,
+      sessionId: "sess-pg",
+      lowestNoteMidi: 50,
+      highestNoteMidi: 74,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValue(
+      buildResponseWithSongIds(404, [1]),
+    );
+    createDuetRecommendationMock.mockResolvedValue(buildDuetResponse([7]));
+
+    renderWithQueryClient(<RecommendPage />);
+
+    // 최초: 단일 추천(/recommendations)이 default 가중으로 호출된다.
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenNthCalledWith(1, {
+        sessionId: "sess-pg",
+        voiceRangeLow: 50,
+        voiceRangeHigh: 74,
+        excludeSongIds: [],
+      });
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /둘이 함께 부를 곡 추천받기/ }),
+    );
+
+    // P-G 선택 → 별도 `/duet` 엔드포인트(be #1847) 단일샷 호출.
+    // 파트너 음역은 슬라이더 기본값(C3~A4 = 48~69)으로 즉시 호출된다.
+    await waitFor(() => {
+      expect(createDuetRecommendationMock).toHaveBeenCalledWith({
+        sessionId: "sess-pg",
+        voiceRangeLow: 50,
+        voiceRangeHigh: 74,
+        partnerVoiceRangeLow: 48,
+        partnerVoiceRangeHigh: 69,
+      });
+    });
+
+    // 결과 카드에 BE 가 내려준 "파트 분담" 안내가 표기된다.
+    await waitFor(() => {
+      expect(screen.getByText("파트 분담")).toBeInTheDocument();
+      expect(
+        screen.getByText("7번 곡은 후렴을 나눠 부르기 좋아요"),
       ).toBeInTheDocument();
     });
   });

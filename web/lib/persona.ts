@@ -5,12 +5,13 @@
  * (persona-expansion-social-emotional.md §5-6, 이슈 #1600). BE 와 매칭되는 페르소나 식별자 타입
  * (`RecommendationPersona`)은 `lib/api/recommendation.ts` SoT.
  *
- * web 노출 모드는 `P-E` 안전곡(#1600)·`P-F` 과시·킬링파트(#1844). P-D 시퀀스는 별도 화면, P-G 는 후속 이슈.
+ * web 노출 모드는 `P-E` 안전곡(#1600)·`P-F` 과시·킬링파트(#1844)·`P-G` 듀엣(#1848). P-D 시퀀스는 별도 화면.
  *
  * 페르소나별 결과 카드 사유는 BE 전용 엔드포인트 응답이 곡별로 항상 채워 내려준다 — 안전곡은
  * "안심 포인트"(쉬운 이유, `/safe` `safetyReason`, be #1840), 과시는 "킬링파트 안내"(임팩트 구간,
- * `/showoff` `killingPartReason`, be #1843). 둘 다 메타 미상 곡도 graceful 한 기본 사유라 client 가
- * 사유를 추정할 필요 없이 BE 가 내려준 텍스트를 페르소나 라벨과 함께 그대로 노출하면 된다.
+ * `/showoff` `killingPartReason`, be #1843), 듀엣은 "파트 분담"(누가 어느 파트, `/duet`
+ * `partAssignmentReason`, be #1847). 셋 다 메타 미상 곡도 graceful 한 기본 사유라 client 가 사유를
+ * 추정할 필요 없이 BE 가 내려준 텍스트를 페르소나 라벨과 함께 그대로 노출하면 된다.
  */
 
 import type { RecommendationPersona } from "@/lib/api/recommendation";
@@ -26,3 +27,9 @@ export const SHOWOFF_SONG_PERSONA: RecommendationPersona = "P-F";
 
 /** P-F 과시 모드 결과 카드의 사유 라벨 — 임팩트 구간을 "킬링파트"로 옷 입힌다. */
 export const SHOWOFF_SONG_REASON_LABEL = "킬링파트";
+
+/** P-G 듀엣 모드 — "둘이 파트를 나눠 함께 부르고 싶다"(spec §2, 로드맵 사회 축 마지막). */
+export const DUET_SONG_PERSONA: RecommendationPersona = "P-G";
+
+/** P-G 듀엣 모드 결과 카드의 사유 라벨 — 곡 음역을 둘로 나눈 안내를 "파트 분담"으로 옷 입힌다. */
+export const DUET_SONG_REASON_LABEL = "파트 분담";

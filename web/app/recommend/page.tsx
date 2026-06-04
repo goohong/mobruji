@@ -66,9 +66,11 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import {
   AgeGroup,
+  createDuetRecommendation,
   createRecommendation,
   createSafeRecommendation,
   createShowoffRecommendation,
+  DuetRecommendationResponse,
   Mood,
   RecommendationCreateRequest,
   RecommendationPersona,
@@ -77,6 +79,7 @@ import {
   RequestedGender,
   SafeRecommendationResponse,
   ShowoffRecommendationResponse,
+  VocalGender,
 } from "@/lib/api/recommendation";
 import {
   readVoiceRange,
@@ -91,7 +94,12 @@ import {
 import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { SAFE_SONG_PERSONA, SHOWOFF_SONG_PERSONA } from "@/lib/persona";
+import {
+  DUET_SONG_PERSONA,
+  SAFE_SONG_PERSONA,
+  SHOWOFF_SONG_PERSONA,
+} from "@/lib/persona";
+import { VoiceRangeSlider } from "@/components/ui";
 import { useHistoryStore } from "@/store/history";
 import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { useSessionStore } from "@/store/session";
@@ -277,10 +285,12 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       isVoiceRangeReady &&
       voiceRangeLow !== undefined &&
       voiceRangeHigh !== undefined &&
-      // P-E 안전곡 / P-F 과시 모드는 각자 단일샷 전용 엔드포인트(SafeRecommendationFeed /
-      // ShowoffRecommendationFeed)가 별도로 페치하므로 무한 스크롤 default 추천은 멈춘다(중복 페치 방지).
+      // P-E 안전곡 / P-F 과시 / P-G 듀엣 모드는 각자 단일샷 전용 엔드포인트(SafeRecommendationFeed /
+      // ShowoffRecommendationFeed / DuetRecommendationFeed)가 별도로 페치하므로 무한 스크롤 default
+      // 추천은 멈춘다(중복 페치 방지).
       selectedPersona !== SAFE_SONG_PERSONA &&
-      selectedPersona !== SHOWOFF_SONG_PERSONA,
+      selectedPersona !== SHOWOFF_SONG_PERSONA &&
+      selectedPersona !== DUET_SONG_PERSONA,
     initialPageParam: 0,
     queryFn: () => {
       const request: RecommendationCreateRequest = {
@@ -472,6 +482,15 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           />
         ) : selectedPersona === SHOWOFF_SONG_PERSONA ? (
           <ShowoffRecommendationFeed
+            sessionId={sessionId}
+            voiceRangeLow={voiceRange.lowestNoteMidi}
+            voiceRangeHigh={voiceRange.highestNoteMidi}
+            ageGroup={selectedAgeGroup}
+            gender={selectedGender}
+            appliedFilterCount={appliedFilterCount}
+          />
+        ) : selectedPersona === DUET_SONG_PERSONA ? (
+          <DuetRecommendationFeed
             sessionId={sessionId}
             voiceRangeLow={voiceRange.lowestNoteMidi}
             voiceRangeHigh={voiceRange.highestNoteMidi}
@@ -1200,6 +1219,314 @@ function ShowoffRecommendationFeed({
       <SongDetailSheet
         open={selected !== null}
         onClose={() => setSelected(null)}
+        titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
+      >
+        {selected ? (
+          <SongDetailContent item={selected} userVoiceRange={userRange} />
+        ) : null}
+      </SongDetailSheet>
+    </div>
+  );
+}
+
+/** 듀엣 파트너 음역 입력 기본값 — voice-range 직접 선택 화면과 같은 C3~A4. */
+const DEFAULT_PARTNER_LOW_MIDI = 48; // C3
+const DEFAULT_PARTNER_HIGH_MIDI = 69; // A4
+
+type DuetRecommendationFeedProps = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 좌중/사용자 연령대(선택, RecommendRefinePanel). 미선택이면 BE 로 생략 전달. */
+  ageGroup: AgeGroup | null;
+  /** 요청자 성별 필터(선택, RecommendRefinePanel). 미선택이면 BE 로 생략 전달. */
+  gender: RequestedGender | null;
+  /** 결과에 적용된 조건 수(이슈 #1715) — 결과 요약 "조건 N개 적용됨". */
+  appliedFilterCount: number;
+};
+
+/**
+ * P-G 듀엣·함께 부르기(be #1847) 결과 피드.
+ *
+ * 의도 모드에서 "둘이 함께 부를 곡"을 켜면 노출되는 단일샷 추천이다(로드맵 사회 축 마지막).
+ * 단일 추천이 1인 음역만 받는 데 반해 듀엣은 두 사람 음역을 받으므로, 안전곡/과시 피드와 달리
+ * **파트너 음역·성별 입력 패널**을 함께 둔다. 요청자 음역·성별은 추천 화면이 이미 가진 값을 쓰고,
+ * 파트너 음역(필수)·성별(선택)만 이 패널에서 받는다. 전용 엔드포인트 `POST
+ * /api/v1/recommendations/duet` 는 두 음역 합집합으로 후보를 만든 뒤 MIXED 듀엣곡 우위 + 두 음역
+ * 동시 충족도로 재정렬한 한 묶음 + 곡별 "파트 분담" 안내(`partAssignmentReason`)를 돌려준다(spec
+ * §5-4). 파트너 음역은 슬라이더 기본값이 항상 유효해 즉시 한 묶음을 페치하고, 사용자가 조정하면
+ * queryKey 변화로 재페치한다(안전곡/과시의 단일샷 패턴과 결 맞춤).
+ */
+function DuetRecommendationFeed({
+  sessionId,
+  voiceRangeLow,
+  voiceRangeHigh,
+  ageGroup,
+  gender,
+  appliedFilterCount,
+}: DuetRecommendationFeedProps) {
+  const [selected, setSelected] = useState<RecommendedSongResponse | null>(null);
+  // 파트너 음역(필수) — 슬라이더 로컬 상태. 기본값은 voice-range 직접 선택과 동일(C3~A4)이라
+  // 조정 전에도 유효한 한 묶음을 즉시 받을 수 있다. 사용자가 움직이면 queryKey 가 바뀌어 재페치된다.
+  const [partnerLow, setPartnerLow] = useState<number>(DEFAULT_PARTNER_LOW_MIDI);
+  const [partnerHigh, setPartnerHigh] = useState<number>(
+    DEFAULT_PARTNER_HIGH_MIDI,
+  );
+  // 파트너 성별(선택) — 파트 분담 라벨용. 미선택(null)이면 BE 로 생략 → 음높이 기준 기본 라벨 graceful.
+  const [partnerGender, setPartnerGender] = useState<VocalGender | null>(null);
+
+  const duetQuery = useQuery<DuetRecommendationResponse, Error>({
+    queryKey: [
+      "duet-recommendations",
+      sessionId,
+      voiceRangeLow,
+      voiceRangeHigh,
+      partnerLow,
+      partnerHigh,
+      gender,
+      partnerGender,
+      ageGroup,
+    ],
+    queryFn: () =>
+      createDuetRecommendation({
+        sessionId,
+        voiceRangeLow,
+        voiceRangeHigh,
+        partnerVoiceRangeLow: partnerLow,
+        partnerVoiceRangeHigh: partnerHigh,
+        // 미선택(null)이면 필드를 생략해 BE 결정성 seed 입력 정합/하위호환을 유지한다.
+        ...(gender !== null ? { gender } : {}),
+        ...(partnerGender !== null ? { partnerGender } : {}),
+        ...(ageGroup !== null ? { ageGroup } : {}),
+      }),
+  });
+
+  const userRange = {
+    lowMidi: voiceRangeLow,
+    highMidi: voiceRangeHigh,
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <DuetPartnerPanel
+        partnerLow={partnerLow}
+        partnerHigh={partnerHigh}
+        partnerGender={partnerGender}
+        onPartnerRangeChange={(next) => {
+          setPartnerLow(next.lowMidi);
+          setPartnerHigh(next.highMidi);
+        }}
+        onPartnerGenderChange={setPartnerGender}
+      />
+      <DuetResults
+        query={duetQuery}
+        userRange={userRange}
+        appliedFilterCount={appliedFilterCount}
+        selected={selected}
+        onSelect={setSelected}
+      />
+    </div>
+  );
+}
+
+type DuetPartnerPanelProps = {
+  partnerLow: number;
+  partnerHigh: number;
+  partnerGender: VocalGender | null;
+  onPartnerRangeChange: (next: { lowMidi: number; highMidi: number }) => void;
+  onPartnerGenderChange: (gender: VocalGender | null) => void;
+};
+
+/**
+ * 듀엣 파트너 입력 패널 — 함께 부를 상대의 음역(필수)·성별(선택)을 받는다.
+ *
+ * 음역은 voice-range 직접 선택과 같은 `VoiceRangeSlider` 를 재사용한다(별도 측정 흐름 없이 한
+ * 화면에서 파트너 음역을 가볍게 고른다). 성별은 파트 분담 라벨용이라 선택이며, 다시 누르면 해제된다.
+ */
+function DuetPartnerPanel({
+  partnerLow,
+  partnerHigh,
+  partnerGender,
+  onPartnerRangeChange,
+  onPartnerGenderChange,
+}: DuetPartnerPanelProps) {
+  return (
+    <section
+      aria-label="함께 부를 파트너"
+      className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-4"
+    >
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+          함께 부를 파트너
+        </h2>
+        <p className="text-xs text-[var(--text-caption)]">
+          상대의 음역대를 알려주면 두 사람에 맞춰 파트를 나눠 부를 곡을 골라드려요.
+        </p>
+      </div>
+      <VoiceRangeSlider
+        lowMidi={partnerLow}
+        highMidi={partnerHigh}
+        onChange={onPartnerRangeChange}
+        lowLabel="파트너 최저음"
+        highLabel="파트너 최고음"
+      />
+      <div
+        role="group"
+        aria-label="파트너 성별 (선택)"
+        className="flex flex-col gap-1.5"
+      >
+        <span className="text-xs text-[var(--text-caption)]">
+          파트너 성별 (선택)
+        </span>
+        <div className="flex items-center gap-1 self-start">
+          {(
+            [
+              { value: "MALE", label: "남성" },
+              { value: "FEMALE", label: "여성" },
+            ] as const
+          ).map(({ value, label }) => {
+            const active = partnerGender === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={active}
+                onClick={() =>
+                  onPartnerGenderChange(active ? null : value)
+                }
+                className={`min-h-9 rounded-full px-4 text-sm font-medium transition-colors duration-[var(--duration-base)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] ${
+                  active
+                    ? "bg-[var(--brand-500)] text-white hover:bg-[var(--brand-600)]"
+                    : "bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type DuetResultsProps = {
+  query: ReturnType<typeof useQuery<DuetRecommendationResponse, Error>>;
+  userRange: UserVoiceRange;
+  appliedFilterCount: number;
+  selected: RecommendedSongResponse | null;
+  onSelect: (item: RecommendedSongResponse | null) => void;
+};
+
+/**
+ * 듀엣 결과 묶음 — 로딩/에러/빈 결과/정상 렌더. 결과 카드 + 상세 시트는 단일 추천과 공유하고,
+ * 곡별 "파트 분담" 안내는 BE 가 채워 준 사유를 카드에 그대로 노출한다.
+ */
+function DuetResults({
+  query,
+  userRange,
+  appliedFilterCount,
+  selected,
+  onSelect,
+}: DuetResultsProps) {
+  if (query.isPending) {
+    return (
+      <ul
+        aria-busy="true"
+        aria-label="듀엣 추천 로딩 중"
+        className="grid grid-cols-1 gap-3 lg:grid-cols-2"
+      >
+        {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
+          <SongCardSkeleton key={idx} />
+        ))}
+      </ul>
+    );
+  }
+
+  if (query.isError) {
+    const error = query.error;
+    return (
+      <div className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4">
+        <p className="text-sm text-[var(--danger-fg-strong)]">
+          듀엣 추천을 불러오지 못했습니다.{" "}
+          {error instanceof ApiError
+            ? `${error.status}: ${error.message}`
+            : error.message}
+        </p>
+        <button
+          type="button"
+          onClick={() => query.refetch()}
+          className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-[var(--danger-cta-bg)] px-4 text-sm font-medium text-white hover:bg-[var(--danger-cta-bg-hover)]"
+        >
+          다시 시도
+        </button>
+      </div>
+    );
+  }
+
+  const duetSongs = query.data.recommendations;
+
+  if (duetSongs.length === 0) {
+    return (
+      <div
+        role="status"
+        className="flex flex-col items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-5"
+      >
+        <p className="text-sm text-[var(--text-secondary)]">
+          둘이 함께 부를 만한 곡을 찾지 못했어요. 두 사람의 음역대를 다시 확인해 보세요.
+        </p>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--brand-500)] px-4 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
+        >
+          음역대 다시 입력
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <p
+          data-testid="duet-result-summary"
+          className="text-xs text-[var(--text-caption)]"
+        >
+          <span className="font-medium text-[var(--text-secondary)]">
+            듀엣곡 {duetSongs.length}곡
+          </span>
+          {appliedFilterCount > 0 ? (
+            <span> · 조건 {appliedFilterCount}개 적용됨</span>
+          ) : null}
+        </p>
+        <p className="text-xs text-[var(--text-caption)]">
+          두 사람 음역에 맞춰 파트를 나눠 부르기 좋은 곡을 골랐어요.
+        </p>
+        {/* be #1668 0건 fallback — 풀이 부족해 일부 조건을 완화해 채웠을 때 알린다. */}
+        {query.data.relaxed ? (
+          <p
+            data-testid="duet-relaxed-notice"
+            className="text-xs text-[var(--text-caption)]"
+          >
+            듀엣곡이 부족해 일부 조건을 완화해 채웠어요.
+          </p>
+        ) : null}
+      </div>
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {duetSongs.map((duetSong, index) => (
+          <SongCard
+            key={duetSong.recommendation.song.id}
+            item={duetSong.recommendation}
+            index={index}
+            userVoiceRange={userRange}
+            partAssignmentReason={duetSong.partAssignmentReason}
+            onShowDetail={() => onSelect(duetSong.recommendation)}
+          />
+        ))}
+      </ul>
+      <SongDetailSheet
+        open={selected !== null}
+        onClose={() => onSelect(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
       >
         {selected ? (
