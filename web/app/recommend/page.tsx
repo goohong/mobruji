@@ -35,9 +35,11 @@
  *   - 매 페이지의 queryFn 은 호출 시점의 누적 `excludedSongIds`(store snapshot)을
  *     전달한다 → BE SeedDeriver(PR #64) + entity 영속화(PR #74) 효과로 결정성을
  *     유지하면서도 페이지마다 다른 결과를 반환받는다.
- *   - 시드 소진(빈 페이지) 감지 → `getNextPageParam`이 `undefined`를 반환해 추가
- *     페치를 멈춘다. 첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA,
- *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
+ *   - 시드 소진 감지 → `getNextPageParam`이 `undefined`를 반환해 추가 페치를 멈춘다.
+ *     빈 페이지뿐 아니라 **이미 본 곡으로만 채워진 n건 페이지**(신규 고유 0건, #1818)도
+ *     소진으로 보고 멈춘다 — 풀이 마르면 BE 가 중복 곡을 다시 채워 보낼 수 있어서다.
+ *     첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA, 2페이지 이후 소진이면
+ *     "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
  */
 
 import {
@@ -268,6 +270,23 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     },
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.recommendations.length === 0) {
+        return undefined;
+      }
+      // 신규 고유 0건 종료가드 (#1818): 누적 excludeSongIds 로 풀이 소진되면 BE 가
+      // 빈 페이지 대신 이미 본 곡을 다시 채운 n건 페이지로 응답할 수 있다. 마지막
+      // 페이지가 비어 있지 않더라도 이전 페이지들에 없던 "신규 고유" 곡이 하나도
+      // 없으면 더 가져올 게 없다고 보고 멈춘다 — 안 그러면 sentinel 이 중복 페이지를
+      // 무한히 당겨오고(미종료) display 중복 제거가 같은 풀만 반복 페치하게 된다.
+      const seenBeforeLastPage = new Set<number>();
+      for (const page of allPages.slice(0, -1)) {
+        for (const rec of page.recommendations) {
+          seenBeforeLastPage.add(rec.song.id);
+        }
+      }
+      const hasFreshSong = lastPage.recommendations.some(
+        (rec) => !seenBeforeLastPage.has(rec.song.id),
+      );
+      if (!hasFreshSong) {
         return undefined;
       }
       return allPages.length;

@@ -860,6 +860,62 @@ describe("RecommendPage", () => {
       // 1차 페이지 곡은 여전히 노출.
       expect(screen.getByText("곡-1")).toBeInTheDocument();
     });
+
+    // closes #1818 — 풀 소진 후 BE 가 빈 페이지 대신 "이미 본 곡"으로만 채운 n건
+    // 페이지를 응답해도 신규 고유 0건이면 무한스크롤이 멈추고 끝 상태로 전환된다.
+    it("두 번째 페이지가 이미 본 곡으로만 채워지면(신규 고유 0건) sentinel이 사라지고 추가 페치를 멈춘다", async () => {
+      sessionMock.set({ sessionId: "sess-dup", voiceRangeId: 55 });
+      wireAppendExcluded();
+
+      readVoiceRangeMock.mockResolvedValue({
+        id: 55,
+        sessionId: "sess-dup",
+        lowestNoteMidi: 50,
+        highestNoteMidi: 70,
+        sourceMethod: "OCTAVE_PICK",
+        createdAt: "2026-05-21T00:00:00Z",
+        updatedAt: "2026-05-21T00:00:00Z",
+      });
+
+      // 2차 페이지는 비어있지 않지만 1차 페이지와 동일한 곡 ID 만 재등장(풀 소진).
+      createRecommendationMock
+        .mockResolvedValueOnce(buildResponseWithSongIds(1, [1, 2]))
+        .mockResolvedValueOnce(buildResponseWithSongIds(2, [1, 2]));
+
+      renderWithQueryClient(<RecommendPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("곡-1")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        triggerIntersection();
+      });
+
+      await waitFor(() => {
+        expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+      });
+
+      // 신규 고유 0건 → hasNextPage=false → 끝 안내 + sentinel 제거.
+      await waitFor(() => {
+        expect(
+          screen.getByText(/추천할 수 있는 곡을 모두 보여드렸어요\./),
+        ).toBeInTheDocument();
+      });
+      expect(
+        screen.queryByTestId("recommend-sentinel"),
+      ).not.toBeInTheDocument();
+
+      // 추가 sentinel 진입을 흉내내도 더 이상 페치하지 않는다(미종료 회귀 가드).
+      await act(async () => {
+        triggerIntersection();
+      });
+      expect(createRecommendationMock).toHaveBeenCalledTimes(2);
+
+      // 중복은 누적되지 않고 1·2번 곡이 한 번씩만 노출된다.
+      expect(screen.getAllByText("곡-1")).toHaveLength(1);
+      expect(screen.getAllByText("곡-2")).toHaveLength(1);
+    });
   });
 
   // closes #134 — 추천 응답이 성공하면 히스토리 store 에 push 된다.
