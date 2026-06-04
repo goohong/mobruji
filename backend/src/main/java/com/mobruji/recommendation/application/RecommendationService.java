@@ -33,6 +33,7 @@ import com.mobruji.recommendation.domain.ScoredRecommendation;
 import com.mobruji.recommendation.domain.SeedSongsNotFoundException;
 import com.mobruji.recommendation.domain.SequenceRecommendationResult;
 import com.mobruji.recommendation.domain.SequenceStage;
+import com.mobruji.recommendation.domain.ShowoffRecommendationResult;
 import com.mobruji.song.domain.Difficulty;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
@@ -297,6 +298,109 @@ public class RecommendationService {
             case EASY -> 0;
             case NORMAL -> 1;
             case HARD -> 2;
+        };
+    }
+
+    /**
+     * 과시·킬링파트형(P-F) 추천(persona-expansion-social-emotional.md §2/§5). "고음 질러 박수받고 싶다" 의도에 맞춰
+     * 사용자 최고음 근접 + 임팩트(에너지) + 어려운 난이도로 강편향한 과시 추천을 만든다. 안전곡(P-E)의 반대축이며, 신규 추천
+     * 알고리즘이 아니라 기존 {@link #create} 파이프라인을 *과시 가중 프리셋* 으로 재조합하는 것이다 — 점수 함수·가중치/결정성
+     * 불변식을 건드리지 않는다.
+     *
+     * <p>가중 프리셋(기존 신호 재조합, 가중치 변경 없음):
+     * <ul>
+     * <li>입력 분위기를 {@code POWERFUL} 로 고정해 임팩트·고에너지 쪽으로 편향한다 — 기존 {@code moodMatch}/{@code tempoMatch}
+     * 신호를 그대로 재사용한다(안전곡의 {@code CALM} 거울).</li>
+     * <li>산출된 결과를 사용자 음역 천장 근접도 + {@code difficulty=HARD} 우위로 결정적으로 재정렬한다
+     * ({@link #applyShowoffPreset}) — 곡 천장(최고음)이 사용자 최고음에 닿을수록 "한 방 지르기" 좋은 곡으로 본다. 킬링파트
+     * (곡 안 임팩트 구간) 메타는 미확보 상태라(§5-2) 음역 천장 근접만으로 1차 추천한다.</li>
+     * <li>음역 적합도({@code rangeFit})·대중성 등 나머지 신호는 기존 값을 그대로 둔다 — 신규 비결정 신호를 도입하지 않아 같은
+     * 입력이면 같은 결과(결정성 보존).</li>
+     * </ul>
+     *
+     * <p>각 추천 곡에는 "킬링파트 안내"({@code killingPartReason}) 한 줄이 난이도·곡 천장 근접도에서 결정적으로 파생되어 붙는다
+     * (§4 설명 가능성). 결과는 단일 추천과 같은 경로로 영속되어 고유 {@code requestId} 로 곡 피드백·재조회를 재사용할 수 있다.
+     */
+    public ShowoffRecommendationResult createShowoff(final ShowoffRecommendationCommand showoffRecommendationCommand) {
+        final CreateRecommendationCommand createCommand = new CreateRecommendationCommand(
+                showoffRecommendationCommand.sessionId(),
+                showoffRecommendationCommand.voiceRangeLow(),
+                showoffRecommendationCommand.voiceRangeHigh(),
+                Mood.POWERFUL,
+                null,
+                showoffRecommendationCommand.ageGroup(),
+                showoffRecommendationCommand.gender(),
+                List.of(),
+                false);
+        // 빈 화면을 막기 위해 0건 fallback 을 켠다(relaxOnZeroResult=true) — 과시 사용자도 항상 지를 곡을 받길 원한다.
+        final RecommendationResult result = create(createCommand, true);
+        final List<ShowoffRecommendationResult.ShowoffRecommendation> showoffRecommendations = applyShowoffPreset(
+                result.recommendations(),
+                showoffRecommendationCommand.voiceRangeHigh(),
+                showoffRecommendationCommand.limit());
+        log.info(
+                "event=recommendation.showoff.created persona={} resultCount={} relaxed={}",
+                RecommendationPersona.P_F.code(),
+                showoffRecommendations.size(),
+                result.relaxed());
+        return new ShowoffRecommendationResult(
+                RecommendationPersona.P_F, result.requestId(), showoffRecommendations, result.relaxedFilters());
+    }
+
+    /**
+     * 과시 강편향 — 점수 순으로 정렬된 추천을 ① 사용자 음역 천장 근접도(곡 최고음이 {@code userVoiceHigh} 에 가까울수록 우위,
+     * 곡 천장 미상은 후순위) ② {@code difficulty=HARD} 우위(난이도 미상은 후순위) 순으로 재정렬하고, 노출 곡 수를 {@code limit}
+     * 으로 자른다. 두 키가 모두 같은 곡끼리는 입력 순서(점수 내림차순)를 보존하는 stable sort 라 같은 입력이면 같은 결과
+     * (결정성 보존). 재정렬 후 노출 순서대로 {@code rankPosition} 을 1부터 다시 매겨 "킬링파트 안내"를 붙인다.
+     */
+    private static List<ShowoffRecommendationResult.ShowoffRecommendation> applyShowoffPreset(
+            final List<ScoredRecommendation> recommendations, final int userVoiceHigh, final Integer limit) {
+        final List<ScoredRecommendation> reranked = new ArrayList<>(recommendations);
+        reranked.sort(Comparator
+                .comparingInt((final ScoredRecommendation recommendation) -> ceilingProximity(
+                        recommendation, userVoiceHigh))
+                .thenComparingInt(RecommendationService::showoffDifficultyRank));
+        final int bound = limit == null ? reranked.size() : Math.min(limit, reranked.size());
+        final List<ShowoffRecommendationResult.ShowoffRecommendation> showoffRecommendations = new ArrayList<>(bound);
+        for (int i = 0; i < bound; i++) {
+            final ScoredRecommendation source = reranked.get(i);
+            final ScoredRecommendation ranked = new ScoredRecommendation(
+                    source.song(),
+                    source.score(),
+                    source.matchReason(),
+                    i + 1,
+                    source.breakdown(),
+                    source.transposeSuggestion());
+            showoffRecommendations.add(
+                    ShowoffRecommendationResult.ShowoffRecommendation.of(ranked, userVoiceHigh));
+        }
+        return showoffRecommendations;
+    }
+
+    /**
+     * 과시 재정렬용 음역 천장 근접도 — 곡 최고음과 사용자 음역 천장의 거리(반음). 값이 작을수록(가까울수록) "지르기" 좋은 곡으로
+     * 상위 노출한다(킬링파트 메타 부재 시 1차 신호, §5-2). 곡 천장 미상은 {@link Integer#MAX_VALUE} 로 후순위.
+     */
+    private static int ceilingProximity(final ScoredRecommendation recommendation, final int userVoiceHigh) {
+        final Integer highMidi = recommendation.song().getHighMidi();
+        if (highMidi == null) {
+            return Integer.MAX_VALUE;
+        }
+        return Math.abs(highMidi - userVoiceHigh);
+    }
+
+    /**
+     * 과시 재정렬용 난이도 우선순위 — HARD(0) → NORMAL(1) → EASY(2) → 미상(3). 값이 작을수록 과시(상위 노출). 안전곡 거울.
+     */
+    private static int showoffDifficultyRank(final ScoredRecommendation recommendation) {
+        final Difficulty difficulty = recommendation.song().getDifficulty();
+        if (difficulty == null) {
+            return 3;
+        }
+        return switch (difficulty) {
+            case HARD -> 0;
+            case NORMAL -> 1;
+            case EASY -> 2;
         };
     }
 
