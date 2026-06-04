@@ -23,7 +23,7 @@ import {
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
 import { useSessionStore } from "@/store/session";
-import { Button, VoiceRangeSlider } from "@/components/ui";
+import { Button, StepIndicator, VoiceRangeSlider } from "@/components/ui";
 import { VoiceRangeIntuition } from "./components/VoiceRangeIntuition";
 
 const DEFAULT_LOW_MIDI = 48; // C3
@@ -114,9 +114,7 @@ export default function VoiceRangePage() {
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col gap-8">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            1단계
-          </p>
+          <StepIndicator current={1} total={2} />
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             내 음역대를 알려주세요
           </h1>

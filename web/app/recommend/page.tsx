@@ -67,6 +67,7 @@ import {
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
 import { midiToKoreanNoteName } from "@/lib/notes";
+import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
@@ -322,9 +323,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-8">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            2단계
-          </p>
+          <StepIndicator current={2} total={2} />
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             추천 결과
           </h1>
