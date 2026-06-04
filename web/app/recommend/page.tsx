@@ -308,7 +308,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
    */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl flex flex-col gap-8">
+      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
             Step 2
@@ -494,7 +494,7 @@ function RecommendationFeed({
       <ul
         aria-busy="true"
         aria-label="추천 결과 로딩 중"
-        className="flex flex-col gap-3"
+        className="grid grid-cols-1 gap-3 lg:grid-cols-2"
       >
         {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
           <SongCardSkeleton key={idx} />
@@ -582,7 +582,7 @@ function RecommendationFeed({
       >
         {liveMessage}
       </div>
-      <ul className="flex flex-col gap-3">
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {allRecommendations.map((item, index) => (
           <SongCard
             key={item.song.id}
@@ -615,7 +615,7 @@ function RecommendationFeed({
             <ul
               aria-busy="true"
               aria-label="다음 추천 결과 로딩 중"
-              className="flex flex-col gap-3"
+              className="grid grid-cols-1 gap-3 lg:grid-cols-2"
             >
               {Array.from({ length: 2 }).map((_, idx) => (
                 <SongCardSkeleton key={idx} />
