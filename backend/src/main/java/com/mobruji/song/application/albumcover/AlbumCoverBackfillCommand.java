@@ -12,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import com.mobruji.song.domain.Song;
@@ -33,8 +32,9 @@ import com.mobruji.song.infrastructure.SongRepository;
  * ./gradlew bootRun --args='--spring.profiles.active=local --mobruji.backfill-album-cover=true'
  * </pre>
  *
- * <p>인자 미지정 시 no-op — 평시 부팅에 영향 없음. {@code test} 프로파일은 Spring Bean 자체 미등록으로 통합 테스트
- * 영향 없음.
+ * <p>인자 미지정 시 no-op — 평시 부팅(테스트 포함)에 영향 없음. 본 빈은 on-demand admin
+ * 트리거({@code POST /api/v1/admin/songs/album-cover-backfill}, 이슈 #1766)가 {@code runBackfill} 을 재사용하므로
+ * 모든 프로파일에서 등록된다.
  *
  * <p>동작:
  * <ol>
@@ -49,7 +49,6 @@ import com.mobruji.song.infrastructure.SongRepository;
  * <p>결정성 영향 없음 — 추천 알고리즘 입력과 무관, UX 표시 전용 (ADR 0010 정합).
  */
 @Component
-@Profile("!test")
 public class AlbumCoverBackfillCommand implements ApplicationRunner {
 
     /** ApplicationArguments 에서 인식할 옵션 키. {@code --mobruji.backfill-album-cover=true} */
