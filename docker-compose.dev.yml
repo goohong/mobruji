@@ -59,6 +59,10 @@ services:
       MYSQL_PORT: "3306"
       MYSQL_USER: ${MYSQL_USER:-mobruji}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env.dev}
+      # admin endpoint 게이트 (#224/#228). dev 음역대 메타추정 트리거(#1788)도 이 토큰을 쓴다:
+      #   curl -XPOST -H "X-Admin-Token: $MOBRUJI_ADMIN_TOKEN" \
+      #     "https://<host>/api/v1/admin/songs/estimate-vocal-range?limit=20"
+      # → 음역대 미보유 곡을 keyOriginal/genre 메타로 추정해 채워 추천 풀 진입 (응답: scanned/applied/...).
       MOBRUJI_ADMIN_TOKEN: ${MOBRUJI_ADMIN_TOKEN:?MOBRUJI_ADMIN_TOKEN must be set in .env.dev}
       MOBRUJI_CORS_ALLOWED_ORIGINS: ${MOBRUJI_CORS_ALLOWED_ORIGINS:-http://localhost}
       # allowPublicKeyRetrieval=true — MySQL 8.4 의 caching_sha2_password 가

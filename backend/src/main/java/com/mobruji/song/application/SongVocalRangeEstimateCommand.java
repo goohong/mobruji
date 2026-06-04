@@ -73,10 +73,14 @@ public class SongVocalRangeEstimateCommand implements ApplicationRunner {
      * 음역대 미보유 곡에 메타 추정 음역대를 채운다. {@code limit} 이 있으면 id 순 앞에서 그만큼만 처리해 chunk 단위로
      * 안전하게 반복 실행한다 — 한 곡이 적용되면 다음 실행의 후보에서 빠지므로(lowMidi/highMidi 가 채워져) 자연 resume 된다.
      *
+     * <p>on-demand admin 트리거({@code POST /api/v1/admin/songs/estimate-vocal-range}, 이슈 #1788)가
+     * 본 메서드를 재사용해 도커 dev 컨테이너에서도 추정 배치를 돌린다 — {@link ApplicationArguments} 전용
+     * 부팅 trigger 가 닿지 않는 경로를 열어 준다.
+     *
      * @param limit 처리할 곡 상한 (미지정 시 전체 미보유 곡)
      * @return 처리 요약
      */
-    EstimateSummary runEstimate(final OptionalInt limit) {
+    public EstimateSummary runEstimate(final OptionalInt limit) {
         final List<Song> missing = songRepository.findMissingVocalRange();
         final List<Song> selected = limit.isPresent()
                 ? missing.stream().limit(limit.getAsInt()).toList()
@@ -146,7 +150,7 @@ public class SongVocalRangeEstimateCommand implements ApplicationRunner {
         return "true".equalsIgnoreCase(values.get(values.size() - 1));
     }
 
-    record EstimateSummary(
+    public record EstimateSummary(
             int scanned,
             int applied,
             int skippedUnestimable,
