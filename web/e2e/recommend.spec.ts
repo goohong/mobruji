@@ -6,7 +6,7 @@
  * 검증:
  *  1. `/recommend` 페이지 HTTP 200 응답
  *  2. 음역대(voice-range) 미입력 시 fallback CTA (음역대 입력하러 가기) 가 노출
- *  3. 음역대 + 추천 API mock 후 진입 시 페이지 헤더(2단계 / 추천 결과) 가 렌더
+ *  3. 음역대 + 추천 API mock 후 진입 시 페이지 헤더(2/2 단계 / 추천 결과) 가 렌더
  *  4. 페이지 로드 중 console error 0건
  *
  * mock 전략 (spec §7, Q4 결정 (b)):
@@ -104,7 +104,7 @@ test.describe("S3: 추천 페이지 smoke", () => {
       (url) => url.pathname === "/api/v1/recommendations",
       async (route) => {
         // 빈 추천 응답 — page 가 "더 이상 추천할 곡이 없어요" fallback 을 렌더.
-        // 곡 카드를 렌더하지 않아도 페이지 헤더/2단계 caption 가 smoke 충분.
+        // 곡 카드를 렌더하지 않아도 페이지 헤더/2/2 단계 caption 가 smoke 충분.
         await route.fulfill({
           status: 201,
           contentType: "application/json",
@@ -132,8 +132,9 @@ test.describe("S3: 추천 페이지 smoke", () => {
     expect(response, "GET /recommend 응답이 존재해야 합니다.").not.toBeNull();
     expect(response!.status()).toBe(200);
 
-    // 2단계 caption + 헤더 "추천 결과" 가 렌더되면 RecommendContent 분기 도달.
-    await expect(page.getByText("2단계", { exact: true })).toBeVisible();
+    // 2/2 단계 caption + 헤더 "추천 결과" 가 렌더되면 RecommendContent 분기 도달.
+    // StepIndicator 가 `{current}/{total} 단계` 포맷으로 렌더한다(StepIndicator.tsx SoT).
+    await expect(page.getByText("2/2 단계", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { level: 1, name: "추천 결과" }),
     ).toBeVisible();

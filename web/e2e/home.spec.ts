@@ -6,7 +6,7 @@
  * 검증:
  *  1. `/` 페이지 HTTP 200 응답
  *  2. 헤더 카피 "오늘 노래방, 뭐 부르지?" 가 화면에 렌더
- *  3. 신규(미측정) 사용자용 진입 경로 — 페르소나 카드(측정 wizard `/voice-range/auto`)와
+ *  3. 신규(미측정) 사용자용 진입 경로 — 페르소나 카드(측정 방식 선택 `/voice-range/method`)와
  *     "직접 입력으로 시작"(`/voice-range`) 보조 경로가 노출되고 클릭 가능
  *  4. 페이지 로드 중 console error 0건
  *
@@ -21,7 +21,8 @@
  *  - #1571(OnboardingIntentPicker) 이후 신규 사용자 진입은 단일 "음역대 측정하기" CTA 대신
  *    3 페르소나 카드 + "직접 입력으로 시작" 보조 경로로 대체됐다. 단언 SoT 는 단위 테스트
  *    `web/app/page.test.tsx`(NewUserPanel 분기) 와 일치한다. 페르소나 카드는 자식 경로
- *    미구현이라 전부 `/voice-range/auto` 로 fallback 한다(OnboardingIntentPicker `PATH_DESTINATION`).
+ *    미구현이라 전부 `/voice-range/method`(측정 방식 선택) 로 라우팅한다
+ *    (OnboardingIntentPicker `PATH_DESTINATION`, directive #1511).
  *  - 후속 impl PR 2 에서 S2 (returning user — localStorage seed) 추가 예정.
  */
 import { expect, test } from "@playwright/test";
@@ -46,10 +47,10 @@ test.describe("S1: 홈 페이지 신규 사용자 smoke", () => {
     ).toBeVisible();
 
     // 신규(미측정) 사용자 진입 경로 — 페르소나 카드(OnboardingIntentPicker).
-    // 자식 경로 미구현이라 측정 wizard `/voice-range/auto` 로 fallback 한다.
+    // 자식 경로 미구현이라 측정 방식 선택 `/voice-range/method` 로 라우팅한다.
     const beginnerCard = page.getByRole("link", { name: "내 목소리부터 알아보기" });
     await expect(beginnerCard).toBeVisible();
-    await expect(beginnerCard).toHaveAttribute("href", "/voice-range/auto");
+    await expect(beginnerCard).toHaveAttribute("href", "/voice-range/method");
 
     // 신규 사용자 secondary CTA — 직접 입력 진입(`/voice-range`).
     const manualCta = page.getByRole("link", { name: "직접 입력으로 시작" });
