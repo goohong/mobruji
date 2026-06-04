@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -34,6 +35,10 @@ CYCLES = ("be", "fe", "rev", "plan", "infra")
 GH_TIMEOUT_SECONDS = 25
 # (#1390) launch 연속 실패 N회 초과 시 큐에서 제외 — 무한 재시도 + head-of-line block 차단.
 MAX_LAUNCH_ATTEMPTS = 3
+# (#1770) root(/) 디스크 압박 시 신규 sub-agent launch 보류 임계치(%). 워크트리/빌드
+# 산출물 누적으로 root 가 폭주하면 신규 사이클을 띄우지 않고 stale 회복(lock/디스크 정리)만
+# 진행한다. env override 가능 — 디스크 여유에 맞춰 동적 조정.
+DISK_HOLD_PCT = int(os.environ.get("MOBRUJI_DISK_HOLD_PCT", "90"))
 # (#1401) cycle forum thread 동기 생성 — discord-reply.sh 가 thread_id 를 stdout 으로
 # 즉시 반환 (forum_create_thread 는 비동기 event 라 id 즉시 미수신). 자율 경로가
 # 📌 dialogue thread 대신 전용 cycle forum thread 에 보고하게 하는 핵심.
@@ -257,16 +262,47 @@ def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
         return None
 
 
+def root_disk_pct() -> int:
+    """root(/) 사용률 정수%. 조회 실패 시 0 (가드 미발동 — 안전 fallback)."""
+    try:
+        usage = shutil.disk_usage("/")
+        return int(usage.used * 100 / usage.total) if usage.total else 0
+    except OSError as exc:
+        logger.warning("root 디스크 사용률 조회 실패: %r", exc)
+        return 0
+
+
+def disk_pressure_hold() -> bool:
+    """(#1770) root 디스크 압박(>= DISK_HOLD_PCT) 시 신규 launch 보류 여부.
+
+    True 면 dispatch_once 가 이번 tick 신규 launch 를 건너뛴다. stale in_flight
+    회복(lock 해제 → ephemeral 워크트리 teardown → 디스크 정리)은 계속 진행돼
+    압박이 자연 완화된다. 신규 launch 만 막아 root 폭주를 차단.
+    """
+    pct = root_disk_pct()
+    if pct >= DISK_HOLD_PCT:
+        logger.warning(
+            "디스크 압박 %d%% (>= %d%%) — 이번 tick 신규 sub-agent launch 보류",
+            pct, DISK_HOLD_PCT,
+        )
+        return True
+    return False
+
+
 def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
     """각 cycle: stale in_flight 회복 + idle 면 큐 다음 항목 launch.
 
     agent_loop tick 마다 호출. 반환 = 이번 tick 에 launch 된 항목 list (로그용).
+
+    (#1770) root 디스크 압박 시 신규 launch 는 보류하되 stale 회복은 계속 — 동시
+    워크트리/빌드 산출물로 root 가 폭주하는 것을 막는 안전장치.
     """
     launched: list[dict[str, Any]] = []
     if ev.get_state("paused") is True:
         return launched
     now = now or datetime.now(timezone.utc)
     started: dict[str, str] = ev.get_state(IN_FLIGHT_STARTED_KEY) or {}
+    hold_new = disk_pressure_hold()
 
     for cycle in CYCLES:
         in_flight = set(ev.get_state("in_flight_agents") or [])
@@ -284,6 +320,11 @@ def dispatch_once(*, now: datetime | None = None) -> list[dict[str, Any]]:
                 ev.set_state(IN_FLIGHT_STARTED_KEY, started)
             else:
                 continue  # busy — 다음 cycle
+
+        # (#1770) 디스크 압박이면 신규 launch 보류 — stale 회복(위)은 이미 끝났으므로
+        # 디스크 정리는 진행되고, 신규 워크트리/빌드만 띄우지 않아 root 폭주를 차단.
+        if hold_new:
+            continue
 
         nxt = wq.peek_next(cycle)
         if nxt is None:
