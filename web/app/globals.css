@@ -302,6 +302,25 @@ body {
 }
 
 /*
+ * 적합도 매핑 좌측 보더 (#1721). 곡별 hue 가 의미 전달 0 이던 문제를 풀어, 내 음역 적합도를
+ * 알 때는 보더 색이 그 레벨을 표현한다 — green=부를 수 있음(high) / amber=도전(mid) /
+ * neutral=버거움(low). 적합도를 모르는 카드(세션 음역대 없음·곡 음역 미보유)는 data-fit 가
+ * 없어 위 hue gradient 를 그대로 쓴다. 색은 --badge-*-fg 토큰이라 라이트/다크 자동 대응.
+ */
+.song-accent-stripe[data-fit="high"] {
+  background-image: none;
+  background-color: var(--badge-success-fg);
+}
+.song-accent-stripe[data-fit="mid"] {
+  background-image: none;
+  background-color: var(--badge-warning-fg);
+}
+.song-accent-stripe[data-fit="low"] {
+  background-image: none;
+  background-color: var(--badge-neutral-fg);
+}
+
+/*
  * Shimmer sweep — 스켈레톤 로딩 플레이스홀더용 (#1493).
  *
  * Tailwind 기본 `animate-pulse`(opacity 깜빡임) 대신, 토스/네이버 류 앱의 "빛이

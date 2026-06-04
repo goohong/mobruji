@@ -71,6 +71,8 @@ import {
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip, HeartPop } from "@/components/ui";
 
+import { toFitDisplay, type FitLevel } from "@/lib/recommendationFit";
+
 import { FitBadge, FitReasons } from "./FitBadge";
 import { AlbumCoverThumbnail } from "./SongDetailContent";
 
@@ -124,6 +126,12 @@ type SongCardProps =
       onShowDetail?: () => void;
       index?: number;
       activePersona?: never;
+      /**
+       * 검색 카드(/songs)에서 BE 추천 컨텍스트 없이도 "내 음역 적합" 배지를 그리기 위한
+       * client 산출 적합도(0~1). 호출 측이 세션 음역대 + 곡 음역으로 계산해 넘긴다
+       * (#1721). 세션 음역대가 없거나 곡 음역 미보유면 미지정 → 배지 생략.
+       */
+      voiceFit?: number;
     };
 
 export function SongCard(props: SongCardProps) {
@@ -137,6 +145,19 @@ export function SongCard(props: SongCardProps) {
     "item" in props && props.activePersona ? props.activePersona : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
   const index: number = typeof props.index === "number" ? props.index : 0;
+  // closes #1484 / #1721 — "내 음역 적합" 적합도. 추천 컨텍스트는 BE voiceFit, 검색
+  // 컨텍스트(/songs)는 호출 측이 세션 음역대로 산출해 넘긴 voiceFit 을 쓴다. 둘 다 없으면
+  // null → 배지/사유 생략.
+  const searchVoiceFit: number | null =
+    "voiceFit" in props && typeof props.voiceFit === "number"
+      ? props.voiceFit
+      : null;
+  const voiceFit: number | null =
+    item && typeof item.voiceFit === "number" ? item.voiceFit : searchVoiceFit;
+  // closes #1721 — 좌측 보더에 의미 부여. 적합도를 알면 레벨(high/mid/low)로 매핑하고,
+  // 모르면 종전 곡별 hue(#1683) fallback. CSS 가 data-fit 를 받아 보더 색을 바꾼다.
+  const voiceFitLevel: FitLevel | null =
+    voiceFit !== null ? toFitDisplay(voiceFit).level : null;
   // closes #1683 — stagger 진입 delay(--card-index) + 곡별 deterministic accent hue(--song-hue).
   const cardStyle = {
     "--card-index": index,
@@ -144,9 +165,11 @@ export function SongCard(props: SongCardProps) {
   } as CSSProperties;
   // 좌측 4px accent stripe. rounded-l 로 카드 모서리를 따라가 overflow-hidden 없이도
   // 둥근 코너 밖으로 삐져나오지 않는다(내부 포커스 ring clip 회피).
+  // data-fit 가 있으면 적합도 레벨 색(green=부를 수 있음 / amber / neutral), 없으면 hue.
   const accentStripe: ReactNode = (
     <span
       aria-hidden="true"
+      data-fit={voiceFitLevel ?? undefined}
       className="song-accent-stripe pointer-events-none absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)]"
     />
   );
@@ -249,8 +272,8 @@ export function SongCard(props: SongCardProps) {
            * 노출한다. 라벨은 "내 음역 적합" — 곡 자체의 음역이 아니라 내 음역대와의
            * 적합도임을 표면에서 분명히 한다 (V8, recommend-page-visual-ux-audit-1708).
            */}
-          {item && typeof item.voiceFit === "number" ? (
-            <FitBadge label="내 음역 적합" fit={item.voiceFit} />
+          {voiceFit !== null ? (
+            <FitBadge label="내 음역 적합" fit={voiceFit} />
           ) : null}
           {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
           {/*
@@ -266,6 +289,17 @@ export function SongCard(props: SongCardProps) {
           ) : null}
         </div>
       </div>
+
+      {/*
+       * closes #1721 — 검색 카드 한 줄 적합 사유. 추천(item)은 matchReason/personaReason/
+       * FitReasons 가 사유를 담당하므로, 사유 줄은 BE 컨텍스트가 없는 검색 카드에서만
+       * client 적합도 레벨로 노출한다.
+       */}
+      {!item && voiceFitLevel ? (
+        <p className="text-xs text-[var(--text-secondary)]">
+          {voiceFitSearchReason(voiceFitLevel)}
+        </p>
+      ) : null}
 
       {/*
        * closes #1600 — 페르소나 사유("안심 포인트") 한 줄. P-E 안전곡 모드처럼 의도
@@ -712,6 +746,23 @@ export function getSongHue(songId: number): number {
   return String(songId)
     .split("")
     .reduce((accumulated, character) => accumulated + character.charCodeAt(0), 0) % 360;
+}
+
+/**
+ * 검색 카드(/songs)의 client 적합도 레벨 → 한 줄 사유 (#1721).
+ *
+ * 추천 카드처럼 BE 사유 문장이 없는 검색 컨텍스트에서, 내 음역대 대비 "부를 수 있는지"를
+ * 한 문장으로 풀어 준다. 톤/색은 좌측 보더 + FitBadge 가 담당하고 여기선 문장만 담당한다.
+ */
+export function voiceFitSearchReason(level: FitLevel): string {
+  switch (level) {
+    case "high":
+      return "내 음역대에 잘 맞아 편하게 부를 수 있어요.";
+    case "mid":
+      return "조금 도전적이지만 부를 수 있어요.";
+    case "low":
+      return "음이 높거나 낮아 부르기 버거울 수 있어요.";
+  }
 }
 
 /**

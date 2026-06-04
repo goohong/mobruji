@@ -120,6 +120,25 @@ function estimateKeyMatch(song: SongResponse): RecommendationBreakdownItem {
   };
 }
 
+/**
+ * 사용자 음역대와 곡 음역의 겹침 비율(0~1)을 계산한다.
+ *
+ * `overlap / songSpan` — 곡 음역 중 내 음역대 안에 들어오는 구간 비율. /songs 검색 카드의
+ * "내 음역 적합" 배지(#1721)와 추천 점수 분해의 음역 적합 항목이 같은 직관을 공유하도록
+ * 단일 함수로 둔다. 음역 정보가 없으면 `null` 을 돌려준다.
+ */
+export function computeVoiceFitRatio(
+  userVoiceRange: UserVoiceRange,
+  songLow: number,
+  songHigh: number,
+): number {
+  const overlapLow = Math.max(songLow, userVoiceRange.lowMidi);
+  const overlapHigh = Math.min(songHigh, userVoiceRange.highMidi);
+  const overlapSemitones = Math.max(0, overlapHigh - overlapLow);
+  const songSpan = Math.max(1, songHigh - songLow);
+  return Math.min(1, overlapSemitones / songSpan);
+}
+
 function estimateRangeFit(
   song: SongResponse,
   userVoiceRange: UserVoiceRange | null,
@@ -136,11 +155,10 @@ function estimateRangeFit(
   const userLow = userVoiceRange.lowMidi;
   const userHigh = userVoiceRange.highMidi;
 
-  const overlapLow = Math.max(songLow, userLow);
-  const overlapHigh = Math.min(songHigh, userHigh);
-  const overlapSemitones = Math.max(0, overlapHigh - overlapLow);
-  const songSpan = Math.max(1, songHigh - songLow);
-  const ratio = Math.min(1, overlapSemitones / songSpan);
+  const ratio = roundTo(
+    computeVoiceFitRatio(userVoiceRange, songLow, songHigh),
+    2,
+  );
 
   const songLowName = midiToKoreanNoteName(songLow);
   const songHighName = midiToKoreanNoteName(songHigh);
@@ -150,7 +168,7 @@ function estimateRangeFit(
   return {
     key: "rangeFit",
     label: "음역 적합",
-    score: roundTo(ratio, 2),
+    score: ratio,
     detail: `사용자 ${userLowName}-${userHighName} vs 곡 ${songLowName}-${songHighName}`,
     estimated: true,
   };
