@@ -160,6 +160,31 @@ class NextSongRecommendationTest {
     }
 
     @Test
+    @DisplayName("excludeSongIds 풀 소진 시 빈 응답으로 종료한다 (재surface 금지, #1817)")
+    void next_poolExhausted_returnsEmptyWithoutResurface() {
+        // given: 카탈로그의 seed 외 모든 곡을 명시 제외(스와이프로 전부 본 상황) → 후보 풀 소진
+        final List<Long> allSongIds = songRepository.findAll().stream().map(Song::getId).toList();
+        final String excludeCsv = allSongIds.stream()
+                .filter(id -> !id.equals(iuLilacId))
+                .map(String::valueOf)
+                .reduce((a, b) -> a + ", " + b)
+                .orElseThrow();
+        final String payload = """
+                {
+                  "sessionId": "%s",
+                  "seedSongIds": [%d],
+                  "excludeSongIds": [%s]
+                }
+                """.formatted(SESSION_ID, iuLilacId, excludeCsv);
+
+        // when
+        final List<Integer> songIds = postNextAndExtractSongIds(payload);
+
+        // then: 0건 fallback 으로 이미 본 곡을 다시 노출하지 않고 빈 결과로 끝낸다
+        assertThat(songIds).isEmpty();
+    }
+
+    @Test
     @DisplayName("조회되지 않는 seed ID 만 보내면 422")
     void next_unknownSeeds_returns422() {
         final String payload = """
