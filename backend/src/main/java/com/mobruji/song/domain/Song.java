@@ -137,6 +137,17 @@ public class Song {
     private Difficulty difficulty;
 
     /**
+     * 곡 보컬의 성별 분류 (#1767). nullable — 큐레이션(시드/큐레이터)이 명시한 경우에만 채워진다. null 인 외부
+     * 임포트 곡은 추천 시점에 보컬 음역·키로 추정해 후순위 가산하므로(=컬럼은 큐레이션 권위값 전용), 미적재 곡도
+     * 성별 필터에서 graceful degrade 한다.
+     *
+     * <p>추천 {@code genderFit} 신호의 1순위 입력 — 적재만으로 랭킹이 바뀌므로 결정성에는 입력 변화로만 반영된다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "vocal_gender", length = 16)
+    private VocalGender vocalGender;
+
+    /**
      * 곡의 음향 에너지/강렬함 정도 (0.0~1.0). nullable — 1차는 수기/시드 적재, 자동 산출은 후속
      * (spec {@code song-analysis-data-and-consumers.md} §8 Q2). 미적재(null) 곡은 소비자
      * (#1485 mood / #1486 next-song)가 graceful degrade — energy 가중 0 으로 다른 신호만 사용한다.
@@ -184,6 +195,7 @@ public class Song {
             final Integer lowMidi,
             final Integer highMidi,
             final Difficulty difficulty,
+            final VocalGender vocalGender,
             final Float energy,
             final String albumCoverUrl) {
         Objects.requireNonNull(title, "title must not be null");
@@ -220,7 +232,7 @@ public class Song {
         return new Song(
                 null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
                 tjNumber, kyNumber, metadataSource, isrc, mbId, resolvedConfidence,
-                lowMidi, highMidi, resolvedDifficulty, energy, albumCoverUrl, now, now);
+                lowMidi, highMidi, resolvedDifficulty, vocalGender, energy, albumCoverUrl, now, now);
     }
 
     /**
