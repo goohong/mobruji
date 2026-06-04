@@ -130,6 +130,10 @@ python batch_analyze.py --seed tests/validation_set.json --vocal-separation --gr
 # 3) offline — 사전 feed 로 분석 skip, 정확도만 재계산(네트워크/의존성 불요)
 python batch_analyze.py --seed tests/validation_set.json \
   --from-results /data/tmp/feed.ndjson --ground-truth
+
+# 4) 라벨 없는 신규 임포트 곡 — 음역 합리성(가창 범위) 검증 후 backfill (directive #1716)
+python batch_analyze.py --seed tests/new-songs-verification.json \
+  --out /data/tmp/new-feed.ndjson --plausibility
 ```
 
 - **feed 레코드**: `{id, status, metadataSource="AUDIO_ANALYSIS", lowMidi, highMidi,
@@ -144,6 +148,13 @@ python batch_analyze.py --seed tests/validation_set.json \
   볼륨에 쌓이게 한다. analyze.py 가 분석 직후 `shutil.rmtree` 로 삭제한다.
 - **회귀 가드**(spec §10-4): lowMidi/highMidi MAE ≤ 2 semitone · MAX ≤ 4 · confidence
   평균 ≥ 0.6 충족 시 `회귀 가드 통과: True`. 미통과 시 경고 로그.
+- **음역 합리성 가드**(`--plausibility`, directive #1716): **라벨이 없는** 신규 임포트
+  곡 검증용. ground truth 가 없어 `--ground-truth` 로 검증할 수 없을 때, 자체분석
+  결과가 사람 가창 음역의 물리적 한계와 멜로디 음역폭 상식 안에 드는지 판정해
+  분석 오류(반주 저음 오검출 · 옥타브 폴딩 등)를 걸러낸다. 타당 범위:
+  `low∈[36(C2),67(G4)]`, `high∈[52(E3),88(E6)]`, `span∈[5,40]` 반음, `low < high`.
+  분석은 성공했으나 범위가 비합리적인 곡은 **추천 backfill 에서 제외**(`blocked`)하고,
+  타당한 곡 id 만 `backfillReady` 로 보고한다.
 
 ### 검증셋
 
@@ -152,6 +163,13 @@ python batch_analyze.py --seed tests/validation_set.json \
 §13). `label.lowMidi/highMidi` 는 운영자 PoC 추정값이다. 통계적 ground truth(10곡,
 정식 회귀 가드)는 spec §10-4 PR H 의 `tests/ground_truth.json` 이 단일 진실이며 본
 set 과 별개다.
+
+`tests/new-songs-verification.json` — directive #1716 **신규곡(라벨 없음)** 음역 backfill
+검증 fixture(8곡). MusicBrainz 대량 임포트(#1705/#1707)로 곡 100→371 확대됐으나 신규곡은
+vocal range 가 없어 추천에 진입하지 못한다. 본 set 은 `--plausibility` 가드로 자체분석
+결과의 합리성을 검증하기 위한 것이며 `label` 이 없다(신규곡 = ground truth 부재).
+**live 실행**(yt-dlp 다운로드 + librosa 분석 + 실제 추천 노출 확인)은 머지 후 운영
+환경에서 수행한다(인프라 CI 는 단위/순수 로직만 검증).
 
 ## 테스트
 

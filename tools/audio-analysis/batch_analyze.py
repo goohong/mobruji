@@ -26,6 +26,10 @@ Spec: docs/features/song-self-analysis-pipeline.md
   # 네트워크/의존성 없이 사전 feed 로 정확도만 재계산 (offline)
   python batch_analyze.py --seed tests/validation_set.json \
     --from-results /data/tmp/feed.ndjson --ground-truth
+
+  # 라벨 없는 신규 임포트 곡 — 음역 합리성(가창 범위) 검증 후 backfill (directive #1716)
+  python batch_analyze.py --seed tests/new-songs-verification.json \
+    --out /data/tmp/new-feed.ndjson --plausibility
 """
 from __future__ import annotations
 
@@ -47,6 +51,17 @@ DEFAULT_TMPDIR = "/data/tmp"
 TOLERANCE_MAE_SEMITONE = 2.0
 TOLERANCE_MAX_SEMITONE = 4.0
 TOLERANCE_CONFIDENCE_MEAN = 0.6
+
+# 라벨 없는 신규곡 backfill 가드 — 사람 가창 음역의 물리적 타당 범위(MIDI).
+# 신규 임포트 곡은 ground truth 라벨이 없어 compute_accuracy 로 검증할 수 없다.
+# 자체분석 결과를 추천에 적재(backfill)하기 전, 범위가 가창적으로 합리적인지 판정해
+# 분석 오류(예: 반주 저음 오검출, 옥타브 폴딩)를 걸러낸다. directive #1716.
+PLAUSIBLE_MIDI_FLOOR = 36   # C2 — 이 미만 lowMidi 는 가창 음역 밖(반주 저음 의심)
+PLAUSIBLE_MIDI_CEIL = 88    # E6 — 이 초과 highMidi 는 가창 음역 밖
+PLAUSIBLE_LOW_MAX = 67      # G4 — "최저음"이 이보다 높으면 분석 오류 의심
+PLAUSIBLE_HIGH_MIN = 52     # E3 — "최고음"이 이보다 낮으면 분석 오류 의심
+PLAUSIBLE_SPAN_MIN = 5      # 단4도 미만 음역폭은 멜로디로 비현실적
+PLAUSIBLE_SPAN_MAX = 40     # 3옥타브+ 음역폭은 단일 멜로디로 비현실적
 
 
 # ----------------------------------------------------------------------
@@ -213,6 +228,97 @@ def format_accuracy_report(metrics: dict) -> str:
     return "\n".join(lines)
 
 
+def range_plausibility(record: dict) -> dict:
+    """단일 feed 레코드의 음역(lowMidi/highMidi)이 가창적으로 합리적인지 판정한다(순수 함수).
+
+    신규 임포트 곡은 ground truth 라벨이 없어 compute_accuracy 로 검증할 수 없다.
+    자체분석 결과를 추천에 backfill 하기 전, 사람 가창 음역의 물리적 한계와 멜로디
+    음역폭 상식 안에 드는지(=합리적 범위) 확인해 분석 오류를 걸러낸다.
+
+    반환: {"id", "plausible": bool, "reasons": [str, ...]}.
+    status != success 또는 MIDI 누락 시 plausible=False.
+    """
+    song_id = record.get("id")
+    if record.get("status") != "success":
+        return {"id": song_id, "plausible": False, "reasons": ["status != success"]}
+    low = record.get("lowMidi")
+    high = record.get("highMidi")
+    if low is None or high is None:
+        return {"id": song_id, "plausible": False, "reasons": ["lowMidi/highMidi 누락"]}
+    low = int(low)
+    high = int(high)
+    reasons: list[str] = []
+    if low >= high:
+        reasons.append(f"lowMidi({low}) >= highMidi({high})")
+    if low < PLAUSIBLE_MIDI_FLOOR:
+        reasons.append(f"lowMidi({low}) < {PLAUSIBLE_MIDI_FLOOR}(C2)")
+    if low > PLAUSIBLE_LOW_MAX:
+        reasons.append(f"lowMidi({low}) > {PLAUSIBLE_LOW_MAX}(G4)")
+    if high > PLAUSIBLE_MIDI_CEIL:
+        reasons.append(f"highMidi({high}) > {PLAUSIBLE_MIDI_CEIL}(E6)")
+    if high < PLAUSIBLE_HIGH_MIN:
+        reasons.append(f"highMidi({high}) < {PLAUSIBLE_HIGH_MIN}(E3)")
+    if low < high:  # 음역폭은 low < high 일 때만 의미가 있다
+        span = high - low
+        if span < PLAUSIBLE_SPAN_MIN:
+            reasons.append(f"음역폭({span}) < {PLAUSIBLE_SPAN_MIN} 반음")
+        if span > PLAUSIBLE_SPAN_MAX:
+            reasons.append(f"음역폭({span}) > {PLAUSIBLE_SPAN_MAX} 반음")
+    return {"id": song_id, "plausible": not reasons, "reasons": reasons}
+
+
+def summarize_plausibility(records: list[dict]) -> dict:
+    """feed 전체의 음역 타당성을 집계한다(라벨 불요 — 신규곡 backfill 검증용).
+
+    분석은 성공했으나 범위가 비합리적인 곡(implausible)은 추천 backfill 에서
+    제외해야 한다 — 잘못된 음역이 추천 결과를 오염시키지 않도록.
+    """
+    per_song = [range_plausibility(item) for item in records]
+    status_by_id = {item.get("id"): item.get("status") for item in records}
+    success_count = sum(1 for item in records if item.get("status") == "success")
+    plausible = [row for row in per_song if row["plausible"]]
+    implausible_success = [
+        row
+        for row in per_song
+        if not row["plausible"] and status_by_id.get(row["id"]) == "success"
+    ]
+    return {
+        "songsTotal": len(records),
+        "songsSuccess": success_count,
+        "plausibleCount": len(plausible),
+        "implausibleCount": len(implausible_success),
+        "plausibleRate": (
+            round(len(plausible) / success_count, 3) if success_count else None
+        ),
+        "backfillReady": [row["id"] for row in plausible],
+        "blocked": [
+            {"id": row["id"], "reasons": row["reasons"]} for row in implausible_success
+        ],
+        "perSong": per_song,
+    }
+
+
+def format_plausibility_report(summary: dict) -> str:
+    """음역 타당성 집계를 사람이 읽는 로그 블록으로 포맷한다."""
+    lines = [
+        "=== audio-analysis 음역 타당성(합리적 범위) 리포트 ===",
+        f"곡 수: 전체 {summary['songsTotal']} / 분석성공 {summary['songsSuccess']}",
+        f"타당(backfill 안전): {summary['plausibleCount']} / 비합리(차단): {summary['implausibleCount']}",
+        f"타당 비율: {summary['plausibleRate']}",
+        (
+            f"가창 음역 한계: low∈[{PLAUSIBLE_MIDI_FLOOR},{PLAUSIBLE_LOW_MAX}] "
+            f"high∈[{PLAUSIBLE_HIGH_MIN},{PLAUSIBLE_MIDI_CEIL}] "
+            f"span∈[{PLAUSIBLE_SPAN_MIN},{PLAUSIBLE_SPAN_MAX}]"
+        ),
+    ]
+    if summary["blocked"]:
+        lines.append("차단된 곡(분석 성공이나 범위 비합리 — backfill 제외):")
+        for row in summary["blocked"]:
+            lines.append(f"  - {row['id']}: {', '.join(row['reasons'])}")
+    lines.append(f"backfill 대상 id: {summary['backfillReady']}")
+    return "\n".join(lines)
+
+
 def to_feed_record(song_id: str, result: object, method: str) -> dict:
     """analyze.AnalysisResult 를 backfill-ready feed 레코드로 변환한다.
 
@@ -328,6 +434,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="시드 label 과 비교해 정확도 리포트 로깅",
     )
+    parser.add_argument(
+        "--plausibility",
+        action="store_true",
+        help="라벨 없는 신규곡 — 음역 합리성(가창 범위) 리포트 로깅 + 비합리 곡 차단",
+    )
     parser.add_argument("--tmpdir", default=None, help="임시 작업 경로(default /data/tmp)")
     parser.add_argument(
         "--clip-seconds", dest="clip_seconds", type=int, default=45, help="clip 길이(초)"
@@ -364,6 +475,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         LOG.info("\n%s", format_accuracy_report(metrics))
         if not metrics["withinTolerance"]:
             LOG.warning("정확도 회귀 가드 미통과 — 라벨 대비 오차 확인 필요")
+
+    if args.plausibility:
+        summary = summarize_plausibility(records)
+        LOG.info("\n%s", format_plausibility_report(summary))
+        if summary["implausibleCount"] > 0:
+            LOG.warning(
+                "%d 곡 음역 비합리 — 추천 backfill 에서 제외 필요",
+                summary["implausibleCount"],
+            )
     return 0
 
 
