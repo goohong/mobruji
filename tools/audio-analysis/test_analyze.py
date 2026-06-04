@@ -11,11 +11,15 @@ import pytest
 from analyze import (
     METHOD_SPLEETER_2STEMS,
     METHOD_VOCAL_SKIP,
+    PLAYER_CLIENT_CHAIN,
     analysis_method_label,
     confidence_score,
     extract_range,
     frequency_to_midi,
+    harden_ydl_opts,
     mask_url,
+    run_with_client_chain,
+    youtube_cookies_file,
 )
 
 
@@ -121,6 +125,105 @@ class TestAnalysisMethodLabel:
 
     def test_labels_are_distinct(self) -> None:
         assert METHOD_VOCAL_SKIP != METHOD_SPLEETER_2STEMS
+
+
+class TestYoutubeCookiesFile:
+    def test_unset_returns_none(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        assert youtube_cookies_file() is None
+
+    def test_missing_file_returns_none(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(tmp_path / "nope.txt"))
+        assert youtube_cookies_file() is None
+
+    def test_existing_file_returns_path(self, monkeypatch, tmp_path) -> None:
+        cookie = tmp_path / "cookies.txt"
+        cookie.write_text("# Netscape HTTP Cookie File\n")
+        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(cookie))
+        assert youtube_cookies_file() == str(cookie)
+
+    def test_directory_path_returns_none(self, monkeypatch, tmp_path) -> None:
+        # 디렉토리는 쿠키 파일이 아니다 (예: /dev/null 마운트 fallback 도 is_file False).
+        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(tmp_path))
+        assert youtube_cookies_file() is None
+
+
+class TestHardenYdlOpts:
+    def test_sets_single_player_client(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        opts = harden_ydl_opts({"quiet": True}, "android")
+        assert opts["extractor_args"]["youtube"]["player_client"] == ["android"]
+        assert opts["quiet"] is True
+
+    def test_does_not_mutate_base(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        base = {"quiet": True}
+        harden_ydl_opts(base, "web")
+        assert "extractor_args" not in base
+
+    def test_omits_cookies_when_unset(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        assert "cookiefile" not in harden_ydl_opts({}, "web")
+
+    def test_includes_cookies_when_present(self, monkeypatch, tmp_path) -> None:
+        cookie = tmp_path / "cookies.txt"
+        cookie.write_text("# Netscape HTTP Cookie File\n")
+        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(cookie))
+        assert harden_ydl_opts({}, "web")["cookiefile"] == str(cookie)
+
+
+class TestRunWithClientChain:
+    def test_chain_covers_known_clients(self) -> None:
+        assert PLAYER_CLIENT_CHAIN[0] == "web"
+        assert "android" in PLAYER_CLIENT_CHAIN
+
+    def test_falls_back_to_next_client_on_download_error(self, monkeypatch) -> None:
+        yt_dlp = pytest.importorskip("yt_dlp")
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        seen: list[str] = []
+
+        class FakeYDL:
+            def __init__(self, opts: dict) -> None:
+                self.client = opts["extractor_args"]["youtube"]["player_client"][0]
+
+            def __enter__(self) -> "FakeYDL":
+                return self
+
+            def __exit__(self, *exc) -> bool:
+                return False
+
+        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+        def action(ydl: "FakeYDL"):
+            seen.append(ydl.client)
+            if ydl.client != "ios":
+                raise yt_dlp.utils.DownloadError("blocked")
+            return "ok"
+
+        assert run_with_client_chain({"quiet": True}, action) == "ok"
+        assert seen == ["web", "android", "ios"]
+
+    def test_raises_last_error_when_all_clients_fail(self, monkeypatch) -> None:
+        yt_dlp = pytest.importorskip("yt_dlp")
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+
+        class FakeYDL:
+            def __init__(self, opts: dict) -> None:
+                pass
+
+            def __enter__(self) -> "FakeYDL":
+                return self
+
+            def __exit__(self, *exc) -> bool:
+                return False
+
+        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+        def action(ydl: "FakeYDL"):
+            raise yt_dlp.utils.DownloadError("blocked")
+
+        with pytest.raises(yt_dlp.utils.DownloadError):
+            run_with_client_chain({}, action, clients=("web", "android"))
 
 
 def test_module_has_tooling_version() -> None:

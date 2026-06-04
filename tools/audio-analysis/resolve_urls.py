@@ -349,16 +349,16 @@ def search_youtube(query: str) -> Optional[dict]:
 
     반환: {"url", "title", "uploader", "duration"} 또는 결과 없으면 None.
     """
-    import yt_dlp  # type: ignore
-
-    ydl_opts = {
+    base_opts = {
         "quiet": True,
         "noprogress": True,
         "skip_download": True,
         "extract_flat": False,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+    # player_client 폴백 체인 + 쿠키(있으면)로 검색을 견고화한다(#1802, analyze 재사용).
+    info = analyze.run_with_client_chain(
+        base_opts, lambda ydl: ydl.extract_info(f"ytsearch1:{query}", download=False)
+    )
     entries = (info or {}).get("entries") or []
     if not entries:
         return None

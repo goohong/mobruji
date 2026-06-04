@@ -29,8 +29,14 @@ services:
     volumes:
       - ./tools/audio-analysis:/workspace:ro
       - /data/tmp:/data/tmp
+      # 쿠키 파일(#1802): 음악 영상이 인증 없이는 막히는 패턴 완화. 호스트의
+      # YTDLP_COOKIES_FILE(없으면 /dev/null)을 read-only 로 컨테이너 안 고정 경로에
+      # 마운트하고, 같은 경로를 컨테이너 YTDLP_COOKIES_FILE 로 노출한다. analyze.py 는
+      # 파일이 존재할 때만 --cookies 를 전달하므로 미설정 시 기존 동작 그대로.
+      - ${YTDLP_COOKIES_FILE:-/dev/null}:/run/secrets/yt-cookies.txt:ro
     # yt-dlp 다운로드 + librosa 분석은 외부 네트워크 필요 (YouTube).
     # 결정성/PII 정책은 Python tool 측 `mask_url` 가 보장.
     environment:
       - PYTHONUNBUFFERED=1
       - TMPDIR=/data/tmp
+      - YTDLP_COOKIES_FILE=/run/secrets/yt-cookies.txt
