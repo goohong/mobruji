@@ -40,7 +40,14 @@
  *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
@@ -308,37 +315,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             추천 결과
           </h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-[var(--text-secondary)]">
-              내 음역대: {midiToKoreanNoteName(voiceRange.lowestNoteMidi)} ~{" "}
-              {midiToKoreanNoteName(voiceRange.highestNoteMidi)}
-            </p>
-            <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
-          </div>
-          <VoiceRangeIntuition
-            lowMidi={voiceRange.lowestNoteMidi}
-            highMidi={voiceRange.highestNoteMidi}
-            compact
-          />
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
-            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
-                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
-                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
-            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
-              <Link
-                href="/voice-range/auto"
-                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
-              >
-                마이크로 다시 측정
-              </Link>
-            ) : null}
-            <Link
-              href="/voice-range"
-              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
-            >
-              음역대 다시 입력
-            </Link>
-          </div>
+          <VoiceRangeHeaderSummary voiceRange={voiceRange} />
         </header>
 
         {/* (V1·V2·V5) 결과 우선 — 의도 모드 + 분위기/나이대 필터는 접이식 "추천 다듬기"
@@ -779,6 +756,80 @@ function NoSessionFallback() {
       ctaHref="/voice-range"
       ctaLabel="음역대 입력하러 가기"
     />
+  );
+}
+
+type VoiceRangeHeaderSummaryProps = {
+  voiceRange: VoiceRangeResponse;
+};
+
+/**
+ * 헤더 음역대 요약 + 접이식 보조 정보 (recommend-page-visual-ux-audit #1711).
+ *
+ * 결과 우선 노출을 위해 헤더에는 "내 음역대: X ~ Y" + 소스 뱃지만 상시 노출하고,
+ * 음역 직관 막대(VoiceRangeIntuition)·재측정/재입력 링크 등 보조 정보는 "음역대 자세히"
+ * disclosure(기본 접힘) 안으로 내린다 → 모바일에서 첫 곡 카드가 더 위로 올라온다.
+ */
+function VoiceRangeHeaderSummary({ voiceRange }: VoiceRangeHeaderSummaryProps) {
+  const [expanded, setExpanded] = useState(false);
+  const detailId = useId();
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm text-[var(--text-secondary)]">
+          내 음역대: {midiToKoreanNoteName(voiceRange.lowestNoteMidi)} ~{" "}
+          {midiToKoreanNoteName(voiceRange.highestNoteMidi)}
+        </p>
+        <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          onClick={() => setExpanded((prev) => !prev)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--text-caption)] underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
+        >
+          음역대 자세히
+          <span
+            aria-hidden="true"
+            className={`transition-transform duration-[var(--duration-base)] ${
+              expanded ? "rotate-180" : ""
+            }`}
+          >
+            ⌄
+          </span>
+        </button>
+      </div>
+
+      {expanded ? (
+        <div id={detailId} className="space-y-2">
+          <VoiceRangeIntuition
+            lowMidi={voiceRange.lowestNoteMidi}
+            highMidi={voiceRange.highestNoteMidi}
+            compact
+          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
+            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
+                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
+                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
+            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
+              <Link
+                href="/voice-range/auto"
+                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
+              >
+                마이크로 다시 측정
+              </Link>
+            ) : null}
+            <Link
+              href="/voice-range"
+              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
+            >
+              음역대 다시 입력
+            </Link>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
