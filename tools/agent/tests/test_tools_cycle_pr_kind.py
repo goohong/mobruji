@@ -143,8 +143,8 @@ def test_pr_review_creates_forum_thread(
     assert "🆔 `rev-1234-open`" in body
     assert "📋 진행 (🟡 대기)" in body
     assert "🔖 관련" in body
-    # tags 키워드 — 🟡 1차 review.
-    assert create_args[1]["tags"] == ["🟡 1차 review"]
+    # tags 키워드 — 🟡 Pre-merge review (available_tags 정확 일치, #1805).
+    assert create_args[1]["tags"] == ["🟡 Pre-merge review"]
 
 
 def test_pr_review_state_schema_expanded(
@@ -275,10 +275,10 @@ def test_pr_audit_retags_existing_thread(
     assert mock_forum_tools["edit_starter"].call_count == 1
     assert mock_forum_tools["comment"].call_count == 1
 
-    # retag 인자 검증 — 같은 thread_id + 🔵 사후 E2E QA.
+    # retag 인자 검증 — 같은 thread_id + 🔵 Post-merge audit (available_tags 정확 일치, #1805).
     retag_args = mock_forum_tools["retag"].call_args
     assert retag_args[0][0] == "thread_5555"
-    assert "🔵" in retag_args[0][1]
+    assert retag_args[0][1] == "🔵 Post-merge audit"
 
     # edit_starter 인자 검증 — 본문에 단계 1 결과 + 단계 2 체크리스트.
     edit_args = mock_forum_tools["edit_starter"].call_args
@@ -431,6 +431,66 @@ def test_dedupe_cache_persists_thread_id_for_audit(
     assert "thread_1111" in contents
     assert pr_url in contents
     assert '"kind": "pr_review"' in contents or '"kind":"pr_review"' in contents
+
+
+# ─── 포럼 태그명 ↔ available_tags 정확 일치 (#1805) ──────────────────────────
+
+# rev 포럼 available_tags — Discord 포럼에 등록된 4종 (SoT).
+REV_FORUM_AVAILABLE_TAGS = {
+    "🟡 Pre-merge review",
+    "🔵 Post-merge audit",
+    "✅ rev pass",
+    "❌ rev fail",
+}
+
+
+def test_tag_constants_match_available_tags():
+    """PR_REVIEW_TAG / PR_AUDIT_TAG 가 포럼 available_tags 와 정확히 일치."""
+    import tools_cycle as tc
+
+    assert tc.PR_REVIEW_TAG == "🟡 Pre-merge review"
+    assert tc.PR_AUDIT_TAG == "🔵 Post-merge audit"
+    assert tc.PR_REVIEW_TAG in REV_FORUM_AVAILABLE_TAGS
+    assert tc.PR_AUDIT_TAG in REV_FORUM_AVAILABLE_TAGS
+
+
+def test_pr_review_tag_passed_to_forum_matches_available(
+    isolated_db, isolated_mobruji_dir, mock_forum_tools, monkeypatch,
+):
+    """pr_review 시 forum_create_thread 에 넘긴 태그가 available_tags 의 원소."""
+    monkeypatch.setenv("PR_REVIEW_FORUM_ID", "forum_tag_check")
+
+    import tools_cycle as tc
+
+    tc.register_directive_pending(
+        "rev-tag-open", "tag check", kind="pr_review",
+        pr_url="https://github.com/owner/repo/pull/4242",
+    )
+
+    tags = mock_forum_tools["create"].call_args[1]["tags"]
+    assert len(tags) == 1
+    assert tags[0] in REV_FORUM_AVAILABLE_TAGS
+
+
+def test_pr_audit_retag_matches_available(
+    isolated_db, isolated_mobruji_dir, mock_forum_tools, monkeypatch,
+):
+    """pr_audit 시 forum_retag 에 넘긴 태그가 available_tags 의 원소."""
+    monkeypatch.setenv("PR_REVIEW_FORUM_ID", "forum_tag_check2")
+
+    import tools_cycle as tc
+
+    pr_url = "https://github.com/owner/repo/pull/4343"
+    tc.register_directive_pending(
+        "rev-tag2-open", "open", kind="pr_review", pr_url=pr_url,
+        thread_id="thread_tag2",
+    )
+    tc.register_directive_pending(
+        "rev-tag2-merge", "merge", kind="pr_audit", pr_url=pr_url,
+    )
+
+    retag_tag = mock_forum_tools["retag"].call_args[0][1]
+    assert retag_tag in REV_FORUM_AVAILABLE_TAGS
 
 
 # ─── error 가드 ──────────────────────────────────────────────────────────────
