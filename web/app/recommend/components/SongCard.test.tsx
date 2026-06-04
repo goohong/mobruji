@@ -116,7 +116,8 @@ describe("SongCard", () => {
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
     expect(screen.getByText("POP")).toBeInTheDocument();
-    expect(screen.getByText(/score 0\.91/)).toBeInTheDocument();
+    // closes #1719 — score 원값은 카드 표면에 노출하지 않는다.
+    expect(screen.queryByText(/score/)).not.toBeInTheDocument();
   });
 
   it("difficulty가 없고 lowMidi/highMidi만 있으면 client-side 계산 라벨을 노출한다", () => {
@@ -146,7 +147,7 @@ describe("SongCard", () => {
     expect(screen.queryByLabelText(/가창 난이도/)).not.toBeInTheDocument();
     // 카드 자체는 렌더됨
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
-    expect(screen.getByText("C Major")).toBeInTheDocument();
+    expect(screen.getByText("C 장조")).toBeInTheDocument();
   });
 
   // closes #91 #92 — 검색 페이지에서 song prop으로 카드 렌더 시

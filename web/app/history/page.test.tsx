@@ -363,7 +363,7 @@ describe("HistoryPage", () => {
       expect(screen.queryByText("곡-1")).not.toBeInTheDocument();
       // 헤더 문구도 BE source 표기로 바뀐다.
       expect(
-        screen.getByText(/세션 ID 기준 1건의 추천을 서버에서 불러왔어요/),
+        screen.getByText(/지금까지 받은 1건의 추천을 불러왔어요/),
       ).toBeInTheDocument();
       expect(readRecommendationHistoryMock).toHaveBeenCalledWith(
         "sess-be",
@@ -485,9 +485,9 @@ describe("HistoryPage", () => {
       expect(screen.getByText(/잔잔한.*85 BPM/)).toBeInTheDocument();
     });
 
-    it("BE source 일 때 하단 삭제 버튼 라벨이 '이 기기 캐시 비우기' 로 분기되고 confirm 문구에 서버 데이터 잔존 안내가 포함된다 (#295 항목 3)", async () => {
+    it("BE source 일 때 하단 삭제 버튼 라벨이 '이 기기 기록 지우기' 로 분기되고 confirm 문구에 서버 데이터 잔존 안내가 포함된다 (#295 항목 3)", async () => {
       // BE entries 가 있으면 "전체 삭제" 라는 라벨이 사용자 기대치(서버 영구 삭제)와 어긋남.
-      // 라벨을 "이 기기 캐시 비우기" 로 분기하고 confirm 문구에 "다음 방문 시 다시 보입니다" 명시.
+      // 라벨을 "이 기기 기록 지우기" 로 분기하고 confirm 문구에 "다음 방문 시 다시 보입니다" 명시.
       sessionMock.set({ sessionId: "sess-clear-label" });
       readRecommendationHistoryMock.mockResolvedValueOnce(
         buildBackendListResponse([
@@ -528,7 +528,7 @@ describe("HistoryPage", () => {
       // BE entries 로딩 완료 후 라벨이 분기되어야 한다.
       await screen.findByText("BE곡-500");
       const clearBtn = await screen.findByRole("button", {
-        name: "이 기기 캐시 비우기",
+        name: "이 기기 기록 지우기",
       });
       // 분기 후 기존 라벨은 더 이상 노출되지 않는다.
       expect(
@@ -571,7 +571,7 @@ describe("HistoryPage", () => {
       expect(liveRegion).toHaveTextContent(/최근 2건의 추천을 기록해두었어요/);
     });
 
-    it("BE entry 도착 시 라이브 영역에 '세션 ID 기준 N건' 메시지로 분기된다", async () => {
+    it("BE entry 도착 시 라이브 영역에 '지금까지 받은 N건' 메시지로 분기된다", async () => {
       sessionMock.set({ sessionId: "sess-live" });
       readRecommendationHistoryMock.mockResolvedValueOnce(
         buildBackendListResponse([
@@ -610,7 +610,7 @@ describe("HistoryPage", () => {
       expect(liveRegion).toHaveAttribute("aria-live", "polite");
       expect(liveRegion).toHaveAttribute("aria-atomic", "true");
       expect(liveRegion).toHaveTextContent(
-        /세션 ID 기준 1건의 추천을 서버에서 불러왔어요/,
+        /지금까지 받은 1건의 추천을 불러왔어요/,
       );
     });
   });

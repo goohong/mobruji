@@ -29,17 +29,17 @@ function buildSong(overrides: Partial<SongResponse>): SongResponse {
 }
 
 describe("formatMusicalKey", () => {
-  it("SHARP enum 토큰을 '#' 으로 치환하고 첫 글자만 대문자로 만든다", () => {
-    expect(formatMusicalKey("C_SHARP_MAJOR")).toBe("C# Major");
+  it("SHARP enum 토큰을 '#' 으로 치환하고 MAJOR 를 한글 '장조' 로 표기한다 (#1719)", () => {
+    expect(formatMusicalKey("C_SHARP_MAJOR")).toBe("C# 장조");
   });
 
-  it("UNKNOWN 은 한글이 아닌 'Unknown' 으로 고정 표기한다", () => {
-    expect(formatMusicalKey("UNKNOWN")).toBe("Unknown");
+  it("UNKNOWN 은 '정보 없음' 으로 고정 표기한다 (#1719)", () => {
+    expect(formatMusicalKey("UNKNOWN")).toBe("정보 없음");
   });
 
-  it("일반 MAJOR/MINOR enum 도 첫 글자만 대문자로 변환한다", () => {
-    expect(formatMusicalKey("A_MINOR")).toBe("A Minor");
-    expect(formatMusicalKey("G_MAJOR")).toBe("G Major");
+  it("일반 MAJOR/MINOR enum 을 한글 장조/단조 로 변환한다 (#1719)", () => {
+    expect(formatMusicalKey("A_MINOR")).toBe("A 단조");
+    expect(formatMusicalKey("G_MAJOR")).toBe("G 장조");
   });
 });
 

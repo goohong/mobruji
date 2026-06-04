@@ -425,16 +425,16 @@ function resolveDifficulty(song: SongResponse): Difficulty | null {
 }
 
 /**
- * SongCard와 동일한 키 표기: `C_SHARP_MAJOR` → `C# Major`, `UNKNOWN` → `Unknown`.
+ * SongCard와 동일한 키 표기: `C_SHARP_MAJOR` → `C# 장조`, `UNKNOWN` → `정보 없음`
+ * (closes #1719 — 영어 음악 용어 대신 평이한 한글 표기).
  */
 function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
 }
