@@ -30,6 +30,14 @@ Spec: docs/features/song-self-analysis-pipeline.md
   # 라벨 없는 신규 임포트 곡 — 음역 합리성(가창 범위) 검증 후 backfill (directive #1716)
   python batch_analyze.py --seed tests/new-songs-verification.json \
     --out /data/tmp/new-feed.ndjson --plausibility
+
+  # 음역 미보유 곡 대량 backfill — 안전 단위(20곡) chunk + rate 대기로 반복 실행 (directive #1734)
+  # 같은 명령을 반복하면 --resume 가 완료 곡을 skip 해 진척이 누적되고, --limit 으로
+  # invocation 당 처리량을 한정해 디스크/rate 폭주를 막는다. 시드(미보유 곡 id+YouTube)는
+  # DB 후보(SongAudioBackfillCommand findCandidatesForBackfill) 에서 운영 단계에 생성한다.
+  python batch_analyze.py --seed /data/tmp/missing-range-candidates.json \
+    --out /data/tmp/backfill.ndjson --resume /data/tmp/backfill.ndjson \
+    --limit 20 --sleep-seconds 3 --plausibility
 """
 from __future__ import annotations
 
@@ -339,6 +347,51 @@ def to_feed_record(song_id: str, result: object, method: str) -> dict:
     }
 
 
+def resume_existing(resume_path: Optional[str]) -> list[dict]:
+    """resume feed 를 로드한다. 경로 미지정 또는 첫 실행(파일 없음)이면 빈 리스트.
+
+    반복 실행에서는 --resume 와 --out 을 같은 경로로 두므로 첫 invocation 에는
+    파일이 아직 없다 — 이를 "진척 없음"으로 취급해 정상 진행한다.
+    """
+    if not resume_path or not Path(resume_path).exists():
+        return []
+    return load_results(resume_path)
+
+
+def done_ids_from_feed(records: list[dict]) -> set:
+    """resume 시 재분석을 건너뛸 곡 id 집합 — status success 인 곡만.
+
+    실패(status != success)곡은 포함하지 않아 다음 invocation 에서 재시도된다.
+    """
+    return {record.get("id") for record in records if record.get("status") == "success"}
+
+
+def select_pending(seed: list[dict], done_ids: set, limit: Optional[int]) -> list[dict]:
+    """이번 invocation 에서 분석할 곡을 고른다(순수 함수 — 안전 단위 반복의 핵심).
+
+    이미 완료된 곡(done_ids)을 제외하고, limit 이 주어지면 시드 순서 앞에서 N곡만
+    chunk 한다. 미보유 곡 수백 곡을 한 번에 돌려 디스크/rate 가 폭주하지 않도록
+    invocation 당 처리량을 한정하고, resume(done_ids)으로 반복 실행 시 진척이
+    누적되게 한다. directive #1734.
+    """
+    pending = [song for song in seed if song["id"] not in done_ids]
+    if limit is not None:
+        pending = pending[:limit]
+    return pending
+
+
+def merge_feed(existing: list[dict], fresh: list[dict]) -> list[dict]:
+    """기존 feed 와 이번 invocation 결과를 id 기준 병합한다(새 결과 우선).
+
+    같은 id 는 새 결과로 갱신(실패→성공 재시도 반영), 기존 곡의 순서는 보존하고
+    신규 곡은 뒤에 덧붙인다. 반복 실행이 단일 누적 feed 로 모이게 한다.
+    """
+    by_id: dict = {record.get("id"): record for record in existing}
+    for record in fresh:
+        by_id[record.get("id")] = record
+    return list(by_id.values())
+
+
 def load_results(path: str) -> list[dict]:
     """NDJSON feed 를 레코드 리스트로 로드한다(offline 정확도 재계산용)."""
     records: list[dict] = []
@@ -357,15 +410,21 @@ def run_batch(
     seed: list[dict],
     clip_seconds: int,
     vocal_separation: bool,
+    sleep_seconds: float = 0.0,
 ) -> list[dict]:
-    """시드 곡을 순차 분석한다. 곡 단위 실패는 격리되어 batch 가 중단되지 않는다."""
+    """시드 곡을 순차 분석한다. 곡 단위 실패는 격리되어 batch 가 중단되지 않는다.
+
+    sleep_seconds > 0 이면 곡 사이에 대기해 YouTube rate limit 을 완화한다(directive #1734).
+    """
     import analyze  # 외부 의존성(yt-dlp/librosa)은 analyze 내부에서 lazy import
 
     method = analyze.analysis_method_label(vocal_separation)
     records: list[dict] = []
     successful = 0
     failed = 0
-    for song in seed:
+    for index, song in enumerate(seed):
+        if index > 0 and sleep_seconds > 0:
+            time.sleep(sleep_seconds)
         song_id = song["id"]
         started = time.time()
         try:
@@ -439,6 +498,24 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="라벨 없는 신규곡 — 음역 합리성(가창 범위) 리포트 로깅 + 비합리 곡 차단",
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="기존 feed NDJSON — 이미 성공한 곡은 skip 하고 결과를 누적(반복 실행)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="이번 invocation 에서 분석할 최대 곡 수(안전 단위 chunk, 미지정 시 남은 전체)",
+    )
+    parser.add_argument(
+        "--sleep-seconds",
+        dest="sleep_seconds",
+        type=float,
+        default=0.0,
+        help="곡 사이 대기 초(YouTube rate limit 완화)",
+    )
     parser.add_argument("--tmpdir", default=None, help="임시 작업 경로(default /data/tmp)")
     parser.add_argument(
         "--clip-seconds", dest="clip_seconds", type=int, default=45, help="clip 길이(초)"
@@ -462,12 +539,31 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     seed = load_seed(args.seed)
 
+    if args.limit is not None and args.limit <= 0:
+        raise ValueError("--limit 은 양의 정수여야 합니다")
+    if args.sleep_seconds < 0:
+        raise ValueError("--sleep-seconds 는 음수일 수 없습니다")
+
     if args.from_results:
         records = load_results(args.from_results)
         LOG.info("offline mode: loaded %d records from %s", len(records), args.from_results)
     else:
         resolve_tmpdir(args.tmpdir)
-        records = run_batch(seed, args.clip_seconds, args.vocal_separation)
+        existing = resume_existing(args.resume)
+        done_ids = done_ids_from_feed(existing)
+        pending = select_pending(seed, done_ids, args.limit)
+        LOG.info(
+            "chunk: 시드 %d곡 / 완료 skip %d곡 / 이번 분석 %d곡 (남은 후보 %d, limit=%s)",
+            len(seed),
+            len(done_ids),
+            len(pending),
+            len(seed) - len(done_ids),
+            args.limit,
+        )
+        fresh = run_batch(
+            pending, args.clip_seconds, args.vocal_separation, args.sleep_seconds
+        )
+        records = merge_feed(existing, fresh)
         write_feed(records, args.out)
 
     if args.ground_truth:
