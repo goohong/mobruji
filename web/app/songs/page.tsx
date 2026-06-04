@@ -30,12 +30,18 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
 import { searchSongs, type SongResponse } from "@/lib/api/song";
+import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
+import {
+  computeVoiceFitRatio,
+  type UserVoiceRange,
+} from "@/lib/scoreBreakdown";
 import {
   deriveDifficulty,
   difficultyLabel,
   type Difficulty,
 } from "@/lib/difficulty";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
+import { useSessionStore } from "@/store/session";
 import { Chip, Input } from "@/components/ui";
 
 import { SongCard } from "../recommend/components/SongCard";
@@ -170,6 +176,23 @@ function SongSearchPageInner() {
     enabled,
   });
 
+  // closes #1721 — 세션 음역대가 있으면 검색 카드에도 "내 음역 적합" 배지를 그린다.
+  // 음역대 미등록(404)/세션 없음은 graceful — 배지를 그냥 생략하고 검색은 그대로 동작한다.
+  const sessionId = useSessionStore((state) => state.sessionId);
+  const voiceRangeQuery = useQuery<VoiceRangeResponse, Error>({
+    queryKey: ["voice-range", sessionId],
+    queryFn: ({ signal }) => readVoiceRange(sessionId!, { signal }),
+    enabled: sessionId !== null,
+    retry: false,
+  });
+  const userVoiceRange = useMemo<UserVoiceRange | null>(() => {
+    const data = voiceRangeQuery.data;
+    if (!data) {
+      return null;
+    }
+    return { lowMidi: data.lowestNoteMidi, highMidi: data.highestNoteMidi };
+  }, [voiceRangeQuery.data]);
+
   // 응답 곡들의 unique genre들 (필터 chip 옵션). null/공백은 제외, 사전 순 고정.
   const availableGenres = useMemo<string[]>(() => {
     if (!query.data) {
@@ -267,6 +290,7 @@ function SongSearchPageInner() {
           songs={filteredSongs}
           rawCount={query.data?.length ?? 0}
           filtersActive={filtersActive}
+          userVoiceRange={userVoiceRange}
         />
       </div>
     </main>
@@ -364,6 +388,7 @@ type SearchResultProps = {
   songs: SongResponse[];
   rawCount: number;
   filtersActive: boolean;
+  userVoiceRange: UserVoiceRange | null;
 };
 
 function SearchResult({
@@ -374,6 +399,7 @@ function SearchResult({
   songs,
   rawCount,
   filtersActive,
+  userVoiceRange,
 }: SearchResultProps) {
   if (!enabled) {
     return (
@@ -448,7 +474,7 @@ function SearchResult({
           ? `필터 결과 ${songs.length}곡 / 전체 ${rawCount}곡`
           : `${rawCount}곡`}
       </p>
-      <SongSearchResultList songs={songs} />
+      <SongSearchResultList songs={songs} userVoiceRange={userVoiceRange} />
     </div>
   );
 }
@@ -460,9 +486,13 @@ function SearchResult({
  */
 type SongSearchResultListProps = {
   songs: SongResponse[];
+  userVoiceRange: UserVoiceRange | null;
 };
 
-function SongSearchResultList({ songs }: SongSearchResultListProps) {
+function SongSearchResultList({
+  songs,
+  userVoiceRange,
+}: SongSearchResultListProps) {
   const [selected, setSelected] = useState<SongResponse | null>(null);
   return (
     <>
@@ -480,6 +510,7 @@ function SongSearchResultList({ songs }: SongSearchResultListProps) {
             key={song.id}
             song={song}
             index={index}
+            voiceFit={resolveSearchVoiceFit(song, userVoiceRange)}
             onShowDetail={() => setSelected(song)}
           />
         ))}
@@ -499,6 +530,26 @@ function SongSearchResultList({ songs }: SongSearchResultListProps) {
  * 응답 곡에 BE가 채워준 difficulty가 있으면 그것을, 없으면 lowMidi/highMidi로 계산,
  * 둘 다 없으면 null. 필터는 null인 곡을 제외한다.
  */
+/**
+ * 검색 카드 "내 음역 적합" 배지용 client 적합도(0~1) (#1721).
+ *
+ * 세션 음역대가 있고 곡이 음역(lowMidi/highMidi)을 보유했을 때만 겹침 비율을 계산한다.
+ * 둘 중 하나라도 없으면 `undefined` → SongCard 가 배지/사유/보더 매핑을 생략한다.
+ */
+function resolveSearchVoiceFit(
+  song: SongResponse,
+  userVoiceRange: UserVoiceRange | null,
+): number | undefined {
+  if (
+    userVoiceRange === null ||
+    typeof song.lowMidi !== "number" ||
+    typeof song.highMidi !== "number"
+  ) {
+    return undefined;
+  }
+  return computeVoiceFitRatio(userVoiceRange, song.lowMidi, song.highMidi);
+}
+
 function songDifficulty(song: SongResponse): Difficulty | null {
   if (song.difficulty) {
     return song.difficulty;

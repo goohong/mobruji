@@ -24,6 +24,8 @@ import userEvent from "@testing-library/user-event";
 import SongSearchPage from "./page";
 import { ApiError } from "@/lib/api/client";
 import { searchSongs } from "@/lib/api/song";
+import { readVoiceRange } from "@/lib/api/voice-range";
+import { useSessionStore } from "@/store/session";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 // next/navigation의 useRouter / useSearchParams 가짜 구현.
@@ -49,7 +51,19 @@ vi.mock("@/lib/api/song", async () => {
   };
 });
 
+vi.mock("@/lib/api/voice-range", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/api/voice-range")>(
+      "@/lib/api/voice-range",
+    );
+  return {
+    ...actual,
+    readVoiceRange: vi.fn(),
+  };
+});
+
 const searchSongsMock = vi.mocked(searchSongs);
+const readVoiceRangeMock = vi.mocked(readVoiceRange);
 
 function renderWithQueryClient(ui: ReactNode) {
   const client = new QueryClient({
@@ -66,8 +80,15 @@ function renderWithQueryClient(ui: ReactNode) {
 
 beforeEach(() => {
   searchSongsMock.mockReset();
+  readVoiceRangeMock.mockReset();
   replaceMock.mockReset();
   paramsRef.current = new URLSearchParams();
+  // 기본은 세션 없음 → 음역대 조회 비활성(배지 미노출). 배지 테스트만 sessionId 주입.
+  useSessionStore.setState({
+    sessionId: null,
+    voiceRangeId: null,
+    excludedSongIds: [],
+  });
 });
 
 afterEach(() => {
@@ -387,6 +408,54 @@ describe("SongSearchPage", () => {
     const lastUrl = replaceMock.mock.calls.at(-1)?.[0] as string;
     expect(lastUrl).toContain("keyword=song");
     expect(lastUrl).toContain("difficulty=EASY");
+  });
+
+  // closes #1721 — 세션 음역대가 있으면 검색 카드에도 "내 음역 적합" 배지를 노출한다.
+  describe("내 음역 적합 배지 (#1721)", () => {
+    it("세션 음역대가 있으면 곡 음역 대비 적합도 배지를 카드에 노출한다", async () => {
+      const user = userEvent.setup();
+      useSessionStore.setState({
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        voiceRangeId: null,
+        excludedSongIds: [],
+      });
+      // 사용자 48-72. twoSongsResponse 곡1(48-60)은 곡 음역이 완전 포함 → 100%.
+      readVoiceRangeMock.mockResolvedValue({
+        id: 1,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        lowestNoteMidi: 48,
+        highestNoteMidi: 72,
+        sourceMethod: "SELF_REPORT",
+        createdAt: "2026-06-04T00:00:00Z",
+        updatedAt: "2026-06-04T00:00:00Z",
+      });
+      searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
+
+      renderWithQueryClient(<SongSearchPage />);
+      await user.type(
+        screen.getByPlaceholderText("곡 제목이나 아티스트로 검색"),
+        "song",
+      );
+
+      expect(
+        await screen.findByLabelText(/내 음역 적합 100%/, {}, { timeout: 2000 }),
+      ).toBeInTheDocument();
+    });
+
+    it("세션 음역대가 없으면 배지를 노출하지 않는다", async () => {
+      const user = userEvent.setup();
+      searchSongsMock.mockResolvedValueOnce(twoSongsResponse());
+
+      renderWithQueryClient(<SongSearchPage />);
+      await user.type(
+        screen.getByPlaceholderText("곡 제목이나 아티스트로 검색"),
+        "song",
+      );
+
+      await screen.findByText("쉬운 곡", {}, { timeout: 2000 });
+      expect(readVoiceRangeMock).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText(/내 음역 적합/)).not.toBeInTheDocument();
+    });
   });
 
   // closes #470 — 검색 에러는 role="alert" + aria-live="assertive"로 SR이 즉시 announce.
