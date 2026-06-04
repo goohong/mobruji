@@ -23,6 +23,8 @@ def _no_disk_pressure(request, monkeypatch):
         return
     import tools_queue as tq
     monkeypatch.setattr(tq, "root_disk_pct", lambda: 10)
+    # (#1785) 기본: 회수 sweep 비활성(경로 부재 → graceful no-op). 회수 테스트가 개별 override.
+    monkeypatch.setattr(tq, "DATA_SWEEP_SCRIPT", "/nonexistent-mobruji-sweep.sh")
 
 
 def _seed_directive(directive_id: str, thread_id: str = "T1") -> None:
@@ -297,3 +299,54 @@ def test_dispatch_recovers_stale_even_under_disk_pressure(isolated_db, monkeypat
     tq.dispatch_once()
     # stale lock 회복됨(신규 launch 는 보류하더라도).
     assert "rev" not in set(ev.get_state("in_flight_agents") or [])
+
+
+def test_reclaim_skips_below_threshold(monkeypatch, tmp_path):
+    """(#1785) root < DISK_RECLAIM_PCT 면 sweep 호출 안 함 (no-op)."""
+    import tools_queue as tq
+
+    calls: list = []
+    script = tmp_path / "sweep.sh"
+    script.write_text("#!/usr/bin/env bash\nexit 0\n")
+    monkeypatch.setattr(tq, "DATA_SWEEP_SCRIPT", str(script))
+    monkeypatch.setattr(tq, "DISK_RECLAIM_PCT", 80)
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 70)
+    monkeypatch.setattr(tq.subprocess, "run", lambda *a, **k: calls.append(a))
+
+    tq.reclaim_worktree_disk_if_needed()
+    assert calls == []
+
+
+def test_reclaim_runs_sweep_above_threshold(monkeypatch, tmp_path):
+    """(#1785) root >= DISK_RECLAIM_PCT 면 sweep 스크립트를 동기 실행."""
+    import subprocess as _sp
+    import tools_queue as tq
+
+    calls: list = []
+    script = tmp_path / "sweep.sh"
+    script.write_text("#!/usr/bin/env bash\nexit 0\n")
+    monkeypatch.setattr(tq, "DATA_SWEEP_SCRIPT", str(script))
+    monkeypatch.setattr(tq, "DISK_RECLAIM_PCT", 80)
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 85)
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(tq.subprocess, "run", fake_run)
+    tq.reclaim_worktree_disk_if_needed()
+    assert calls and calls[0] == ["bash", str(script)]
+
+
+def test_reclaim_graceful_when_script_absent(monkeypatch):
+    """(#1785) sweep 스크립트 부재면 subprocess 안 띄우고 graceful 반환."""
+    import tools_queue as tq
+
+    calls: list = []
+    monkeypatch.setattr(tq, "DATA_SWEEP_SCRIPT", "/nonexistent-sweep.sh")
+    monkeypatch.setattr(tq, "DISK_RECLAIM_PCT", 80)
+    monkeypatch.setattr(tq, "root_disk_pct", lambda: 99)
+    monkeypatch.setattr(tq.subprocess, "run", lambda *a, **k: calls.append(a))
+
+    tq.reclaim_worktree_disk_if_needed()
+    assert calls == []
