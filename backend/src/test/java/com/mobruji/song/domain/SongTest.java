@@ -298,6 +298,28 @@ class SongTest {
     }
 
     @Test
+    @DisplayName("backfillFromAudioAnalysis: confidence 통과해도 비합리 음역대면 수기 값 보존, no-op (#1725)")
+    void backfillFromAudio_implausibleRange_preservesAll() {
+        final Song song = Song.builder()
+                .title("t").artist("a")
+                .keyOriginal(MusicalKey.C_MAJOR)
+                .metadataSource(MetadataSource.MANUAL_SEED)
+                .lowMidi(60).highMidi(70)
+                .build();
+
+        // confidence 0.95 충분하지만 lowMidi=30 < C2(36) — 반주 저음 오검출 의심.
+        final AudioAnalysisResult implausible = new AudioAnalysisResult(
+                30, 70, "C", 120.0, 200.0, 0.95, "analyze-py-0.1.0");
+
+        final boolean changed = song.backfillFromAudioAnalysis(implausible, 0.6);
+
+        assertThat(changed).isFalse();
+        assertThat(song.getLowMidi()).isEqualTo(60);
+        assertThat(song.getHighMidi()).isEqualTo(70);
+        assertThat(song.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+    }
+
+    @Test
     @DisplayName("create: metadataConfidence 미명시 시 기본값 1.0 (MANUAL 신뢰도)")
     void create_withoutConfidence_defaultsToOne() {
         final Song song = Song.builder()

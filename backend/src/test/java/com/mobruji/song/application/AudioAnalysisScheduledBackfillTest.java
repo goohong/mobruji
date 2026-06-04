@@ -49,7 +49,7 @@ class AudioAnalysisScheduledBackfillTest {
 
         final SongAudioBackfillCommand backfillCommand = mock(SongAudioBackfillCommand.class);
         when(backfillCommand.runBackfill(any(List.class), eq(0.6)))
-                .thenReturn(new SongAudioBackfillCommand.BackfillSummary(2, 2, 2, 0, 0));
+                .thenReturn(new SongAudioBackfillCommand.BackfillSummary(2, 2, 2, 0, 0, 0));
 
         final AudioAnalysisScheduledBackfill scheduler = new AudioAnalysisScheduledBackfill(repo, backfillCommand);
 

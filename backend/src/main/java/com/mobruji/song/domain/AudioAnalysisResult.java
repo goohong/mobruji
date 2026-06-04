@@ -29,6 +29,24 @@ public record AudioAnalysisResult(
         String toolingVersion
 ) {
 
+    /** 가창 음역 최저음의 물리적 하한 (C2). 이 미만 lowMidi 는 반주 저음 오검출 의심. */
+    public static final int PLAUSIBLE_MIDI_FLOOR = 36;
+
+    /** 가창 음역 최고음의 물리적 상한 (E6). 이 초과 highMidi 는 가창 음역 밖. */
+    public static final int PLAUSIBLE_MIDI_CEIL = 88;
+
+    /** "최저음" 이 이보다 높으면 (G4) 분석 오류 의심. */
+    public static final int PLAUSIBLE_LOW_MAX = 67;
+
+    /** "최고음" 이 이보다 낮으면 (E3) 분석 오류 의심. */
+    public static final int PLAUSIBLE_HIGH_MIN = 52;
+
+    /** 단4도 미만 음역폭은 멜로디로 비현실적. */
+    public static final int PLAUSIBLE_SPAN_MIN = 5;
+
+    /** 3옥타브+ 음역폭은 단일 멜로디로 비현실적 (옥타브 폴딩 의심). */
+    public static final int PLAUSIBLE_SPAN_MAX = 40;
+
     public AudioAnalysisResult {
         Objects.requireNonNull(toolingVersion, "toolingVersion must not be null");
         if (lowMidi > highMidi) {
@@ -41,5 +59,28 @@ public record AudioAnalysisResult(
         if (durationSec < 0.0) {
             throw new IllegalArgumentException("durationSec must not be negative: " + durationSec);
         }
+    }
+
+    /**
+     * 분석된 음역(lowMidi/highMidi)이 사람 가창으로 합리적인지 판정한다 — 합리성 가드(#1725).
+     *
+     * <p>confidence 임계를 통과한 결과라도 반주 저음 오검출·옥타브 폴딩 같은 분석 오류로 음역이 가창 한계를
+     * 벗어날 수 있다. backfill 적용 전 본 가드를 통과하지 못한 결과는 추천 풀에 진입시키지 않는다. 판정 기준은
+     * Python CLI 측 가드({@code tools/audio-analysis/batch_analyze.py} {@code range_plausibility})와 동일하다.
+     *
+     * @return 가창적으로 합리적이면 {@code true}, 비합리적이면 {@code false}
+     */
+    public boolean isVocalRangePlausible() {
+        if (lowMidi >= highMidi) {
+            return false;
+        }
+        if (lowMidi < PLAUSIBLE_MIDI_FLOOR || lowMidi > PLAUSIBLE_LOW_MAX) {
+            return false;
+        }
+        if (highMidi > PLAUSIBLE_MIDI_CEIL || highMidi < PLAUSIBLE_HIGH_MIN) {
+            return false;
+        }
+        final int span = highMidi - lowMidi;
+        return span >= PLAUSIBLE_SPAN_MIN && span <= PLAUSIBLE_SPAN_MAX;
     }
 }

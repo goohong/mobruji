@@ -80,7 +80,7 @@ class SongAudioBackfillCommandMetricsTest {
         when(runner.analyzeByMetadata("high", "artist-high"))
                 .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.9, "v"));
         when(runner.analyzeByMetadata("low", "artist-low"))
-                .thenReturn(new AudioAnalysisResult(50, 90, "C", 120.0, 200.0, 0.3, "v"));
+                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.3, "v"));
         final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, registry);
 
         // when

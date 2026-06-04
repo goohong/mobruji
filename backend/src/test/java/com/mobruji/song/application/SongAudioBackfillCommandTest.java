@@ -61,7 +61,7 @@ class SongAudioBackfillCommandTest {
         when(runner.analyzeByMetadata("high1", "artist-high1"))
                 .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
         when(runner.analyzeByMetadata("low", "artist-low"))
-                .thenReturn(new AudioAnalysisResult(50, 90, "C", 120.0, 200.0, 0.40, "v"));
+                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.40, "v"));
         when(runner.analyzeByMetadata("high2", "artist-high2"))
                 .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.75, "v"));
 
@@ -75,6 +75,7 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.successful()).isEqualTo(3);
         assertThat(summary.updated()).isEqualTo(2);
         assertThat(summary.skippedLowConfidence()).isEqualTo(1);
+        assertThat(summary.skippedImplausibleRange()).isZero();
         assertThat(summary.failed()).isZero();
 
         // updated 된 두 곡만 save 호출
@@ -85,6 +86,46 @@ class SongAudioBackfillCommandTest {
         assertThat(s1.getDifficulty()).isEqualTo(Difficulty.HARD);
         assertThat(s2.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
         assertThat(s3.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
+    }
+
+    @Test
+    @DisplayName("runBackfill: confidence 통과해도 비합리 음역대는 거부되고 skippedImplausibleRange 로 집계 (#1725)")
+    void runBackfill_implausibleRange_rejectedAndCounted() {
+        // given: confidence 는 충분히 높지만 음역이 가창 한계를 벗어난 곡 2종 + 정상 곡 1
+        final Song bassMisdetect = seedSong("bass", 60, 70);
+        final Song octaveFold = seedSong("octave", 60, 70);
+        final Song ok = seedSong("ok", 60, 70);
+
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findAll()).thenReturn(List.of(bassMisdetect, octaveFold, ok));
+
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        // lowMidi=30 < C2(36) — 반주 저음 오검출. highMidi 는 정상.
+        when(runner.analyzeByMetadata("bass", "artist-bass"))
+                .thenReturn(new AudioAnalysisResult(30, 70, "C", 120.0, 200.0, 0.95, "v"));
+        // span 42 > 40 — 옥타브 폴딩 의심.
+        when(runner.analyzeByMetadata("octave", "artist-octave"))
+                .thenReturn(new AudioAnalysisResult(40, 82, "C", 120.0, 200.0, 0.95, "v"));
+        when(runner.analyzeByMetadata("ok", "artist-ok"))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.90, "v"));
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBackfill(0.6);
+
+        // then: 분석 성공 3, 비합리 2건 거부, 정상 1곡만 적용
+        assertThat(summary.analyzed()).isEqualTo(3);
+        assertThat(summary.successful()).isEqualTo(3);
+        assertThat(summary.updated()).isEqualTo(1);
+        assertThat(summary.skippedImplausibleRange()).isEqualTo(2);
+        assertThat(summary.skippedLowConfidence()).isZero();
+        assertThat(summary.failed()).isZero();
+        // 비합리 거부 곡은 source/midi 보존, 정상 곡만 갱신
+        assertThat(bassMisdetect.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+        assertThat(bassMisdetect.getLowMidi()).isEqualTo(60);
+        assertThat(octaveFold.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+        assertThat(ok.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
+        verify(repo, times(1)).save(any(Song.class));
     }
 
     @Test
@@ -113,6 +154,7 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.successful()).isEqualTo(2);
         assertThat(summary.updated()).isEqualTo(2);
         assertThat(summary.skippedLowConfidence()).isZero();
+        assertThat(summary.skippedImplausibleRange()).isZero();
         assertThat(summary.failed()).isEqualTo(1);
         // 실패한 곡은 source/midi 그대로
         assertThat(s2.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
@@ -136,6 +178,7 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.successful()).isZero();
         assertThat(summary.updated()).isZero();
         assertThat(summary.skippedLowConfidence()).isZero();
+        assertThat(summary.skippedImplausibleRange()).isZero();
         assertThat(summary.failed()).isZero();
         verify(runner, never()).analyzeByMetadata(anyString(), anyString());
         verify(repo, never()).save(ArgumentMatchers.any());
