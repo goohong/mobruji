@@ -76,7 +76,7 @@ class RecommendationHistoryControllerTest {
     void readHistory_nonEmpty_returns200WithMappedFields() throws Exception {
         // given
         final RecommendationRequestEntity recommendationRequestEntity = RecommendationRequestEntity.create(
-                SESSION_ID, 48, 72, Mood.UPBEAT, 130, null, List.of());
+                SESSION_ID, 48, 72, Mood.UPBEAT, 130, null, null, List.of());
         final Song song = Song.builder()
                 .title("test-title")
                 .artist("test-artist")

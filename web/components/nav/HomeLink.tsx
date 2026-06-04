@@ -10,7 +10,8 @@
  * 노출 정책:
  *  - 홈("/") 에서는 이미 루트이므로 숨긴다 (중복 회피). usePathname 정확 매치 —
  *    BottomNav.isActive 의 홈 정확 매치 철학과 동일.
- *  - 그 외 모든 라우트에서 노출. ThemeToggle 처럼 모바일/데스크탑 공통 노출.
+ *  - 모바일 한정(`md:hidden`). 데스크톱은 상단 DesktopNav 헤더의 브랜드 워드마크가
+ *    홈 링크를 겸하므로 floating 홈 아이콘이 중복된다 (closes #1717).
  *
  * a11y:
  *  - `aria-label="홈으로 이동"` 으로 스크린리더에 목적 명시.
@@ -38,7 +39,8 @@ export function HomeLink() {
       title="홈"
       className={[
         // fixed top-left, safe-area 고려. ThemeToggle(우상단) 과 대칭. z-30 동일.
-        "fixed top-3 left-3 z-30",
+        // 데스크톱은 상단 헤더 브랜드가 홈 링크를 겸하므로 md:hidden.
+        "fixed top-3 left-3 z-30 md:hidden",
         "flex h-10 w-10 items-center justify-center rounded-full",
         "border border-[var(--border)] bg-[var(--surface-floating)] backdrop-blur",
         "text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors duration-[var(--duration-base)]",

@@ -14,6 +14,8 @@
 
 import Link from "next/link";
 
+import { StepIndicator } from "@/components/ui";
+
 type MethodCard = {
   href: string;
   emoji: string;
@@ -43,9 +45,7 @@ export default function VoiceRangeMethodPage() {
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col gap-8">
         <header className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Step 1
-          </p>
+          <StepIndicator current={1} total={2} />
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             음역대를 어떻게 알려주실래요?
           </h1>

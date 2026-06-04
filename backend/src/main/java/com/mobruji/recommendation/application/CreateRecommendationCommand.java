@@ -5,6 +5,7 @@ import java.util.Objects;
 
 import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.song.domain.Mood;
+import com.mobruji.song.domain.VocalGender;
 
 /**
  * 추천 생성 유스케이스의 입력 커맨드. api.dto 의존을 끊기 위해 application 계층에 둔 입력 모델
@@ -19,6 +20,9 @@ import com.mobruji.song.domain.Mood;
  * <p>{@code ageGroup}은 #1487에서 도입된 연령대 입력(옵션, nullable). null이면 generationFit 신호가 0 이 되어
  * 랭킹에 영향이 없다.
  *
+ * <p>{@code gender}는 #1767에서 도입된 성별 필터 입력(옵션, nullable). null이면 genderFit 신호가 0 이 되어
+ * 랭킹에 영향이 없다(배타 제외가 아니라 가중 가산이라 미입력 하위호환).
+ *
  * <p>{@code excludeSessionHistory}는 #1549에서 도입된 세션 단위 자동 중복 회피 플래그. {@code true}면 서비스가
  * 같은 {@code sessionId}의 이전 추천 결과 곡과 이전에 제외/부른 곡을 {@code excludeSongIds}에 자동 누적 병합해
  * 반복 추천을 방지한다. {@code false}(기본)면 기존 동작 그대로 — 클라이언트가 넘긴 {@code excludeSongIds}만 적용.
@@ -30,6 +34,7 @@ public record CreateRecommendationCommand(
         Mood mood,
         Integer preferredBpm,
         AgeGroup ageGroup,
+        VocalGender gender,
         List<Long> excludeSongIds,
         boolean excludeSessionHistory
 ) {

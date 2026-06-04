@@ -19,10 +19,11 @@ class RecommendationDiversityTest {
 
     private static DiversityPostProcessor diversityPostProcessor(final int maxSameArtist, final int maxSameGenre) {
         final RecommendationProperties properties = new RecommendationProperties(
-                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0),
+                new RecommendationProperties.Weights(0.5, 0.2, 0.2, 0.1, 0.1, 0.0, 0.0),
                 new RecommendationProperties.Diversity(maxSameArtist, maxSameGenre),
                 new RecommendationProperties.Tempo(40.0, java.util.Map.of(), 110),
-                new RecommendationProperties.Generation(15.0, java.util.Map.of()),
+                new RecommendationProperties.Generation(15.0, java.util.Map.of()), new RecommendationProperties.Gender(
+                        0.6, 0.5, 0.3),
                 10,
                 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
@@ -135,7 +136,7 @@ class RecommendationDiversityTest {
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();
         // diversity 후처리는 total만 사용 — breakdown 6신호는 임의로 채워 둠.
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 1.0, 1.0, 0.5, 0.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0);
         return new ScoredSong(song, new Scored(score, breakdown));
     }
 }

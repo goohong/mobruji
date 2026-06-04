@@ -8,7 +8,7 @@
  *    저장된 음역대 요약(API 응답 도착 시 노트명) + "음역대 다시 측정" 보조.
  *
  * 추가 검증:
- *  - SecondaryNav는 두 상태 모두에서 곡 검색/받은 추천/좋아요/북마크 4개 링크 노출.
+ *  - SecondaryNav는 두 상태 모두에서 곡 검색/이력/좋아요/북마크 4개 링크 노출.
  *  - a11y violation 0 (axe).
  */
 
@@ -26,6 +26,7 @@ import {
 import Home from "./page";
 import { readVoiceRange } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
+import { useAuthStore } from "@/store/auth";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 
 vi.mock("@/lib/api/voice-range", async () => {
@@ -66,7 +67,15 @@ beforeEach(() => {
   });
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem("mobruji-session");
+    localStorage.removeItem("mobruji-auth");
   }
+  // 기본은 비로그인 — 계정 진입점이 로그인/회원가입 링크로 노출되어야 한다.
+  useAuthStore.setState({
+    token: null,
+    tokenExpiresAt: null,
+    userId: null,
+    email: null,
+  });
 });
 
 afterEach(() => {
@@ -84,7 +93,7 @@ describe("Home — 공통", () => {
     ).toBeInTheDocument();
   });
 
-  it("빠른 진입 nav에 검색/받은 추천/좋아요/북마크 4개 링크가 노출된다", async () => {
+  it("빠른 진입 nav에 검색/이력/좋아요/북마크 4개 링크가 노출된다", async () => {
     renderWithQueryClient(<Home />);
     const nav = screen.getByRole("navigation", { name: /빠른 진입/ });
     expect(nav).toBeInTheDocument();
@@ -92,7 +101,7 @@ describe("Home — 공통", () => {
       screen.getByRole("link", { name: /곡 검색/ }),
     ).toHaveAttribute("href", "/songs");
     expect(
-      screen.getByRole("link", { name: /받은 추천/ }),
+      screen.getByRole("link", { name: /^이력$/ }),
     ).toHaveAttribute("href", "/history");
     expect(screen.getByRole("link", { name: /좋아요/ })).toHaveAttribute(
       "href",
@@ -102,6 +111,17 @@ describe("Home — 공통", () => {
       "href",
       "/bookmarks",
     );
+  });
+
+  it("비로그인 시 계정 진입점에 로그인·회원가입 링크가 노출된다 (#1800)", async () => {
+    renderWithQueryClient(<Home />);
+    const accountNav = screen.getByRole("navigation", { name: "계정" });
+    expect(
+      within(accountNav).getByRole("link", { name: "로그인" }),
+    ).toHaveAttribute("href", "/login");
+    expect(
+      within(accountNav).getByRole("link", { name: "회원가입" }),
+    ).toHaveAttribute("href", "/signup");
   });
 });
 

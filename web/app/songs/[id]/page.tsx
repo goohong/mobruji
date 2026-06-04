@@ -43,7 +43,7 @@ import {
 } from "@/lib/difficulty";
 import { midiToKoreanNoteName } from "@/lib/notes";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { formatLanguageLabel } from "@/lib/songMeta";
+import { formatLanguageLabel, formatMoodLabel } from "@/lib/songMeta";
 import { useLikesStore } from "@/store/likes";
 import { AlbumCover } from "@/app/recommend/components/SongDetailContent";
 
@@ -128,6 +128,8 @@ function SongDetailView({ song }: SongDetailViewProps) {
   const keyLabel = formatMusicalKey(song.keyOriginal);
   // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
   const languageLabel = formatLanguageLabel(song.language);
+  // closes #1764 — 분위기 코드값("UPBEAT")을 한국어 라벨로. 매핑 불가 시 null → 칩 생략.
+  const moodLabel = formatMoodLabel(song.mood);
   // closes #1284 — 한국 곡 한국어 표시 우선 (heading + 좋아요 aria-label 동일 표시).
   const displayTitle = formatSongDisplayTitle(song);
 
@@ -149,7 +151,7 @@ function SongDetailView({ song }: SongDetailViewProps) {
             /history → /songs/[id] 라우트 전환 시 hero morph 한다. */}
         <AlbumCover song={song} viewTransitionName={`album-${song.id}`} />
         <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-          Song detail
+          곡 상세
         </p>
         <h1 className="text-3xl font-semibold text-[var(--text-primary)]">
           {displayTitle}
@@ -182,9 +184,9 @@ function SongDetailView({ song }: SongDetailViewProps) {
               {song.genre}
             </span>
           ) : null}
-          {song.mood ? (
+          {moodLabel ? (
             <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
-              {song.mood}
+              {moodLabel}
             </span>
           ) : null}
         </div>

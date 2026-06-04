@@ -25,6 +25,7 @@ import { midiToKoreanNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
 import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
+import { HomeAccountNav } from "@/app/components/HomeAccountNav";
 import { BrandWordmark } from "@/components/brand/BrandWordmark";
 
 /**
@@ -90,8 +91,11 @@ export default function Home() {
 
         <SecondaryNav />
 
+        <HomeAccountNav />
+
         <p className="text-xs text-[var(--text-disclaimer)]">
-          익명 세션으로 동작합니다. 회원가입 없음.
+          가입 없이 익명으로 바로 쓸 수 있어요. 로그인하면 음역대·취향이 기기를 옮겨도
+          유지됩니다.
         </p>
       </div>
     </main>
@@ -268,11 +272,15 @@ function VoiceRangeSummary({
  * 측정 여부와 무관하게 노출 — 검색은 측정 없이도 진입 가능한 경로, 좋아요/북마크/이력은
  * 빈 상태(empty)도 친화 메시지를 가지고 있어 측정 안 한 사용자가 눌러도 막다른 길이
  * 아니다. 따라서 분기 바깥에 둔다.
+ *
+ * 라벨은 글로벌 nav(BottomNav/DesktopNav)와 통일한다 (closes #1717) — /history 는
+ * 탭 라벨과 동일하게 "이력". 측정/추천은 위 primary CTA 가 이미 담당하므로 여기서는
+ * 콘텐츠 목적지(검색/이력/좋아요/북마크)만 둔다.
  */
 function SecondaryNav() {
   const items: Array<{ href: string; label: string }> = [
     { href: "/songs", label: "곡 검색" },
-    { href: "/history", label: "받은 추천" },
+    { href: "/history", label: "이력" },
     { href: "/likes", label: "좋아요" },
     { href: "/bookmarks", label: "북마크" },
   ];

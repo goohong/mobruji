@@ -27,8 +27,8 @@ class MoodPresetCatalogTest {
 
     private static RecommendationProperties propertiesWithTempo(final RecommendationProperties.Tempo tempo) {
         return new RecommendationProperties(
-                new RecommendationProperties.Weights(0.5, 0.2, 0.3, 0.1, 0.1, 0.15),
-                DIVERSITY, tempo, GENERATION, 10, 0.01,
+                new RecommendationProperties.Weights(0.5, 0.2, 0.3, 0.1, 0.1, 0.15, 0.0),
+                DIVERSITY, tempo, GENERATION, new RecommendationProperties.Gender(0.6, 0.5, 0.3), 10, 0.01,
                 RecommendationProperties.SeedStrategy.DERIVED);
     }
 

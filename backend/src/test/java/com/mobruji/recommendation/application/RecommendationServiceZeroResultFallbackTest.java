@@ -141,8 +141,8 @@ class RecommendationServiceZeroResultFallbackTest {
         given(songRepository.findAllWithVocalRange()).willReturn(catalog);
         given(recommendationProperties.resultCount()).willReturn(RESULT_COUNT);
 
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0);
-        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any()))
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0);
+        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any(), any()))
                 .willReturn(new Scored(0.9, breakdown));
         given(diversityPostProcessor.apply(anyList(), anyInt())).willAnswer(invocation -> {
             final List<ScoredSong> candidates = invocation.getArgument(0);
@@ -154,14 +154,14 @@ class RecommendationServiceZeroResultFallbackTest {
     private static CreateRecommendationCommand command(
             final Mood mood, final List<Long> excludeSongIds, final boolean excludeSessionHistory) {
         return new CreateRecommendationCommand(
-                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null,
+                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, null,
                 excludeSongIds, excludeSessionHistory);
     }
 
     private static RecommendationRequestEntity persistedRequestEntity(
             final Mood mood, final List<Long> excludeSongIds) throws Exception {
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, excludeSongIds);
+                SESSION_ID, VOICE_LOW, VOICE_HIGH, mood, /* preferredBpm */ null, null, null, excludeSongIds);
         final Field idField = RecommendationRequestEntity.class.getDeclaredField("id");
         idField.setAccessible(true);
         idField.set(entity, 100L);

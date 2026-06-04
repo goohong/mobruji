@@ -166,7 +166,8 @@ export function VoiceRangeScale({
           </title>
         </rect>
 
-        {/* 사용자 밴드 — 강조 */}
+        {/* 사용자 밴드 — 강조(brand). 자동 측정 viz(#1700, PitchWaveRing)의 brand
+            톤과 맞춰 "내 음역"을 한눈에 평균(회색)과 구분되게 한다(#1722). */}
         <rect
           data-testid="voice-range-scale-user-band"
           x={userX1}
@@ -174,8 +175,8 @@ export function VoiceRangeScale({
           width={Math.max(2, userX2 - userX1)}
           height={userLaneHeight}
           rx={5}
-          className="fill-[var(--chart-bar-active-bg)]"
-          opacity={compact ? 0.8 : undefined}
+          className="fill-[var(--brand-500)]"
+          opacity={compact ? 0.85 : undefined}
         >
           <title>
             내 음역대 {lowNote} ~ {highNote}
@@ -187,7 +188,7 @@ export function VoiceRangeScale({
           x={userX1}
           y={benchLaneY - 5}
           textAnchor="middle"
-          className="fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
+          className="fill-[var(--brand-600)] text-[10px] font-semibold"
         >
           {lowNote}
         </text>
@@ -195,11 +196,32 @@ export function VoiceRangeScale({
           x={userX2}
           y={benchLaneY - 5}
           textAnchor="middle"
-          className="fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
+          className="fill-[var(--brand-600)] text-[10px] font-semibold"
         >
           {highNote}
         </text>
       </svg>
+
+      {/* 평균 범위 vs 내 음역 레전드 — 색 의미를 명시해 "검은 막대 한 덩어리"로
+          읽히던 AS-IS 를 해소한다(#1722). 톤다운(compact) 변형은 보조 정보라 생략. */}
+      {compact ? null : (
+        <div className="flex items-center gap-4 text-xs text-[var(--text-caption)]">
+          <span className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="inline-block h-2.5 w-3 rounded-sm bg-[var(--brand-500)]"
+            />
+            내 음역
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="inline-block h-2.5 w-3 rounded-sm bg-[var(--chart-bar-inactive-bg)]"
+            />
+            평균 범위
+          </span>
+        </div>
+      )}
     </figure>
   );
 }

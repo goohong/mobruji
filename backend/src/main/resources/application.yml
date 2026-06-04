@@ -80,6 +80,8 @@ management:
 # - mood 0.3:     분위기 연속 유사도 가산 (#1485 — 이진 0.2 → 변별력 강화 위해 가중 상향)
 # - popularity 0.1: 모든 곡 popularity=1.0 (시드에 컬럼 없음) → 동일 가산
 # - tempoMatch 0.1: v2(#218) 신규. 곡 BPM ↔ 사용자 선호(또는 mood default) BPM 거리 기반.
+# - generation 0.15: #1487 신규. 곡 발매연도 ↔ 요청 연령대 대표 시기 거리 기반.
+# - gender 0.2:   #1767 신규. 요청 성별 필터(남자곡/여자곡) ↔ 곡 보컬 성별 가산(배타 제외 아님).
 recommendation:
   weights:
     voice-fit: 0.5
@@ -88,6 +90,7 @@ recommendation:
     popularity: 0.1
     tempo-match: 0.1
     generation: 0.15
+    gender: 0.2
   diversity:
     max-same-artist: 2
     max-same-genre: 4
@@ -118,6 +121,14 @@ recommendation:
       FORTIES: 1995
       FIFTIES: 1985
       SIXTIES_PLUS: 1975
+  # #1767 genderFit 신호 설정. 큐레이션 일치는 1.0 고정 — 비-일치 케이스 가산만 외부화.
+  # estimated-match-score: 큐레이션 부재 곡을 음역·키로 추정해 요청 성별과 일치할 때(후순위, 큐레이션보다 낮춤).
+  # mixed-score: 큐레이션 MIXED(듀엣/혼성) — 어느 성별 요청에도 부분 적합.
+  # unknown-score: 큐레이션·추정 모두 불가(음역·키 부재) 중립값. 반대 성별은 0.0(가산 없음, 배타 제외 아님).
+  gender:
+    estimated-match-score: 0.6
+    mixed-score: 0.5
+    unknown-score: 0.3
   result-count: 10
   jitter-magnitude: 0.01
   # spec §3 비기능 — 결정성: 같은 입력 → 같은 결과.

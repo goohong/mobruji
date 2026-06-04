@@ -199,7 +199,8 @@ class TrendingIntegrationTest {
 
     private Long saveRequest(final int low, final int high, final Mood mood) {
         return recommendationRequestRepository.save(
-                RecommendationRequestEntity.create("session-seed", low, high, mood, null, null, List.of())).getId();
+                RecommendationRequestEntity.create("session-seed", low, high, mood, null, null, null, List.of()))
+                .getId();
     }
 
     private void saveRecommendation(final Long requestId, final Long songId, final int rank) {

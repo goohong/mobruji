@@ -40,6 +40,20 @@ METHOD_SPLEETER_2STEMS = "spleeter-2stems"
 # Spleeter pretrained model 캐시 경로 (NCP /data 등 영속 볼륨으로 지정 가능).
 SPLEETER_MODEL_ENV = "AUDIO_ANALYSIS_MODEL_DIR"
 
+# YouTube player_client 폴백 체인 (#1802). 단일 client(web)에서 음악 영상이
+# 'Video unavailable' / HTTP 400 으로 막히는 경우가 잦아, client 를 순차로 바꿔
+# 재시도한다. 인증 없이 접근 가능한 client 가 곡마다 달라 web→android→ios→tv 순회.
+PLAYER_CLIENT_CHAIN = ("web", "android", "ios", "tv")
+# 쿠키 파일 경로 환경변수 (#1802). 음악 영상이 인증 없이는 막히는 패턴 완화.
+YTDLP_COOKIES_ENV = "YTDLP_COOKIES_FILE"
+# PO token provider base URL 환경변수 (#1813). 데이터센터 IP 가 모든 player_client 에서
+# 'Video unavailable' 로 봇차단되는 패턴을 무쿠키로 우회한다. bgutil-ytdlp-pot-provider
+# HTTP sidecar 가 proof-of-origin token 을 발급하고, yt-dlp 가 web client + 토큰으로
+# 차단을 푼다. 미설정 시 PO token 없이 진행(기존 쿠키/체인 동작 유지).
+YTDLP_POT_PROVIDER_ENV = "YTDLP_POT_PROVIDER_URL"
+# bgutil PO token provider plugin(1.x GetPOT 프레임워크)의 extractor-args 키.
+POT_EXTRACTOR_KEY = "youtubepot-bgutilhttp"
+
 
 @dataclass
 class SongMeta:
@@ -135,16 +149,95 @@ def mask_url(url: Optional[str]) -> str:
 
 
 # ----------------------------------------------------------------------
+# YouTube 추출 견고화 (#1802) — player_client 폴백 + 쿠키
+# ----------------------------------------------------------------------
+def youtube_cookies_file() -> Optional[str]:
+    """YTDLP_COOKIES_FILE 가 가리키는 쿠키 파일 경로(존재할 때만). 없으면 None.
+
+    음악 영상이 인증 없이는 'Video unavailable' 로 막히는 패턴(#1802)을 완화한다.
+    환경변수 미설정·파일 부재 시 쿠키 없이 진행(기존 동작 유지).
+    """
+    path = os.environ.get(YTDLP_COOKIES_ENV)
+    if path and Path(path).is_file():
+        return path
+    return None
+
+
+def youtube_pot_provider_url() -> Optional[str]:
+    """YTDLP_POT_PROVIDER_URL 이 가리키는 bgutil PO token provider base URL(설정 시).
+
+    데이터센터 IP 봇차단(#1813)을 무쿠키로 우회한다. 미설정·빈 값이면 None
+    (PO token 없이 진행 — 기존 동작 유지).
+    """
+    url = os.environ.get(YTDLP_POT_PROVIDER_ENV)
+    return url.strip() if url and url.strip() else None
+
+
+def harden_ydl_opts(base_opts: dict, player_client: str) -> dict:
+    """base 옵션에 player_client 1개 + (있으면) PO token provider·쿠키를 입힌 새 dict 를 반환.
+
+    체인의 각 client 별로 호출해 client 를 고정한다(#1802). PO token provider URL 이
+    설정돼 있으면 bgutil HTTP sidecar 의 base_url 을 extractor-args 에 주입한다(#1813).
+    base_opts 는 변형하지 않는다.
+    """
+    hardened = dict(base_opts)
+    extractor_args = dict(hardened.get("extractor_args") or {})
+    youtube_args = dict(extractor_args.get("youtube") or {})
+    youtube_args["player_client"] = [player_client]
+    extractor_args["youtube"] = youtube_args
+    pot_url = youtube_pot_provider_url()
+    if pot_url:
+        pot_args = dict(extractor_args.get(POT_EXTRACTOR_KEY) or {})
+        pot_args["base_url"] = [pot_url]
+        extractor_args[POT_EXTRACTOR_KEY] = pot_args
+    hardened["extractor_args"] = extractor_args
+    cookies = youtube_cookies_file()
+    if cookies:
+        hardened["cookiefile"] = cookies
+    return hardened
+
+
+def run_with_client_chain(
+    base_opts: dict,
+    action,
+    clients: tuple = PLAYER_CLIENT_CHAIN,
+):
+    """player_client 폴백 체인으로 action(ydl) 을 시도한다(#1802).
+
+    client 를 순차로 바꿔 YoutubeDL 을 만들고 action 을 호출, 첫 성공 결과를 반환한다.
+    모든 client 가 DownloadError 로 실패하면 마지막 예외를 재발생한다. action 은
+    YoutubeDL 인스턴스를 받아 download/extract_info 등을 수행하는 콜러블.
+    """
+    import yt_dlp  # type: ignore
+
+    last_error: Optional[Exception] = None
+    for client in clients:
+        opts = harden_ydl_opts(base_opts, client)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return action(ydl)
+        except yt_dlp.utils.DownloadError as error:  # client 단위 실패 → 다음 재시도
+            last_error = error
+            LOG.warning(
+                "yt-dlp player_client=%s 실패 — 다음 client 재시도: %s", client, error
+            )
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("player_client 체인이 비어 있습니다")
+
+
+# ----------------------------------------------------------------------
 # Audio extraction / analysis (외부 IO)
 # ----------------------------------------------------------------------
 def _download_youtube_audio(
     url: str, out_dir: Path, clip_seconds: int = DEFAULT_CLIP_SECONDS
 ) -> Path:
-    """yt-dlp로 audio를 mp3 clip으로 추출. 30~60초 short clip."""
-    import yt_dlp  # type: ignore
+    """yt-dlp로 audio를 mp3 clip으로 추출. 30~60초 short clip.
 
+    player_client 폴백 체인 + 쿠키(있으면)로 추출을 견고화한다(#1802).
+    """
     out_template = str(out_dir / "clip.%(ext)s")
-    ydl_opts = {
+    base_opts = {
         "format": "bestaudio/best",
         "outtmpl": out_template,
         "quiet": True,
@@ -159,8 +252,7 @@ def _download_youtube_audio(
         # 짧은 clip만 받기 위한 ffmpeg 옵션 (post-process)
         "postprocessor_args": ["-t", str(clip_seconds)],
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    run_with_client_chain(base_opts, lambda ydl: ydl.download([url]))
     candidates = list(out_dir.glob("clip.*"))
     audio = next((c for c in candidates if c.suffix in (".mp3", ".m4a", ".webm")), None)
     if audio is None or not audio.exists():

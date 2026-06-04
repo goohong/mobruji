@@ -5,7 +5,7 @@
  *
  * 검증:
  *  1. `/songs` 페이지 HTTP 200 응답
- *  2. 헤더 "곡 검색" + Browse caption 가 렌더
+ *  2. 헤더 "곡 검색" + 둘러보기 caption 가 렌더
  *  3. 검색 입력 placeholder ("곡 제목이나 아티스트로 검색") 가 노출
  *  4. 검색어 미입력 시 안내 ("검색어를 입력해 보세요.") 가 렌더 — BE 호출 0건
  *  5. 검색어 입력 + mock 응답 후 곡 카드 카운트 텍스트 ("1곡") 가 노출
@@ -14,6 +14,8 @@
  * mock 전략 (spec §7, Q4 결정 (b)):
  *  - `/api/v1/songs?keyword=…` 만 Playwright 네이티브 `page.route()` 로 mock.
  *  - 빈 검색어일 때는 page 가 호출 자체를 생략하므로 mock 가 fire 되지 않음.
+ *  - route 매칭은 origin 무관 **pathname predicate** 로 건다 — 로컬·dev 배포(상대 경로)
+ *    양쪽에서 동일하게 intercept 되도록 origin 하드코딩을 제거했다 (#1756).
  *
  * 비고:
  *  - SongSearchPageInner 는 Suspense + useSearchParams 사용 → 첫 마운트 시
@@ -21,8 +23,6 @@
  *    fallback 과 inner 가 같은 h1 카피를 사용하므로 race 없이 단일 selector 검증 가능.
  */
 import { expect, test } from "@playwright/test";
-
-const API_BASE = "http://localhost:8080";
 
 test.describe("S4: 곡 검색 페이지 smoke", () => {
   test("페이지 로드 + 검색 입력 + 빈 키워드 안내 + 콘솔 에러 0건", async ({
@@ -41,7 +41,7 @@ test.describe("S4: 곡 검색 페이지 smoke", () => {
       200,
     );
 
-    // 헤더 카피 — Browse caption + h1 "곡 검색". h1 은 fallback / inner 둘 다
+    // 헤더 카피 — 둘러보기 caption + h1 "곡 검색". h1 은 fallback / inner 둘 다
     // 같은 텍스트라 hydration race 없이 검증 가능.
     await expect(
       page.getByRole("heading", { level: 1, name: "곡 검색" }),
@@ -70,10 +70,9 @@ test.describe("S4: 곡 검색 페이지 smoke", () => {
     });
 
     // /api/v1/songs?keyword=... 를 mock. searchSongs 가 keyword trim 후
-    // encodeURIComponent → URL 패턴은 prefix glob 으로 매칭.
+    // encodeURIComponent → pathname predicate 로 query 무관 매칭.
     await page.route(
-      (url) =>
-        url.origin === API_BASE && url.pathname === "/api/v1/songs",
+      (url) => url.pathname === "/api/v1/songs",
       async (route) => {
         await route.fulfill({
           status: 200,

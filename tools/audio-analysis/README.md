@@ -47,6 +47,17 @@ docker compose -f docker-compose.audio.yml run --rm audio-analysis \
 
 Spring 측 `AudioAnalysisRunner` 도 본 compose 파일을 호출 가능하다 — `audio.analysis.use-docker=true` (또는 `AUDIO_ANALYSIS_USE_DOCKER=true`) 환경변수로 활성화한다. 호스트 Python 의존성 미설치 환경 (예: 운영 서버 컨테이너 내부) 에서 유용하다.
 
+### PO token provider — 데이터센터 IP 봇차단 우회 (#1813, 무쿠키)
+
+데이터센터(NCP 등) IP 는 모든 player_client 에서 YouTube 가 `Video unavailable` 로 봇차단하는 경우가 있다. 이때 `bgutil-ytdlp-pot-provider` sidecar 가 proof-of-origin token 을 발급해 **쿠키 없이** web client 추출을 푼다.
+
+- `docker-compose.audio.yml` 의 `bgutil-provider` 서비스(port 4416)가 sidecar 다. `docker compose run --rm audio-analysis ...` 시 `depends_on` 으로 자동 기동된다.
+- compose 안에서는 `YTDLP_POT_PROVIDER_URL=http://bgutil-provider:4416` 이 기본 주입되어 별도 설정이 필요 없다.
+- 호스트 Python 모드 / 다른 위치의 provider 를 쓰려면 `YTDLP_POT_PROVIDER_URL` 환경변수로 base URL 을 지정한다. 미설정 시 PO token 없이 진행(기존 쿠키/player_client 체인 동작 유지).
+- pip 플러그인 `bgutil-ytdlp-pot-provider` (requirements.txt) 는 sidecar 이미지와 **동일 버전으로 핀**한다 — GetPOT 프레임워크 호환을 위해.
+- PO token 으로도 풀리지 않으면 `YTDLP_COOKIES_FILE` 쿠키 폴백(#1802)을 병행한다.
+- **JS 챌린지 런타임 (#1826)**: PO token 을 받아도 yt-dlp 는 YouTube nsig/sig JS 챌린지를 풀어야 스트림 URL 을 얻는다. JS 인터프리터가 없으면 챌린지 미해결로 다시 `Video unavailable` 이 된다. Dockerfile 이 `deno` 바이너리를 PATH 에 설치하므로 yt-dlp 가 자동 감지한다. 호스트 Python 모드에서는 `deno` 또는 `node` 를 PATH 에 두어야 한다.
+
 ## 사용
 
 ```bash

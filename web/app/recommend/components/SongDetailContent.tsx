@@ -44,7 +44,7 @@ import {
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { formatLanguageLabel } from "@/lib/songMeta";
+import { formatLanguageLabel, formatMoodLabel } from "@/lib/songMeta";
 import { Chip } from "@/components/ui";
 
 import { FitReasons } from "./FitBadge";
@@ -77,6 +77,8 @@ export function SongDetailContent(props: SongDetailContentProps) {
   const keyLabel = formatMusicalKey(song.keyOriginal);
   // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
   const languageLabel = formatLanguageLabel(song.language);
+  // closes #1764 — mood enum("UPBEAT" 등) 코드값 대신 한국어 라벨. 미매핑 시 칩 생략.
+  const moodLabel = formatMoodLabel(song.mood);
   // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
   // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -100,9 +102,9 @@ export function SongDetailContent(props: SongDetailContentProps) {
               키 {keyLabel}
             </span>
             {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
-            {song.mood ? (
+            {moodLabel ? (
               <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
-                {song.mood}
+                {moodLabel}
               </span>
             ) : null}
           </div>
@@ -296,14 +298,11 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
       aria-label="추천 사유"
       className="flex flex-col gap-3 rounded-xl bg-[var(--surface-detail-section)] p-4"
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-          추천 사유
-        </h3>
-        <span className="font-mono text-xs text-[var(--text-detail-meta)]">
-          score {item.score.toFixed(2)}
-        </span>
-      </div>
+      {/* closes #1764 — 'score 0.87' 영어 라벨 + 원값(0~1)은 사용자에게 의미 없는
+          서버 용어라 비노출. 추천 사유/적합도 배지(FitReasons)가 같은 정보를 한국어로 전한다. */}
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+        추천 사유
+      </h3>
       <p className="text-sm text-[var(--text-body-strong)]">
         {item.matchReason}
       </p>
@@ -316,7 +315,7 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
       </dl>
       {hasEstimated ? (
         <p className="text-[11px] text-[var(--text-disclaimer)]">
-          ※ 점수 분해는 클라이언트 추정값입니다. 백엔드 산출값이 추가되면 자동으로 교체됩니다.
+          ※ 점수 분해는 대략적인 추정값이며, 정확한 값이 준비되면 자동으로 갱신됩니다.
         </p>
       ) : null}
     </section>
@@ -425,14 +424,13 @@ function resolveDifficulty(song: SongResponse): Difficulty | null {
 
 function formatMusicalKey(key: string): string {
   if (key === "UNKNOWN") {
-    return "Unknown";
+    return "정보 없음";
   }
   return key
     .replace(/_SHARP/g, "#")
-    .replace(/_/g, " ")
-    .replace(/\b(\w)(\w*)/g, (_, head: string, tail: string) => {
-      return `${head}${tail.toLowerCase()}`;
-    });
+    .replace(/MAJOR/g, "장조")
+    .replace(/MINOR/g, "단조")
+    .replace(/_/g, " ");
 }
 
 /**

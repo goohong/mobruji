@@ -16,6 +16,7 @@ import type {
 } from "@/lib/api/recommendation";
 import {
   buildScoreBreakdown,
+  computeVoiceFitRatio,
   type RecommendationBreakdownItem,
 } from "./scoreBreakdown";
 
@@ -101,9 +102,9 @@ describe("buildScoreBreakdown", () => {
     );
     // 모든 추정 항목은 estimated=true
     expect(breakdown.every((b) => b.estimated)).toBe(true);
-    // 키 한글 변환 — C_SHARP_MAJOR → "C# Major"
+    // 키 한글 변환 — C_SHARP_MAJOR → "C# 장조"
     const keyMatch = breakdown.find((b) => b.key === "keyMatch");
-    expect(keyMatch?.detail).toBe("C# Major");
+    expect(keyMatch?.detail).toBe("C# 장조");
   });
 
   it("사용자 voiceRange가 없거나 곡 음역 정보가 없으면 rangeFit 항목이 빠진다", () => {
@@ -166,5 +167,30 @@ describe("buildScoreBreakdown — rangeFit 클램프/정규화 가드 (#639)", (
     const out = buildScoreBreakdown(item, null);
     expect(out.map((b) => b.score)).toEqual([0, 1, 1.5]);
     expect(out.every((b) => b.estimated === false)).toBe(true);
+  });
+});
+
+// closes #1721 — /songs 검색 카드 "내 음역 적합" 배지가 쓰는 겹침 비율 헬퍼.
+// rangeFit breakdown 과 같은 직관(overlap / songSpan)을 공유해야 한다.
+describe("computeVoiceFitRatio", () => {
+  it("곡 음역이 사용자 음역 안에 완전히 들면 1", () => {
+    expect(computeVoiceFitRatio({ lowMidi: 48, highMidi: 72 }, 55, 65)).toBe(1);
+  });
+
+  it("겹치는 구간이 없으면 0", () => {
+    expect(computeVoiceFitRatio({ lowMidi: 48, highMidi: 55 }, 60, 72)).toBe(0);
+  });
+
+  it("부분 겹침은 겹침 반음 / 곡 span 비율", () => {
+    // 곡 60-72(span 12), 사용자 60-66 → overlap 6 → 0.5
+    expect(computeVoiceFitRatio({ lowMidi: 60, highMidi: 66 }, 60, 72)).toBe(
+      0.5,
+    );
+  });
+
+  it("songSpan 0(단일음) 가드로 유한값을 반환", () => {
+    const ratio = computeVoiceFitRatio({ lowMidi: 48, highMidi: 72 }, 60, 60);
+    expect(Number.isFinite(ratio)).toBe(true);
+    expect(ratio).toBe(0);
   });
 });

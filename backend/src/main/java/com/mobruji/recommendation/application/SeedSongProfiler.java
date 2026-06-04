@@ -76,6 +76,7 @@ public class SeedSongProfiler {
                 mood,
                 preferredBpm,
                 null,
+                null,
                 excludeSongIds,
                 excludeSessionHistory);
     }

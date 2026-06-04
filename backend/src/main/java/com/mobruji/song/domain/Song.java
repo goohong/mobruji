@@ -137,6 +137,17 @@ public class Song {
     private Difficulty difficulty;
 
     /**
+     * 곡 보컬의 성별 분류 (#1767). nullable — 큐레이션(시드/큐레이터)이 명시한 경우에만 채워진다. null 인 외부
+     * 임포트 곡은 추천 시점에 보컬 음역·키로 추정해 후순위 가산하므로(=컬럼은 큐레이션 권위값 전용), 미적재 곡도
+     * 성별 필터에서 graceful degrade 한다.
+     *
+     * <p>추천 {@code genderFit} 신호의 1순위 입력 — 적재만으로 랭킹이 바뀌므로 결정성에는 입력 변화로만 반영된다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "vocal_gender", length = 16)
+    private VocalGender vocalGender;
+
+    /**
      * 곡의 음향 에너지/강렬함 정도 (0.0~1.0). nullable — 1차는 수기/시드 적재, 자동 산출은 후속
      * (spec {@code song-analysis-data-and-consumers.md} §8 Q2). 미적재(null) 곡은 소비자
      * (#1485 mood / #1486 next-song)가 graceful degrade — energy 가중 0 으로 다른 신호만 사용한다.
@@ -184,6 +195,7 @@ public class Song {
             final Integer lowMidi,
             final Integer highMidi,
             final Difficulty difficulty,
+            final VocalGender vocalGender,
             final Float energy,
             final String albumCoverUrl) {
         Objects.requireNonNull(title, "title must not be null");
@@ -220,7 +232,7 @@ public class Song {
         return new Song(
                 null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
                 tjNumber, kyNumber, metadataSource, isrc, mbId, resolvedConfidence,
-                lowMidi, highMidi, resolvedDifficulty, energy, albumCoverUrl, now, now);
+                lowMidi, highMidi, resolvedDifficulty, vocalGender, energy, albumCoverUrl, now, now);
     }
 
     /**
@@ -390,6 +402,42 @@ public class Song {
             this.updatedAt = LocalDateTime.now();
         }
         return changed;
+    }
+
+    /**
+     * keyOriginal/genre 메타 추정 음역대를 적용한다 — 오디오 자체분석 인프라 부재(#1778) 동안의 interim 경로.
+     * {@link #backfillFromAudioAnalysis} 가 "신뢰도 충족 시 덮어쓰기" 라면, 본 메서드는 "음역대 미보유 곡에만 채움".
+     * 다음 정책:
+     *
+     * <ul>
+     * <li>{@code lowMidi}/{@code highMidi} 중 하나라도 이미 채워져 있으면 no-op({@code false} 반환) — 수기/외부/
+     * 자체분석으로 채워진 값을 추정값이 덮지 않는다 (자체분석 권위 우선).</li>
+     * <li>{@code !estimate.isVocalRangePlausible()} → no-op({@code false} 반환) — 합리성 가드(#1737).</li>
+     * <li>적용 시 lowMidi/highMidi 를 추정값으로 채우고 {@link Difficulty} 를 계산, {@link MetadataSource}
+     * 를 {@link MetadataSource#ESTIMATED} 로, {@code metadataConfidence} 를 추정 신뢰도(낮음)로 저장한다 —
+     * 추후 {@link #backfillFromAudioAnalysis} 가 자체분석 임계(기본 0.6)를 통과하면 그대로 덮어쓴다.</li>
+     * </ul>
+     *
+     * <p>본 메서드는 추천 알고리즘(점수 계산) 입력 데이터만 바꿀 뿐 알고리즘 코드 자체에는 영향이 없다 — 결정성 회귀 없음.
+     *
+     * @param estimate 메타 추정 음역 (필수)
+     * @return 실제로 적용됐는지 여부
+     */
+    public boolean applyEstimatedVocalRange(final VocalRangeEstimate estimate) {
+        Objects.requireNonNull(estimate, "estimate must not be null");
+        if (this.lowMidi != null || this.highMidi != null) {
+            return false;
+        }
+        if (!estimate.isVocalRangePlausible()) {
+            return false;
+        }
+        this.lowMidi = estimate.lowMidi();
+        this.highMidi = estimate.highMidi();
+        this.difficulty = deriveDifficulty(this.lowMidi, this.highMidi);
+        this.metadataSource = MetadataSource.ESTIMATED;
+        this.metadataConfidence = estimate.confidence();
+        this.updatedAt = LocalDateTime.now();
+        return true;
     }
 
     /**

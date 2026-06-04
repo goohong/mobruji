@@ -6,13 +6,15 @@
  * 검증:
  *  1. `/recommend` 페이지 HTTP 200 응답
  *  2. 음역대(voice-range) 미입력 시 fallback CTA (음역대 입력하러 가기) 가 노출
- *  3. 음역대 + 추천 API mock 후 진입 시 페이지 헤더(Step 2 / 추천 결과) 가 렌더
+ *  3. 음역대 + 추천 API mock 후 진입 시 페이지 헤더(2단계 / 추천 결과) 가 렌더
  *  4. 페이지 로드 중 console error 0건
  *
  * mock 전략 (spec §7, Q4 결정 (b)):
  *  - BE 의존 endpoint 2종 (`/api/v1/voice-ranges/{sessionId}` + `/api/v1/recommendations`)
  *    을 Playwright 네이티브 `page.route()` 로 mock. msw 의존 추가 없이 e2e self-contained.
- *  - api base URL 은 client.ts 기본값 `http://localhost:8080`.
+ *  - route 매칭은 origin 무관 **pathname predicate** 로 건다 — 로컬(`localhost:8080`)·
+ *    dev 배포(상대 경로가 `PLAYWRIGHT_BASE_URL` origin 으로 해소) 양쪽에서 동일하게 intercept
+ *    되도록 origin 하드코딩을 제거했다 (#1756).
  *
  * 가정 (서버 기동):
  *  - `baseURL=http://localhost:3000` (playwright.config.ts). 로컬: `npm run dev` 또는
@@ -28,7 +30,6 @@
  */
 import { expect, test } from "@playwright/test";
 
-const API_BASE = "http://localhost:8080";
 const SESSION_ID = "00000000-0000-7000-8000-000000000001";
 
 test.describe("S3: 추천 페이지 smoke", () => {
@@ -81,7 +82,7 @@ test.describe("S3: 추천 페이지 smoke", () => {
     // BE 호출 mock — voice-range (GET) + recommendations (POST).
     // 두 endpoint 의 응답 schema 는 web/lib/api/voice-range.ts + recommendation.ts 와 동일.
     await page.route(
-      `${API_BASE}/api/v1/voice-ranges/${SESSION_ID}`,
+      (url) => url.pathname === `/api/v1/voice-ranges/${SESSION_ID}`,
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -100,10 +101,10 @@ test.describe("S3: 추천 페이지 smoke", () => {
     );
 
     await page.route(
-      `${API_BASE}/api/v1/recommendations`,
+      (url) => url.pathname === "/api/v1/recommendations",
       async (route) => {
         // 빈 추천 응답 — page 가 "더 이상 추천할 곡이 없어요" fallback 을 렌더.
-        // 곡 카드를 렌더하지 않아도 페이지 헤더/Step 2 caption 가 smoke 충분.
+        // 곡 카드를 렌더하지 않아도 페이지 헤더/2단계 caption 가 smoke 충분.
         await route.fulfill({
           status: 201,
           contentType: "application/json",
@@ -131,8 +132,9 @@ test.describe("S3: 추천 페이지 smoke", () => {
     expect(response, "GET /recommend 응답이 존재해야 합니다.").not.toBeNull();
     expect(response!.status()).toBe(200);
 
-    // Step 2 caption + 헤더 "추천 결과" 가 렌더되면 RecommendContent 분기 도달.
-    await expect(page.getByText("Step 2", { exact: true })).toBeVisible();
+    // "2/2 단계" caption + 헤더 "추천 결과" 가 렌더되면 RecommendContent 분기 도달.
+    // StepIndicator(current=2,total=2) 는 "{current}/{total} 단계" 포맷으로 렌더한다.
+    await expect(page.getByText("2/2 단계", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { level: 1, name: "추천 결과" }),
     ).toBeVisible();

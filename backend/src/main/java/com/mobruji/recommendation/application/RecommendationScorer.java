@@ -10,6 +10,7 @@ import com.mobruji.recommendation.domain.TransposeSuggestion;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
+import com.mobruji.song.domain.VocalGender;
 
 import lombok.RequiredArgsConstructor;
 
@@ -19,7 +20,8 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * v1/v2 규칙 기반 점수 함수.
  *
  * <p>{@code score = w_voiceFit * rangeFit + w_genre * genreMatch + w_mood * moodMatch
- *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + w_generation * generationFit + jitter}
+ *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + w_generation * generationFit
+ *                 + w_gender * genderFit + jitter}
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
@@ -34,6 +36,8 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * 곡 BPM이 null이거나 사용자 선호 BPM이 결정될 수 없으면 0.5(중립).</li>
  * <li>generationFit (#1487): {@code 1.0 - min(1.0, |songReleaseYear - representativeYear| / toleranceYears)}.
  * 연령대 미입력 또는 곡 발매연도 부재면 0.0(가중 없음) — 미입력 시 랭킹 영향 없음(하위호환).</li>
+ * <li>genderFit (#1767): 요청 성별 필터(남자곡/여자곡)와 곡 보컬 성별 적합도. 큐레이션 일치 1.0, 추정 일치·혼성·추정
+ * 불가는 부분 가산, 반대 성별 0.0. 성별 미입력이면 0.0(가중 없음, 배타 제외가 아니라 가산 가중).</li>
  * <li>jitter: 동순위 분산용. seed 고정으로 결정성 유지 가능.</li>
  * </ul>
  *
@@ -84,6 +88,14 @@ public class RecommendationScorer {
      */
     static final double CENTEREDNESS_SIGMA_FLOOR = 1.0;
 
+    /**
+     * 큐레이션 부재 곡의 보컬 성별 추정 분기점(곡 최고음 MIDI). highMidi 가 이 값 이상이면 FEMALE, 미만이면 MALE 로
+     * 추정한다(#1767). 곡 보컬 멜로디 최고음이 성별을 가르는 가장 변별력 있는 단일 신호라 highMidi 만으로 추정하고,
+     * highMidi 가 없으면 추정하지 않는다(=unknownScore) — v1 key→MIDI 휴리스틱은 모든 키를 옥타브 4(60~71)로
+     * 접어 성별 변별이 불가능하기 때문. D#5(75) 부근을 경계로 둔다(난이도 NORMAL/HARD 경계와 정합).
+     */
+    static final int ESTIMATED_GENDER_HIGH_MIDI_SPLIT = 75;
+
     private final RecommendationProperties recommendationProperties;
 
     public Scored score(
@@ -93,10 +105,12 @@ public class RecommendationScorer {
             final Mood requestedMood,
             final Integer preferredBpm,
             final AgeGroup ageGroup,
+            final VocalGender gender,
             final Random random) {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
         final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
         final RecommendationProperties.Generation generation = recommendationProperties.generation();
+        final RecommendationProperties.Gender genderConfig = recommendationProperties.gender();
         final double rangeFit = voiceRangeFit(
                 song.getLowMidi(), song.getHighMidi(), song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
@@ -105,6 +119,7 @@ public class RecommendationScorer {
         final double popularityPrior = popularityPrior(song);
         final double tempoMatch = tempoMatch(song.getBpm(), preferredBpm, requestedMood, tempo);
         final double generationFit = generationFit(song.getReleaseYear(), ageGroup, generation);
+        final double genderFit = genderFit(gender, song, genderConfig);
         final double jitterMagnitude = recommendationProperties.jitterMagnitude();
         final double jitter = (random.nextDouble() * 2 - 1) * jitterMagnitude;
         final double total = weights.voiceFit() * rangeFit
@@ -113,9 +128,10 @@ public class RecommendationScorer {
                 + weights.popularity() * popularityPrior
                 + weights.tempoMatch() * tempoMatch
                 + weights.generation() * generationFit
+                + weights.gender() * genderFit
                 + jitter;
         final ScoreBreakdown breakdown = new ScoreBreakdown(
-                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit);
+                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit, genderFit);
         final TransposeSuggestion suggestedTranspose = suggestTranspose(
                 song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         return new Scored(total, breakdown, suggestedTranspose);
@@ -403,6 +419,55 @@ public class RecommendationScorer {
         final double distance = Math.abs((double) releaseYear - representativeYear);
         final double normalized = Math.min(1.0, distance / generation.distanceToleranceYears());
         return 1.0 - normalized;
+    }
+
+    /**
+     * genderFit 신호 (#1767). 요청 성별 필터(남자곡/여자곡)와 곡 보컬 성별의 부분 적합도(0~1).
+     *
+     * <p>우선순위:
+     * <ul>
+     * <li>요청 성별이 null(미입력) → 0.0 (가중 없음 — 배타 제외가 아니라 다른 신호로 추천 풀에 잔존).</li>
+     * <li>큐레이션 {@link Song#getVocalGender()} 보유 — 권위값. MIXED(듀엣/혼성)는 {@code mixedScore},
+     * 요청과 같으면 1.0, 반대면 0.0.</li>
+     * <li>큐레이션 부재 — {@link #estimateVocalGender}로 추정. 추정 일치는 {@code estimatedMatchScore}(큐레이션보다
+     * 낮춰 신뢰도 차이 반영), 추정 불가(highMidi 부재)는 {@code unknownScore}, 추정 반대 성별은 0.0.</li>
+     * </ul>
+     *
+     * <p>가중 합산에는 weights.gender로 들어가며, raw 신호는 ScoreBreakdown에 보존된다.
+     */
+    static double genderFit(
+            final VocalGender requestGender,
+            final Song song,
+            final RecommendationProperties.Gender genderConfig) {
+        if (requestGender == null) {
+            return 0.0;
+        }
+        final VocalGender curated = song.getVocalGender();
+        if (curated != null) {
+            if (curated == VocalGender.MIXED) {
+                return genderConfig.mixedScore();
+            }
+            return curated == requestGender ? 1.0 : 0.0;
+        }
+        final VocalGender estimated = estimateVocalGender(song);
+        if (estimated == null) {
+            return genderConfig.unknownScore();
+        }
+        return estimated == requestGender ? genderConfig.estimatedMatchScore() : 0.0;
+    }
+
+    /**
+     * 큐레이션 부재 곡의 보컬 성별 추정 (#1767). 곡 최고음(highMidi)이 {@link #ESTIMATED_GENDER_HIGH_MIDI_SPLIT}
+     * 이상이면 FEMALE, 미만이면 MALE. highMidi 가 없으면 {@code null}(추정 불가) — v1 key→MIDI 휴리스틱은 모든
+     * 키를 옥타브 4 로 접어 성별 변별이 불가능하므로 키 기반 추정은 하지 않는다. 추정은 MIXED 를 만들지 않는다
+     * (혼성/듀엣은 큐레이션 전용).
+     */
+    static VocalGender estimateVocalGender(final Song song) {
+        final Integer highMidi = song.getHighMidi();
+        if (highMidi == null) {
+            return null;
+        }
+        return highMidi >= ESTIMATED_GENDER_HIGH_MIDI_SPLIT ? VocalGender.FEMALE : VocalGender.MALE;
     }
 
     /**

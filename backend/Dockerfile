@@ -41,9 +41,20 @@ FROM eclipse-temurin:21-jre-noble AS runner
 RUN groupadd --system --gid 1001 spring \
     && useradd --system --uid 1001 --gid spring --no-create-home spring
 
-# 헬스체크용 curl. 이미지 크기 +5MB 이내.
+# 헬스체크용 curl + 오디오 자체분석 DooD 용 docker CLI / compose plugin (#1779).
+# audio.analysis.use-docker=true (docker-compose.dev.audio.yml overlay) 일 때
+# AudioAnalysisRunner 가 `docker compose run --rm audio-analysis` 를 호출한다 —
+# 백엔드 컨테이너 안에서 호스트 데몬 소켓으로 형제 컨테이너를 띄우므로 client 바이너리가 필요.
+# 데몬은 설치하지 않는다(소켓 마운트로 호스트 데몬 재사용).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
+        > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -20,6 +20,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 
 import com.mobruji.song.domain.Mood;
+import com.mobruji.song.domain.VocalGender;
 
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -73,6 +74,14 @@ public class RecommendationRequestEntity {
     @Column(name = "age_group", length = 16)
     private AgeGroup ageGroup;
 
+    /**
+     * #1767에서 추가된 성별 필터(남자곡/여자곡). nullable — 미입력 시 genderFit 신호가 0 이 되어 랭킹에 영향이 없다.
+     * 결정성 seed 입력에도 포함된다(같은 voiceRange/sessionId 라도 gender 가 다르면 다른 결과).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gender", length = 16)
+    private VocalGender gender;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -100,6 +109,7 @@ public class RecommendationRequestEntity {
             final Mood mood,
             final Integer preferredBpm,
             final AgeGroup ageGroup,
+            final VocalGender gender,
             final List<Long> excludeSongIds) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(excludeSongIds, "excludeSongIds must not be null");
@@ -120,6 +130,7 @@ public class RecommendationRequestEntity {
                 mood,
                 preferredBpm,
                 ageGroup,
+                gender,
                 LocalDateTime.now(),
                 new ArrayList<>(excludeSongIds));
     }

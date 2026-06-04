@@ -111,7 +111,7 @@ describe("SongCard", () => {
       </ul>,
     );
     expect(
-      screen.getByLabelText(/가창 난이도 Hard/),
+      screen.getByLabelText(/가창 난이도 어려움/),
     ).toBeInTheDocument();
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("SongCard", () => {
       </ul>,
     );
     expect(
-      screen.getByLabelText(/가창 난이도 Hard/),
+      screen.getByLabelText(/가창 난이도 어려움/),
     ).toBeInTheDocument();
     // 최고음 음표명 노출 — MIDI 77 = 파5 (한국어 단독, #1310 사용자 정정 2026-06-03)
     expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
@@ -161,7 +161,7 @@ describe("SongCard", () => {
     );
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
-    expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
     // 추천 컨텍스트 전용 표시는 모두 숨김.
     expect(screen.queryByText(/score/)).not.toBeInTheDocument();
     expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("SongCard", () => {
       // 카드 표면 핵심 정보는 그대로 보인다.
       expect(screen.getByText("테스트 곡")).toBeInTheDocument();
       expect(screen.getByText("가수")).toBeInTheDocument();
-      expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
       // 상세는 모달로 위임 — 카드 표면에 없어야 한다.
       expect(screen.queryByText(/score/)).not.toBeInTheDocument();
       expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
@@ -361,9 +361,9 @@ describe("SongCard", () => {
           "사용자 도3-솔4 vs 곡 솔3-파5",
         ),
       ).toBeInTheDocument();
-      // 추정값 안내 footnote
+      // 추정값 안내 footnote (#1764 — 서버/기술 용어 '클라이언트·백엔드' 제거)
       expect(
-        screen.getByText(/클라이언트 추정값입니다/),
+        screen.getByText(/대략적인 추정값/),
       ).toBeInTheDocument();
     });
 
@@ -513,6 +513,69 @@ describe("SongCard", () => {
       expect(card).toHaveClass("animate-card-enter");
       expect(card.style.getPropertyValue("--card-index")).toBe("5");
       expect(container.querySelector(".song-accent-stripe")).not.toBeNull();
+    });
+  });
+
+  // closes #1721 — 검색 카드(/songs)에 "내 음역 적합" 배지 + 한 줄 사유 + 적합도 보더.
+  describe("검색 카드 음역 적합 표시 (#1721)", () => {
+    it("voiceFit 가 주어지면 '내 음역 적합' 배지와 한 줄 사유를 노출한다", () => {
+      const { song } = buildItem({ lowMidi: 55, highMidi: 67 });
+      renderWithQueryClient(
+        <ul>
+          <SongCard song={song} voiceFit={0.85} />
+        </ul>,
+      );
+      expect(screen.getByLabelText(/내 음역 적합 85%/)).toBeInTheDocument();
+      expect(
+        screen.getByText("내 음역대에 잘 맞아 편하게 부를 수 있어요."),
+      ).toBeInTheDocument();
+    });
+
+    it("voiceFit 미지정 검색 카드는 배지/사유 없이 hue 보더만 유지한다", () => {
+      const { song } = buildItem();
+      const { container } = renderWithQueryClient(
+        <ul>
+          <SongCard song={song} />
+        </ul>,
+      );
+      expect(screen.queryByLabelText(/내 음역 적합/)).not.toBeInTheDocument();
+      const stripe = container.querySelector(".song-accent-stripe");
+      expect(stripe).not.toBeNull();
+      expect(stripe).not.toHaveAttribute("data-fit");
+    });
+
+    it("적합도 레벨이 좌측 보더 data-fit 으로 매핑된다 (high=green/mid=amber/low=neutral)", () => {
+      const { song } = buildItem({ lowMidi: 55, highMidi: 67 });
+      const high = renderWithQueryClient(
+        <ul>
+          <SongCard song={song} voiceFit={0.9} />
+        </ul>,
+      );
+      expect(
+        high.container.querySelector(".song-accent-stripe"),
+      ).toHaveAttribute("data-fit", "high");
+      cleanup();
+
+      const mid = renderWithQueryClient(
+        <ul>
+          <SongCard song={song} voiceFit={0.5} />
+        </ul>,
+      );
+      expect(mid.container.querySelector(".song-accent-stripe")).toHaveAttribute(
+        "data-fit",
+        "mid",
+      );
+      cleanup();
+
+      const low = renderWithQueryClient(
+        <ul>
+          <SongCard song={song} voiceFit={0.1} />
+        </ul>,
+      );
+      expect(low.container.querySelector(".song-accent-stripe")).toHaveAttribute(
+        "data-fit",
+        "low",
+      );
     });
   });
 

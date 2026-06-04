@@ -96,12 +96,15 @@ describe("SongDetailPage", () => {
       expect(screen.getByText("Hello")).toBeInTheDocument();
     });
     expect(screen.getByText("Adele")).toBeInTheDocument();
-    expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
     // 최고음 파5, 최저음 솔3 — 한국어 단독 (#1310 사용자 정정 2026-06-03)
     expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
     expect(screen.getByLabelText(/최저음 솔3/)).toBeInTheDocument();
     // 키 라벨 (F 단조 — #1719 한글 표기)
     expect(screen.getByText(/키 F 단조/)).toBeInTheDocument();
+    // 분위기 칩 — 코드값(EMOTIONAL) 이 아니라 한국어 라벨로 노출 (#1764)
+    expect(screen.getByText("감성적인")).toBeInTheDocument();
+    expect(screen.queryByText("EMOTIONAL")).not.toBeInTheDocument();
     // 메타 셀
     expect(screen.getByText("2015")).toBeInTheDocument();
     expect(screen.getByText("12345")).toBeInTheDocument();

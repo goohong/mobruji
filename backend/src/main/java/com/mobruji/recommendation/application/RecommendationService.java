@@ -105,7 +105,10 @@ public class RecommendationService {
         final CreateRecommendationCommand derivedCommand = seedSongProfiler.profile(
                 nextRecommendationCommand.sessionId(), seedSongs, mergedExcludeIds,
                 nextRecommendationCommand.excludeSessionHistory());
-        return create(derivedCommand);
+        // 무한 스와이프(#1763)는 본/패스한 곡을 excludeSongIds 에 누적해 다음 batch 를 이어 붙인다. 풀이 소진되면
+        // 빈 응답으로 종료해야 프론트 무한스크롤이 멈춘다(#1817). 0건 fallback(#1668)을 끄면 이미 본 곡을 다시
+        // 노출(재surface)하지 않고 빈 결과로 끝낸다 — #1668 "가까운 곡" UX 는 재추천(create) 버튼 경로에만 둔다.
+        return create(derivedCommand, false);
     }
 
     /**
@@ -132,7 +135,22 @@ public class RecommendationService {
                 });
     }
 
+    /**
+     * 재추천(create) 버튼 경로의 공개 진입점. 결과 0건이면 제외 필터를 단계적으로 완화해 가까운 곡으로 채우는
+     * 0건 fallback(#1668)을 적용한다(빈 화면 방지 UX). 무한 스와이프(#1763)의 풀 소진 종료(#1817)는
+     * {@link #createFromSeeds} 가 fallback 을 끈 {@link #create(CreateRecommendationCommand, boolean)} 로 처리한다.
+     */
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
+        return create(createRecommendationCommand, true);
+    }
+
+    /**
+     * {@code relaxOnZeroResult} 가 {@code true} 면 결과 0건일 때 제외 필터를 단계적으로 완화하는 fallback(#1668)을
+     * 적용한다. {@code false} 면 완화 없이 빈 결과를 그대로 돌려준다 — 무한 스와이프(#1763)에서 본/패스한 곡 풀이
+     * 소진되면 이미 본 곡을 재노출하지 않고 빈 응답으로 종료시키기 위함이다(#1817).
+     */
+    private RecommendationResult create(
+            final CreateRecommendationCommand createRecommendationCommand, final boolean relaxOnZeroResult) {
         final long startNanos = System.nanoTime();
         // 세션 단위 자동 중복 회피(#1549): 플래그가 켜지면 같은 세션의 이전 추천 결과 곡 + 이전 제외/부른 곡을
         // 클라이언트가 넘긴 excludeSongIds 에 누적 병합한다. 병합 결과를 영속·필터·seed 에 일관되게 사용해
@@ -150,6 +168,7 @@ public class RecommendationService {
                         createRecommendationCommand.mood(),
                         createRecommendationCommand.preferredBpm(),
                         createRecommendationCommand.ageGroup(),
+                        createRecommendationCommand.gender(),
                         excludeSongIds));
 
         // 후보 곡 단계에서 excludeSongIds 필터링.
@@ -174,7 +193,8 @@ public class RecommendationService {
         // 완화 대상은 제외 곡 셋뿐이다 — 음역대 보유 조건(#1744)은 완화하지 않는다(미보유 곡은 voiceFit 오염원이므로
         // 빈 화면이 더 낫다). 분위기·연령대는 점수 신호일 뿐 후보를 줄이지 않는다.
         // 음역대는 점수 순(가까운 순) 정렬로 끝까지 보존 — 완전 무관 곡이 아닌 가까운 곡부터 노출한다.
-        if (diversified.isEmpty()) {
+        // relaxOnZeroResult=false(무한 스와이프 #1763)면 풀 소진 시 빈 결과로 종료해 재surface 를 막는다(#1817).
+        if (relaxOnZeroResult && diversified.isEmpty()) {
             // 1단계: 세션 단위 자동 중복 회피(#1549)로 누적된 제외만 풀고, 사용자가 명시한 제외 곡은 유지한다.
             final Set<Long> clientExcludeSet = new HashSet<>(createRecommendationCommand.excludeSongIds());
             if (clientExcludeSet.size() < excludeSet.size()) {
@@ -262,6 +282,7 @@ public class RecommendationService {
                             savedRequest.getMood(),
                             savedRequest.getPreferredBpm(),
                             savedRequest.getAgeGroup(),
+                            savedRequest.getGender(),
                             random);
                     return new ScoredSong(song, scored);
                 })
@@ -402,6 +423,7 @@ public class RecommendationService {
                 savedRequest.getMood(),
                 savedRequest.getPreferredBpm(),
                 savedRequest.getAgeGroup(),
+                savedRequest.getGender(),
                 excludeSongIds);
         final String inputHash = SeedDeriver.hashHex16(
                 savedRequest.getSessionId(),
@@ -410,6 +432,7 @@ public class RecommendationService {
                 savedRequest.getMood(),
                 savedRequest.getPreferredBpm(),
                 savedRequest.getAgeGroup(),
+                savedRequest.getGender(),
                 excludeSongIds);
         return new SeedContext(seed, inputHash);
     }
