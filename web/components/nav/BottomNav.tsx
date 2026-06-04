@@ -19,7 +19,8 @@
  *
  * 안전 영역:
  *  - iOS notch/home indicator 대응으로 `pb-[env(safe-area-inset-bottom)]`.
- *  - main 콘텐츠 가림 방지 padding은 layout.tsx에서 책임진다 (`pb-16 md:pb-0`).
+ *  - main 콘텐츠 가림 방지 padding은 layout.tsx에서 책임진다
+ *    (`pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0` — nav 높이 + safe-area 보정, #1718).
  *
  * active 매치 규칙:
  *  - 홈("/")은 정확 매치만 (다른 모든 경로가 "/"로 시작하므로 prefix 매치 시 항상 active).
