@@ -1,6 +1,7 @@
 package com.mobruji.song.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -14,6 +15,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
+import org.springframework.boot.DefaultApplicationArguments;
 
 import com.mobruji.song.domain.AudioAnalysisFailedException;
 import com.mobruji.song.domain.AudioAnalysisResult;
@@ -137,5 +139,108 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.failed()).isZero();
         verify(runner, never()).analyzeByMetadata(anyString(), anyString());
         verify(repo, never()).save(ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("runBoundedCandidateBackfill: 후보 중 limit 만큼만 분석, 전체(findAll) 미사용")
+    void runBoundedCandidateBackfill_limitsCandidates() {
+        // given: backfill 후보 3곡, limit 2
+        final Song c1 = seedSong("c1", null, null);
+        final Song c2 = seedSong("c2", null, null);
+        final Song c3 = seedSong("c3", null, null);
+
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of(c1, c2, c3));
+
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        when(runner.analyzeByMetadata("c1", "artist-c1"))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
+        when(runner.analyzeByMetadata("c2", "artist-c2"))
+                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.80, "v"));
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        // when
+        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBoundedCandidateBackfill(2, 0.6);
+
+        // then: 앞 2곡만 분석/적용, 3번째 곡은 손대지 않음
+        assertThat(summary.analyzed()).isEqualTo(2);
+        assertThat(summary.successful()).isEqualTo(2);
+        assertThat(summary.updated()).isEqualTo(2);
+        verify(runner, times(2)).analyzeByMetadata(anyString(), anyString());
+        verify(runner, never()).analyzeByMetadata("c3", "artist-c3");
+        verify(repo, never()).findAll();
+        assertThat(c3.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
+    }
+
+    @Test
+    @DisplayName("runBoundedCandidateBackfill: limit 이 후보 수보다 크면 전체 후보 처리")
+    void runBoundedCandidateBackfill_limitExceedsCandidates_processesAll() {
+        final Song c1 = seedSong("c1", null, null);
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of(c1));
+
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        when(runner.analyzeByMetadata("c1", "artist-c1"))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBoundedCandidateBackfill(10, 0.6);
+
+        assertThat(summary.analyzed()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("run: --backfill-audio.limit 지정 시 후보 selective query 경로로 분기 (findAll 미사용)")
+    void run_withLimitOption_routesToBoundedCandidates() {
+        final Song c1 = seedSong("c1", null, null);
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findCandidatesForBackfill(SongAudioBackfillCommand.DEFAULT_CONFIDENCE_THRESHOLD))
+                .thenReturn(List.of(c1));
+
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        when(runner.analyzeByMetadata("c1", "artist-c1"))
+                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        cmd.run(new DefaultApplicationArguments(
+                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=5"));
+
+        verify(repo, times(1)).findCandidatesForBackfill(
+                SongAudioBackfillCommand.DEFAULT_CONFIDENCE_THRESHOLD);
+        verify(repo, never()).findAll();
+    }
+
+    @Test
+    @DisplayName("run: limit 옵션 없으면 기존 전체(findAll) 경로 유지")
+    void run_withoutLimitOption_usesFindAll() {
+        final SongRepository repo = mock(SongRepository.class);
+        when(repo.findAll()).thenReturn(List.of());
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        cmd.run(new DefaultApplicationArguments("--mobruji.backfill-audio=true"));
+
+        verify(repo, times(1)).findAll();
+        verify(repo, never()).findCandidatesForBackfill(ArgumentMatchers.anyDouble());
+    }
+
+    @Test
+    @DisplayName("run: limit 값이 0/음수/비정수면 fail-fast (IllegalArgumentException)")
+    void run_invalidLimit_throws() {
+        final SongRepository repo = mock(SongRepository.class);
+        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
+        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
+
+        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
+                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=0")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
+                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=abc")))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(runner, never()).analyzeByMetadata(anyString(), anyString());
     }
 }
