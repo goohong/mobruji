@@ -212,7 +212,8 @@ public class CatalogBrowseImportCommand {
     }
 
     private static String titleArtistKey(final String title, final String artist) {
-        return title.toLowerCase(Locale.ROOT) + ' ' + artist.toLowerCase(Locale.ROOT);
+        // U+001F (Unit Separator) — title/artist 에 공백이 있어도 dedup 키가 충돌하지 않게 하는 구분자.
+        return title.toLowerCase(Locale.ROOT) + '\u001F' + artist.toLowerCase(Locale.ROOT);
     }
 
     /**

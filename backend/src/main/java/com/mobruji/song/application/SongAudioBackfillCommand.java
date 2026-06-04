@@ -3,6 +3,7 @@ package com.mobruji.song.application;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -35,6 +36,13 @@ import io.micrometer.core.instrument.MeterRegistry;
  * ./gradlew bootRun --args='--spring.profiles.active=local --mobruji.backfill-audio=true'
  * </pre>
  *
+ * <p>소량 검증 배치(이슈 #1716) — {@code --mobruji.backfill-audio.limit=N} 추가 시 전체 대신 backfill 후보
+ * (미분석/신규 곡) 중 id 순 앞 N곡만 분석한다. 신규 임포트 곡 음역대 backfill 정확도를 소량 표본으로 먼저 검증:
+ * <pre>
+ * ./gradlew bootRun --args='--spring.profiles.active=local --mobruji.backfill-audio=true
+ * --mobruji.backfill-audio.limit=5'
+ * </pre>
+ *
  * <p>인자({@link ApplicationArguments}) 미지정 시 no-op — 평시 부팅에 영향 없음. {@code test} 프로파일에서는
  * Spring Bean 자체를 등록하지 않아 통합 테스트가 영향받지 않는다.
  *
@@ -56,6 +64,14 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
 
     /** ApplicationArguments 에서 인식할 옵션 키. {@code --mobruji.backfill-audio=true} */
     static final String OPTION_KEY = "mobruji.backfill-audio";
+
+    /**
+     * 소량 검증 배치 옵션 키 — {@code --mobruji.backfill-audio.limit=N}. 지정 시 전체({@code findAll}) 대신
+     * backfill 후보({@link SongRepository#findCandidatesForBackfill(double)} = 미분석/신규 곡)를 id 순 앞에서 N곡만
+     * 처리한다. 이슈 #1716 — 신규 임포트 곡 음역대 backfill 을 무분별 대량이 아닌 소량(5~10곡) 검증 배치로 먼저 돌린다.
+     * 옵션 미지정 시 기존 전체 backfill 동작 그대로 유지.
+     */
+    static final String OPTION_LIMIT_KEY = "mobruji.backfill-audio.limit";
 
     /**
      * 적용 임계 confidence — 작업 지시 기본 0.6. 임계 미달은 수기 값을 보존한다.
@@ -123,7 +139,30 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
         if (!isOptionTrue(args)) {
             return;
         }
-        runBackfill(DEFAULT_CONFIDENCE_THRESHOLD);
+        final OptionalInt limit = parseLimit(args);
+        if (limit.isPresent()) {
+            runBoundedCandidateBackfill(limit.getAsInt(), DEFAULT_CONFIDENCE_THRESHOLD);
+        } else {
+            runBackfill(DEFAULT_CONFIDENCE_THRESHOLD);
+        }
+    }
+
+    /**
+     * 검증 배치 진입점 — backfill 후보(미분석/신규 곡) 중 id 순 앞에서 {@code limit} 곡만 분석한다. 신규 임포트 곡의
+     * 음역대 backfill 정확도를 소량 표본으로 먼저 검증하기 위한 경로(이슈 #1716). 전체({@code findAll})를 건드리지 않아
+     * 이미 분석된 곡 재분석/대량 처리 비용을 피한다.
+     *
+     * @param limit               분석할 후보 곡 상한 (양수)
+     * @param confidenceThreshold 적용 임계 confidence
+     * @return 처리 요약
+     */
+    BackfillSummary runBoundedCandidateBackfill(final int limit, final double confidenceThreshold) {
+        final List<Song> candidates = songRepository.findCandidatesForBackfill(confidenceThreshold);
+        final List<Song> selected = candidates.stream().limit(limit).toList();
+        LOG.info(
+                "audio backfill bounded validation batch: candidates={} limit={} selected={}",
+                candidates.size(), limit, selected.size());
+        return runBackfill(selected, confidenceThreshold);
     }
 
     /**
@@ -226,6 +265,33 @@ public class SongAudioBackfillCommand implements ApplicationRunner {
      */
     public static Instant getLastBackfillCompletedAt() {
         return LAST_BACKFILL_COMPLETED_AT.get();
+    }
+
+    /**
+     * {@code --mobruji.backfill-audio.limit=N} 파싱 — 미지정/빈 값이면 {@link OptionalInt#empty()}.
+     * 양의 정수만 허용하며 0/음수/비정수는 잘못된 수동 trigger 이므로 fail-fast 한다.
+     */
+    private static OptionalInt parseLimit(final ApplicationArguments args) {
+        if (args == null || !args.containsOption(OPTION_LIMIT_KEY)) {
+            return OptionalInt.empty();
+        }
+        final List<String> values = args.getOptionValues(OPTION_LIMIT_KEY);
+        if (values == null || values.isEmpty()) {
+            return OptionalInt.empty();
+        }
+        final String raw = values.get(values.size() - 1).trim();
+        final int parsed;
+        try {
+            parsed = Integer.parseInt(raw);
+        } catch (final NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "--" + OPTION_LIMIT_KEY + " 는 양의 정수여야 합니다: " + raw, e);
+        }
+        if (parsed <= 0) {
+            throw new IllegalArgumentException(
+                    "--" + OPTION_LIMIT_KEY + " 는 양의 정수여야 합니다: " + parsed);
+        }
+        return OptionalInt.of(parsed);
     }
 
     private static boolean isOptionTrue(final ApplicationArguments args) {
