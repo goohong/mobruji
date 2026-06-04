@@ -63,11 +63,11 @@ export function resolveSongDifficulty(song: {
 export function difficultyLabel(difficulty: Difficulty): string {
   switch (difficulty) {
     case "EASY":
-      return "Easy";
+      return "쉬움";
     case "NORMAL":
-      return "Normal";
+      return "보통";
     case "HARD":
-      return "Hard";
+      return "어려움";
   }
 }
 

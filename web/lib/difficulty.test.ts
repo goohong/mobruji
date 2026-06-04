@@ -86,9 +86,9 @@ describe("deriveDifficulty 비정상 입력 (회귀 방지 고정)", () => {
 
 describe("difficultyLabel", () => {
   it("난이도 enum을 표시 라벨로 매핑", () => {
-    expect(difficultyLabel("EASY")).toBe("Easy");
-    expect(difficultyLabel("NORMAL")).toBe("Normal");
-    expect(difficultyLabel("HARD")).toBe("Hard");
+    expect(difficultyLabel("EASY")).toBe("쉬움");
+    expect(difficultyLabel("NORMAL")).toBe("보통");
+    expect(difficultyLabel("HARD")).toBe("어려움");
   });
 });
 
