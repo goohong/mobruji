@@ -65,6 +65,9 @@ services:
       # → 음역대 미보유 곡을 keyOriginal/genre 메타로 추정해 채워 추천 풀 진입 (응답: scanned/applied/...).
       MOBRUJI_ADMIN_TOKEN: ${MOBRUJI_ADMIN_TOKEN:?MOBRUJI_ADMIN_TOKEN must be set in .env.dev}
       MOBRUJI_CORS_ALLOWED_ORIGINS: ${MOBRUJI_CORS_ALLOWED_ORIGINS:-http://localhost}
+      # 앨범커버 backfill (MusicBrainz/CAA) — 약관상 contact 포함 User-Agent 의무 (#1811).
+      # .env.dev 에 운영 이메일 contact 포함 값 주입(없으면 URL-only contact 기본값 폴백).
+      ALBUM_COVER_USER_AGENT: ${ALBUM_COVER_USER_AGENT:-mobruji-backend/0.1 (+https://github.com/goohong/mobruji)}
       # allowPublicKeyRetrieval=true — MySQL 8.4 의 caching_sha2_password 가
       # useSSL=false 환경에서 public key 교환을 요구. dev 환경(internal docker
       # network)이라 plain text 비밀번호 전송이 격리됨.
