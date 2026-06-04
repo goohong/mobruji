@@ -17,7 +17,7 @@ docs/_import/
 
 ### Gradle / Spring Boot (backend/) ###
 backend/.gradle
-backend/build/
+backend/build
 backend/out/
 backend/bin/
 backend/!**/src/main/**/build/
@@ -43,6 +43,7 @@ backend/!gradle/wrapper/gradle-wrapper.jar
 .vscode/
 
 ### Node / Next.js (web/) ###
+node_modules/
 web/node_modules/
 web/.next/
 web/out/
