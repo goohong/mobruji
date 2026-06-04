@@ -14,9 +14,12 @@ import org.springframework.web.server.ResponseStatusException;
 import com.mobruji.recommendation.api.dto.NextRecommendationRequest;
 import com.mobruji.recommendation.api.dto.RecommendationCreateRequest;
 import com.mobruji.recommendation.api.dto.RecommendationResponse;
+import com.mobruji.recommendation.api.dto.SequenceRecommendationCreateRequest;
+import com.mobruji.recommendation.api.dto.SequenceRecommendationResponse;
 import com.mobruji.recommendation.api.dto.TrendingListResponse;
 import com.mobruji.recommendation.application.TrendingQuery;
 import com.mobruji.recommendation.domain.RecommendationResult;
+import com.mobruji.recommendation.domain.SequenceRecommendationResult;
 import com.mobruji.song.domain.Mood;
 
 import jakarta.validation.Valid;
@@ -57,6 +60,20 @@ public class RecommendationController {
         final RecommendationResult recommendationResult = recommendationService.createFromSeeds(
                 nextRecommendationRequest.toCommand());
         return ResponseEntity.status(HttpStatus.CREATED).body(RecommendationResponse.from(recommendationResult));
+    }
+
+    /**
+     * 모임 사회자형(P-D) 시퀀스 추천(persona-expansion-social-emotional.md §2/§5). 단일 곡 묶음이 아니라 자리 흐름
+     * (워밍업 → 고조 → 마무리) 3단계를 단계별 다른 분위기로 산출한다. 응답 형상이 단일 추천과 달라(단계 묶음) 기존
+     * {@code POST /recommendations} 확장이 아닌 별도 엔드포인트로 둔다(§8 Q1 선택지 b).
+     */
+    @PostMapping("/sequence")
+    public ResponseEntity<SequenceRecommendationResponse> createSequence(
+            @Valid @RequestBody final SequenceRecommendationCreateRequest sequenceRecommendationCreateRequest) {
+        final SequenceRecommendationResult sequenceRecommendationResult = recommendationService.createSequence(
+                sequenceRecommendationCreateRequest.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(SequenceRecommendationResponse.from(sequenceRecommendationResult));
     }
 
     @GetMapping("/{id}")

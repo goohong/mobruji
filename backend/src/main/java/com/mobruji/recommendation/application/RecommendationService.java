@@ -26,9 +26,12 @@ import com.mobruji.recommendation.domain.FilterRelaxation;
 import com.mobruji.recommendation.domain.Recommendation;
 import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
+import com.mobruji.recommendation.domain.RecommendationPersona;
 import com.mobruji.recommendation.domain.RecommendationResult;
 import com.mobruji.recommendation.domain.ScoredRecommendation;
 import com.mobruji.recommendation.domain.SeedSongsNotFoundException;
+import com.mobruji.recommendation.domain.SequenceRecommendationResult;
+import com.mobruji.recommendation.domain.SequenceStage;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
 import com.mobruji.recommendation.infrastructure.SessionFeedbackRepository;
@@ -147,6 +150,69 @@ public class RecommendationService {
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
         final boolean relaxOnZeroResult = createRecommendationCommand.excludeSongIds().isEmpty();
         return create(createRecommendationCommand, relaxOnZeroResult);
+    }
+
+    /**
+     * 모임 사회자형(P-D) 시퀀스 추천(persona-expansion-social-emotional.md §2/§5). 한 곡 묶음이 아니라 자리 흐름
+     * (워밍업 → 고조 → 마무리) 3단계를 단계별로 다른 분위기 입력으로 산출한다. 신규 추천 알고리즘이 아니라 기존 {@link #create}
+     * 파이프라인을 단계 분위기를 바꿔 가며 재사용하는 *형상*만 신규다 — 점수 가중치/결정성 불변식을 건드리지 않는다.
+     *
+     * <p>구현:
+     * <ul>
+     * <li>{@link SequenceStage} 순서대로(워밍업/고조/마무리) 각 단계의 분위기({@link SequenceStage#mood()})를 mood 입력으로
+     * 단일 추천을 만든다 — 단계별 {@code moodMatch} + 분위기 기반 {@code tempoMatch} default 가 달라져 단계마다 다른 곡 묶음이 나온다.</li>
+     * <li>단계 간 곡 중복을 막기 위해 앞 단계에서 노출한 곡 ID 를 다음 단계의 {@code excludeSongIds} 에 누적한다 — 한 시퀀스 안에서
+     * 같은 곡이 두 단계에 겹치지 않는다(풀이 소진되면 0건 fallback 이 가까운 곡으로 채운다 — 빈 단계보다 채움 우선).</li>
+     * <li>{@code songsPerStage} 가 있으면 단계별 결과를 그 개수로 자른다. null 이면 기본 결과 개수.</li>
+     * </ul>
+     *
+     * <p>좌중 공통·평균 음역({@code voiceRangeLow}/{@code voiceRangeHigh})은 {@code rangeFit} centeredness 항을 통해 중앙
+     * 편향을 만들어 "특정인 비-과편향 가드"(§4)를 별도 로직 없이 충족한다. 각 단계는 고유 {@code requestId} 로 영속되어 단계별 곡
+     * 피드백·재조회를 단일 추천과 같은 경로로 처리할 수 있다.
+     */
+    public SequenceRecommendationResult createSequence(
+            final SequenceRecommendationCommand sequenceRecommendationCommand) {
+        final List<Long> accumulatedExcludeIds = new ArrayList<>();
+        final List<SequenceRecommendationResult.StageRecommendation> stageRecommendations = new ArrayList<>();
+        for (final SequenceStage stage : SequenceStage.values()) {
+            final CreateRecommendationCommand stageCommand = new CreateRecommendationCommand(
+                    sequenceRecommendationCommand.sessionId(),
+                    sequenceRecommendationCommand.voiceRangeLow(),
+                    sequenceRecommendationCommand.voiceRangeHigh(),
+                    stage.mood(),
+                    null,
+                    sequenceRecommendationCommand.ageGroup(),
+                    sequenceRecommendationCommand.gender(),
+                    new ArrayList<>(accumulatedExcludeIds),
+                    false);
+            // 단계마다 가까운 곡으로 채워 빈 단계를 막는다(relaxOnZeroResult=true) — 사회자는 모든 단계가 채워지길 원한다.
+            final RecommendationResult stageResult = truncate(
+                    create(stageCommand, true), sequenceRecommendationCommand.songsPerStage());
+            stageRecommendations.add(new SequenceRecommendationResult.StageRecommendation(
+                    stage, stage.mood(), stage.stageReason(), stageResult));
+            stageResult.recommendations()
+                    .forEach(recommendation -> accumulatedExcludeIds.add(recommendation.song().getId()));
+        }
+        log.info(
+                "event=recommendation.sequence.created persona={} stages={} songsPerStage={}",
+                RecommendationPersona.P_D.code(),
+                stageRecommendations.size(),
+                sequenceRecommendationCommand.songsPerStage());
+        return new SequenceRecommendationResult(RecommendationPersona.P_D, stageRecommendations);
+    }
+
+    /**
+     * 단계별 추천 결과를 {@code limit} 개로 자른다(상위 rank 우선). {@code limit} 이 null 이거나 결과가 더 짧으면 그대로 둔다.
+     * {@code requestId}·완화 플래그는 보존한다 — 자른 건 노출 곡 수일 뿐 영속된 추천 요청 자체는 단계별로 유지된다.
+     */
+    private static RecommendationResult truncate(final RecommendationResult result, final Integer limit) {
+        if (limit == null || result.recommendations().size() <= limit) {
+            return result;
+        }
+        return new RecommendationResult(
+                result.requestId(),
+                result.recommendations().subList(0, limit),
+                result.relaxedFilters());
     }
 
     /**
