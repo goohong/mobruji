@@ -68,6 +68,7 @@ import {
   AgeGroup,
   createRecommendation,
   createSafeRecommendation,
+  createShowoffRecommendation,
   Mood,
   RecommendationCreateRequest,
   RecommendationPersona,
@@ -75,6 +76,7 @@ import {
   RecommendedSongResponse,
   RequestedGender,
   SafeRecommendationResponse,
+  ShowoffRecommendationResponse,
 } from "@/lib/api/recommendation";
 import {
   readVoiceRange,
@@ -89,7 +91,7 @@ import {
 import { StepIndicator } from "@/components/ui";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { SAFE_SONG_PERSONA } from "@/lib/persona";
+import { SAFE_SONG_PERSONA, SHOWOFF_SONG_PERSONA } from "@/lib/persona";
 import { useHistoryStore } from "@/store/history";
 import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { useSessionStore } from "@/store/session";
@@ -275,9 +277,10 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       isVoiceRangeReady &&
       voiceRangeLow !== undefined &&
       voiceRangeHigh !== undefined &&
-      // P-E 안전곡 모드는 단일샷 `/safe` 엔드포인트(SafeRecommendationFeed)가 별도로
-      // 페치하므로 무한 스크롤 default 추천은 멈춘다(중복 페치 방지).
-      selectedPersona !== SAFE_SONG_PERSONA,
+      // P-E 안전곡 / P-F 과시 모드는 각자 단일샷 전용 엔드포인트(SafeRecommendationFeed /
+      // ShowoffRecommendationFeed)가 별도로 페치하므로 무한 스크롤 default 추천은 멈춘다(중복 페치 방지).
+      selectedPersona !== SAFE_SONG_PERSONA &&
+      selectedPersona !== SHOWOFF_SONG_PERSONA,
     initialPageParam: 0,
     queryFn: () => {
       const request: RecommendationCreateRequest = {
@@ -460,6 +463,15 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
 
         {selectedPersona === SAFE_SONG_PERSONA ? (
           <SafeRecommendationFeed
+            sessionId={sessionId}
+            voiceRangeLow={voiceRange.lowestNoteMidi}
+            voiceRangeHigh={voiceRange.highestNoteMidi}
+            ageGroup={selectedAgeGroup}
+            gender={selectedGender}
+            appliedFilterCount={appliedFilterCount}
+          />
+        ) : selectedPersona === SHOWOFF_SONG_PERSONA ? (
+          <ShowoffRecommendationFeed
             sessionId={sessionId}
             voiceRangeLow={voiceRange.lowestNoteMidi}
             voiceRangeHigh={voiceRange.highestNoteMidi}
@@ -1018,6 +1030,170 @@ function SafeRecommendationFeed({
             userVoiceRange={userRange}
             safetyReason={safeSong.safetyReason}
             onShowDetail={() => setSelected(safeSong.recommendation)}
+          />
+        ))}
+      </ul>
+      <SongDetailSheet
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
+      >
+        {selected ? (
+          <SongDetailContent item={selected} userVoiceRange={userRange} />
+        ) : null}
+      </SongDetailSheet>
+    </div>
+  );
+}
+
+type ShowoffRecommendationFeedProps = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 좌중/사용자 연령대(선택, RecommendRefinePanel). 미선택이면 BE 로 생략 전달. */
+  ageGroup: AgeGroup | null;
+  /** 성별 필터(선택, RecommendRefinePanel). 미선택이면 BE 로 생략 전달. */
+  gender: RequestedGender | null;
+  /** 결과에 적용된 조건 수(이슈 #1715) — 결과 요약 "조건 N개 적용됨". */
+  appliedFilterCount: number;
+};
+
+/**
+ * P-F 과시·킬링파트(be #1843) 결과 피드.
+ *
+ * 의도 모드에서 "고음 질러 박수받기"를 켜면 노출되는 단일샷 추천이다(안전곡 피드의 거울).
+ * 전용 엔드포인트 `POST /api/v1/recommendations/showoff` 는 사용자 음역 천장 근접 + `difficulty=HARD`
+ * 우위로 재정렬한 한 묶음 + 곡별 "킬링파트 안내"(`killingPartReason`)를 돌려준다(spec §5-4). 무한
+ * 스크롤·스와이프·정렬은 "지금 한 방" 의도와 결이 달라 두지 않고, 결과 카드 + 상세 시트만 단일
+ * 추천과 공유한다. 킬링파트 안내는 BE 가 곡별로 채워 준 사유를 카드에 그대로 노출한다.
+ */
+function ShowoffRecommendationFeed({
+  sessionId,
+  voiceRangeLow,
+  voiceRangeHigh,
+  ageGroup,
+  gender,
+  appliedFilterCount,
+}: ShowoffRecommendationFeedProps) {
+  const [selected, setSelected] = useState<RecommendedSongResponse | null>(null);
+
+  const showoffQuery = useQuery<ShowoffRecommendationResponse, Error>({
+    queryKey: [
+      "showoff-recommendations",
+      sessionId,
+      voiceRangeLow,
+      voiceRangeHigh,
+      ageGroup,
+      gender,
+    ],
+    queryFn: () =>
+      createShowoffRecommendation({
+        sessionId,
+        voiceRangeLow,
+        voiceRangeHigh,
+        // 미선택(null)이면 필드를 생략해 BE 결정성 seed 입력 정합/하위호환을 유지한다.
+        ...(ageGroup !== null ? { ageGroup } : {}),
+        ...(gender !== null ? { gender } : {}),
+      }),
+  });
+
+  const userRange = {
+    lowMidi: voiceRangeLow,
+    highMidi: voiceRangeHigh,
+  };
+
+  if (showoffQuery.isPending) {
+    return (
+      <ul
+        aria-busy="true"
+        aria-label="과시 추천 로딩 중"
+        className="grid grid-cols-1 gap-3 lg:grid-cols-2"
+      >
+        {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
+          <SongCardSkeleton key={idx} />
+        ))}
+      </ul>
+    );
+  }
+
+  if (showoffQuery.isError) {
+    const error = showoffQuery.error;
+    return (
+      <div className="flex flex-col gap-3 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4">
+        <p className="text-sm text-[var(--danger-fg-strong)]">
+          과시 추천을 불러오지 못했습니다.{" "}
+          {error instanceof ApiError
+            ? `${error.status}: ${error.message}`
+            : error.message}
+        </p>
+        <button
+          type="button"
+          onClick={() => showoffQuery.refetch()}
+          className="inline-flex h-10 w-fit items-center justify-center rounded-full bg-[var(--danger-cta-bg)] px-4 text-sm font-medium text-white hover:bg-[var(--danger-cta-bg-hover)]"
+        >
+          다시 시도
+        </button>
+      </div>
+    );
+  }
+
+  const showoffSongs = showoffQuery.data.recommendations;
+
+  if (showoffSongs.length === 0) {
+    return (
+      <div
+        role="status"
+        className="flex flex-col items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)] p-5"
+      >
+        <p className="text-sm text-[var(--text-secondary)]">
+          질러볼 만한 곡을 찾지 못했어요. 음역대를 다시 입력해 보세요.
+        </p>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--brand-500)] px-4 text-sm font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
+        >
+          음역대 다시 입력
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <p
+          data-testid="showoff-result-summary"
+          className="text-xs text-[var(--text-caption)]"
+        >
+          <span className="font-medium text-[var(--text-secondary)]">
+            과시곡 {showoffSongs.length}곡
+          </span>
+          {appliedFilterCount > 0 ? (
+            <span> · 조건 {appliedFilterCount}개 적용됨</span>
+          ) : null}
+        </p>
+        <p className="text-xs text-[var(--text-caption)]">
+          내 음역 천장 근처 킬링파트가 있는 곡으로 질러볼 곡을 골랐어요.
+        </p>
+        {/* be #1668 0건 fallback — 풀이 부족해 일부 조건을 완화해 채웠을 때 알린다. */}
+        {showoffQuery.data.relaxed ? (
+          <p
+            data-testid="showoff-relaxed-notice"
+            className="text-xs text-[var(--text-caption)]"
+          >
+            과시곡이 부족해 일부 조건을 완화해 채웠어요.
+          </p>
+        ) : null}
+      </div>
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {showoffSongs.map((showoffSong, index) => (
+          <SongCard
+            key={showoffSong.recommendation.song.id}
+            item={showoffSong.recommendation}
+            index={index}
+            userVoiceRange={userRange}
+            killingPartReason={showoffSong.killingPartReason}
+            onShowDetail={() => setSelected(showoffSong.recommendation)}
           />
         ))}
       </ul>

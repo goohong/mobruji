@@ -13,10 +13,12 @@ import {
   createRecommendation,
   createSafeRecommendation,
   createSequenceRecommendation,
+  createShowoffRecommendation,
   readRecommendation,
   type RecommendationResponse,
   type SafeRecommendationResponse,
   type SequenceRecommendationResponse,
+  type ShowoffRecommendationResponse,
 } from "./recommendation";
 
 const fetchMock = vi.fn();
@@ -210,6 +212,74 @@ describe("createSafeRecommendation", () => {
         sessionId: "sess-safe",
         voiceRangeLow: 48,
         voiceRangeHigh: 72,
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+// ---------- P-F 과시·킬링파트 추천 (#1844, be #1843) ----------
+describe("createShowoffRecommendation", () => {
+  const showoffResponse: ShowoffRecommendationResponse = {
+    persona: "P-F",
+    requestId: 99,
+    relaxed: false,
+    relaxedFilters: [],
+    recommendations: [
+      {
+        killingPartReason: "후렴 고음이 내 천장 근처라 한 방 지르기 좋아요",
+        recommendation: {
+          song: {
+            id: 11,
+            title: "과시곡",
+            artist: "아티스트",
+            releaseYear: 2018,
+            keyOriginal: "A_MINOR",
+            bpm: 132,
+            mood: "POWERFUL",
+            language: "ko",
+            genre: "록",
+            tjNumber: null,
+            kyNumber: null,
+            metadataSource: "MANUAL_SEED",
+            difficulty: "HARD",
+          },
+          score: 0.88,
+          matchReason: "음역 천장이 잘 맞아요",
+          rankPosition: 1,
+        },
+      },
+    ],
+  };
+
+  it("POST /api/v1/recommendations/showoff 로 body 를 직렬화해 호출하고 응답을 매핑한다", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(showoffResponse, 201));
+
+    const result = await createShowoffRecommendation({
+      sessionId: "sess-showoff",
+      voiceRangeLow: 50,
+      voiceRangeHigh: 76,
+      gender: "MALE",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/recommendations\/showoff$/);
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      sessionId: "sess-showoff",
+      voiceRangeLow: 50,
+      voiceRangeHigh: 76,
+      gender: "MALE",
+    });
+    expect(result).toEqual(showoffResponse);
+  });
+
+  it("ApiError 를 swallow 하지 않고 그대로 전파한다 (호출 측 에러 UI 분기 근거)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: "bad" }, 400));
+    await expect(
+      createShowoffRecommendation({
+        sessionId: "sess-showoff",
+        voiceRangeLow: 50,
+        voiceRangeHigh: 76,
       }),
     ).rejects.toBeInstanceOf(ApiError);
   });

@@ -1020,6 +1020,35 @@ describe("SongCard", () => {
     });
   });
 
+  // 이슈 #1844 (be #1843) — P-F 과시 "킬링파트 안내"(killingPartReason) 노출.
+  describe("킬링파트 (#1844)", () => {
+    it("killingPartReason 이 주어지면 '킬링파트' 라벨과 함께 노출한다", () => {
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard
+            item={item}
+            killingPartReason="후렴 고음이 내 천장 근처라 한 방 지르기 좋아요"
+          />
+        </ul>,
+      );
+      expect(screen.getByText("킬링파트")).toBeInTheDocument();
+      expect(
+        screen.getByText("후렴 고음이 내 천장 근처라 한 방 지르기 좋아요"),
+      ).toBeInTheDocument();
+    });
+
+    it("killingPartReason 이 없으면(일반 추천) 킬링파트 줄을 그리지 않는다", () => {
+      const item = buildItem({ difficulty: "HARD" });
+      renderWithQueryClient(
+        <ul>
+          <SongCard item={item} />
+        </ul>,
+      );
+      expect(screen.queryByText("킬링파트")).not.toBeInTheDocument();
+    });
+  });
+
   describe("hero morph view-transition-name (closes #1687, PR7)", () => {
     it("href 모드(라우트 이동)에서는 thumbnail 에 album-{id} 이름이 붙는다", () => {
       const item = buildItem();

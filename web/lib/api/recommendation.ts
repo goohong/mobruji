@@ -383,6 +383,77 @@ export function createSafeRecommendation(
 }
 
 /**
+ * P-F 과시·킬링파트 추천 요청. BE `ShowoffRecommendationCreateRequest`(be #1843)와 1:1 매칭한다.
+ *
+ * 단일 추천과 같은 음역 적합도 산식을 재사용하므로 `voiceRangeLow`/`voiceRangeHigh` 는 필수다.
+ * `voiceRangeHigh`(음역 천장)는 킬링파트 근접 재정렬 기준으로도 쓰인다(spec §5-2). `ageGroup`·
+ * `gender`·`limit`(1~50)은 모두 선택이며, 미지정 필드는 생략한다(BE 결정성 seed 입력 정합, 하위호환).
+ * 안전곡(P-E)의 반대축으로, 단일 추천의 `persona` 필드 확장이 아니라 **별도 엔드포인트**
+ * (`POST /api/v1/recommendations/showoff`)로 분리돼 있다 — 응답이 곡별 "킬링파트 안내"를 함께
+ * 내려주는 형상이라 단일 추천과 달라서다(spec §5-4).
+ */
+export type ShowoffRecommendationRequest = {
+  sessionId: string;
+  voiceRangeLow: number;
+  voiceRangeHigh: number;
+  /** 연령대 대표값(선택). 미입력 시 generationFit 신호 기여 0(하위호환). */
+  ageGroup?: AgeGroup | null;
+  /** 성별 필터(선택). 미입력 시 성별 신호 기여 0(하위호환). */
+  gender?: VocalGender | null;
+  /** 노출 곡 수 상한(선택, 1~50). 미입력 시 단일 추천 기본 개수. */
+  limit?: number | null;
+};
+
+/**
+ * 과시 추천 1건. BE `ShowoffRecommendationResponse.ShowoffSongResponse`(be #1843)와 1:1 매칭한다.
+ *
+ * `recommendation` 은 단일 추천과 같은 곡 형상(`RecommendedSongResponse`)이라 결과 카드 렌더를
+ * 재사용한다. `killingPartReason` 은 사용자 음역 천장 근접도에서 결정적으로 파생한 "킬링파트 안내"
+ * (어디가 임팩트 구간인지·왜 이 곡으로 질러볼 만한지) 한 줄로, BE 가 항상 채워 준다(곡 천장 미상도
+ * graceful 한 기본 사유).
+ */
+export type ShowoffSongResponse = {
+  killingPartReason: string;
+  recommendation: RecommendedSongResponse;
+};
+
+/**
+ * P-F 과시·킬링파트 추천 응답. BE `ShowoffRecommendationResponse`(be #1843)와 1:1 매칭한다.
+ *
+ * `persona` 는 이 추천을 산출한 페르소나 식별자("P-F"). `requestId` 는 단일 추천과 같은 경로로
+ * 영속된 추천 요청 ID(Long)라 곡 피드백·재조회를 단일 추천과 같은 경로로 처리할 수 있다.
+ * `relaxed`/`relaxedFilters` 는 0건 fallback(be #1668) 으로 일부 필터를 완화해 채웠음을 알린다.
+ * `recommendations` 는 과시 강편향(음역 천장 근접 + HARD 우위)으로 재정렬한 곡 묶음이다.
+ */
+export type ShowoffRecommendationResponse = {
+  persona: RecommendationPersona;
+  requestId: number;
+  relaxed: boolean;
+  relaxedFilters: string[];
+  recommendations: ShowoffSongResponse[];
+};
+
+/**
+ * P-F 과시·킬링파트 추천 생성.
+ *
+ * 신규 엔드포인트 `POST /api/v1/recommendations/showoff`(be #1843, spec §5-4). "고음 질러
+ * 박수받고 싶다" 의도에 맞춰 음역 천장 근접 + `difficulty=HARD` 우위로 재정렬한 곡 묶음 + 곡별
+ * "킬링파트 안내"를 돌려준다(안전곡 `/safe` 의 거울). 단일 추천과 달리 무한 스크롤이 아닌
+ * 단일샷(상한 `limit`)이다.
+ */
+export function createShowoffRecommendation(
+  request: ShowoffRecommendationRequest,
+): Promise<ShowoffRecommendationResponse> {
+  return apiFetch<ShowoffRecommendationResponse>(
+    "/api/v1/recommendations/showoff",
+    {
+      method: "POST",
+      body: request,
+    },
+  );
+}
+
+/**
  * "부른 곡 기반 다음곡 추천"(#1486) 요청.
  *
  * BE `POST /api/v1/recommendations/next`(`createFromSeeds`)와 1:1 매칭. seed 곡들의

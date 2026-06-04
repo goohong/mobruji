@@ -51,7 +51,7 @@ import type {
   RecommendedSongResponse,
   SongResponse,
 } from "@/lib/api/recommendation";
-import { SAFE_SONG_REASON_LABEL } from "@/lib/persona";
+import { SAFE_SONG_REASON_LABEL, SHOWOFF_SONG_REASON_LABEL } from "@/lib/persona";
 import {
   difficultyLabel,
   resolveSongDifficulty,
@@ -116,6 +116,12 @@ type SongCardProps =
        * 라벨과 함께 노출하고, 미지정(일반 추천)이면 사유 줄을 생략한다.
        */
       safetyReason?: string;
+      /**
+       * P-F 과시 모드의 "킬링파트 안내"(임팩트 구간) 한 줄. BE `/showoff` 응답이 곡별로 내려준
+       * `killingPartReason`(be #1843)을 그대로 전달한다. 지정되면 카드 표면에 "킬링파트"
+       * 라벨과 함께 노출하고, 미지정(일반 추천)이면 사유 줄을 생략한다.
+       */
+      killingPartReason?: string;
     }
   | {
       song: SongResponse;
@@ -125,6 +131,7 @@ type SongCardProps =
       onShowDetail?: () => void;
       index?: number;
       safetyReason?: never;
+      killingPartReason?: never;
       /**
        * 검색 카드(/songs)에서 BE 추천 컨텍스트 없이도 "내 음역 적합" 배지를 그리기 위한
        * client 산출 적합도(0~1). 호출 측이 세션 음역대 + 곡 음역으로 계산해 넘긴다
@@ -142,6 +149,8 @@ export function SongCard(props: SongCardProps) {
     "item" in props && props.userVoiceRange ? props.userVoiceRange : null;
   const safetyReason: string | null =
     "item" in props && props.safetyReason ? props.safetyReason : null;
+  const killingPartReason: string | null =
+    "item" in props && props.killingPartReason ? props.killingPartReason : null;
   const onShowDetail: (() => void) | undefined = props.onShowDetail;
   const index: number = typeof props.index === "number" ? props.index : 0;
   // closes #1484 / #1721 — "내 음역 적합" 적합도. 추천 컨텍스트는 BE voiceFit, 검색
@@ -175,6 +184,9 @@ export function SongCard(props: SongCardProps) {
   // closes #1600 — P-E 안전곡 "안심 포인트"(쉬운 이유)를 카드 표면에 노출. BE `/safe`
   // 응답이 곡별로 내려준 safetyReason(be #1840)을 그대로 보여준다.
   const safetyPoint = item && safetyReason ? safetyReason : null;
+  // closes #1844 — P-F 과시 "킬링파트 안내"(임팩트 구간)를 카드 표면에 노출. BE `/showoff`
+  // 응답이 곡별로 내려준 killingPartReason(be #1843)을 그대로 보여준다.
+  const killingPart = item && killingPartReason ? killingPartReason : null;
   // 모달 모드: 카드 본문 클릭 = 모달 트리거. breakdown/YouTube 링크는 모달로 위임되어
   // 카드 표면에서 사라진다 (closes #323). href 모드와 동시 지정 시 모달이 우선.
   const isModalMode = typeof onShowDetail === "function";
@@ -312,6 +324,22 @@ export function SongCard(props: SongCardProps) {
           </span>
           <span className="text-xs text-[var(--text-secondary)]">
             {safetyPoint}
+          </span>
+        </div>
+      ) : null}
+
+      {/*
+       * closes #1844 — P-F 과시 "킬링파트 안내" 한 줄. BE `/showoff` 응답이 곡별로 내려준
+       * killingPartReason 이 있을 때만 노출한다. "박수받고 싶다" 임팩트 신호라 안심 포인트(green)와
+       * 톤을 구분(spotlight=amber 톤)하고, 모달 모드에서도 한눈에 보이는 핵심 신호라 표면에 유지한다.
+       */}
+      {killingPart ? (
+        <div className="flex items-start gap-2 rounded-[var(--radius-md)] bg-[var(--badge-warning-bg)] px-3 py-2">
+          <span className="shrink-0 text-xs font-semibold text-[var(--badge-warning-fg)]">
+            {SHOWOFF_SONG_REASON_LABEL}
+          </span>
+          <span className="text-xs text-[var(--text-secondary)]">
+            {killingPart}
           </span>
         </div>
       ) : null}
