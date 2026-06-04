@@ -1,6 +1,10 @@
 # Python audio analysis tooling (spec: docs/features/audio-tooling-bootstrap.md)
 # 의존성 핀은 부트스트랩 시점 기준이며, PR B에서 spleeter/demucs 도입 시 재조정.
 yt-dlp==2026.3.17
+# PO token provider plugin (#1813). 데이터센터 IP 봇차단을 무쿠키로 우회 — yt_dlp_plugins
+# 네임스페이스에 자동 등록되어 web client 추출 시 bgutil HTTP sidecar 에서 토큰을 받는다.
+# sidecar 이미지(brainicism/bgutil-ytdlp-pot-provider)와 동일 버전으로 핀.
+bgutil-ytdlp-pot-provider==1.1.0
 librosa==0.10.2.post1
 numpy==1.26.4
 soundfile==0.12.1

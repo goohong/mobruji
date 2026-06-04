@@ -12,6 +12,7 @@ from analyze import (
     METHOD_SPLEETER_2STEMS,
     METHOD_VOCAL_SKIP,
     PLAYER_CLIENT_CHAIN,
+    POT_EXTRACTOR_KEY,
     analysis_method_label,
     confidence_score,
     extract_range,
@@ -20,6 +21,7 @@ from analyze import (
     mask_url,
     run_with_client_chain,
     youtube_cookies_file,
+    youtube_pot_provider_url,
 )
 
 
@@ -148,6 +150,20 @@ class TestYoutubeCookiesFile:
         assert youtube_cookies_file() is None
 
 
+class TestYoutubePotProviderUrl:
+    def test_unset_returns_none(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_POT_PROVIDER_URL", raising=False)
+        assert youtube_pot_provider_url() is None
+
+    def test_blank_returns_none(self, monkeypatch) -> None:
+        monkeypatch.setenv("YTDLP_POT_PROVIDER_URL", "   ")
+        assert youtube_pot_provider_url() is None
+
+    def test_set_returns_trimmed_url(self, monkeypatch) -> None:
+        monkeypatch.setenv("YTDLP_POT_PROVIDER_URL", "  http://bgutil-provider:4416  ")
+        assert youtube_pot_provider_url() == "http://bgutil-provider:4416"
+
+
 class TestHardenYdlOpts:
     def test_sets_single_player_client(self, monkeypatch) -> None:
         monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
@@ -170,6 +186,21 @@ class TestHardenYdlOpts:
         cookie.write_text("# Netscape HTTP Cookie File\n")
         monkeypatch.setenv("YTDLP_COOKIES_FILE", str(cookie))
         assert harden_ydl_opts({}, "web")["cookiefile"] == str(cookie)
+
+    def test_omits_pot_provider_when_unset(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        monkeypatch.delenv("YTDLP_POT_PROVIDER_URL", raising=False)
+        assert POT_EXTRACTOR_KEY not in harden_ydl_opts({}, "web")["extractor_args"]
+
+    def test_injects_pot_base_url_when_set(self, monkeypatch) -> None:
+        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
+        monkeypatch.setenv("YTDLP_POT_PROVIDER_URL", "http://bgutil-provider:4416")
+        opts = harden_ydl_opts({}, "web")
+        assert opts["extractor_args"][POT_EXTRACTOR_KEY]["base_url"] == [
+            "http://bgutil-provider:4416"
+        ]
+        # web client 와 PO token provider 가 함께 설정돼야 토큰으로 차단을 푼다.
+        assert opts["extractor_args"]["youtube"]["player_client"] == ["web"]
 
 
 class TestRunWithClientChain:
