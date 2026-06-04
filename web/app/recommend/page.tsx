@@ -35,9 +35,21 @@
  *   - 매 페이지의 queryFn 은 호출 시점의 누적 `excludedSongIds`(store snapshot)을
  *     전달한다 → BE SeedDeriver(PR #64) + entity 영속화(PR #74) 효과로 결정성을
  *     유지하면서도 페이지마다 다른 결과를 반환받는다.
- *   - 시드 소진(빈 페이지) 감지 → `getNextPageParam`이 `undefined`를 반환해 추가
- *     페치를 멈춘다. 첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA,
- *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
+ *   - 시드 소진 감지 → `getNextPageParam`이 `undefined`를 반환해 추가 페치를 멈춘다.
+ *     빈 페이지뿐 아니라 **이미 본 곡으로만 채워진 n건 페이지**(신규 고유 0건, #1818)도
+ *     소진으로 보고 멈춘다 — 풀이 마르면 BE 가 중복 곡을 다시 채워 보낼 수 있어서다.
+ *     첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA, 2페이지 이후 소진이면
+ *     "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
+ *
+ * 이슈 #1822 (2026-06-04) — 무한 스크롤 버벅임/깜빡임/스크롤바 진동 종합 fix:
+ *   - sentinel IntersectionObserver 를 `isFetchingNextPage`/`hasNextPage` 의존에서
+ *     떼어내 **한 번만 생성**한다. 직전 구현은 페치 상태가 토글될 때마다 ref 콜백이
+ *     새 함수로 발급돼 observer 가 재생성됐고, 재생성 직후 sentinel 이 rootMargin
+ *     안에 있으면 교차가 즉시 재평가돼 페치가 폭주(11ms 간격)했다. observer 를
+ *     안정화하면 교차 임계 통과 시에만 콜백이 1회 발화 → **1교차 = 1페치** 가 보장된다.
+ *     최신 페치 상태/함수는 ref 로 읽어 stale closure 를 피한다.
+ *   - 로딩 푸터를 **고정 높이**로 둬서 스켈레톤 append/remove 로 인한 리스트 높이
+ *     변동(스크롤바 떨림)을 없앤다. 페치 중에도 푸터 높이는 변하지 않는다.
  */
 
 import {
@@ -89,10 +101,12 @@ const SKELETON_COUNT = 4;
  * IntersectionObserver sentinel 의 rootMargin.
  *
  * 사용자가 리스트 끝에 도달하기 전에 미리 다음 batch 페치를 트리거해서
- * 무한 스크롤이 "끊김 없이" 보이도록 한다. 너무 크면 첫 페이지 마운트 직후에
- * 두 번째 페이지가 즉시 페치돼서 의도와 어긋날 수 있으니 적당히 400px 만 둔다.
+ * 무한 스크롤이 "끊김 없이" 보이도록 한다. (#1822) 직전 400px 는 첫 페이지가
+ * 짧을 때 마운트 직후 sentinel 이 곧장 margin 안에 들어와 2페이지가 즉시 당겨지는
+ * 과도 prefetch 를 유발했다. 안정 observer(1교차=1페치) 와 함께 200px 로 완화해
+ * "끝에 가까워질 때" 한 박자 늦게 자연스럽게 다음 페이지를 준비한다.
  */
-const SENTINEL_ROOT_MARGIN = "400px";
+const SENTINEL_ROOT_MARGIN = "200px";
 
 /**
  * 결과 정렬 기준(이슈 #1765).
@@ -268,6 +282,23 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
     },
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.recommendations.length === 0) {
+        return undefined;
+      }
+      // 신규 고유 0건 종료가드 (#1818): 누적 excludeSongIds 로 풀이 소진되면 BE 가
+      // 빈 페이지 대신 이미 본 곡을 다시 채운 n건 페이지로 응답할 수 있다. 마지막
+      // 페이지가 비어 있지 않더라도 이전 페이지들에 없던 "신규 고유" 곡이 하나도
+      // 없으면 더 가져올 게 없다고 보고 멈춘다 — 안 그러면 sentinel 이 중복 페이지를
+      // 무한히 당겨오고(미종료) display 중복 제거가 같은 풀만 반복 페치하게 된다.
+      const seenBeforeLastPage = new Set<number>();
+      for (const page of allPages.slice(0, -1)) {
+        for (const rec of page.recommendations) {
+          seenBeforeLastPage.add(rec.song.id);
+        }
+      }
+      const hasFreshSong = lastPage.recommendations.some(
+        (rec) => !seenBeforeLastPage.has(rec.song.id),
+      );
+      if (!hasFreshSong) {
         return undefined;
       }
       return allPages.length;
@@ -584,39 +615,54 @@ function RecommendationFeed({
     }
   }
 
+  // (#1822) 최신 페치 상태/함수를 ref 로 보관 — sentinel observer 콜백이
+  // stale closure 없이 읽는다. ref 라 값이 바뀌어도 observer 를 재생성하지 않아
+  // "1교차 = 1페치" 안정성을 유지한다. (react-hooks/refs: 렌더 중 ref 쓰기 금지 →
+  // effect 에서만 갱신.)
+  const fetchStateRef = useRef({
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  });
+  useEffect(() => {
+    fetchStateRef.current = { hasNextPage, isFetchingNextPage, fetchNextPage };
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   // IntersectionObserver 로 sentinel 진입을 감지해 다음 batch 페치.
-  // ref 콜백 패턴: sentinel DOM 노드가 마운트/언마운트될 때마다 observer 를
-  // 다시 연결한다. 의존성에 fetchNextPage/hasNextPage/isFetchingNextPage 가 들어가서
-  // 상태가 바뀌면 콜백이 새 함수로 발급되어 observer 가 갱신된다.
-  const sentinelRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (!node) {
-        return;
-      }
-      if (typeof IntersectionObserver === "undefined") {
-        // SSR/구식 브라우저 safety net — 진입 감지 불가하면 무한 스크롤이 동작하지
-        // 않지만 본 페이지는 client component 라 실질 영향은 거의 없다.
-        return;
-      }
-      if (!hasNextPage || isFetchingNextPage) {
-        return;
-      }
-      const observer = new IntersectionObserver(
-        (entries) => {
-          const entry = entries[0];
-          if (entry?.isIntersecting) {
-            fetchNextPage();
-          }
-        },
-        { rootMargin: SENTINEL_ROOT_MARGIN },
-      );
-      observer.observe(node);
-      return () => {
-        observer.disconnect();
-      };
-    },
-    [fetchNextPage, hasNextPage, isFetchingNextPage],
-  );
+  // (#1822) ref 콜백은 빈 의존성으로 **안정 함수** 라, sentinel DOM 노드가
+  // mount/unmount 될 때만 observer 를 생성/해제한다(재렌더로는 재생성 안 됨).
+  // 직전엔 fetchNextPage/hasNextPage/isFetchingNextPage 의존이라 페치 상태가
+  // 토글될 때마다 콜백이 새로 발급 → observer 재생성 → 재연결 직후 sentinel 이
+  // margin 안이면 교차가 즉시 재평가돼 페치가 폭주했다. 안정 observer 는 교차
+  // 임계를 실제로 통과할 때만 1회 발화하므로 폭주가 사라진다. 페치 게이트
+  // (hasNextPage/isFetchingNextPage) 는 ref 에서 읽어 콜백 안에서 판단한다.
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) {
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      // SSR/구식 브라우저 safety net — 진입 감지 불가하면 무한 스크롤이 동작하지
+      // 않지만 본 페이지는 client component 라 실질 영향은 거의 없다.
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) {
+          return;
+        }
+        const state = fetchStateRef.current;
+        if (state.hasNextPage && !state.isFetchingNextPage) {
+          state.fetchNextPage();
+        }
+      },
+      { rootMargin: SENTINEL_ROOT_MARGIN },
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // 1차 페치(첫 페이지) 로딩 — skeleton 다수로 카드 공간 인지를 유지.
   if (isPending) {
@@ -748,34 +794,35 @@ function RecommendationFeed({
       </SongDetailSheet>
       {/*
         Footer 영역:
-          - hasNextPage 가 true 면 sentinel + skeleton(로딩 중일 때) 노출.
+          - hasNextPage 가 true 면 sentinel 겸 **고정 높이 로딩 푸터** 노출.
           - hasNextPage 가 false 면 시드 소진 안내 + 음역대 재입력 CTA 노출.
             (이미 한 페이지 이상 본 후이므로 "더 이상 없어요" 톤은 부드럽게.)
       */}
       {hasNextPage ? (
-        <div className="flex flex-col gap-3">
+        /*
+          (#1822) sentinel 겸 로딩 푸터. 직전엔 페치 중 SongCardSkeleton 2장을
+          append/remove 해서 리스트 높이가 출렁였고(스크롤바 진동), 높이 변동이
+          sentinel 위치를 흔들어 과도 prefetch 도 거들었다. 이제 푸터를 **고정
+          높이**로 두고 페치 중에만 내부에 스피너를 토글한다 — 높이는 그대로라
+          진동이 없다. IntersectionObserver 가 이 노드 진입을 감지해 다음 batch 를
+          페치하며, 테스트 식별용 data-testid 를 둔다.
+        */
+        <div
+          ref={sentinelRef}
+          data-testid="recommend-sentinel"
+          aria-busy={isFetchingNextPage}
+          aria-label={isFetchingNextPage ? "다음 추천 결과 로딩 중" : undefined}
+          className="flex h-14 w-full items-center justify-center"
+        >
           {isFetchingNextPage ? (
-            <ul
-              aria-busy="true"
-              aria-label="다음 추천 결과 로딩 중"
-              className="grid grid-cols-1 gap-3 lg:grid-cols-2"
-            >
-              {Array.from({ length: 2 }).map((_, idx) => (
-                <SongCardSkeleton key={idx} />
-              ))}
-            </ul>
+            <span className="inline-flex items-center gap-2 text-sm text-[var(--text-caption)]">
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--brand-500)] motion-reduce:animate-none"
+              />
+              다음 추천을 불러오는 중...
+            </span>
           ) : null}
-          {/*
-            sentinel: 사용자가 리스트 끝에 가까워지면 IntersectionObserver 가
-            진입을 감지해 fetchNextPage 를 호출한다. 시각적으로는 보이지 않지만
-            테스트가 식별할 수 있도록 data-testid 를 둔다.
-          */}
-          <div
-            ref={sentinelRef}
-            data-testid="recommend-sentinel"
-            aria-hidden="true"
-            className="h-1 w-full"
-          />
         </div>
       ) : (
         <div
