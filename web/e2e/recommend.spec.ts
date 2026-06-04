@@ -132,8 +132,9 @@ test.describe("S3: 추천 페이지 smoke", () => {
     expect(response, "GET /recommend 응답이 존재해야 합니다.").not.toBeNull();
     expect(response!.status()).toBe(200);
 
-    // 2단계 caption + 헤더 "추천 결과" 가 렌더되면 RecommendContent 분기 도달.
-    await expect(page.getByText("2단계", { exact: true })).toBeVisible();
+    // "2/2 단계" caption + 헤더 "추천 결과" 가 렌더되면 RecommendContent 분기 도달.
+    // StepIndicator(current=2,total=2) 는 "{current}/{total} 단계" 포맷으로 렌더한다.
+    await expect(page.getByText("2/2 단계", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { level: 1, name: "추천 결과" }),
     ).toBeVisible();
