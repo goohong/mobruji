@@ -44,7 +44,7 @@ import {
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { formatLanguageLabel } from "@/lib/songMeta";
+import { formatLanguageLabel, formatMoodLabel } from "@/lib/songMeta";
 import { Chip } from "@/components/ui";
 
 import { FitReasons } from "./FitBadge";
@@ -77,6 +77,8 @@ export function SongDetailContent(props: SongDetailContentProps) {
   const keyLabel = formatMusicalKey(song.keyOriginal);
   // closes #1715 — 내부 언어 코드("ko")를 한국어 라벨로. 매핑 불가 시 null → 셀 생략.
   const languageLabel = formatLanguageLabel(song.language);
+  // closes #1764 — 분위기 코드값("UPBEAT")을 한국어 라벨로. 매핑 불가 시 null → 칩 생략.
+  const moodLabel = formatMoodLabel(song.mood);
   // closes #1284 — 한국 곡 한국어 표시 우선. 액션 버튼 aria-label / YouTube 검색
   // query / placeholder aria 모두 같은 displayTitle 로 일관성 유지.
   const displayTitle = formatSongDisplayTitle(song);
@@ -100,9 +102,9 @@ export function SongDetailContent(props: SongDetailContentProps) {
               키 {keyLabel}
             </span>
             {song.genre ? <Chip tone="neutral">{song.genre}</Chip> : null}
-            {song.mood ? (
+            {moodLabel ? (
               <span className="inline-flex items-center rounded-full bg-[var(--badge-neutral-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--badge-neutral-fg)]">
-                {song.mood}
+                {moodLabel}
               </span>
             ) : null}
           </div>
@@ -301,7 +303,7 @@ function MatchReasonSection({ item, userVoiceRange }: MatchReasonSectionProps) {
           추천 사유
         </h3>
         <span className="font-mono text-xs text-[var(--text-detail-meta)]">
-          score {item.score.toFixed(2)}
+          점수 {item.score.toFixed(2)}
         </span>
       </div>
       <p className="text-sm text-[var(--text-body-strong)]">

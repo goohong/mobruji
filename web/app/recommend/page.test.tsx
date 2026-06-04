@@ -299,6 +299,10 @@ describe("RecommendPage", () => {
       expect(screen.getByText("곡-1")).toBeInTheDocument();
     });
     expect(screen.getByText("곡-2")).toBeInTheDocument();
+    // closes #1764 — 결과 영역에 종합 점수순 정렬 기준 한 줄 안내가 노출된다.
+    expect(screen.getByTestId("recommend-sort-criteria")).toHaveTextContent(
+      "음역 적합도·분위기·인기 등을 종합한 점수순으로 정렬했어요.",
+    );
   });
 
   // ---------- 분위기/나이대 필터 (roadmap-mood-age-ui) ----------
