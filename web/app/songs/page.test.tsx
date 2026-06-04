@@ -206,7 +206,7 @@ describe("SongSearchPage", () => {
     expect(screen.getByText("어려운 곡")).toBeInTheDocument();
 
     // Hard 필터 → 어려운 곡만 남아야 한다.
-    await user.click(screen.getByRole("button", { name: "Hard" }));
+    await user.click(screen.getByRole("button", { name: "어려움" }));
     await waitFor(() => {
       expect(screen.queryByText("쉬운 곡")).not.toBeInTheDocument();
     });
@@ -281,7 +281,7 @@ describe("SongSearchPage", () => {
 
     // POP AND Hard → 'POP/HARD'인 곡 1건만.
     await user.click(screen.getByRole("button", { name: "POP" }));
-    await user.click(screen.getByRole("button", { name: "Hard" }));
+    await user.click(screen.getByRole("button", { name: "어려움" }));
 
     await waitFor(() => {
       expect(screen.queryByText("쉬운 곡")).not.toBeInTheDocument();
@@ -308,7 +308,7 @@ describe("SongSearchPage", () => {
       { timeout: 2000 },
     );
 
-    await user.click(screen.getByRole("button", { name: "Easy" }));
+    await user.click(screen.getByRole("button", { name: "쉬움" }));
     await waitFor(() => {
       expect(screen.queryByText("어려운 곡")).not.toBeInTheDocument();
     });
@@ -351,7 +351,7 @@ describe("SongSearchPage", () => {
     expect(screen.queryByText("쉬운 곡")).not.toBeInTheDocument();
 
     // chip의 aria-pressed가 URL 상태를 반영해야 한다.
-    expect(screen.getByRole("button", { name: "Hard" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "어려움" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -379,7 +379,7 @@ describe("SongSearchPage", () => {
     );
 
     replaceMock.mockClear();
-    await user.click(screen.getByRole("button", { name: "Easy" }));
+    await user.click(screen.getByRole("button", { name: "쉬움" }));
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalled();

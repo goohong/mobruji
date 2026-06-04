@@ -19,7 +19,8 @@
  *
  * 안전 영역:
  *  - iOS notch/home indicator 대응으로 `pb-[env(safe-area-inset-bottom)]`.
- *  - main 콘텐츠 가림 방지 padding은 layout.tsx에서 책임진다 (`pb-16 md:pb-0`).
+ *  - main 콘텐츠 가림 방지 padding은 layout.tsx에서 책임진다
+ *    (`pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0` — nav 높이 + safe-area 보정, #1718).
  *
  * nav 항목·아이콘·active 매치 규칙은 `navItems.tsx` 공통 모듈에 모여 있어 DesktopNav 와
  * 동일한 목적지·라벨을 공유한다 (IA 통일, closes #1717).

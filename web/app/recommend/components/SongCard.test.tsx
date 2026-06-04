@@ -111,12 +111,13 @@ describe("SongCard", () => {
       </ul>,
     );
     expect(
-      screen.getByLabelText(/가창 난이도 Hard/),
+      screen.getByLabelText(/가창 난이도 어려움/),
     ).toBeInTheDocument();
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
     expect(screen.getByText("POP")).toBeInTheDocument();
-    expect(screen.getByText(/score 0\.91/)).toBeInTheDocument();
+    // closes #1719 — score 원값은 카드 표면에 노출하지 않는다.
+    expect(screen.queryByText(/score/)).not.toBeInTheDocument();
   });
 
   it("difficulty가 없고 lowMidi/highMidi만 있으면 client-side 계산 라벨을 노출한다", () => {
@@ -128,7 +129,7 @@ describe("SongCard", () => {
       </ul>,
     );
     expect(
-      screen.getByLabelText(/가창 난이도 Hard/),
+      screen.getByLabelText(/가창 난이도 어려움/),
     ).toBeInTheDocument();
     // 최고음 음표명 노출 — MIDI 77 = 파5 (한국어 단독, #1310 사용자 정정 2026-06-03)
     expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
@@ -146,7 +147,7 @@ describe("SongCard", () => {
     expect(screen.queryByLabelText(/가창 난이도/)).not.toBeInTheDocument();
     // 카드 자체는 렌더됨
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
-    expect(screen.getByText("C Major")).toBeInTheDocument();
+    expect(screen.getByText("C 장조")).toBeInTheDocument();
   });
 
   // closes #91 #92 — 검색 페이지에서 song prop으로 카드 렌더 시
@@ -160,7 +161,7 @@ describe("SongCard", () => {
     );
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
-    expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
     // 추천 컨텍스트 전용 표시는 모두 숨김.
     expect(screen.queryByText(/score/)).not.toBeInTheDocument();
     expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
@@ -215,7 +216,7 @@ describe("SongCard", () => {
       // 카드 표면 핵심 정보는 그대로 보인다.
       expect(screen.getByText("테스트 곡")).toBeInTheDocument();
       expect(screen.getByText("가수")).toBeInTheDocument();
-      expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
       // 상세는 모달로 위임 — 카드 표면에 없어야 한다.
       expect(screen.queryByText(/score/)).not.toBeInTheDocument();
       expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();

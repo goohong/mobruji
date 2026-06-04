@@ -174,7 +174,7 @@ class RecommendationServiceFallbackAndAccumulationTest {
         for (int i = 1; i <= size; i++) {
             catalog.add(buildSong((long) i, "s" + i, "A" + i));
         }
-        given(songRepository.findAll()).willReturn(catalog);
+        given(songRepository.findAllWithVocalRange()).willReturn(catalog);
 
         final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0);
         given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any()))

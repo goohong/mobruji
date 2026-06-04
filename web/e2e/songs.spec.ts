@@ -5,7 +5,7 @@
  *
  * 검증:
  *  1. `/songs` 페이지 HTTP 200 응답
- *  2. 헤더 "곡 검색" + Browse caption 가 렌더
+ *  2. 헤더 "곡 검색" + 둘러보기 caption 가 렌더
  *  3. 검색 입력 placeholder ("곡 제목이나 아티스트로 검색") 가 노출
  *  4. 검색어 미입력 시 안내 ("검색어를 입력해 보세요.") 가 렌더 — BE 호출 0건
  *  5. 검색어 입력 + mock 응답 후 곡 카드 카운트 텍스트 ("1곡") 가 노출
@@ -41,7 +41,7 @@ test.describe("S4: 곡 검색 페이지 smoke", () => {
       200,
     );
 
-    // 헤더 카피 — Browse caption + h1 "곡 검색". h1 은 fallback / inner 둘 다
+    // 헤더 카피 — 둘러보기 caption + h1 "곡 검색". h1 은 fallback / inner 둘 다
     // 같은 텍스트라 hydration race 없이 검증 가능.
     await expect(
       page.getByRole("heading", { level: 1, name: "곡 검색" }),

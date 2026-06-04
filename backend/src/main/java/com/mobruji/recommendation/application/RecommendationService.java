@@ -155,9 +155,11 @@ public class RecommendationService {
         // 후보 곡 단계에서 excludeSongIds 필터링.
         // spec §3 기능 요구사항: "이미 들었어요" → 결과에서 제외.
         // 점수 계산 전에 필터해 점수 산정 비용을 절약하고, 다양성 후처리(아티스트/장르 cap)도 제외 후 카탈로그 위에서 작동.
+        // 후보 universe 는 음역대 보유 곡만(#1744): 음역대 미보유 곡은 voiceFit 을 실측 band 로 못 구해 0.5 중립으로
+        // 추천 풀을 오염시키므로(추천 곡 전부 50% 사고) 후보에서 제외한다. backfill 완료 곡은 자동 편입된다.
         final Set<Long> excludeSet = new HashSet<>(excludeSongIds);
-        final List<Song> allSongs = songRepository.findAll();
-        final List<Song> candidates = allSongs.stream()
+        final List<Song> rangedSongs = songRepository.findAllWithVocalRange();
+        final List<Song> candidates = rangedSongs.stream()
                 .filter(song -> !excludeSet.contains(song.getId()))
                 .toList();
 
@@ -169,13 +171,14 @@ public class RecommendationService {
         List<ScoredSong> diversified = rankCandidates(candidates, savedRequest, seedContext.seed(), resultCount);
 
         // 0건 fallback(#1668): 결과가 비면 빈 화면 대신 제외 필터를 가장 덜 침습적인 순서로 완화해 재질의한다.
-        // 음역대·분위기·연령대는 점수 신호일 뿐 후보를 0건으로 줄이지 않으므로, 완화 대상은 유일한 하드 필터인 제외 곡 셋이다.
+        // 완화 대상은 제외 곡 셋뿐이다 — 음역대 보유 조건(#1744)은 완화하지 않는다(미보유 곡은 voiceFit 오염원이므로
+        // 빈 화면이 더 낫다). 분위기·연령대는 점수 신호일 뿐 후보를 줄이지 않는다.
         // 음역대는 점수 순(가까운 순) 정렬로 끝까지 보존 — 완전 무관 곡이 아닌 가까운 곡부터 노출한다.
         if (diversified.isEmpty()) {
             // 1단계: 세션 단위 자동 중복 회피(#1549)로 누적된 제외만 풀고, 사용자가 명시한 제외 곡은 유지한다.
             final Set<Long> clientExcludeSet = new HashSet<>(createRecommendationCommand.excludeSongIds());
             if (clientExcludeSet.size() < excludeSet.size()) {
-                final List<Song> sessionHistoryRelaxed = allSongs.stream()
+                final List<Song> sessionHistoryRelaxed = rangedSongs.stream()
                         .filter(song -> !clientExcludeSet.contains(song.getId()))
                         .toList();
                 diversified = rankCandidates(sessionHistoryRelaxed, savedRequest, seedContext.seed(), resultCount);
@@ -184,8 +187,8 @@ public class RecommendationService {
                 }
             }
             // 2단계: 그래도 0건이면 사용자 명시 제외 곡까지 후보에 포함한다(빈 화면보다는 가까운 곡 노출).
-            if (diversified.isEmpty() && !allSongs.isEmpty()) {
-                diversified = rankCandidates(allSongs, savedRequest, seedContext.seed(), resultCount);
+            if (diversified.isEmpty() && !rangedSongs.isEmpty()) {
+                diversified = rankCandidates(rangedSongs, savedRequest, seedContext.seed(), resultCount);
                 if (!diversified.isEmpty()) {
                     relaxedFilters.add(FilterRelaxation.EXCLUDED_SONGS);
                 }

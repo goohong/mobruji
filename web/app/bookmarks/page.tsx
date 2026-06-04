@@ -99,7 +99,7 @@ function BookmarksContent({ songs }: BookmarksContentProps) {
       <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Bookmarks
+            북마크
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             북마크한 곡

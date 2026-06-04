@@ -30,7 +30,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
 import { searchSongs, type SongResponse } from "@/lib/api/song";
-import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
+import {
+  deriveDifficulty,
+  difficultyLabel,
+  type Difficulty,
+} from "@/lib/difficulty";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { Chip, Input } from "@/components/ui";
 
@@ -40,9 +44,9 @@ import { SongDetailContent } from "../recommend/components/SongDetailContent";
 
 const DEBOUNCE_MS = 300;
 const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
-  { key: "EASY", label: "Easy" },
-  { key: "NORMAL", label: "Normal" },
-  { key: "HARD", label: "Hard" },
+  { key: "EASY", label: difficultyLabel("EASY") },
+  { key: "NORMAL", label: difficultyLabel("NORMAL") },
+  { key: "HARD", label: difficultyLabel("HARD") },
 ];
 
 /*
@@ -88,7 +92,7 @@ function SearchPageFallback() {
       <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Browse
+            둘러보기
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
@@ -222,7 +226,7 @@ function SongSearchPageInner() {
       <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Browse
+            둘러보기
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
