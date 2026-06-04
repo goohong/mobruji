@@ -53,13 +53,15 @@
 | 곡 분석 프로파일 | SongAnalysisProfile | `song` | 곡 1건의 분석 파생 속성 묶음 read-model — `lowMidi`/`highMidi`/`keyOriginal`/`difficulty`/`mood`/`energy`/`metadataConfidence`. 추천(voiceFit/mood/next-song)·연습·트렌딩 소비자가 읽는 단일 계약 표면. 영속 엔티티 아님(`Song` 컬럼들의 view). song-analysis-data-and-consumers.md §5-1·§5-3 |
 | 곡 후보 풀 | SongCandidatePool | `song` | 추천/검색/카탈로그가 매칭 대상으로 삼는 곡 집합 — 큐레이션 곡(`MANUAL_SEED`) + 임포트 곡(`EXTERNAL_API`) 합집합. 규모 확장(30→100→수백)의 단위. 영속 엔티티 아님 — `Song` 행 전체의 개념 라벨. song-catalog-expansion.md §5-1 |
 | 메타-only 임포트 | MetadataOnlyImport | `song` | 외부 CC0 출처(MusicBrainz)에서 메타데이터(제목/아티스트/연도/장르/식별자)만 가져와 `Song` 으로 upsert 하는 배치(`MetadataOnlyImportCommand`, `--mobruji.import-catalog`). 음역대/key/tempo 미설정 — 자체 분석(#1490)이 후속. `metadataSource=EXTERNAL_API` + 낮은 confidence. (title, artist)·ISRC 멱등. song-catalog-expansion.md §5-1 |
-| 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡, 선호 BPM, 연령대). 영속 단위. 엔티티 §5-3 |
+| 추천 요청 | RecommendationRequest (엔티티 `RecommendationRequestEntity`) | `recommendation` | 사용자가 입력하는 추천 컨텍스트 (음역대, 분위기, 제외 곡, 선호 BPM, 연령대, 성별 필터). 영속 단위. 엔티티 §5-3 |
 | 연령대 | AgeGroup | `recommendation` | 추천 요청 선택 입력 enum (`TEENS`/`TWENTIES`/`THIRTIES`/`FORTIES`/`FIFTIES`/`SIXTIES_PLUS`). 세대별 대표 발매 시기(`application.yml` `recommendation.generation.representative-year`)와의 거리로 `generationFit` 신호 산출 (#1487). null 이면 랭킹 무영향 (하위호환) |
+| 보컬 성별 | VocalGender | `song` / `recommendation` | 곡 보컬 성별 enum (`MALE`/`FEMALE`/`MIXED`). 곡 속성으로는 큐레이션(시드/큐레이터 명시) 1순위, 임포트 곡은 최고음(`highMidi`) 추정 또는 미상. 추천 요청에서는 남자곡/여자곡 필터 선택값(`MIXED` 미사용 — 요청은 `MALE`/`FEMALE`/null). `genderFit` 신호 산출 (#1767). 요청 null 이면 랭킹 무영향 (배타 제외 아님) |
 | 추천 | Recommendation | `recommendation` | 사용자 컨텍스트 기반 곡 매칭 결과 (영속 행). 요청 1 : N 행. 엔티티 §5-3 |
 | 추천 결과 | RecommendationResult | `recommendation` | 추천 요청 1건의 최종 결과 컨테이너 (요청 ID + 정렬·다양성 후처리 마친 `ScoredRecommendation` 리스트). application 이 `api.dto` 에 의존하지 않도록 domain 레이어에 둔 결과 표현 (ADR-0005 §A-7) |
 | 채점된 추천 | ScoredRecommendation | `recommendation` | 추천 결과 1건 값 객체 (곡 + 점수 + 매칭 사유 + 랭킹 + `ScoreBreakdown`). 영속 엔티티 `Recommendation` 와 응답 DTO 를 잇는 중간 표현. 과거 추천 재조회 경로에서는 `breakdown` 이 null. 설명 가능성(#1484)용 파생값 `voiceFit`(0~1, = `rangeFit` 신호) + `voiceFitReason`(짧은 한국어 사유), 분위기 변별력(#1485)용 `moodFit`(0~1, = `moodMatch` 신호) + `moodFitReason` 노출 — breakdown null 경로에서는 모두 null. 연습형 페르소나(P-A, #1494)용 `practiceDifficulty`(= 곡 `difficulty`) + `practiceDifficultyReason`(최고음+난이도 한국어 사유) — 곡 속성 파생이라 재조회 경로에서도 채워지고, 음역 미보유 곡은 난이도 null + graceful "정보 없음" 사유. 연습형(P-A, #1544)용 `suggestedTranspose`(반음 수) + `transposedVoiceFit`(0~1) + `suggestedTransposeReason`(한국어 사유) — voiceFit 낮은 곡에만 채워지고, 조옮김 불요·키 UNKNOWN·재조회 경로에서는 모두 null |
-| 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 7종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`/`generationFit`). "Why this song?" 설명 가능성 확보용 (P2). `moodMatch` 는 #1485 에서 이진(1.0/0.0)에서 분위기 `(energy, brightness)` 좌표 거리 기반 연속 유사도로 확장 — 정확 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 0~1 |
+| 점수 분해 | ScoreBreakdown | `recommendation` | 추천 점수 신호 분해 — 가중치 적용 전 raw 값(0~1) 8종 (`keyMatch`/`rangeFit`/`genreMatch`/`moodMatch`/`popularity`/`tempoMatch`/`generationFit`/`genderFit`). "Why this song?" 설명 가능성 확보용 (P2). `moodMatch` 는 #1485 에서 이진(1.0/0.0)에서 분위기 `(energy, brightness)` 좌표 거리 기반 연속 유사도로 확장 — 정확 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 0~1 |
 | 세대 적합도 | generationFit | `recommendation` | `ScoreBreakdown` raw 신호 — 곡 발매 연도와 요청 `ageGroup` 의 대표 시기 거리를 선형 감쇠(`1 - min(1, 거리/허용오차)`)로 환산 (#1487). ageGroup/발매연도 null 또는 미등재 세대면 0.0 (랭킹 무영향) |
+| 성별 적합도 | genderFit | `recommendation` | `ScoreBreakdown` raw 신호 — 요청 성별 필터(남자곡/여자곡)와 곡 보컬 성별의 부분 적합도 (#1767). 큐레이션 일치 1.0, 큐레이션 `MIXED` 는 `mixedScore`, 임포트 추정 일치는 `estimatedMatchScore`(후순위), 추정 불가는 `unknownScore`, 반대 성별은 0.0. 요청 성별 null 이면 0.0 (가중 없음, 배타 제외 아님 — 음역대 등 다른 신호로 추천 풀에 잔존). 가산 수준은 `application.yml` `recommendation.gender` 로 외부화 |
 | 키 조옮김 제안 | TransposeSuggestion | `recommendation` | voiceFit(rangeFit) 낮은 곡(< 0.4)에 대해 카라오케 통상 범위 ±6 반음 안에서 음역 적합도를 가장 끌어올리는 권장 조옮김량(`semitones`, 양수=올림/음수=내림)과 조옮김 적용 후 재계산한 `transposedVoiceFit`(0~1, voiceFit 과 동일 산식이라 비교 가능)을 담는 값 객체 (#1544). 키 root MIDI 에 반음을 더해 같은 `voiceRangeFit` 산식을 재사용. 곡 키 UNKNOWN(산정 근거 없음)·원곡 그대로 무난(≥ 0.4)·±범위 내 개선 없음이면 제안 없음(null). 연습형 페르소나(P-A) |
 | 트렌딩 | TrendingSong | `recommendation` | 다른 사용자 추천 히스토리를 기간별 집계한 인기곡 1건 read-model (곡 + 순위 + 등장 횟수 + 인기도). 영속 엔티티 아님 — `Recommendation`×`RecommendationRequestEntity` 집계 view. 노래방 일반 차트와 달리 분위기/음역대 결합 조회 (#1488). trending-recommendation.md |
 | 인기도 | popularityScore (TrendingSong) | `recommendation` | 트렌딩 정렬 신호 — 곡이 추천 결과에 등장할 때마다 `1.0 / rankPosition` 을 더한 rank 감쇠 합. 상위 노출(rank 1)일수록 큰 가중. 추천 점수(`ScoreBreakdown.popularity`)와 별개 — 조회 전용 집계값으로 알고리즘 결정성 무관 |
@@ -201,6 +203,7 @@
 | `highMidi` | Integer | nullable | 곡 보컬 멜로디 최고음 (MIDI). 시드부터 적재. PR #96 |
 | `difficulty` | enum `Difficulty` | nullable | EASY/NORMAL/HARD. `lowMidi`/`highMidi` 둘 다 있으면 `Song.create()`에서 자동 분류. PR #96 |
 | `energy` | Float | nullable, 0.0~1.0 | 곡 음향 에너지/강렬함. 1차 수기/시드 적재, 자동 산출 후속(§8 Q2). 추천 점수 입력 아님 — null 곡은 소비자 graceful degrade. song-analysis-data-and-consumers.md §5-1, #1490 |
+| `vocalGender` | enum `VocalGender` | nullable | 곡 보컬 성별 (MALE/FEMALE/MIXED). 큐레이션(시드/큐레이터 명시) 1순위 권위값. null 곡은 추천 시 `highMidi` 추정(후순위) 또는 미상 처리. `genderFit` 신호 입력. V15 마이그레이션(`V15__gender_vocal_filter.sql`). #1767 |
 | `albumCoverUrl` | String(512) | nullable | 곡 카드/모달 표시용 외부 앨범 커버 URL. iTunes(1차)→Cover Art Archive(폴백) backfill 결과를 캐싱(이미지 미저장, URL 만). 비-조회키라 인덱스 없음. 추천 결정성 무영향. V7 마이그레이션(`V7__song_album_cover_url.sql`). 이슈 #322 / ADR-0029 / album-cover-art.md |
 | `createdAt`, `updatedAt` | LocalDateTime | not null | |
 
@@ -221,6 +224,7 @@
 | `voiceRangeLow`, `voiceRangeHigh` | int | not null | MIDI [12, 119] |
 | `mood` | enum `Mood` | nullable | 선택 |
 | `ageGroup` | enum `AgeGroup` | nullable | 선택 입력. `age_group VARCHAR(16)` 컬럼(V9 마이그레이션). null 이면 `generationFit` 신호 0.0 → 랭킹 무영향 (#1487) |
+| `gender` | enum `VocalGender` | nullable | 선택 입력 성별 필터(남자곡/여자곡 — `MALE`/`FEMALE`, `MIXED` 미사용). `gender VARCHAR(16)` 컬럼(V15 마이그레이션). null 이면 `genderFit` 신호 0.0 → 랭킹 무영향(배타 제외 아님) (#1767) |
 | `excludeSongIds` | List&lt;Long&gt; | nullable→[] 정규화 | 사용자가 "이미 들었어요"로 제외한 곡 ID. 별 join table `recommendation_request_exclude_song(recommendation_request_id, song_id)`에 영속 (`@ElementCollection`) |
 | `createdAt` | LocalDateTime | not null | |
 
@@ -383,6 +387,7 @@ erDiagram
         int high_midi
         varchar difficulty
         decimal energy
+        varchar vocal_gender
         varchar album_cover_url
         datetime created_at
         datetime updated_at
@@ -394,6 +399,7 @@ erDiagram
         int voice_range_low
         int voice_range_high
         varchar mood
+        varchar gender
         datetime created_at
     }
 

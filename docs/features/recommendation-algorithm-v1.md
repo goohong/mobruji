@@ -257,3 +257,12 @@ v1은 100~수백곡이므로 in-memory 정렬 가능. 카탈로그 1만곡 초�
   - **쿼리**: `RecommendationRepository.findDistinctRecommendedSongIdsBySessionId` + `RecommendationRequestRepository.findDistinctExcludeSongIdsBySessionId` 각각 `DISTINCT` 1쿼리 — 요청별 lazy collection 접근(N+1) 회피.
   - **결정성**: 병합 결과를 영속·후보 필터·`SeedDeriver` 입력에 일관 반영한다. 누적 패턴(§9 2026-05-21)과 동일 — 제외 셋이 커지면 seed 가 달라져 다음 결과가 변주된다. 기본 false 이므로 기존 결정성 E2E(같은 입력 반복 → 같은 결과)는 무변경.
   - **테스트**: `RecommendationSessionHistoryDedupTest` E2E(2회 호출 무중복 / 3회 누적 / 기본 false 결정성 / `/next` 전파) + `RecommendationCreateRequestTest`(플래그 정규화·toCommand 매핑).
+- 2026-06-04: **성별 필터(남자곡/여자곡) — `genderFit` 가중 신호 + 요청 성별 필드 (BE, closes #1767)**.
+  - **배경**: 음역대만으로는 "남자가 부를 곡 / 여자가 부를 곡" 선호를 반영하지 못했다. 성별 필터를 배타 제외가 아니라 가중 신호로 도입해 음역대와 함께 점수에 반영한다. fe 필터 UI(기본 ON — 프로필 #1605 성별 또는 측정 시 선택)는 후속 사이클.
+  - **곡 보컬 성별 신호**: `Song.vocalGender`(enum `VocalGender` MALE/FEMALE/MIXED, V15 마이그레이션 `gender VARCHAR(16)`). 큐레이션(시드/큐레이터 명시) 1순위 권위값. 임포트 곡은 최고음(`highMidi ≥ 75 → FEMALE, < 75 → MALE`) 추정(후순위), `highMidi` 부재면 미상. v1 key→MIDI 휴리스틱은 모든 키를 옥타브 4 로 접어 성별 변별이 불가능하므로 키 기반 추정은 하지 않는다. 추정은 `MIXED` 를 만들지 않는다(혼성/듀엣은 큐레이션 전용).
+  - **API 입력 확장**: `RecommendationCreateRequest.gender: VocalGender?`(옵션, 요청은 `MALE`/`FEMALE`/null — `MIXED` 미사용). null 이면 `genderFit=0.0`(가중 없음, 배타 제외 아님 — 음역대 등 다른 신호로 추천 풀에 잔존).
+  - **응답 확장**: `ScoreBreakdown` / `ScoreBreakdownResponse` 에 `genderFit` 필드 추가(7→8 신호). raw [0,1].
+  - **공식**: 큐레이션 일치 1.0 / 큐레이션 `MIXED` → `mixedScore` / 추정 일치 → `estimatedMatchScore`(큐레이션보다 낮춰 신뢰도 차이 반영) / 추정 불가 → `unknownScore` / 반대 성별 0.0.
+  - **가중치**: `recommendation.weights.gender = 0.1` + `recommendation.gender`(`estimated-match-score=0.6` / `mixed-score=0.5` / `unknown-score=0.3`) (application.yml).
+  - **결정성**: `gender` 를 `SeedDeriver` canonical 입력(genderToken)에 포함 — 같은 음역/세션이라도 성별 필터가 다르면 seed/hash 가 달라진다. null 은 빈 토큰이라 기존 결정성 E2E(같은 입력 반복 → 같은 결과) 무변경.
+  - **테스트**: `RecommendationScorerTest` genderFit 단위 12건(요청 null / 큐레이션 일치·반대·MIXED / 추정 일치·반대·불가 / split 경계 75 / score 랭킹 반영·null 무영향·raw 신호 보존) + `SeedDeriverTest` gender entropy 2건 + `RecommendationPropertiesValidationTest` / `ScoreBreakdownResponseTest` 8신호 마이그레이션.
