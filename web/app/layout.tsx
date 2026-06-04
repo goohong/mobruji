@@ -5,6 +5,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
 import { BottomNav } from "@/components/nav/BottomNav";
+import { DesktopNav } from "@/components/nav/DesktopNav";
 import { RouteTransition } from "@/components/layout/RouteTransition";
 import { HomeLink } from "@/components/nav/HomeLink";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -116,11 +117,17 @@ export default function RootLayout({
         />
       </head>
       {/*
-        모바일 BottomNav가 fixed로 깔리므로 main 콘텐츠가 가려지지 않도록 body에
-        하단 padding을 둔다. 데스크탑(md:)에선 nav를 숨기므로 padding도 제거.
-        nav 높이(h-14=56px) + safe-area 여유로 pb-20 (= 80px) 사용.
+        모바일 BottomNav(하단 fixed) / 데스크톱 DesktopNav(상단 fixed) 가 본문을 가리지
+        않도록 body 에 뷰포트별 padding 을 둔다.
+         - 모바일: 하단 BottomNav(h-14=56px) + safe-area 여유로 pb-20 (=80px).
+           데스크톱(md:)에선 BottomNav 를 숨기므로 하단 padding 제거(md:pb-0).
+         - 데스크톱: 상단 DesktopNav(h-14=56px) 만큼 md:pt-14. 모바일엔 상단 헤더가
+           없으므로 기본 pt-0 유지.
       */}
-      <body className="min-h-full flex flex-col pb-20 md:pb-0">
+      <body className="min-h-full flex flex-col pb-20 md:pb-0 md:pt-14">
+        {/* 데스크톱 상단 헤더 nav — DOM 상 ThemeToggle 앞에 둬서 동일 z-30 에서
+            ThemeToggle(우상단 floating)이 헤더 위로 그려지게 한다 (closes #1717). */}
+        <DesktopNav />
         <Providers>
           <RouteTransition>{children}</RouteTransition>
         </Providers>
