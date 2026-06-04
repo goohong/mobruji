@@ -118,9 +118,13 @@ export default function RootLayout({
       {/*
         모바일 BottomNav가 fixed로 깔리므로 main 콘텐츠가 가려지지 않도록 body에
         하단 padding을 둔다. 데스크탑(md:)에선 nav를 숨기므로 padding도 제거.
-        nav 높이(h-14=56px) + safe-area 여유로 pb-20 (= 80px) 사용.
+
+        nav 실제 높이 = pt-1(4px) + 탭 h-14(56px) + env(safe-area-inset-bottom).
+        고정 pb-20(80px) 만 두면 home indicator(safe-area ≈ 34px) 기기에서 nav가
+        80px를 넘어 본문·CTA를 가린다 (#1718). safe-area를 padding에 더해
+        80px 버퍼가 항상 nav 위에 남도록 calc 로 보정한다.
       */}
-      <body className="min-h-full flex flex-col pb-20 md:pb-0">
+      <body className="min-h-full flex flex-col pb-[calc(5rem_+_env(safe-area-inset-bottom))] md:pb-0">
         <Providers>
           <RouteTransition>{children}</RouteTransition>
         </Providers>
