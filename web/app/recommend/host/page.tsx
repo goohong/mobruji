@@ -8,9 +8,8 @@
  * 모드 진입은 추천 화면의 CTA 링크로 연결한다(spec §8 Q2 선택지 b — 추천 화면 내 진입을
  * 1차 가설). 이 화면을 거치지 않으면 기존 추천 흐름은 불변(하위호환).
  *
- * be #1599(시퀀스 엔드포인트) 미머지 상태이므로, 시퀀스 호출 실패 시 기존 추천을 단계별로
- * 묶는 client placeholder fallback(lib/sequence.deriveSequenceFallback)으로 병행 동작한다
- * ([[feedback-be-fe-parallel]]).
+ * 시퀀스 응답은 be #1837(`POST /api/v1/recommendations/sequence`)이 단계별 가중으로
+ * 산출해 내려준다 — 호출 실패는 에러 UI 로 노출한다(placeholder fallback 없음).
  */
 
 import { useState } from "react";
@@ -20,9 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import {
   AgeGroup,
-  createRecommendation,
   createSequenceRecommendation,
-  RecommendationCreateRequest,
   SequenceRecommendationRequest,
   SequenceRecommendationResponse,
 } from "@/lib/api/recommendation";
@@ -30,7 +27,6 @@ import {
   readVoiceRange,
   VoiceRangeResponse,
 } from "@/lib/api/voice-range";
-import { deriveSequenceFallback, HOST_PERSONA } from "@/lib/sequence";
 import { midiToCombinedNoteName } from "@/lib/notes";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { useSessionStore } from "@/store/session";
@@ -52,34 +48,6 @@ type HostContentProps = {
   sessionId: string;
 };
 
-/**
- * 시퀀스를 조회한다 — 정식 시퀀스 엔드포인트 우선, 실패 시 기존 추천 기반 client fallback.
- *
- * be #1599 머지 전에는 `createSequenceRecommendation` 이 실패하므로, 일반 추천을 받아
- * 단계별로 묶어 같은 응답 형상으로 돌려준다. BE 가 정식 응답을 내려주면 그 응답을 그대로
- * 쓴다(이후 fallback 미발화).
- */
-async function fetchSequence(
-  request: SequenceRecommendationRequest,
-): Promise<SequenceRecommendationResponse> {
-  try {
-    return await createSequenceRecommendation(request);
-  } catch {
-    const fallbackRequest: RecommendationCreateRequest = {
-      sessionId: request.sessionId,
-      voiceRangeLow: request.voiceRangeLow,
-      voiceRangeHigh: request.voiceRangeHigh,
-    };
-    // 좌중 연령대 중 첫 값을 단일 추천 generationFit 입력으로 흘려보내 picker 가 fallback
-    // 에서도 결과에 영향을 준다(정식 엔드포인트는 분포 전체를 받는다).
-    if (request.ageGroups && request.ageGroups.length > 0) {
-      fallbackRequest.ageGroup = request.ageGroups[0];
-    }
-    const base = await createRecommendation(fallbackRequest);
-    return deriveSequenceFallback(base);
-  }
-}
-
 function HostContent({ sessionId }: HostContentProps) {
   const voiceRangeQuery = useQuery<VoiceRangeResponse, Error>({
     queryKey: ["voice-range", sessionId],
@@ -88,9 +56,9 @@ function HostContent({ sessionId }: HostContentProps) {
 
   const voiceRangeIdFromStore = useSessionStore((state) => state.voiceRangeId);
 
-  // 좌중 연령대 분포 — 영속하지 않는 화면 로컬 상태. 값이 바뀌면 queryKey 가 바뀌어
-  // 시퀀스가 다시 산출된다.
-  const [crowdAgeGroups, setCrowdAgeGroups] = useState<AgeGroup[]>([]);
+  // 좌중 대표 연령대 — 영속하지 않는 화면 로컬 상태. 값이 바뀌면 queryKey 가 바뀌어
+  // 시퀀스가 다시 산출된다. BE 는 단일 대표 ageGroup 을 받는다(be #1837).
+  const [crowdAgeGroup, setCrowdAgeGroup] = useState<AgeGroup | null>(null);
 
   const isVoiceRangeReady =
     voiceRangeQuery.isSuccess &&
@@ -105,7 +73,7 @@ function HostContent({ sessionId }: HostContentProps) {
       "recommendations-sequence",
       sessionId,
       voiceRangeIdFromStore,
-      crowdAgeGroups,
+      crowdAgeGroup,
     ],
     enabled:
       isVoiceRangeReady &&
@@ -116,12 +84,11 @@ function HostContent({ sessionId }: HostContentProps) {
         sessionId: voiceRangeSessionId!,
         voiceRangeLow: voiceRangeLow!,
         voiceRangeHigh: voiceRangeHigh!,
-        persona: HOST_PERSONA,
       };
-      if (crowdAgeGroups.length > 0) {
-        request.ageGroups = crowdAgeGroups;
+      if (crowdAgeGroup !== null) {
+        request.ageGroup = crowdAgeGroup;
       }
-      return fetchSequence(request);
+      return createSequenceRecommendation(request);
     },
   });
 
@@ -188,8 +155,8 @@ function HostContent({ sessionId }: HostContentProps) {
         </header>
 
         <CrowdAgeGroupPicker
-          selected={crowdAgeGroups}
-          onChange={setCrowdAgeGroups}
+          selected={crowdAgeGroup}
+          onChange={setCrowdAgeGroup}
         />
 
         <SequenceFeed query={sequenceQuery} userVoiceRange={userRange} />
@@ -235,7 +202,7 @@ function SequenceFeed({ query, userVoiceRange }: SequenceFeedProps) {
   }
 
   const totalSongs = data.stages.reduce(
-    (sum, bundle) => sum + bundle.songs.length,
+    (sum, bundle) => sum + bundle.recommendations.length,
     0,
   );
   if (totalSongs === 0) {

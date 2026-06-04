@@ -78,6 +78,14 @@ export type MetadataSource =
   | "INFERRED";
 
 /**
+ * 보컬 성별.
+ *
+ * BE `com.mobruji.song.domain.VocalGender` 와 1:1 매칭. P-D 시퀀스 요청의 선택 성별 필터
+ * 입력으로 쓰이며, 미입력(null/생략)이면 성별 신호 기여 0 으로 처리된다(하위호환).
+ */
+export type VocalGender = "MALE" | "FEMALE" | "MIXED";
+
+/**
  * 추천 의도 페르소나 식별자.
  *
  * BE `com.mobruji.recommendation.domain.RecommendationPersona` 와 1:1 매칭
@@ -244,45 +252,62 @@ export function createRecommendation(
  * P-D 모임 사회자 시퀀스 추천의 자리 단계 식별자.
  *
  * 단일 추천과 달리 P-D 는 "분위기 흐름"(워밍업 → 고조 → 마무리)을 단계별 곡 묶음으로
- * 산출한다(persona-expansion-social-emotional.md §2 P-D / §5-1). BE 시퀀스 단계 enum 과
- * 1:1 UPPER 매칭을 가정한다(be #1599, spec §8 Q1 결정 후 확정).
+ * 산출한다(persona-expansion-social-emotional.md §2 P-D / §5-1). BE `SequenceStage` enum
+ * (be #1837, `POST /api/v1/recommendations/sequence`)과 1:1 UPPER 매칭한다.
  *
- * - `INTRO` 도입 — 누구나 아는 곡으로 자리를 연다.
- * - `PEAK` 고조 — 트렌딩/신나는 곡으로 분위기를 끌어올린다.
- * - `FINALE` 마무리 — 다 같이 부르는 곡으로 흐름을 닫는다.
+ * - `WARMUP` 워밍업 — 다 같이 편하게 자리를 연다(분위기 `CALM`).
+ * - `PEAK` 고조 — 신나는 곡으로 분위기를 끌어올린다(분위기 `UPBEAT`).
+ * - `CLOSING` 마무리 — 감성적으로 흐름을 닫는다(분위기 `EMOTIONAL`).
  */
-export type SequenceStage = "INTRO" | "PEAK" | "FINALE";
+export type SequenceStage = "WARMUP" | "PEAK" | "CLOSING";
 
-/** 한 자리 단계의 곡 묶음. 단계별로 다른 가중 프리셋으로 산출된다. */
+/**
+ * 한 자리 단계의 추천 묶음. BE `SequenceRecommendationResponse.StageResponse`(be #1837)와
+ * 1:1 매칭한다.
+ *
+ * 단계별로 다른 분위기(`mood`) 입력으로 산출되며, `recommendations` 는 단일 추천과 동일한
+ * `RecommendedSongResponse` 형상이라 결과 카드 렌더를 재사용한다. `requestId` 는 단계별
+ * 고유(Long)라 단계별 곡 피드백·재조회를 단일 추천과 같은 경로로 처리할 수 있다.
+ * `relaxed`/`relaxedFilters` 는 풀 소진 시 BE 가 일부 필터를 완화해 단계를 채웠음을 알린다.
+ */
 export type SequenceStageBundle = {
   stage: SequenceStage;
-  songs: RecommendedSongResponse[];
+  mood: Mood;
+  stageReason: string;
+  requestId: number;
+  relaxed: boolean;
+  relaxedFilters: string[];
+  recommendations: RecommendedSongResponse[];
 };
 
 /**
- * P-D 시퀀스 추천 요청.
+ * P-D 시퀀스 추천 요청. BE `SequenceRecommendationCreateRequest`(be #1837)와 1:1 매칭한다.
  *
- * 단일 음역 입력은 기존 추천과 동일하되, **인원 연령대 분포**(`ageGroups`)를 배열로 받아
- * 좌중 구성을 반영한다(spec §2 P-D 입력 신호). `persona` 는 `P-D` 로 고정 전달한다.
- * 미지정 필드는 생략한다(BE 결정성 seed 입력 정합, 하위호환).
+ * `voiceRangeLow`/`voiceRangeHigh` 는 좌중 공통·평균 음역 힌트(필수) — 단일 추천과 같은
+ * 음역 적합도 산식을 재사용하며 중앙 편향으로 한쪽 극단 쏠림을 막는다(§4 비-과편향 가드).
+ * `ageGroup`(좌중 대표 연령대)·`gender`(성별 필터)·`songsPerStage`(단계별 곡 수 상한)는
+ * 모두 선택이며, 미지정 필드는 생략한다(BE 결정성 seed 입력 정합, 하위호환).
  */
 export type SequenceRecommendationRequest = {
   sessionId: string;
   voiceRangeLow: number;
   voiceRangeHigh: number;
-  /** 좌중 연령대 분포(선택, 다중). spec §2 P-D 입력 신호 — generationFit 분포 가중. */
-  ageGroups?: AgeGroup[];
-  persona?: RecommendationPersona | null;
+  /** 좌중 대표 연령대(선택). spec §2 P-D 입력 신호 — generationFit 대표값. */
+  ageGroup?: AgeGroup | null;
+  /** 좌중 성별 필터(선택). 미입력 시 성별 신호 기여 0(하위호환). */
+  gender?: VocalGender | null;
+  /** 단계별 노출 곡 수 상한(선택, 1~50). 미입력 시 단일 추천 기본 개수. */
+  songsPerStage?: number | null;
 };
 
 /**
- * P-D 시퀀스 추천 응답.
+ * P-D 시퀀스 추천 응답. BE `SequenceRecommendationResponse`(be #1837)와 1:1 매칭한다.
  *
- * 단일 추천 envelope 와 달리 단계별 곡 묶음(`stages`)을 돌려준다. `persona` 는 이 시퀀스를
- * 산출한 페르소나 식별자(`P-D`).
+ * 단일 추천 envelope 와 달리 단계별 곡 묶음(`stages`)을 자리 흐름(워밍업 → 고조 → 마무리)
+ * 순서대로 돌려준다. `persona` 는 이 시퀀스를 산출한 페르소나 식별자(`P-D`). 단일 추천과 달리
+ * top-level `requestId` 는 없고 각 단계가 고유 `requestId` 를 갖는다.
  */
 export type SequenceRecommendationResponse = {
-  requestId: string;
   persona: RecommendationPersona;
   stages: SequenceStageBundle[];
 };
@@ -290,10 +315,9 @@ export type SequenceRecommendationResponse = {
 /**
  * P-D 모임 사회자 시퀀스 추천 생성.
  *
- * 엔드포인트 형상은 spec §5-4 후보(신규 `POST /api/v1/recommendations/sequence`, §8 Q1
- * 선택지 b)를 1차 가설로 둔다. be #1599 머지 전에는 이 호출이 실패할 수 있으며, 호출 측
- * (lib/sequence.deriveSequenceFallback)이 기존 추천을 단계별로 묶는 client placeholder
- * fallback 으로 병행 동작한다([[feedback-be-fe-parallel]]).
+ * 신규 엔드포인트 `POST /api/v1/recommendations/sequence`(be #1837, spec §8 Q1 선택지 b —
+ * 응답 형상이 단일 추천과 달라 별도 엔드포인트). 워밍업 → 고조 → 마무리 3단계 묶음을
+ * 단계별 다른 분위기 입력으로 산출한 응답을 그대로 돌려준다.
  */
 export function createSequenceRecommendation(
   request: SequenceRecommendationRequest,

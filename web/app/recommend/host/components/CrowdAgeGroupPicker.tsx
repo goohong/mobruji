@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * P-D 모임 사회자 모드의 좌중 연령대 분포 입력 (이슈 #1601, spec §2 P-D 입력 신호).
+ * P-D 모임 사회자 모드의 좌중 대표 연령대 입력 (이슈 #1601, spec §2 P-D 입력 신호).
  *
- * 단일 추천(P-C)의 나이대 칩은 "나 한 명"의 세대를 고르는 단일 선택이지만, P-D 는
- * **여러 명이 섞인 자리**라 연령대를 다중 선택한다 — 좌중 구성을 시퀀스 가중(generationFit
- * 분포)에 반영한다. 미선택이면 연령대 신호 없이 동작(하위호환).
+ * be #1837 시퀀스 엔드포인트는 좌중 연령대를 **단일 대표값**(`ageGroup`)으로 받아
+ * generationFit 분포 가중에 반영한다. 따라서 자리의 대표 연령대를 하나 고르는 단일 선택이며,
+ * 같은 칩을 다시 누르면 해제된다. 미선택이면 연령대 신호 없이 동작(하위호환).
  */
 
 import type { AgeGroup } from "@/lib/api/recommendation";
@@ -21,8 +21,8 @@ const AGE_GROUP_OPTIONS: ReadonlyArray<{ value: AgeGroup; label: string }> = [
 ];
 
 type CrowdAgeGroupPickerProps = {
-  selected: AgeGroup[];
-  onChange: (next: AgeGroup[]) => void;
+  selected: AgeGroup | null;
+  onChange: (next: AgeGroup | null) => void;
 };
 
 export function CrowdAgeGroupPicker({
@@ -30,11 +30,7 @@ export function CrowdAgeGroupPicker({
   onChange,
 }: CrowdAgeGroupPickerProps) {
   const toggle = (value: AgeGroup) => {
-    if (selected.includes(value)) {
-      onChange(selected.filter((item) => item !== value));
-    } else {
-      onChange([...selected, value]);
-    }
+    onChange(selected === value ? null : value);
   };
 
   return (
@@ -44,12 +40,12 @@ export function CrowdAgeGroupPicker({
           인원 연령대
         </span>
         <span className="text-xs text-[var(--text-caption)]">
-          자리에 있는 연령대를 모두 골라보세요 (선택)
+          자리의 대표 연령대를 골라보세요 (선택)
         </span>
       </div>
       <div className="flex flex-wrap gap-2">
         {AGE_GROUP_OPTIONS.map(({ value, label }) => {
-          const active = selected.includes(value);
+          const active = selected === value;
           return (
             <button
               key={value}
