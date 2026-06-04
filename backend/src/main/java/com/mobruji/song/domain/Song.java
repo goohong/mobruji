@@ -393,6 +393,42 @@ public class Song {
     }
 
     /**
+     * keyOriginal/genre 메타 추정 음역대를 적용한다 — 오디오 자체분석 인프라 부재(#1778) 동안의 interim 경로.
+     * {@link #backfillFromAudioAnalysis} 가 "신뢰도 충족 시 덮어쓰기" 라면, 본 메서드는 "음역대 미보유 곡에만 채움".
+     * 다음 정책:
+     *
+     * <ul>
+     * <li>{@code lowMidi}/{@code highMidi} 중 하나라도 이미 채워져 있으면 no-op({@code false} 반환) — 수기/외부/
+     * 자체분석으로 채워진 값을 추정값이 덮지 않는다 (자체분석 권위 우선).</li>
+     * <li>{@code !estimate.isVocalRangePlausible()} → no-op({@code false} 반환) — 합리성 가드(#1737).</li>
+     * <li>적용 시 lowMidi/highMidi 를 추정값으로 채우고 {@link Difficulty} 를 계산, {@link MetadataSource}
+     * 를 {@link MetadataSource#ESTIMATED} 로, {@code metadataConfidence} 를 추정 신뢰도(낮음)로 저장한다 —
+     * 추후 {@link #backfillFromAudioAnalysis} 가 자체분석 임계(기본 0.6)를 통과하면 그대로 덮어쓴다.</li>
+     * </ul>
+     *
+     * <p>본 메서드는 추천 알고리즘(점수 계산) 입력 데이터만 바꿀 뿐 알고리즘 코드 자체에는 영향이 없다 — 결정성 회귀 없음.
+     *
+     * @param estimate 메타 추정 음역 (필수)
+     * @return 실제로 적용됐는지 여부
+     */
+    public boolean applyEstimatedVocalRange(final VocalRangeEstimate estimate) {
+        Objects.requireNonNull(estimate, "estimate must not be null");
+        if (this.lowMidi != null || this.highMidi != null) {
+            return false;
+        }
+        if (!estimate.isVocalRangePlausible()) {
+            return false;
+        }
+        this.lowMidi = estimate.lowMidi();
+        this.highMidi = estimate.highMidi();
+        this.difficulty = deriveDifficulty(this.lowMidi, this.highMidi);
+        this.metadataSource = MetadataSource.ESTIMATED;
+        this.metadataConfidence = estimate.confidence();
+        this.updatedAt = LocalDateTime.now();
+        return true;
+    }
+
+    /**
      * MusicBrainz recording 매칭 결과를 적용한다 — spec {@code musicbrainz-integration.md} §5-4.
      *
      * <p>멱등성 — 이미 {@code mbId} 가 채워진 곡은 no-op({@code false} 반환)으로 재실행 시 중복 매칭/덮어쓰기를
