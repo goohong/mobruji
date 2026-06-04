@@ -115,7 +115,7 @@ export default function VoiceRangePage() {
       <div className="w-full max-w-md flex flex-col gap-8">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Step 1
+            1단계
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             내 음역대를 알려주세요

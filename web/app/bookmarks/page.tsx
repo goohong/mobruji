@@ -96,10 +96,10 @@ function BookmarksContent({ songs }: BookmarksContentProps) {
    */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl flex flex-col gap-6">
+      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Bookmarks
+            북마크
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             북마크한 곡
@@ -137,7 +137,14 @@ function BookmarkSongListWithModal({ songs }: BookmarkSongListWithModalProps) {
   const [selected, setSelected] = useState<SongResponse | null>(null);
   return (
     <>
-      <ul aria-label="북마크한 곡 목록" className="flex flex-col gap-2">
+      {/*
+       * 와이드 뷰포트 2컬럼 그리드 (closes #1717). items-start 로 카드가 행 높이에 맞춰
+       * 늘어나지 않게 해 본문↔footer void 를 제거한다. 모바일은 단일 컬럼.
+       */}
+      <ul
+        aria-label="북마크한 곡 목록"
+        className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2"
+      >
         {songs.map((song, index) => (
           <SongCard
             key={song.id}
@@ -166,12 +173,13 @@ function LoadingBookmarks() {
       aria-label="북마크한 곡 불러오는 중"
       className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]"
     >
-      <div className="w-full max-w-2xl flex flex-col gap-6">
+      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <Skeleton className="h-3 w-20" />
           <Skeleton className="h-8 w-40" />
         </header>
-        <ul className="flex flex-col gap-2">
+        {/* 실제 결과 그리드(lg:grid-cols-2)와 동일 배치로 로딩 → 결과 레이아웃 점프 제거. */}
+        <ul className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
           {Array.from({ length: 4 }).map((_, rowIndex) => (
             <li key={rowIndex}>
               <Skeleton className="h-20 w-full rounded-[var(--radius-lg)]" />

@@ -35,7 +35,11 @@ import {
   computeVoiceFitRatio,
   type UserVoiceRange,
 } from "@/lib/scoreBreakdown";
-import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
+import {
+  deriveDifficulty,
+  difficultyLabel,
+  type Difficulty,
+} from "@/lib/difficulty";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useSessionStore } from "@/store/session";
 import { Chip, Input } from "@/components/ui";
@@ -46,9 +50,9 @@ import { SongDetailContent } from "../recommend/components/SongDetailContent";
 
 const DEBOUNCE_MS = 300;
 const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
-  { key: "EASY", label: "Easy" },
-  { key: "NORMAL", label: "Normal" },
-  { key: "HARD", label: "Hard" },
+  { key: "EASY", label: difficultyLabel("EASY") },
+  { key: "NORMAL", label: difficultyLabel("NORMAL") },
+  { key: "HARD", label: difficultyLabel("HARD") },
 ];
 
 /*
@@ -91,10 +95,10 @@ export default function SongSearchPage() {
 function SearchPageFallback() {
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl flex flex-col gap-6">
+      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Browse
+            둘러보기
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
@@ -242,10 +246,10 @@ function SongSearchPageInner() {
 
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl flex flex-col gap-6">
+      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            Browse
+            둘러보기
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
@@ -492,7 +496,15 @@ function SongSearchResultList({
   const [selected, setSelected] = useState<SongResponse | null>(null);
   return (
     <>
-      <ul aria-label="검색 결과" className="flex flex-col gap-3">
+      {/*
+       * 와이드 뷰포트(≥1024px) 2컬럼 그리드 (closes #1717). items-start 로 같은 행의
+       * 카드가 균일 높이로 늘어나며 본문↔footer 사이 void 가 생기는 것을 막는다 —
+       * 카드 높이는 각자 콘텐츠에 맞춘다. 모바일은 단일 컬럼 유지.
+       */}
+      <ul
+        aria-label="검색 결과"
+        className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2"
+      >
         {songs.map((song, index) => (
           <SongCard
             key={song.id}
