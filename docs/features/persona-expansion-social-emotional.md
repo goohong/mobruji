@@ -187,11 +187,12 @@ evidence: `06-domain-model.md §4-1`/§5-2 + 각 기능 spec status 확인(2026-
 | # | 질문 | 선택지 | 담당/기한 |
 |---|---|---|---|
 | Q1 | P-D 시퀀스 추천 — 엔드포인트 형상 | (a) 기존 `/recommendations` 확장(단계 파라미터) / (b) 신규 `/recommendations/sequence` | @goohong / P-D 구현 spec |
-| Q2 | 페르소나 모드 진입 — 온보딩 `PersonaEntryPath` 통합 vs 추천 화면 내 모드 선택 | (a) `PersonaEntryPath` 확장 / (b) 추천 화면 모드 토글 / (c) 혼합 | @goohong / fe 구현 spec |
+| Q2 | 페르소나 모드 진입 — 온보딩 `PersonaEntryPath` 통합 vs 추천 화면 내 모드 선택 | ~~(a) `PersonaEntryPath` 확장 / (b) 추천 화면 모드 토글 / (c) 혼합~~ → **(c) 혼합 채택**(추천 화면 내 진입 유지 + deliberate 시트 surface, 인라인 경쟁 토글 아님). 결정 SoT = `recommend-intent-mode-ui-separation.md §5-3`. 온보딩 `PersonaEntryPath` 통합(a)은 별 트랙. | @goohong / **closed 2026-06-05** |
 | Q3 | P-G 다중 음역 입력 계약 — 추천 결정성·정규화 영향 | (a) 신규 엔드포인트 / (b) 요청 모델에 음역 배열 / (c) ADR 필요 | @goohong / P-G 데이터 확보 후 |
 | Q4 | P-F 킬링파트 메타 출처 | (a) self-analysis 파이프라인 자동(#1490) / (b) 수기 큐레이션 / (c) 혼합 | @goohong / P-F 데이터 ADR |
 | Q5 | P-E '안전곡' 의 '안 망한다' 정의 — 난이도+템포+대중성 외 추가 신호 필요 여부 | (a) 3신호로 충분 / (b) 추가 신호(예: 멜로디 단조성) — 데이터 부재로 보류 | @goohong / P-E 구현 spec |
 
 ## 9) 결정 로그
 
+- **2026-06-05**: §8 Q2(페르소나 모드 진입) **close = (c) 혼합** — 추천 결과 페이지 내 진입을 유지하되, 인라인 경쟁 토글이 아니라 deliberate 2-step 시트 surface 로 분리. 근거: 의도 모드 전환은 전용 엔드포인트 서버 재요청(무거운 모드 전환)이라 전용 surface 가 데이터 성격과 정합 + #1712 가 보존한 "결과 본 뒤 즉석 전환" 가치 유지. 결정 SoT = `recommend-intent-mode-ui-separation.md`(§5-2 데이터 의존도 / §5-3 방향 비교). 온보딩 `PersonaEntryPath` 통합(a)은 별 트랙으로 잔존.
 - **2026-06-03**: 초안 작성(status=draft). 출처: 이슈 #1591(사용자 채택 2026-06-03). 제품 북극성 페르소나 3종(P-A/B/C, 로드맵 SoT)이 모두 개인·실용 축임을 진단하고, 사회(P-D 사회자·P-G 듀엣)·감정(P-E 안전곡·P-F 과시) 축 4종을 추가. **신규 알고리즘이 아니라 기존 `ScoreBreakdown` 신호·`TrendingSong`/`SongAnalysisProfile` read-model 의 페르소나별 가중 프리셋 재조합** 원칙 명시. 데이터 가용성 evidence(난이도/분위기/트렌딩 = 확보, 킬링파트/듀엣 = 미확보) 기반으로 **P-D/P-E 1차(기존 데이터) / P-F/P-G 2차(데이터 선행)** 단계 분리. `06-domain-model.md §4-1` 에 `RecommendationPersona` 용어 등재 동반. §7 오픈 이슈(06-domain-model)는 canonical 영역이라 미편집.
