@@ -107,6 +107,7 @@ ADR 본문이 아닌 **부속 운영 가이드**(예: 1회성 마이그레이션
 | [0027](0027-infra-dedicated-cycle-evaluation.md) | infra 전용 사이클 도입 평가 — 상시 워크트리 거부 + 온디맨드 infra 역할 채택 |
 | [0028](0028-dev-https-tls-strategy.md) | dev 배포 HTTPS 전환 전략 — nip.io wildcard DNS + Let's Encrypt |
 | [0029](0029-album-cover-art-source.md) | 앨범 커버 아트 출처 — iTunes Search 1차 + Cover Art Archive 폴백, Spotify 미채택 (proposed) |
+| [0030](0030-orchestrator-learnings-adoption-evaluation.md) | claude-code-orchestrator 학습점 3건 도입 평가 — 리서치 자산화 채택 · 패턴 승격 부분 · hook 능동 제안 보류 |
 
 > 번호 0020 은 비어 있음 (스킵). 0021 이 직후 번호.
 
