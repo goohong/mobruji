@@ -30,8 +30,12 @@ from typing import Optional
 
 LOG = logging.getLogger("analyze")
 
-TOOLING_VERSION = "analyze-py-0.2.0"
+TOOLING_VERSION = "analyze-py-0.3.0"
 DEFAULT_CLIP_SECONDS = 45
+# ytsearchN 후보 수 (#1863). 단일 결과(ytsearch1)가 'Video unavailable' 이면 곡 전체가
+# 실패하던 문제를 완화한다. 메타(제목/아티스트) 분석 시 N개 후보를 받아 다운로드 가능한
+# 첫 영상을 쓴다. 실제 가용성은 검색 메타에 드러나지 않아 다운로드 시점에 가린다.
+YTSEARCH_CANDIDATE_LIMIT = 10
 PITCH_LOW_PERCENTILE = 5.0
 PITCH_HIGH_PERCENTILE = 95.0
 
@@ -260,10 +264,74 @@ def _download_youtube_audio(
     return audio
 
 
-def _build_youtube_search_url(title: str, artist: Optional[str]) -> str:
-    """ytsearch 쿼리로 변환 (yt-dlp 내부 검색 핸들러)."""
-    query = title if not artist else f"{artist} {title}"
-    return f"ytsearch1:{query}"
+def _build_search_query(title: str, artist: Optional[str]) -> str:
+    """검색 쿼리 문자열(아티스트가 있으면 '아티스트 제목')."""
+    return title if not artist else f"{artist} {title}"
+
+
+def _search_candidate_video_urls(
+    query: str, limit: int = YTSEARCH_CANDIDATE_LIMIT
+) -> list[str]:
+    """ytsearchN 으로 후보 영상 watch URL 목록을 얻는다(audio 다운로드 없음, #1863).
+
+    단일 결과(ytsearch1)가 'Video unavailable' 이면 곡 전체가 실패하던 문제를 완화한다.
+    extract_flat 로 검색만 빠르게 수행하고(가용성은 검색 메타에 드러나지 않는다), 실제
+    다운로드 가능 여부는 후속 _download_first_available 의 다운로드 시도에서 가린다.
+    player_client 폴백 체인 + PO token + 쿠키(있으면)로 검색을 견고화한다(harden_ydl_opts).
+    """
+    base_opts = {
+        "quiet": True,
+        "noprogress": True,
+        "skip_download": True,
+        "extract_flat": True,
+    }
+    info = run_with_client_chain(
+        base_opts,
+        lambda ydl: ydl.extract_info(f"ytsearch{limit}:{query}", download=False),
+    )
+    entries = (info or {}).get("entries") or []
+    urls: list[str] = []
+    for entry in entries:
+        if not entry:
+            continue
+        video_id = entry.get("id")
+        if video_id:
+            urls.append(f"https://www.youtube.com/watch?v={video_id}")
+        elif entry.get("webpage_url"):
+            urls.append(entry["webpage_url"])
+    return urls
+
+
+def _cleanup_partial_clips(out_dir: Path) -> None:
+    """실패한 후보가 남긴 부분 다운로드 파일을 정리해 다음 후보 추출과 섞이지 않게 한다."""
+    for leftover in out_dir.glob("clip.*"):
+        try:
+            leftover.unlink()
+        except OSError:
+            pass
+
+
+def _download_first_available(
+    candidate_urls: list[str], out_dir: Path, clip_seconds: int = DEFAULT_CLIP_SECONDS
+) -> Path:
+    """후보 URL 을 순회하며 첫 다운로드 가능 영상을 mp3 clip 으로 추출한다(#1863).
+
+    'Video unavailable' 등 DownloadError 로 막힌 후보는 건너뛰고 다음 후보를 시도한다.
+    모든 후보가 실패하면 마지막 예외를 재발생하고, 후보가 비면 RuntimeError 를 던진다.
+    """
+    import yt_dlp  # type: ignore
+
+    last_error: Optional[Exception] = None
+    for url in candidate_urls:
+        try:
+            return _download_youtube_audio(url, out_dir, clip_seconds)
+        except yt_dlp.utils.DownloadError as error:  # 후보 단위 실패 → 다음 후보
+            last_error = error
+            LOG.warning("후보 영상 추출 실패 — 다음 후보 시도: %s", error)
+            _cleanup_partial_clips(out_dir)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("ytsearch 결과가 비어 다운로드 가능한 영상이 없습니다")
 
 
 def _separate_vocals(audio_path: Path, out_dir: Path) -> Path:
@@ -346,19 +414,24 @@ def run_analysis(
     if not youtube_url and not song_title:
         raise ValueError("--youtube-url 또는 --song-title 중 하나는 필수")
 
-    target_url = youtube_url or _build_youtube_search_url(song_title or "", artist)
     method = analysis_method_label(vocal_separation)
+    search_query = None if youtube_url else _build_search_query(song_title or "", artist)
+    log_target = youtube_url or f"ytsearch{YTSEARCH_CANDIDATE_LIMIT}:{search_query}"
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="audio-analysis-"))
     started = time.time()
     LOG.info(
         "analysis start url=%s method=%s tmp=%s",
-        mask_url(target_url),
+        mask_url(log_target),
         method,
         tmp_dir,
     )
     try:
-        audio_path = _download_youtube_audio(target_url, tmp_dir, clip_seconds)
+        if youtube_url:
+            audio_path = _download_youtube_audio(youtube_url, tmp_dir, clip_seconds)
+        else:
+            candidate_urls = _search_candidate_video_urls(search_query)
+            audio_path = _download_first_available(candidate_urls, tmp_dir, clip_seconds)
         pitch_source = audio_path
         if vocal_separation:
             pitch_source = _separate_vocals(audio_path, tmp_dir / "stems")
