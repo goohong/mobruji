@@ -472,6 +472,47 @@ describe("RecommendPage", () => {
     expect(screen.getByTestId("refine-active-count")).toHaveTextContent("3");
   });
 
+  // ---------- 첫 페이지 stale 제외 셋 회귀 (closes #1855) ----------
+  it("localStorage 에 영속된 stale excludedSongIds 가 있어도 첫 추천은 빈 제외 셋으로 요청해 곡을 받는다", async () => {
+    // 로그인+온보딩 후 새 추천 진입 시, 이전 세션의 누적 excludedSongIds 가
+    // localStorage 에 살아남아 첫 페이지에 실려 가면 BE 0건 fallback 이 막혀
+    // "추천 0곡" 회귀가 발생했다(#1855). 첫 페이지는 항상 빈 셋으로 요청해야 한다.
+    sessionMock.set({
+      sessionId: "sess-stale",
+      voiceRangeId: 77,
+      excludedSongIds: [11, 22, 33, 44],
+    });
+
+    readVoiceRangeMock.mockResolvedValue({
+      id: 77,
+      sessionId: "sess-stale",
+      lowestNoteMidi: 48,
+      highestNoteMidi: 69,
+      sourceMethod: "OCTAVE_PICK",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+    createRecommendationMock.mockResolvedValueOnce(
+      buildResponseWithSongIds(300, [1, 2]),
+    );
+
+    renderWithQueryClient(<RecommendPage />);
+
+    await waitFor(() => {
+      expect(createRecommendationMock).toHaveBeenCalledWith({
+        sessionId: "sess-stale",
+        voiceRangeLow: 48,
+        voiceRangeHigh: 69,
+        excludeSongIds: [],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("곡-1")).toBeInTheDocument();
+    });
+    expect(screen.getByText("곡-2")).toBeInTheDocument();
+  });
+
   // ---------- 결과 정렬 기준 선택 (closes #1765) ----------
   it("정렬 칩(음역 적합순/분위기 적합순) 선택 시 결과 순서와 기준 캡션이 바뀐다", async () => {
     const user = userEvent.setup();

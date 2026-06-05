@@ -292,13 +292,20 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       selectedPersona !== SHOWOFF_SONG_PERSONA &&
       selectedPersona !== DUET_SONG_PERSONA,
     initialPageParam: 0,
-    queryFn: () => {
+    queryFn: ({ pageParam }) => {
       const request: RecommendationCreateRequest = {
         sessionId: voiceRangeSessionId!,
         voiceRangeLow: voiceRangeLow!,
         voiceRangeHigh: voiceRangeHigh!,
-        // 호출 시점의 최신 누적 리스트를 BE 로 전달.
-        excludeSongIds: useSessionStore.getState().excludedSongIds,
+        // 첫 페이지(pageParam===0)는 항상 빈 제외 셋으로 요청한다. localStorage 에
+        // 영속된 누적 excludedSongIds 가 SPA 네비게이션/로그인을 넘어 살아남아
+        // 새 추천 진입(온보딩 직후 첫 마운트)에서 stale 제외 셋을 실어 보내면,
+        // BE 단일추천 엔드포인트는 excludeSongIds 가 비어 있을 때만 0건 fallback 을
+        // 적용하므로(RecommendationService#create) 작은 음역대 풀이 stale 셋에
+        // 덮여 첫 페이지가 비고 "추천 0곡" 회귀가 발생한다(#1855). 후속 페이지는
+        // 페이지네이션을 위해 누적 셋을 그대로 전달한다.
+        excludeSongIds:
+          pageParam === 0 ? [] : useSessionStore.getState().excludedSongIds,
       };
       // 미선택(null)이면 필드를 생략해 기존 호출 형태/하위호환을 유지한다.
       if (selectedMood !== null) {
