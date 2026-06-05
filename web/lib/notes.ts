@@ -6,6 +6,15 @@
  * - 음역대 입력 페이지에서 사용자에게 "낮은 음 / 높은 음"을 음표명으로 보여주기 위함.
  * - 한국어 음명 병기 (이슈 #318 A안) — 일반 사용자가 `D3/E2` 같은 SPN을
  *   직관적으로 이해 못한다는 검수 피드백 반영. SPN은 학습용/정확도 보조.
+ *
+ * 한국어 음명은 **노래방/가창 커뮤니티 통념 옥타브**로 표기한다 (이슈 #1856).
+ * SPN 옥타브 숫자(C4=middle C=옥타브 4)를 그대로 한글에 붙이면 — "레5", "미3" —
+ * 한국 보컬 통념의 "몇 옥타브 도/레" 카운팅과 어긋나 사용자가 혼란을 겪었다.
+ * 근거(나무위키 옥타브·3옥타브, namu.wiki): 한국 통념의 **1옥타브 도 = C3(SPN)**,
+ * 3옥타브(도~시) = SPN C5~B5. 따라서 한국 옥타브 = SPN 옥타브 − 2.
+ * 대표 앵커: 2옥타브 라 = A4(남성 평균 고음), 3옥타브 도 = C5(3옥도의 벽),
+ * 3옥타브 레 = D5(여성 기준 고음). 표기는 옥타브를 앞세운 "2옥라"/"3옥도" 형식.
+ * SPN(영문 `C4`)은 `midiToNoteName` 으로 별도 유지 — 정확도/학습용 기술 표기.
  */
 
 const PITCH_CLASSES = [
@@ -48,6 +57,14 @@ const KOREAN_PITCH_CLASSES = [
 
 export const MIN_MIDI = 12; // C0
 export const MAX_MIDI = 119; // B8
+
+/**
+ * 한국 노래방/가창 커뮤니티 통념 옥타브 = SPN 옥타브 − 2 (이슈 #1856).
+ *
+ * 통념의 1옥타브 도 = C3(SPN 옥타브 3), 3옥타브 = SPN C5~B5 → 오프셋 2.
+ * 근거: namu.wiki 옥타브/3옥타브 문서. 한글 음명에만 적용하고 SPN(영문)은 무관.
+ */
+export const KOREAN_VOCAL_OCTAVE_OFFSET = 2;
 
 /**
  * 비유한(NaN/Infinity) MIDI 입력에 대한 placeholder (이슈 #757).
@@ -93,10 +110,11 @@ export function midiToNoteName(
 }
 
 /**
- * MIDI 정수를 한국어 음명 + 옥타브 숫자로 변환 (이슈 #318).
+ * MIDI 정수를 한국 보컬 통념 옥타브 + 한국어 음명으로 변환 (이슈 #318·#1856).
  *
- * 예: 60 → `"도4"`, 61 → `"도♯4"`, 69 → `"라4"`.
- * 옥타브 숫자는 SPN과 동일 규칙(C0=옥타브 0, C4=middle C=옥타브 4).
+ * 예: 60 → `"2옥도"`(middle C), 69 → `"2옥라"`, 72 → `"3옥도"`, 74 → `"3옥레"`.
+ * 옥타브를 앞세운 "N옥<음명>" 형식 — 노래방/가창 커뮤니티 통념 표기.
+ * 옥타브 숫자 = SPN 옥타브 − `KOREAN_VOCAL_OCTAVE_OFFSET`(=2). 1옥타브 도 = C3.
  *
  * 비유한 입력은 `INVALID_MIDI_PLACEHOLDER` 를 반환한다 (이슈 #757).
  * `options.a11yFallback` 을 전달하면 aria-label 등 a11y 컨텍스트에서 의미 있는
@@ -110,14 +128,15 @@ export function midiToKoreanNoteName(
     return options?.a11yFallback ?? INVALID_MIDI_PLACEHOLDER;
   }
   const pitchClass = KOREAN_PITCH_CLASSES[((midi % 12) + 12) % 12];
-  const octave = Math.floor(midi / 12) - 1;
-  return `${pitchClass}${octave}`;
+  const octave = Math.floor(midi / 12) - 1 - KOREAN_VOCAL_OCTAVE_OFFSET;
+  return `${octave}옥${pitchClass}`;
 }
 
 /**
- * MIDI 정수를 "한국어 (SPN)" 병기 형식으로 변환 (이슈 #318 A안).
+ * MIDI 정수를 "한국어 (SPN)" 병기 형식으로 변환 (이슈 #318 A안·#1856).
  *
- * 예: 60 → `"도4 (C4)"`, 69 → `"라4 (A4)"`.
+ * 예: 60 → `"2옥도 (C4)"`, 69 → `"2옥라 (A4)"`. 한글은 노래방 통념 옥타브,
+ * 괄호 안 SPN(영문)은 정확도/학습용 기술 표기로 유지.
  *
  * 차트 Y축처럼 공간 좁은 곳은 `midiToKoreanNoteName` 또는 `midiToNoteName`
  * 한쪽만 쓰고, 본문/카드/슬라이더처럼 공간 여유가 있는 곳에서 병기 사용.

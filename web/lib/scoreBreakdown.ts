@@ -31,7 +31,7 @@ import { midiToKoreanNoteName } from "@/lib/notes";
  *
  * - `score`는 0~1 정규화. UI는 막대 길이 또는 %로 노출한다.
  * - `detail`은 카드에서 점수 옆에 보여줄 한 줄 부연 — 예: "C# 장조" 또는
- *   "사용자 도3-솔4 vs 곡 솔3-파5" (한국어 단독, #1310 사용자 정정 2026-06-03).
+ *   "사용자 1옥도-2옥솔 vs 곡 1옥솔-3옥파" (한국어 단독, #1310; 노래방 통념 옥타브 #1856).
  * - `estimated`가 true이면 client-side 추정값임을 카드에서 명시(자세히 보기 안내)할 수 있다.
  */
 export type RecommendationBreakdownItem = {

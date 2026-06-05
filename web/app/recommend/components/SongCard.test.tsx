@@ -131,10 +131,10 @@ describe("SongCard", () => {
     expect(
       screen.getByLabelText(/가창 난이도 어려움/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = 파5 (한국어 단독, #1310 사용자 정정 2026-06-03)
-    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = 솔3
-    expect(screen.getByText("솔3")).toBeInTheDocument();
+    // 최고음 음표명 노출 — MIDI 77 = 3옥파 (한국어 단독, #1310; 노래방 통념 옥타브 #1856)
+    expect(screen.getByLabelText(/최고음 3옥파/)).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 1옥솔
+    expect(screen.getByText("1옥솔")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
@@ -355,10 +355,10 @@ describe("SongCard", () => {
       expect(screen.getByText("키 매칭")).toBeInTheDocument();
       expect(screen.getByText("장르")).toBeInTheDocument();
       expect(screen.getByText("음역 적합")).toBeInTheDocument();
-      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (한국어 단독, #1310 사용자 정정 2026-06-03)
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (한국어 단독, #1310; 노래방 통념 옥타브 #1856)
       expect(
         screen.getByText(
-          "사용자 도3-솔4 vs 곡 솔3-파5",
+          "사용자 1옥도-2옥솔 vs 곡 1옥솔-3옥파",
         ),
       ).toBeInTheDocument();
       // 추정값 안내 footnote (#1764 — 서버/기술 용어 '클라이언트·백엔드' 제거)

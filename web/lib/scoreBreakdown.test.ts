@@ -96,9 +96,9 @@ describe("buildScoreBreakdown", () => {
     ]);
     const rangeFit = breakdown.find((b) => b.key === "rangeFit");
     expect(rangeFit?.score).toBeCloseTo(0.55, 1);
-    // 한국어 단독 표기 (#1310 사용자 정정 2026-06-03 — SPN 병기 #318 폐지).
+    // 한국어 단독 표기 (#1310; 노래방 통념 옥타브 #1856 — SPN 병기 #318 폐지).
     expect(rangeFit?.detail).toBe(
-      "사용자 도3-솔4 vs 곡 솔3-파5",
+      "사용자 1옥도-2옥솔 vs 곡 1옥솔-3옥파",
     );
     // 모든 추정 항목은 estimated=true
     expect(breakdown.every((b) => b.estimated)).toBe(true);
