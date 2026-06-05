@@ -2303,6 +2303,23 @@ async def _dispatch_agent_forum_action(client: discord.Client, payload: dict) ->
         logger.warning("agent_forum_action: unknown action=%r", action)
 
 
+def _resolve_forum_tags(forum: object, tag_names: list) -> list:
+    """payload tag name list → forum.available_tags 매칭 ForumTag 객체 list.
+
+    매칭 안 되는 name 은 warning 후 drop (Discord create_thread/edit 는
+    available_tags 에 없는 tag 를 거부). create_thread + retag 공유 (#1858).
+    """
+    available = {tag.name: tag for tag in getattr(forum, "available_tags", [])}
+    resolved = []
+    for tag_name in tag_names:
+        target_tag = available.get(tag_name)
+        if target_tag is None:
+            logger.warning("forum tag=%r available_tags 에 없음 — drop", tag_name)
+            continue
+        resolved.append(target_tag)
+    return resolved
+
+
 async def _forum_create_thread(client: discord.Client, payload: dict) -> None:
     forum_id = int(payload.get("forum_id", 0))
     title = payload.get("title", "")[:99]
@@ -2311,7 +2328,13 @@ async def _forum_create_thread(client: discord.Client, payload: dict) -> None:
     if forum is None or not hasattr(forum, "create_thread"):
         logger.warning("forum_create_thread: forum %s 미발견 / type 불일치 — drop", forum_id)
         return
-    result = await forum.create_thread(name=title, content=body)
+    # #1858 fix — payload tags(name list) 를 available_tags 매칭해 applied_tags 전달.
+    # 기존엔 create_thread(name, content) 만 호출 → thread 태그 None 으로 생성됐다.
+    applied_tags = _resolve_forum_tags(forum, payload.get("tags") or [])
+    create_kwargs: dict = {"name": title, "content": body}
+    if applied_tags:
+        create_kwargs["applied_tags"] = applied_tags
+    result = await forum.create_thread(**create_kwargs)
     new_thread_id = getattr(result.thread, "id", None)
     logger.info("forum_create_thread: forum=%s thread=%s", forum_id, new_thread_id or "?")
     # 구멍 C fix — tools/agent.tools_cycle.forum_create_thread 는 thread snowflake 를
@@ -2346,15 +2369,10 @@ async def _forum_retag(client: discord.Client, payload: dict) -> None:
         logger.warning("forum_retag: thread %s 미발견 — drop", thread_id)
         return
     forum = thread.parent
-    target_tag = None
-    for tag in getattr(forum, "available_tags", []):
-        if tag.name == tag_name:
-            target_tag = tag
-            break
-    if target_tag is None:
-        logger.warning("forum_retag: tag=%r forum 의 available_tags 에 없음 — drop", tag_name)
+    resolved = _resolve_forum_tags(forum, [tag_name])
+    if not resolved:
         return
-    await thread.edit(applied_tags=[target_tag])
+    await thread.edit(applied_tags=resolved)
     logger.info("forum_retag: thread=%s tag=%s", thread_id, tag_name)
 
 
