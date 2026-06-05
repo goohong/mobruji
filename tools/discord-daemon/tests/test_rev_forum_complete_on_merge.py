@@ -1,27 +1,21 @@
-"""rev forum thread 완료 자동 retag (구멍 A) + dedupe backfill (구멍 C) 단위 테스트.
+"""rev forum thread 완료 자동 retag (구멍 A) 단위 테스트.
 
 배경 (cycle forum '완료' 태그 자동화 구멍):
   - 구멍 A: rev sub-agent 는 PR 을 안 만들고 리뷰만 한다 → rev forum thread 는
     PR body 의 `cycle-forum:` 참조를 못 받아 cycle_thread_complete_on_merge_loop 가
     영원히 못 잡음 → 무한 정체. FIX = PR #N 머지 시 제목 `#N` rev thread 완료 retag.
-  - 구멍 C: forum_create_thread snowflake 즉시 미반환 → rev-forum-dedupe.jsonl 에
-    thread_id=None → _register_pr_audit lookup miss. FIX = _forum_create_thread 가
-    생성 직후 backfill_rev_forum_dedupe 로 실제 thread_id 채움.
 
 검증 범위:
-1. extract_pr_url_from_forum_body — 정상 / 부재 / None.
-2. title_references_pr — `#N` 매칭 / `#12`≠`#123` 오매칭 거부 / zero-pad / 무관 제목.
-3. thread_is_done — 완료 태그 / 비-완료 태그 / 태그 없음.
-4. backfill_rev_forum_dedupe — append schema + cap.
-5. find_rev_threads_for_pr — active + archived 매칭 / 이미 완료 제외 / forum 부재.
-6. rev_forum_complete_on_merge_loop — 매칭 시 retag 1회 / 매칭 없으면 retag 0회 /
+1. title_references_pr — `#N` 매칭 / `#12`≠`#123` 오매칭 거부 / zero-pad / 무관 제목.
+2. thread_is_done — 완료 태그 / 비-완료 태그 / 태그 없음.
+3. find_rev_threads_for_pr — active + archived 매칭 / 이미 완료 제외 / forum 부재.
+4. rev_forum_complete_on_merge_loop — 매칭 시 retag 1회 / 매칭 없으면 retag 0회 /
    disabled (poll<=0, forum_id=0).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -45,9 +39,6 @@ for _missing in ("requests", "dotenv"):
 import bot  # noqa: E402
 
 
-PR_URL = "https://github.com/goohong/mobruji/pull/1500"
-
-
 def _fake_thread(thread_id: int, name: str, tag_names: list[str] | None = None):
     """discord.Thread 흉내 — id / name / applied_tags(name 속성)."""
     thread = mock.MagicMock()
@@ -60,18 +51,6 @@ def _fake_thread(thread_id: int, name: str, tag_names: list[str] | None = None):
         tags.append(tag)
     thread.applied_tags = tags
     return thread
-
-
-class ExtractPrUrlTests(unittest.TestCase):
-    def test_extracts_url_from_template_body(self):
-        body = f"📌 PR rev review\n> URL: {PR_URL}\n🆔 `rev-1500-open`"
-        self.assertEqual(bot.extract_pr_url_from_forum_body(body), PR_URL)
-
-    def test_no_url_returns_none(self):
-        self.assertIsNone(bot.extract_pr_url_from_forum_body("no url here"))
-
-    def test_empty_returns_none(self):
-        self.assertIsNone(bot.extract_pr_url_from_forum_body(""))
 
 
 class TitleReferencesPrTests(unittest.TestCase):
@@ -104,25 +83,6 @@ class ThreadIsDoneTests(unittest.TestCase):
 
     def test_no_tags(self):
         self.assertFalse(bot.thread_is_done(_fake_thread(1, "x", [])))
-
-
-class BackfillDedupeTests(unittest.TestCase):
-    def setUp(self):
-        import shutil
-        import tempfile
-        self._tmp = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: shutil.rmtree(self._tmp, ignore_errors=True))
-
-    def test_append_schema(self):
-        with mock.patch.object(bot.Path, "home", return_value=self._tmp):
-            bot.backfill_rev_forum_dedupe(PR_URL, "999888777")
-        path = self._tmp / ".mobruji" / "rev-forum-dedupe.jsonl"
-        self.assertTrue(path.exists())
-        entry = json.loads(path.read_text(encoding="utf-8").strip())
-        self.assertEqual(entry["pr_url"], PR_URL)
-        self.assertEqual(entry["kind"], "pr_review")
-        self.assertEqual(entry["thread_id"], "999888777")
-        self.assertIn("ts", entry)
 
 
 class FindRevThreadsTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "spec: docs/features/helper-tool-visibility.md (PreToolUse) + docs/features/pr-webhook-rev-forum.md (PostToolUse, 2026-05-30 #1360). PreToolUse=helper-tool-progress.sh (helper 본체만 발사 — MOBRUJI_HOOK_ACTOR=helper 가드). PostToolUse=pr-register-rev.sh (6 actor 모두 — gh pr create / gh pr merge 호출 시 rev directive 자동 등록).",
+  "_comment": "spec: docs/features/helper-tool-visibility.md (PreToolUse). PreToolUse=helper-tool-progress.sh (helper 본체만 발사 — MOBRUJI_HOOK_ACTOR=helper 가드).",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,17 +9,6 @@
           {
             "type": "command",
             "command": "[ -x $HOME/.mobruji/helper-tool-progress.sh ] && $HOME/.mobruji/helper-tool-progress.sh || true"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ -x $HOME/.mobruji/pr-register-rev.sh ] && $HOME/.mobruji/pr-register-rev.sh || true"
           }
         ]
       }

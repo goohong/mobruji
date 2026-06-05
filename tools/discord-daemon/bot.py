@@ -2314,15 +2314,6 @@ async def _forum_create_thread(client: discord.Client, payload: dict) -> None:
     result = await forum.create_thread(name=title, content=body)
     new_thread_id = getattr(result.thread, "id", None)
     logger.info("forum_create_thread: forum=%s thread=%s", forum_id, new_thread_id or "?")
-    # 구멍 C fix — tools/agent.tools_cycle.forum_create_thread 는 thread snowflake 를
-    # 즉시 반환 못 받아 rev-forum-dedupe.jsonl 에 thread_id=None 으로 박는다 →
-    # 머지 시 _register_pr_audit 의 _dedupe_lookup miss → 단계 전이(🟡→🔵) skip.
-    # bot.py 는 실제 thread snowflake 를 알므로 여기서 dedupe cache 에 backfill 한다.
-    # pr_url 은 starter body 의 'URL: <pr_url>' 줄에서 추출 (pr_review template 양식).
-    if new_thread_id is not None:
-        pr_url = extract_pr_url_from_forum_body(body)
-        if pr_url:
-            backfill_rev_forum_dedupe(pr_url, str(new_thread_id))
 
 
 async def _forum_comment(client: discord.Client, payload: dict) -> None:
@@ -5260,7 +5251,7 @@ def lookup_pr_cycle_thread(pr_number: int) -> tuple[str, str] | None:
     return (cycle, thread_id)
 
 
-# ─── 구멍 A/C 공통 — rev forum thread 완료 자동 retag + dedupe backfill ─────────
+# ─── 구멍 A — rev forum thread 완료 자동 retag ────────────────────────────────
 #
 # 배경 (cycle forum '완료' 태그 자동화 구멍):
 #   - 구멍 A: rev sub-agent 는 PR 을 만들지 않고 리뷰만 한다. 그래서 rev forum 의
@@ -5268,75 +5259,10 @@ def lookup_pr_cycle_thread(pr_number: int) -> tuple[str, str] | None:
 #     cycle_thread_complete_on_merge_loop 가 영원히 못 잡는다 → rev forum 에 진행
 #     스레드가 무한 정체. FIX = PR #N 머지 시 rev forum 에서 제목에 `#N` 을 가진
 #     비-완료 thread 를 찾아 discord-reply.sh --forum-retag <thread> rev 완료 호출.
-#   - 구멍 C: register_directive_pending(kind=pr_review) 가 forum_create_thread 의
-#     snowflake 를 즉시 못 받아 rev-forum-dedupe.jsonl 에 thread_id=None 으로 박음 →
-#     머지 시 _register_pr_audit 의 _dedupe_lookup miss. _forum_create_thread 가
-#     생성 직후 backfill_rev_forum_dedupe 로 실제 thread_id 를 채워 해소.
 #
-# rev forum thread 제목은 tools/agent.tools_cycle._build_pr_review_template 가
-# `📌 PR #{N} rev review — ...` 로 만든다 (또는 cycle launch thread 의 `… #N`).
 # 머지 PR 번호 N 을 제목에서 word-boundary 로 매칭 (#12 가 #123 에 오매칭 안 되게).
-REV_FORUM_DEDUPE_FILENAME: Final[str] = "rev-forum-dedupe.jsonl"
-REV_FORUM_DEDUPE_CAP: Final[int] = 1000
 # 완료로 간주하는 태그 이름 — 이미 완료면 retag skip (멱등 + Discord API 절약).
 REV_FORUM_DONE_TAG_NAMES: Final[frozenset[str]] = frozenset({"완료", "✅ 완료", "✅"})
-# PR URL 추출 — github PR URL (starter body 의 'URL: <pr_url>' 줄).
-_PR_URL_RE: Final = re.compile(
-    r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+", re.IGNORECASE
-)
-
-
-def extract_pr_url_from_forum_body(body: str) -> str | None:
-    """rev forum starter body 에서 github PR URL 추출 (구멍 C backfill 용).
-
-    pr_review template (`_build_pr_review_template`) 가 본문에 `> URL: <pr_url>`
-    줄을 박는다. 첫 매칭 PR URL 반환. 없으면 None.
-    """
-    if not body:
-        return None
-    match = _PR_URL_RE.search(body)
-    return match.group(0) if match else None
-
-
-def _rev_forum_dedupe_path() -> Path:
-    return Path.home() / ".mobruji" / REV_FORUM_DEDUPE_FILENAME
-
-
-def backfill_rev_forum_dedupe(pr_url: str, thread_id: str) -> None:
-    """rev-forum-dedupe.jsonl 에 실제 thread_id 를 backfill (구멍 C).
-
-    tools/agent.tools_cycle._dedupe_append 와 동일 schema
-    (`{pr_url, kind, thread_id, ts}`) — 같은 (pr_url, "pr_review") 의 thread_id=None
-    entry 를 실제 snowflake 로 보강한다. _dedupe_lookup 은 최신 entry 우선이라
-    append 만으로 충분 (lookup 이 reversed 순회). cap FIFO truncate.
-    graceful — IO 실패 시 조용히 return (본 흐름 차단 금지).
-    """
-    path = _rev_forum_dedupe_path()
-    entry = {
-        "pr_url": pr_url,
-        "kind": "pr_review",
-        "thread_id": thread_id,
-        "ts": int(time.time()),
-    }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        logger.warning("backfill_rev_forum_dedupe: append 실패 pr=%s: %r", pr_url, exc)
-        return
-    logger.info(
-        "backfill_rev_forum_dedupe: pr=%s thread=%s dedupe cache backfill 완료",
-        pr_url, thread_id,
-    )
-    # cap FIFO truncate (best-effort).
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        if len(lines) > REV_FORUM_DEDUPE_CAP:
-            tail = lines[-REV_FORUM_DEDUPE_CAP:]
-            path.write_text("\n".join(tail) + "\n", encoding="utf-8")
-    except OSError:
-        return
 
 
 def title_references_pr(title: str, pr_number: int) -> bool:
