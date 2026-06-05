@@ -13,5 +13,9 @@ export type { ChipTone } from "./Chip";
 export { Skeleton } from "./Skeleton";
 export { StepIndicator } from "./StepIndicator";
 export { HeartPop } from "./HeartPop";
-export { VoiceRangeSlider } from "./VoiceRangeSlider";
+export {
+  VoiceRangeSlider,
+  PICKER_MIN_MIDI,
+  PICKER_MAX_MIDI,
+} from "./VoiceRangeSlider";
 export type { VoiceRangeSliderProps } from "./VoiceRangeSlider";

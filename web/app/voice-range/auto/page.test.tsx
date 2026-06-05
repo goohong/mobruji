@@ -449,6 +449,71 @@ describe("AutoVoiceRangePage 측정 흐름", () => {
 
     expect(lowThumb).toHaveAttribute("aria-valuenow", "50");
   });
+
+  // #1864 — picker 밴드 하한(G2=43) 미만으로 측정된 최저음은 RESULT 진입 시 G2 로
+  // 클램프되어 슬라이더 표시·직관 표시·저장값이 한 값으로 일치해야 한다. 클램프가
+  // 없으면 슬라이더는 G2 로 보이지만 저장에는 측정 원본(예: E2=40)이 흘러간다.
+  it("G2 미만 측정 최저음은 G2 로 정렬되어 슬라이더 표시와 저장값이 일치한다", async () => {
+    const user = userEvent.setup();
+    createVoiceRangeMock.mockResolvedValueOnce({
+      id: 93,
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      lowestNoteMidi: 43,
+      highestNoteMidi: 69,
+      sourceMethod: "MIC_MEASURE",
+      createdAt: "2026-06-05T00:00:00Z",
+      updatedAt: "2026-06-05T00:00:00Z",
+    });
+
+    // low phase 가 picker 하한(43) 미만인 E2(40) 로 측정된 상황.
+    const deps = buildDeps({
+      runPhase: vi
+        .fn()
+        .mockImplementation(async (phase, _stream, onSample) => {
+          const lowMidi = phase === "low" ? 40 : 69;
+          const sample: PitchSample = {
+            elapsedMs: 500,
+            frequencyHz: phase === "low" ? 82.41 : 440,
+            clarity: 0.95,
+            isStable: true,
+            midi: lowMidi,
+          };
+          onSample(sample);
+          return {
+            midi: lowMidi,
+            confirmed: true,
+            stableSampleCount: 5,
+            totalSampleCount: 5,
+          } satisfies MeasurementResult;
+        }),
+    });
+
+    renderWithQueryClient(<AutoVoiceRangePage deps={deps} />);
+    await user.click(screen.getByRole("button", { name: /측정 시작/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /측정 결과/ }),
+      ).toBeInTheDocument();
+    });
+
+    // 슬라이더 최저음 손잡이는 측정 원본(40)이 아니라 G2(43)로 표시된다.
+    const lowThumb = screen.getByRole("slider", { name: "최저음" });
+    expect(lowThumb).toHaveAttribute("aria-valuenow", "43");
+
+    await user.click(screen.getByRole("button", { name: /추천 받기/ }));
+
+    await waitFor(() => {
+      expect(createVoiceRangeMock).toHaveBeenCalledTimes(1);
+    });
+    // 저장값도 슬라이더 표시와 같은 G2(43) — 표시/저장 불일치가 해소됐다.
+    expect(createVoiceRangeMock).toHaveBeenCalledWith({
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      lowestNoteMidi: 43,
+      highestNoteMidi: 69,
+      sourceMethod: "MIC_MEASURE",
+    });
+  });
 });
 
 describe("AutoVoiceRangePage 저장", () => {

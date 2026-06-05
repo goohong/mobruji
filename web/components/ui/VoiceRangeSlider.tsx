@@ -51,8 +51,12 @@ export type VoiceRangeSliderProps = {
 // 트랙 하한은 실제 곡 보컬 음역 분포(C3=48 ~ C6=84)에 맞춰 G2(43)로 둔다 (#1853).
 // 곡이 0개인 C2~F#2(36~42) dead-zone 을 트랙에서 제거하되, 곡 최저음(C3) 아래로
 // 약간의 여유(5반음)를 남겨 저음 사용자가 자신의 음역을 표현할 수 있게 한다.
-const DEFAULT_MIN_MIDI = 43; // G2
-const DEFAULT_MAX_MIDI = 84; // C6
+// auto 측정 결과 클램프·표시 스케일이 같은 밴드를 쓰도록 export 한다 (#1864).
+export const PICKER_MIN_MIDI = 43; // G2
+export const PICKER_MAX_MIDI = 84; // C6
+
+const DEFAULT_MIN_MIDI = PICKER_MIN_MIDI;
+const DEFAULT_MAX_MIDI = PICKER_MAX_MIDI;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
