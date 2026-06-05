@@ -61,7 +61,7 @@ describe("VoiceRangeSlider 렌더", () => {
     const { low, high } = getThumbs();
 
     expect(low).toHaveAttribute("aria-valuenow", "48");
-    expect(low).toHaveAttribute("aria-valuemin", "36");
+    expect(low).toHaveAttribute("aria-valuemin", "43");
     expect(low).toHaveAttribute("aria-valuemax", "69");
     expect(high).toHaveAttribute("aria-valuenow", "69");
     expect(high).toHaveAttribute("aria-valuemin", "48");
@@ -135,7 +135,7 @@ describe("VoiceRangeSlider 키보드", () => {
     low.focus();
     await user.keyboard("{Home}");
 
-    expect(getThumbs().low).toHaveAttribute("aria-valuenow", "36");
+    expect(getThumbs().low).toHaveAttribute("aria-valuenow", "43");
   });
 
   it("End 로 최고음을 트랙 최대값으로 보낸다", async () => {
@@ -218,11 +218,11 @@ describe("VoiceRangeSlider 포인터 드래그", () => {
     render(<Harness onChangeSpy={onChangeSpy} />);
     const track = screen.getByTestId("voice-range-track");
 
-    // 트랙 폭 480 → 36..84 (48 반음). clientX 0 = MIDI 36, 480 = MIDI 84.
+    // 트랙 폭 480 → 43..84 (41 반음). clientX 0 = MIDI 43, 480 = MIDI 84.
     // 최저음(48)에 가까운 좌측 클릭으로 최저음을 끌어내린다.
     fireEvent.pointerDown(track, { clientX: 0, pointerId: 1 });
 
-    expect(onChangeSpy).toHaveBeenCalledWith({ lowMidi: 36, highMidi: 69 });
+    expect(onChangeSpy).toHaveBeenCalledWith({ lowMidi: 43, highMidi: 69 });
   });
 });
 

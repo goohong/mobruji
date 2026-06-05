@@ -159,13 +159,13 @@ describe("VoiceRangePage 렌더", () => {
     ).toBeInTheDocument();
   });
 
-  it("최저음 / 최고음 손잡이가 C2~C6 범위의 슬라이더로 렌더된다 (#1706)", () => {
+  it("최저음 / 최고음 손잡이가 G2~C6 범위의 슬라이더로 렌더된다 (#1706, #1853)", () => {
     renderWithQueryClient(<VoiceRangePage />);
     const { low, high } = getRangeThumbs();
 
-    // C2(MIDI 36) ~ C6(MIDI 84) 범위. 최저음 손잡이의 상한은 최고음(69),
-    // 최고음 손잡이의 하한은 최저음(48) 으로 동적으로 제약된다.
-    expect(low).toHaveAttribute("aria-valuemin", "36");
+    // G2(MIDI 43) ~ C6(MIDI 84) 범위 — 실제 곡 보컬 분포(#1853). 최저음 손잡이의
+    // 상한은 최고음(69), 최고음 손잡이의 하한은 최저음(48) 으로 동적으로 제약된다.
+    expect(low).toHaveAttribute("aria-valuemin", "43");
     expect(low).toHaveAttribute("aria-valuemax", "69");
     expect(high).toHaveAttribute("aria-valuemin", "48");
     expect(high).toHaveAttribute("aria-valuemax", "84");
