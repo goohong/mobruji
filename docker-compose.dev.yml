@@ -81,6 +81,13 @@ services:
       AUDIO_ANALYSIS_TOOL_DIR: ${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR in .env.dev (repo 절대경로)}/tools/audio-analysis
       AUDIO_ANALYSIS_COMPOSE_FILE: ${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR in .env.dev (repo 절대경로)}/docker-compose.audio.yml
       AUDIO_ANALYSIS_COMPOSE_SERVICE: audio-analysis
+      # 쿠키 파일 호스트 경로 passthrough (#1850 / #1802). 백엔드가 DooD 로 audio-analysis 를
+      # spawn 할 때 docker-compose.audio.yml 의 ${YTDLP_COOKIES_FILE:-/dev/null} 가 백엔드
+      # 컨테이너의 프로세스 환경에서 보간된다. 이 값이 없으면 항상 /dev/null 로 폴백해 쿠키가
+      # 전달되지 않으므로(271 백필이 인증 막힌 곡에서 실패), 호스트 절대경로를 그대로 노출한다.
+      # 볼륨 source 는 호스트 docker 데몬이 푸므로(DooD) 값은 호스트 경로여야 한다. 미설정 시
+      # /dev/null 폴백으로 기존 무쿠키 동작 유지.
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-/dev/null}
     # spring(uid 1001) 비-root user 가 root:docker 소유 소켓(660)에 접근하려면 docker 그룹 GID 를
     # supplementary group 으로 추가해야 한다. GID 는 호스트별로 다르므로 .env.dev 주입(bootstrap 자동 채움).
     # 값 확인: getent group docker | cut -d':' -f3
