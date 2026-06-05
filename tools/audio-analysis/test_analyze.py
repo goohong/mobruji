@@ -8,11 +8,16 @@ import math
 
 import pytest
 
+import analyze
 from analyze import (
     METHOD_SPLEETER_2STEMS,
     METHOD_VOCAL_SKIP,
     PLAYER_CLIENT_CHAIN,
     POT_EXTRACTOR_KEY,
+    YTSEARCH_CANDIDATE_LIMIT,
+    _build_search_query,
+    _download_first_available,
+    _search_candidate_video_urls,
     analysis_method_label,
     confidence_score,
     extract_range,
@@ -255,6 +260,101 @@ class TestRunWithClientChain:
 
         with pytest.raises(yt_dlp.utils.DownloadError):
             run_with_client_chain({}, action, clients=("web", "android"))
+
+
+class TestBuildSearchQuery:
+    def test_title_only_when_no_artist(self) -> None:
+        assert _build_search_query("Yesterday", None) == "Yesterday"
+
+    def test_artist_prefixes_title(self) -> None:
+        assert _build_search_query("Yesterday", "The Beatles") == "The Beatles Yesterday"
+
+
+class TestSearchCandidateVideoUrls:
+    def test_builds_watch_urls_from_entry_ids(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def fake_chain(base_opts, action, *args, **kwargs):
+            captured["opts"] = base_opts
+            return {"entries": [{"id": "aaa"}, {"id": "bbb"}]}
+
+        monkeypatch.setattr(analyze, "run_with_client_chain", fake_chain)
+        urls = _search_candidate_video_urls("query", limit=5)
+        assert urls == [
+            "https://www.youtube.com/watch?v=aaa",
+            "https://www.youtube.com/watch?v=bbb",
+        ]
+        # 검색만 — 다운로드는 하지 않는다.
+        assert captured["opts"]["skip_download"] is True
+
+    def test_falls_back_to_webpage_url_without_id(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            analyze,
+            "run_with_client_chain",
+            lambda *a, **k: {"entries": [{"webpage_url": "https://youtu.be/zzz"}]},
+        )
+        assert _search_candidate_video_urls("q") == ["https://youtu.be/zzz"]
+
+    def test_empty_entries_returns_empty(self, monkeypatch) -> None:
+        monkeypatch.setattr(analyze, "run_with_client_chain", lambda *a, **k: {"entries": []})
+        assert _search_candidate_video_urls("q") == []
+
+    def test_skips_blank_entries(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            analyze,
+            "run_with_client_chain",
+            lambda *a, **k: {"entries": [None, {"id": "ccc"}, {}]},
+        )
+        assert _search_candidate_video_urls("q") == ["https://www.youtube.com/watch?v=ccc"]
+
+
+class TestDownloadFirstAvailable:
+    def test_returns_first_successful_candidate(self, monkeypatch, tmp_path) -> None:
+        pytest.importorskip("yt_dlp")
+        attempts: list[str] = []
+
+        def fake_download(url, out_dir, clip_seconds):
+            attempts.append(url)
+            return tmp_path / "clip.mp3"
+
+        monkeypatch.setattr(analyze, "_download_youtube_audio", fake_download)
+        result = _download_first_available(["u1", "u2"], tmp_path, 45)
+        assert result == tmp_path / "clip.mp3"
+        assert attempts == ["u1"]  # 첫 후보 성공 시 나머지 건너뜀
+
+    def test_skips_unavailable_and_uses_next(self, monkeypatch, tmp_path) -> None:
+        yt_dlp = pytest.importorskip("yt_dlp")
+        attempts: list[str] = []
+
+        def fake_download(url, out_dir, clip_seconds):
+            attempts.append(url)
+            if url == "bad":
+                raise yt_dlp.utils.DownloadError("Video unavailable")
+            return tmp_path / "clip.mp3"
+
+        monkeypatch.setattr(analyze, "_download_youtube_audio", fake_download)
+        result = _download_first_available(["bad", "good"], tmp_path, 45)
+        assert result == tmp_path / "clip.mp3"
+        assert attempts == ["bad", "good"]
+
+    def test_raises_last_error_when_all_unavailable(self, monkeypatch, tmp_path) -> None:
+        yt_dlp = pytest.importorskip("yt_dlp")
+
+        def fake_download(url, out_dir, clip_seconds):
+            raise yt_dlp.utils.DownloadError("Video unavailable")
+
+        monkeypatch.setattr(analyze, "_download_youtube_audio", fake_download)
+        with pytest.raises(yt_dlp.utils.DownloadError):
+            _download_first_available(["a", "b"], tmp_path, 45)
+
+    def test_raises_runtime_error_when_no_candidates(self, tmp_path) -> None:
+        pytest.importorskip("yt_dlp")
+        with pytest.raises(RuntimeError):
+            _download_first_available([], tmp_path, 45)
+
+
+def test_ytsearch_candidate_limit_is_positive() -> None:
+    assert YTSEARCH_CANDIDATE_LIMIT >= 1
 
 
 def test_module_has_tooling_version() -> None:
