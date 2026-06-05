@@ -19,6 +19,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   AlbumCoverThumbnail,
   SongDetailContent,
+  toSecureAlbumCoverUrl,
 } from "./SongDetailContent";
 import type { SongResponse } from "@/lib/api/recommendation";
 
@@ -216,6 +217,108 @@ describe("AlbumCover view-transition-name (closes #1687, PR7)", () => {
     render(<AlbumCoverThumbnail song={song} />);
     const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
     expect(img.style.viewTransitionName).toBeFalsy();
+  });
+});
+
+/*
+ * 실패 상태 url-기준 추적 회귀 가드 (closes #1850):
+ *  - 같은 인스턴스가 다른 곡(다른 albumCoverUrl)으로 재사용되면 이전 곡의 onError 실패가
+ *    새 곡까지 고착되면 안 된다 — 무한 스크롤/재추천/페르소나 모드에서 '반복적 미표시' 원인.
+ *  - url 이 바뀌면 placeholder 에서 자동으로 <img> 재시도로 복구돼야 한다.
+ *  - 단, 같은 url 로 rerender 되면 실패는 그대로 보존(기존 #529 회귀 가드 유지).
+ */
+describe("AlbumCover 실패 상태 url-기준 추적 (closes #1850)", () => {
+  it("thumbnail onError 후 다른 곡(다른 url)로 rerender 하면 새 <img> 로 복구된다", () => {
+    const songA = buildSong({
+      id: 1,
+      title: "곡 A",
+      albumCoverUrl: "https://example.com/a-404.jpg",
+    });
+    const songB = buildSong({
+      id: 2,
+      title: "곡 B",
+      albumCoverUrl: "https://example.com/b-ok.jpg",
+    });
+    const { rerender } = render(<AlbumCoverThumbnail song={songA} />);
+    fireEvent.error(screen.getByAltText("곡 A 앨범 커버"));
+    expect(
+      screen.getByLabelText(/곡 A 앨범 커버 \(이미지 없음\)/),
+    ).toBeInTheDocument();
+
+    rerender(<AlbumCoverThumbnail song={songB} />);
+    const recovered = screen.getByAltText("곡 B 앨범 커버") as HTMLImageElement;
+    expect(recovered.tagName).toBe("IMG");
+    expect(recovered.getAttribute("src")).toBe("https://example.com/b-ok.jpg");
+    expect(screen.queryByLabelText(/이미지 없음/)).toBeNull();
+  });
+
+  it("large onError 후 다른 곡(다른 url)로 rerender 하면 새 <img> 로 복구된다", () => {
+    const songA = buildSong({
+      id: 1,
+      title: "곡 A",
+      albumCoverUrl: "https://example.com/a-big-404.jpg",
+    });
+    const songB = buildSong({
+      id: 2,
+      title: "곡 B",
+      albumCoverUrl: "https://example.com/b-big-ok.jpg",
+    });
+    const { rerender } = renderWithQueryClient(
+      <SongDetailContent song={songA} />,
+    );
+    fireEvent.error(screen.getByAltText("곡 A 앨범 커버"));
+    expect(
+      screen.getByLabelText(/곡 A 앨범 커버 \(이미지 없음\)/),
+    ).toBeInTheDocument();
+
+    rerender(<SongDetailContent song={songB} />);
+    const recovered = screen.getByAltText("곡 B 앨범 커버") as HTMLImageElement;
+    expect(recovered.getAttribute("src")).toBe(
+      "https://example.com/b-big-ok.jpg",
+    );
+    expect(screen.queryByLabelText(/이미지 없음/)).toBeNull();
+  });
+});
+
+/*
+ * 커버 URL http→https 업그레이드 (mixed-content 방어, closes #1850):
+ *  - BE 백필 출처가 http URL 을 돌려줘도 HTTPS 페이지에서 차단되지 않도록 https 로 정규화.
+ *  - 이미 https/공백/null 은 안전 처리.
+ */
+describe("toSecureAlbumCoverUrl (closes #1850)", () => {
+  it("http URL 은 https 로 업그레이드된다", () => {
+    expect(toSecureAlbumCoverUrl("http://coverartarchive.org/x/500.jpg")).toBe(
+      "https://coverartarchive.org/x/500.jpg",
+    );
+  });
+
+  it("이미 https 인 URL 은 그대로 둔다", () => {
+    expect(toSecureAlbumCoverUrl("https://example.com/c.jpg")).toBe(
+      "https://example.com/c.jpg",
+    );
+  });
+
+  it("null/undefined/공백은 null 로 정규화된다", () => {
+    expect(toSecureAlbumCoverUrl(null)).toBeNull();
+    expect(toSecureAlbumCoverUrl(undefined)).toBeNull();
+    expect(toSecureAlbumCoverUrl("   ")).toBeNull();
+  });
+
+  it("앞뒤 공백은 trim 된다", () => {
+    expect(toSecureAlbumCoverUrl("  https://example.com/c.jpg  ")).toBe(
+      "https://example.com/c.jpg",
+    );
+  });
+
+  it("http URL 이 img src 로 들어오면 https 로 렌더된다", () => {
+    const song = buildSong({
+      albumCoverUrl: "http://coverartarchive.org/release/m/500.jpg",
+    });
+    render(<AlbumCoverThumbnail song={song} />);
+    const img = screen.getByAltText("테스트 곡 앨범 커버") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe(
+      "https://coverartarchive.org/release/m/500.jpg",
+    );
   });
 });
 

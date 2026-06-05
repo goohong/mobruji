@@ -171,6 +171,31 @@ export function SongDetailContent(props: SongDetailContentProps) {
  * - alt 텍스트는 "<곡 제목> 앨범 커버" — 스크린 리더 친화.
  * - onError 시 placeholder 로 fallback (BE 응답 URL 이 404/CORS 등으로 실패한 경우).
  */
+/**
+ * 앨범 커버 URL 을 안전한 표시용으로 정규화한다.
+ *
+ * - null/undefined/공백 → null (placeholder 로 fallback).
+ * - `http://` → `https://` 업그레이드. BE 백필 출처(iTunes / Cover Art Archive)가 http
+ *   URL 을 돌려줄 경우, HTTPS 로 서빙되는 프론트에서 mixed-content 로 차단돼 커버가 조용히
+ *   안 뜨는 것을 막는다. 두 출처 CDN 모두 https 를 지원하므로 무손실 업그레이드다.
+ * - 그 외(이미 https/protocol-relative 등)는 그대로 둔다.
+ */
+export function toSecureAlbumCoverUrl(
+  rawUrl: string | null | undefined,
+): string | null {
+  if (!rawUrl) {
+    return null;
+  }
+  const trimmed = rawUrl.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  if (trimmed.startsWith("http://")) {
+    return `https://${trimmed.slice("http://".length)}`;
+  }
+  return trimmed;
+}
+
 type AlbumCoverProps = {
   song: SongResponse;
   /**
@@ -187,13 +212,16 @@ export function AlbumCover({ song, viewTransitionName }: AlbumCoverProps) {
   // backfill 미적용/fuzzy match 실패 곡은 null → placeholder. img 로딩 실패(404/CORS)
   // 시에도 onError 로 placeholder 로 fallback. eager 로드는 모달이 열린 직후만
   // 발생하므로 lazy 가 아닌 default load 가 자연스럽다 (lazy 는 thumbnail 에서).
-  const url = song.albumCoverUrl ?? null;
-  const [failed, setFailed] = useState(false);
+  const url = toSecureAlbumCoverUrl(song.albumCoverUrl);
+  // 실패한 정확한 url 을 기억한다(단순 boolean 아님) — 같은 모달 인스턴스가 다른 곡으로
+  // 재사용될 때(예: 시퀀스 단계 전환) 이전 곡의 실패가 새 곡 커버까지 고착시키지 않도록,
+  // url 이 바뀌면 자동으로 재시도한다. 같은 url rerender 면 placeholder 유지(실패 보존).
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   // closes #1284 — placeholder / alt 텍스트도 한국 곡 한국어 우선.
   const displayTitle = formatSongDisplayTitle(song);
 
-  if (!url || failed) {
+  if (!url || failedUrl === url) {
     return (
       <AlbumCoverPlaceholder
         size="large"
@@ -214,7 +242,7 @@ export function AlbumCover({ song, viewTransitionName }: AlbumCoverProps) {
       <img
         src={url}
         alt={`${displayTitle} 앨범 커버`}
-        onError={() => setFailed(true)}
+        onError={() => setFailedUrl(url)}
         style={viewTransitionName ? { viewTransitionName } : undefined}
         className="h-48 w-48 rounded-2xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
       />
@@ -583,12 +611,16 @@ export function AlbumCoverThumbnail({
   // closes #322 — SongCard 좌측 small (48~64px) thumbnail. loading="lazy" 로
   // 뷰포트 진입 시점에 페치 — 긴 리스트(추천 무한 스크롤, 검색 결과)에서 초기
   // 네트워크 비용 최소화. onError 시 placeholder 로 fallback.
-  const url = song.albumCoverUrl ?? null;
-  const [failed, setFailed] = useState(false);
+  const url = toSecureAlbumCoverUrl(song.albumCoverUrl);
+  // 무한 스크롤/재추천/페르소나 모드에서 같은 리스트 위치의 인스턴스가 다른 곡으로
+  // 재사용되면 url 만 바뀌고 컴포넌트는 remount 되지 않는다. 단순 boolean failed 면
+  // 이전 곡의 실패가 새 곡(정상 커버)에도 고착돼 '반복적 미표시' 가 된다 — 실패한
+  // url 자체를 기억해 url 이 바뀌면 자동 재시도하고, 같은 url 이면 실패를 보존한다.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   // closes #1284 — thumbnail placeholder / alt 도 한국 곡 한국어 우선.
   const displayTitle = formatSongDisplayTitle(song);
 
-  if (!url || failed) {
+  if (!url || failedUrl === url) {
     return (
       <AlbumCoverPlaceholder
         size="thumbnail"
@@ -605,7 +637,7 @@ export function AlbumCoverThumbnail({
       src={url}
       loading="lazy"
       alt={`${displayTitle} 앨범 커버`}
-      onError={() => setFailed(true)}
+      onError={() => setFailedUrl(url)}
       style={viewTransitionName ? { viewTransitionName } : undefined}
       className="h-14 w-14 rounded-xl object-cover ring-1 ring-[var(--ring-soft-detail)]"
     />
