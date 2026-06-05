@@ -97,9 +97,9 @@ describe("SongDetailPage", () => {
     });
     expect(screen.getByText("Adele")).toBeInTheDocument();
     expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
-    // 최고음 파5, 최저음 솔3 — 한국어 단독 (#1310 사용자 정정 2026-06-03)
-    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/최저음 솔3/)).toBeInTheDocument();
+    // 최고음 3옥파, 최저음 1옥솔 — 한국어 단독 (#1310; 노래방 통념 옥타브 #1856)
+    expect(screen.getByLabelText(/최고음 3옥파/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/최저음 1옥솔/)).toBeInTheDocument();
     // 키 라벨 (F 단조 — #1719 한글 표기)
     expect(screen.getByText(/키 F 단조/)).toBeInTheDocument();
     // 분위기 칩 — 코드값(EMOTIONAL) 이 아니라 한국어 라벨로 노출 (#1764)

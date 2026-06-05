@@ -64,9 +64,11 @@ describe("VoiceRangeProgressCard", () => {
     expect(
       screen.getByRole("heading", { name: /\+6 반음 넓어졌어요/ }),
     ).toBeInTheDocument();
-    // 최신 측정 50~74 → 음표명 레3 ~ 레5 가 헤더 + svg title 두 곳에 노출.
-    // (MIDI 50 = 레3, 74 = 레5; midiToNoteName 사용)
-    expect(screen.getAllByText(/레3 ~ 레5/).length).toBeGreaterThanOrEqual(1);
+    // 최신 측정 50~74 → 음표명 1옥레 ~ 3옥레 가 헤더 + svg title 두 곳에 노출.
+    // (MIDI 50 = 1옥레, 74 = 3옥레; 노래방 통념 옥타브 #1856)
+    expect(
+      screen.getAllByText(/1옥레 ~ 3옥레/).length,
+    ).toBeGreaterThanOrEqual(1);
     // 3회 측정 기록 안내 (헤더 1곳).
     expect(screen.getByText(/3회 측정 기록/)).toBeInTheDocument();
   });
@@ -99,8 +101,8 @@ describe("VoiceRangeProgressCard", () => {
 
   it("#249: 모든 측정 막대에 lowMidi/highMidi 음표명 라벨이 노출된다", () => {
     // 기본 픽스처: 52~70 / 51~72 / 50~74.
-    // → low/high 음표 (한국어 단독, #1310 사용자 정정 2026-06-03):
-    //   1번 미3/라♯4, 2번 레♯3/도5, 3번 레3/레5.
+    // → low/high 음표 (한국어 단독, #1310; 노래방 통념 옥타브 #1856):
+    //   1번 1옥미/2옥라♯, 2번 1옥레♯/3옥도, 3번 1옥레/3옥레.
     const { container } = render(
       <VoiceRangeProgressCard summary={buildSummary()} />,
     );
@@ -110,19 +112,19 @@ describe("VoiceRangeProgressCard", () => {
       container.querySelectorAll("svg text"),
     ).map((node) => node.textContent ?? "");
 
-    // 1번 측정: low=미3, high=라♯4
-    expect(svgTexts).toContain("미3");
-    expect(svgTexts).toContain("라♯4");
-    // 2번 측정: low=레♯3, high=도5
-    expect(svgTexts).toContain("레♯3");
-    expect(svgTexts).toContain("도5");
-    // 3번(최신) 측정: low=레3, high=레5
-    expect(svgTexts).toContain("레3");
-    expect(svgTexts).toContain("레5");
+    // 1번 측정: low=1옥미, high=2옥라♯
+    expect(svgTexts).toContain("1옥미");
+    expect(svgTexts).toContain("2옥라♯");
+    // 2번 측정: low=1옥레♯, high=3옥도
+    expect(svgTexts).toContain("1옥레♯");
+    expect(svgTexts).toContain("3옥도");
+    // 3번(최신) 측정: low=1옥레, high=3옥레
+    expect(svgTexts).toContain("1옥레");
+    expect(svgTexts).toContain("3옥레");
   });
 
   it("#249: Y축에 옥타브 시작음(C-노트) 그리드 라벨이 표시된다", () => {
-    // 픽스처 범위 50(레3) ~ 74(레5) → 도4(60), 도5(72) 가 가시 범위 내 옥타브.
+    // 픽스처 범위 50(1옥레) ~ 74(3옥레) → 2옥도(60), 3옥도(72) 가 가시 범위 내 옥타브.
     const { container } = render(
       <VoiceRangeProgressCard summary={buildSummary()} />,
     );
@@ -131,8 +133,8 @@ describe("VoiceRangeProgressCard", () => {
       container.querySelectorAll("svg text"),
     ).map((node) => node.textContent ?? "");
 
-    expect(svgTexts).toContain("도4");
-    expect(svgTexts).toContain("도5");
+    expect(svgTexts).toContain("2옥도");
+    expect(svgTexts).toContain("3옥도");
   });
 
   it("#567: points 가 빈 배열이면 role=status 안내 메시지만 노출하고 차트는 그리지 않는다", () => {
@@ -200,13 +202,13 @@ describe("VoiceRangeProgressCard", () => {
   });
 
   it("#249: 가시 범위에 옥타브 시작음이 전혀 없으면 가장 가까운 C-노트 1개를 표시한다 (fallback)", () => {
-    // 레4(62) ~ 솔4(67) — 차트 가시 범위 yMin=60,yMax=69 에 도4(60)는 경계 위에 있으므로
+    // 1옥레(62) ~ 2옥솔(67) — 차트 가시 범위 yMin=60,yMax=69 에 2옥도(60)는 경계 위에 있으므로
     // 'fallback path' 가 아닌 정상 후보 path 가 실행된다.
-    // → fallback path 단독을 확인하기 위해 레5~G5 (62+12=74 ~ 79) 범위로 옮긴다:
-    //   yMin=72(도5), yMax=81 → 도5(72) 포함 → fallback 미발동.
+    // → fallback path 단독을 확인하기 위해 3옥레~G5 (62+12=74 ~ 79) 범위로 옮긴다:
+    //   yMin=72(3옥도), yMax=81 → 3옥도(72) 포함 → fallback 미발동.
     // 진짜로 가시 범위에 어떤 C-노트도 없는 케이스는 음역이 12반음 미만이면서 양 끝이
-    // C-노트와 정확히 일치하지 않는 경우. 예: D#5(75)~라5(81) → yMin=73, yMax=83 → C-노트
-    // 없음(72 외부, 84 외부) → fallback 발동, nearest C = round(78/12)*12 = 84(도6).
+    // C-노트와 정확히 일치하지 않는 경우. 예: D#5(75)~3옥라(81) → yMin=73, yMax=83 → C-노트
+    // 없음(72 외부, 84 외부) → fallback 발동, nearest C = round(78/12)*12 = 84(4옥도).
     const narrow = buildSummary({
       points: [
         {
@@ -240,7 +242,7 @@ describe("VoiceRangeProgressCard", () => {
     ).map((node) => node.textContent ?? "");
 
     // yMin=73, yMax=83 → C-노트(60·72·84) 모두 외부 → fallback nearest:
-    // round((73+83)/2 / 12) * 12 = round(78/12)*12 = round(6.5)*12 = 7*12 = 84 = 도6.
-    expect(svgTexts).toContain("도6");
+    // round((73+83)/2 / 12) * 12 = round(78/12)*12 = round(6.5)*12 = 7*12 = 84 = 4옥도.
+    expect(svgTexts).toContain("4옥도");
   });
 });

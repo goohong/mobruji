@@ -109,7 +109,7 @@ describe("aria-label 동적 갱신 debounce (G4)", () => {
     await waitFor(
       () => {
         expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(
-          /현재 음정 라4/,
+          /현재 음정 2옥라/,
         );
       },
       { timeout: 1500 },

@@ -8,7 +8,7 @@
  *   - 제출 시 POST /api/v1/voice-ranges 호출 후 sessionId/voiceRangeId 저장.
  *   - 성공 시 /recommend로 라우팅.
  *
- * 입력은 MIDI 노트 정수로 BE에 전달하고, 사용자에게는 한국어 음명(도4 등)으로 보여준다.
+ * 입력은 MIDI 노트 정수로 BE에 전달하고, 사용자에게는 한국어 음명(2옥도 등, 노래방 통념 옥타브 #1856)으로 보여준다.
  */
 
 import { FormEvent, useState } from "react";

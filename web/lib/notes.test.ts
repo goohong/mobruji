@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import {
   INVALID_MIDI_A11Y_FALLBACK,
   INVALID_MIDI_PLACEHOLDER,
+  KOREAN_VOCAL_OCTAVE_OFFSET,
   MAX_MIDI,
   MIN_MIDI,
   midiToCombinedNoteName,
@@ -95,69 +96,82 @@ describe("MIDI 상수", () => {
   });
 });
 
-describe("midiToKoreanNoteName (#318)", () => {
-  it("C4 = 도4 (middle C)", () => {
-    expect(midiToKoreanNoteName(60)).toBe("도4");
+describe("midiToKoreanNoteName (#318·#1856 노래방 통념 옥타브)", () => {
+  // 한국 노래방/가창 통념 옥타브 = SPN 옥타브 − 2 (#1856). 1옥타브 도 = C3.
+  it("C4 = 2옥도 (middle C)", () => {
+    expect(midiToKoreanNoteName(60)).toBe("2옥도");
   });
 
-  it("A4 = 라4 (440Hz 기준음)", () => {
-    expect(midiToKoreanNoteName(69)).toBe("라4");
+  it("A4 = 2옥라 (440Hz 기준음 = 남자 평균 고음 앵커)", () => {
+    expect(midiToKoreanNoteName(69)).toBe("2옥라");
   });
 
-  it("D3 = 레3 (이슈 본문 사용자 피드백 케이스)", () => {
-    expect(midiToKoreanNoteName(50)).toBe("레3");
+  it("C5 = 3옥도 (3옥도의 벽 앵커)", () => {
+    expect(midiToKoreanNoteName(72)).toBe("3옥도");
   });
 
-  it("E2 = 미2 (이슈 본문 사용자 피드백 케이스)", () => {
-    expect(midiToKoreanNoteName(40)).toBe("미2");
+  it("D5 = 3옥레 (여성 기준 고음 앵커)", () => {
+    expect(midiToKoreanNoteName(74)).toBe("3옥레");
   });
 
-  it("샤프 노트는 ♯(U+266F) 사용: MIDI 61 → 도♯4", () => {
-    expect(midiToKoreanNoteName(61)).toBe("도♯4");
+  it("E3 = 1옥미 (이슈 본문 '미3' 혼란 케이스 → 통념 표기)", () => {
+    expect(midiToKoreanNoteName(52)).toBe("1옥미");
   });
 
-  it("옥타브 경계(B3 = 시3, C4 = 도4)", () => {
-    expect(midiToKoreanNoteName(59)).toBe("시3");
-    expect(midiToKoreanNoteName(60)).toBe("도4");
+  it("D3 = 1옥레 (이슈 본문 사용자 피드백 케이스)", () => {
+    expect(midiToKoreanNoteName(50)).toBe("1옥레");
   });
 
-  it("MIN/MAX 끝값도 안전: MIDI 12 → 도0, MIDI 119 → 시8", () => {
-    expect(midiToKoreanNoteName(MIN_MIDI)).toBe("도0");
-    expect(midiToKoreanNoteName(MAX_MIDI)).toBe("시8");
+  it("E2 = 0옥미 (저음역)", () => {
+    expect(midiToKoreanNoteName(40)).toBe("0옥미");
+  });
+
+  it("샤프 노트는 ♯(U+266F) 사용: MIDI 61 → 2옥도♯", () => {
+    expect(midiToKoreanNoteName(61)).toBe("2옥도♯");
+  });
+
+  it("옥타브 경계(B3 = 1옥시, C4 = 2옥도)", () => {
+    expect(midiToKoreanNoteName(59)).toBe("1옥시");
+    expect(midiToKoreanNoteName(60)).toBe("2옥도");
+  });
+
+  it("MIN/MAX 끝값도 안전: MIDI 12 → -2옥도, MIDI 119 → 6옥시", () => {
+    expect(midiToKoreanNoteName(MIN_MIDI)).toBe("-2옥도");
+    expect(midiToKoreanNoteName(MAX_MIDI)).toBe("6옥시");
   });
 });
 
-describe("midiToCombinedNoteName (#318 A안 — 한국어 (SPN) 병기)", () => {
-  it("MIDI 60 → '도4 (C4)'", () => {
-    expect(midiToCombinedNoteName(60)).toBe("도4 (C4)");
+describe("midiToCombinedNoteName (#318 A안·#1856 — 한국어 (SPN) 병기)", () => {
+  it("MIDI 60 → '2옥도 (C4)'", () => {
+    expect(midiToCombinedNoteName(60)).toBe("2옥도 (C4)");
   });
 
-  it("MIDI 69 → '라4 (A4)'", () => {
-    expect(midiToCombinedNoteName(69)).toBe("라4 (A4)");
+  it("MIDI 69 → '2옥라 (A4)'", () => {
+    expect(midiToCombinedNoteName(69)).toBe("2옥라 (A4)");
   });
 
-  it("샤프 노트 병기 (MIDI 61 → '도♯4 (C#4)')", () => {
-    expect(midiToCombinedNoteName(61)).toBe("도♯4 (C#4)");
+  it("샤프 노트 병기 (MIDI 61 → '2옥도♯ (C#4)')", () => {
+    expect(midiToCombinedNoteName(61)).toBe("2옥도♯ (C#4)");
   });
 });
 
 describe("MIDI 경계 회귀 가드 (#576)", () => {
   // 지원 범위([12,119]) 밖이지만 SPN 절대 경계(MIDI 0=C-1, 127=G9)에서
   // 모듈로/floor 계산이 깨지지 않는지 잠금. 음수 옥타브 처리도 명세.
-  it("MIDI 0 → C-1 / 도-1 (SPN 하한)", () => {
+  it("MIDI 0 → C-1 / -3옥도 (SPN 하한)", () => {
     expect(midiToNoteName(0)).toBe("C-1");
-    expect(midiToKoreanNoteName(0)).toBe("도-1");
+    expect(midiToKoreanNoteName(0)).toBe("-3옥도");
   });
 
-  it("MIDI 127 → G9 / 솔9 (SPN 상한)", () => {
+  it("MIDI 127 → G9 / 7옥솔 (SPN 상한)", () => {
     expect(midiToNoteName(127)).toBe("G9");
-    expect(midiToKoreanNoteName(127)).toBe("솔9");
+    expect(midiToKoreanNoteName(127)).toBe("7옥솔");
   });
 
-  it("음수 MIDI(-12) → C-2 (음수 옥타브 가드)", () => {
+  it("음수 MIDI(-12) → C-2 / -4옥도 (음수 옥타브 가드)", () => {
     // ((midi % 12) + 12) % 12 가 음수 입력에서도 [0,11] 반환해야 함.
     expect(midiToNoteName(-12)).toBe("C-2");
-    expect(midiToKoreanNoteName(-12)).toBe("도-2");
+    expect(midiToKoreanNoteName(-12)).toBe("-4옥도");
   });
 
   it("비유한 입력(NaN/Infinity/-Infinity)은 placeholder 를 반환한다 (#757)", () => {
@@ -187,8 +201,8 @@ describe("MIDI 경계 회귀 가드 (#576)", () => {
     expect(midiToNoteName(69)).toBe("A4");
     expect(midiToNoteName(0)).toBe("C-1");
     expect(midiToNoteName(127)).toBe("G9");
-    expect(midiToKoreanNoteName(60)).toBe("도4");
-    expect(midiToKoreanNoteName(69)).toBe("라4");
+    expect(midiToKoreanNoteName(60)).toBe("2옥도");
+    expect(midiToKoreanNoteName(69)).toBe("2옥라");
   });
 
   it("midiToCombinedNoteName 도 비유한 입력은 placeholder 병기 (#757)", () => {
@@ -246,12 +260,12 @@ describe("MIDI 경계 회귀 가드 (#576)", () => {
       ).toBe("C4");
       expect(
         midiToKoreanNoteName(69, { a11yFallback: INVALID_MIDI_A11Y_FALLBACK }),
-      ).toBe("라4");
+      ).toBe("2옥라");
       expect(
         midiToCombinedNoteName(60, {
           a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
         }),
-      ).toBe("도4 (C4)");
+      ).toBe("2옥도 (C4)");
     });
 
     it("INVALID_MIDI_A11Y_FALLBACK 상수는 한글 안내 문구 (스크린리더 호환)", () => {
@@ -261,13 +275,14 @@ describe("MIDI 경계 회귀 가드 (#576)", () => {
     });
   });
 
-  it("SPN-한국어 옥타브 일치 round-trip (MIDI 0~127 전수)", () => {
-    // midiToNoteName / midiToKoreanNoteName 의 octave 계산이 동일 식 사용.
-    // 한쪽만 바뀌면 UI 병기에서 옥타브 어긋남 → 즉시 fail.
+  it("SPN-한국어 옥타브 오프셋 일치 round-trip (MIDI 0~127 전수, #1856)", () => {
+    // 한국 통념 옥타브 = SPN 옥타브 − KOREAN_VOCAL_OCTAVE_OFFSET(2).
+    // SPN 은 음명 뒤 옥타브(`C4`), 한글은 음명 앞 옥타브(`2옥도`) — 추출 위치 다름.
+    // 두 함수 octave 계산이 어긋나면 UI 병기에서 옥타브 불일치 → 즉시 fail.
     for (let midi = 0; midi <= 127; midi += 1) {
-      const spnOctave = midiToNoteName(midi).match(/-?\d+$/)?.[0];
-      const koreanOctave = midiToKoreanNoteName(midi).match(/-?\d+$/)?.[0];
-      expect(spnOctave).toBe(koreanOctave);
+      const spnOctave = Number(midiToNoteName(midi).match(/-?\d+$/)?.[0]);
+      const koreanOctave = Number(midiToKoreanNoteName(midi).match(/^-?\d+/)?.[0]);
+      expect(koreanOctave).toBe(spnOctave - KOREAN_VOCAL_OCTAVE_OFFSET);
     }
   });
 });

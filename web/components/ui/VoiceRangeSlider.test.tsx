@@ -71,9 +71,9 @@ describe("VoiceRangeSlider 렌더", () => {
   it("aria-valuetext 에 한국어 음명 + SPN 을 병기한다", () => {
     render(<Harness initialLow={48} initialHigh={60} />);
     const { low, high } = getThumbs();
-    // MIDI 48 = 도3 (C3), MIDI 60 = 도4 (C4).
-    expect(low).toHaveAttribute("aria-valuetext", "최저음 도3 (C3)");
-    expect(high).toHaveAttribute("aria-valuetext", "최고음 도4 (C4)");
+    // MIDI 48 = 1옥도 (C3), MIDI 60 = 2옥도 (C4) — 노래방 통념 옥타브 #1856.
+    expect(low).toHaveAttribute("aria-valuetext", "최저음 1옥도 (C3)");
+    expect(high).toHaveAttribute("aria-valuetext", "최고음 2옥도 (C4)");
   });
 
   it("min/max 를 커스텀할 수 있다", () => {
