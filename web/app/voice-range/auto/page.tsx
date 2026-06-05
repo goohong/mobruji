@@ -26,14 +26,15 @@ import {
   VoiceRangeResponse,
 } from "@/lib/api/voice-range";
 import { ApiError } from "@/lib/api/client";
-import {
-  MAX_MIDI,
-  MIN_MIDI,
-  midiToKoreanNoteName,
-} from "@/lib/notes";
+import { midiToKoreanNoteName } from "@/lib/notes";
 import { useSessionStore } from "@/store/session";
 import { safeLog } from "@/lib/logging";
-import { Button, VoiceRangeSlider } from "@/components/ui";
+import {
+  Button,
+  PICKER_MAX_MIDI,
+  PICKER_MIN_MIDI,
+  VoiceRangeSlider,
+} from "@/components/ui";
 import { PitchWaveRing } from "@/components/voice/PitchWaveRing";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import {
@@ -404,8 +405,20 @@ export default function AutoVoiceRangePage({
   );
 }
 
+/**
+ * 측정 원본 MIDI 를 음역대 picker 밴드(G2=43 ~ C6=84)로 클램프한다 (#1864).
+ *
+ * picker(`VoiceRangeSlider`)는 표시 핸들만 밴드로 클램프할 뿐 사용자 조작이
+ * 없으면 onChange 를 발화하지 않는다. 측정값이 G2 미만이면 슬라이더는 G2 로
+ * 보이지만 RESULT state·`VoiceRangeIntuition`·저장에는 원본이 그대로 흘러가
+ * 표시와 저장이 어긋났다. 결과 진입 시점에 같은 밴드로 클램프해 슬라이더 표시 =
+ * 직관 표시 = 저장값을 일치시킨다.
+ */
 function clampMidi(value: number): number {
-  return Math.max(MIN_MIDI, Math.min(MAX_MIDI, Math.round(value)));
+  return Math.max(
+    PICKER_MIN_MIDI,
+    Math.min(PICKER_MAX_MIDI, Math.round(value)),
+  );
 }
 
 interface PermissionStepProps {
@@ -463,11 +476,11 @@ interface MeasureStepProps {
 
 /**
  * PitchWaveRing 표시 음역대 스케일 — G2(43) ~ C6(84), 실제 곡 보컬 분포 밴드 (#1853).
- * 음역대 picker(`VoiceRangeSlider` DEFAULT_MIN_MIDI=43)와 같은 밴드를 공유해 측정·선택
- * 표시 스케일을 일치시킨다. 곡이 0개인 C2~F#2 dead-zone 을 스케일에서 제거.
+ * 음역대 picker(`VoiceRangeSlider`)와 같은 밴드 상수를 공유해 측정·선택 표시 스케일과
+ * 결과 클램프를 한 출처로 묶는다 (#1864). 곡이 0개인 C2~F#2 dead-zone 을 스케일에서 제거.
  */
-const RING_DISPLAY_LOW_MIDI = 43;
-const RING_DISPLAY_HIGH_MIDI = 84;
+const RING_DISPLAY_LOW_MIDI = PICKER_MIN_MIDI;
+const RING_DISPLAY_HIGH_MIDI = PICKER_MAX_MIDI;
 
 function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {
   const phaseLabel = phase === "low" ? "가장 낮은 음" : "가장 높은 음";
