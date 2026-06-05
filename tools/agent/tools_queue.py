@@ -251,20 +251,6 @@ def enqueue_rev_for_pr_if_any(source_cycle: str, worktree: Any) -> str | None:
             f"구현은 하지 말고 코드 리뷰·보고만.",
         )
         logger.info("rev auto-trigger: PR #%s (source=%s) → rev 큐 적재", num, source_cycle)
-        # (#1435) pr-review forum 가시화 — 자율 흐름에서 PR 이 rev 큐에 들어갈 때
-        # PR_REVIEW_FORUM 에 thread 를 신설해 사용자가 pr-review 채널에서 검토 현황을 본다.
-        # 그동안 PostToolUse hook(pr-register-rev.sh) 미구현으로 pr-review 채널이 빈 채였다
-        # (사용자 정정 2026-06-03). graceful — 실패해도 rev 자동 트리거(핵심)는 영향 없음.
-        # dedupe(PR URL)·env 부재 graceful 은 register_directive_pending 내부가 담당.
-        try:
-            tc.register_directive_pending(
-                f"pr-review-{num}", f"PR #{num} 코드 리뷰",
-                kind="pr_review",
-                pr_url=f"https://github.com/goohong/mobruji/pull/{num}",
-                cycle_hint="rev", source="auto_rev_trigger",
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("pr_review forum 등록 실패 PR #%s: %r", num, exc)
         return str(num)
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
         logger.warning("rev auto-trigger 실패 source=%s exc=%r", source_cycle, exc)
