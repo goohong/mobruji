@@ -36,7 +36,7 @@ export type VoiceRangeSliderProps = {
   highMidi: number;
   /** 손잡이 이동 시 변경된 (최저, 최고) 를 함께 전달한다. */
   onChange: (next: { lowMidi: number; highMidi: number }) => void;
-  /** 트랙 최소값 MIDI (기본 C2=36). */
+  /** 트랙 최소값 MIDI (기본 G2=43). */
   minMidi?: number;
   /** 트랙 최대값 MIDI (기본 C6=84). */
   maxMidi?: number;
@@ -48,7 +48,10 @@ export type VoiceRangeSliderProps = {
   disabled?: boolean;
 };
 
-const DEFAULT_MIN_MIDI = 36; // C2
+// 트랙 하한은 실제 곡 보컬 음역 분포(C3=48 ~ C6=84)에 맞춰 G2(43)로 둔다 (#1853).
+// 곡이 0개인 C2~F#2(36~42) dead-zone 을 트랙에서 제거하되, 곡 최저음(C3) 아래로
+// 약간의 여유(5반음)를 남겨 저음 사용자가 자신의 음역을 표현할 수 있게 한다.
+const DEFAULT_MIN_MIDI = 43; // G2
 const DEFAULT_MAX_MIDI = 84; // C6
 
 function clamp(value: number, min: number, max: number): number {

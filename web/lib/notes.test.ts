@@ -5,7 +5,7 @@
  *   - 표준 앵커값(C0, C4, A4, B8)에서 정확한 노트명 반환.
  *   - 옥타브 경계(11→B, 12→C+1) 정상 처리.
  *   - 샤프 노트(C#4) 표기.
- *   - octaveRangeMidis()는 C2(36) ~ C6(84) 닫힌 구간 49개(반음 단위)를 반환.
+ *   - octaveRangeMidis()는 G2(43) ~ C6(84) 닫힌 구간 42개(반음 단위)를 반환.
  */
 
 import { describe, expect, it } from "vitest";
@@ -49,11 +49,11 @@ describe("midiToNoteName", () => {
 });
 
 describe("octaveRangeMidis", () => {
-  it("C2(36) ~ C6(84) 닫힌 구간 49개 노트를 반환한다", () => {
+  it("G2(43) ~ C6(84) 닫힌 구간 42개 노트를 반환한다 (#1853)", () => {
     const midis = octaveRangeMidis();
-    expect(midis[0]).toBe(36);
+    expect(midis[0]).toBe(43);
     expect(midis[midis.length - 1]).toBe(84);
-    expect(midis.length).toBe(84 - 36 + 1);
+    expect(midis.length).toBe(84 - 43 + 1);
   });
 
   it("결과는 1 semitone 단위로 단조증가한다", () => {
@@ -63,11 +63,18 @@ describe("octaveRangeMidis", () => {
     }
   });
 
-  it("옥타브 시작음(C2/C3/C4/C5/C6)을 모두 포함한다", () => {
+  it("곡이 0개인 dead-zone(C2~F#2, 36~42)은 포함하지 않는다 (#1853)", () => {
+    const midis = octaveRangeMidis();
+    [36, 40, 42].forEach((deadZone) => {
+      expect(midis).not.toContain(deadZone);
+    });
+  });
+
+  it("밴드 내 옥타브 시작음(C3/C4/C5/C6)을 모두 포함한다", () => {
     const midis = octaveRangeMidis();
     // 이름은 'OctaveRange'지만 옥타브 경계만이 아닌 그 안의 모든 반음을 포함.
-    // 동작 명세를 잠그기 위해 옥타브 시작음 5개가 포함되는지 명시적으로 확인.
-    [36, 48, 60, 72, 84].forEach((c) => {
+    // 동작 명세를 잠그기 위해 밴드 내 옥타브 시작음 4개가 포함되는지 명시적으로 확인.
+    [48, 60, 72, 84].forEach((c) => {
       expect(midis).toContain(c);
     });
   });

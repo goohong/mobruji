@@ -461,8 +461,12 @@ interface MeasureStepProps {
   elapsedMs: number;
 }
 
-/** PitchWaveRing 표시 음역대 스케일 — C2(36) ~ C6(84), 일반 성악 가시 범위. */
-const RING_DISPLAY_LOW_MIDI = 36;
+/**
+ * PitchWaveRing 표시 음역대 스케일 — G2(43) ~ C6(84), 실제 곡 보컬 분포 밴드 (#1853).
+ * 음역대 picker(`VoiceRangeSlider` DEFAULT_MIN_MIDI=43)와 같은 밴드를 공유해 측정·선택
+ * 표시 스케일을 일치시킨다. 곡이 0개인 C2~F#2 dead-zone 을 스케일에서 제거.
+ */
+const RING_DISPLAY_LOW_MIDI = 43;
 const RING_DISPLAY_HIGH_MIDI = 84;
 
 function MeasureStep({ phase, sample, elapsedMs }: MeasureStepProps) {

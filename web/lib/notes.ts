@@ -136,17 +136,21 @@ export function midiToCombinedNoteName(
 }
 
 /**
- * 옥타브 선택 입력용 후보 노트(C2 ~ C6 닫힌 구간, 반음(semitone) 단위).
+ * 옥타브 선택 입력용 후보 노트(G2 ~ C6 닫힌 구간, 반음(semitone) 단위).
  * voice-range-input.md Q1 결정(옥타브 분류) 1차 PoC 단순화.
  *
  * 함수명이 "anchor"였던 과거 버전은 의미상 옥타브 시작음(C2/C3/...)만 반환할 것처럼 들렸으나
- * 실제 동작은 C2~C6 범위 전 반음을 반환한다. 사용처(`/voice-range` select)는 반음 단위 선택을
+ * 실제 동작은 G2~C6 범위 전 반음을 반환한다. 사용처(`/voice-range` select)는 반음 단위 선택을
  * 요구하므로 동작은 유지하고 이름을 동작에 맞게 정정했다. PR #57(closes #53, #56).
+ *
+ * 하한은 실제 곡 보컬 음역 분포(C3=48 ~ C6=84)에 맞춰 G2(43)로 둔다 (#1853) —
+ * 곡이 0개인 C2~F#2(36~42) dead-zone 을 후보에서 제거. `VoiceRangeSlider` 트랙
+ * 하한(DEFAULT_MIN_MIDI=43)과 동일 밴드를 공유한다.
  */
 export function octaveRangeMidis(): number[] {
   const result: number[] = [];
-  // C2 = 36, ..., C6 = 84
-  for (let midi = 36; midi <= 84; midi += 1) {
+  // G2 = 43, ..., C6 = 84
+  for (let midi = 43; midi <= 84; midi += 1) {
     result.push(midi);
   }
   return result;
