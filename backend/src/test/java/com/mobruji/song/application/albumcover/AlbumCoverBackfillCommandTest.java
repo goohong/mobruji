@@ -143,11 +143,11 @@ class AlbumCoverBackfillCommandTest {
     // 호출될 수 있다.
 
     @Test
-    @DisplayName("@Profile 이 없어야 한다 — on-demand admin 트리거(#1766)가 runBackfill 을 모든 프로파일에서 재사용 (회귀 가드)")
-    void classProfile_isAbsent() {
+    @DisplayName("@Profile 는 !test 로 고정되어야 한다 (통합 테스트 영향 회귀 가드)")
+    void classProfile_excludesTest() {
         final Profile profile = AlbumCoverBackfillCommand.class.getAnnotation(Profile.class);
-        // @Profile("!test") 로 되돌리면 on-demand 트리거가 test 프로파일에서 빈을 못 찾아 슬라이스/E2E 가 깨진다.
-        assertThat(profile).as("on-demand 재사용을 위해 @Profile 은 제거되어야 한다").isNull();
+        assertThat(profile).as("@Profile 어노테이션이 존재해야 한다").isNotNull();
+        assertThat(profile.value()).containsExactly("!test");
     }
 
     @Test

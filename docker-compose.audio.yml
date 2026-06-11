@@ -15,46 +15,15 @@
 # 참고: main `docker-compose.yml` (MySQL) 와는 별도 파일이다 — audio tool 은 곡 분석 시점에만 ad-hoc
 # 실행하면 되므로 항상 띄울 필요가 없다.
 services:
-  # PO token provider sidecar (#1813). 데이터센터 IP 가 모든 player_client 에서
-  # 'Video unavailable' 로 봇차단되는 패턴을 무쿠키로 우회한다. proof-of-origin token 을
-  # HTTP(port 4416)로 발급하며, audio-analysis 의 yt-dlp 플러그인이 web client 추출 시
-  # 이 sidecar 에서 토큰을 받아 차단을 푼다. 경량 node 서버 — backfill 간 토큰 캐시 재사용을
-  # 위해 상주시킨다(`docker compose run` 은 종료 후에도 deps 를 내리지 않음).
-  bgutil-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider:1.1.0
-    restart: unless-stopped
-    expose:
-      - "4416"
-
   audio-analysis:
     build:
       context: ./tools/audio-analysis
       dockerfile: Dockerfile
     image: mobruji/audio-analysis:dev
-    # PO token provider sidecar 가 먼저 떠 있어야 web client 추출이 토큰을 받는다(#1813).
-    # `docker compose run --rm audio-analysis` 는 depends_on 을 자동 기동한다.
-    depends_on:
-      - bgutil-provider
     # 임시 분석 산출물 디버깅용 마운트. 운영에서는 ADR 0006 에 따라 컨테이너 종료 시 자동 삭제됨.
-    #
-    # /data/tmp: 호스트 root 파일시스템(yt-dlp mp3 다운로드 + librosa wav 변환으로 곡당 수십 MB)
-    # 이 협소한 NCP dev 환경에서 분석 임시 산출물을 여유 있는 /data 디스크로 격리한다 (#1779).
-    # analyze.py 의 tempfile.mkdtemp 가 TMPDIR 를 따르며, 분석 후 shutil.rmtree 로 자동 삭제.
-    # 호스트 /data/tmp 는 sticky world-writable(1777)로 부트스트랩이 생성한다.
     volumes:
       - ./tools/audio-analysis:/workspace:ro
-      - /data/tmp:/data/tmp
-      # 쿠키 파일(#1802): 음악 영상이 인증 없이는 막히는 패턴 완화. 호스트의
-      # YTDLP_COOKIES_FILE(없으면 /dev/null)을 read-only 로 컨테이너 안 고정 경로에
-      # 마운트하고, 같은 경로를 컨테이너 YTDLP_COOKIES_FILE 로 노출한다. analyze.py 는
-      # 파일이 존재할 때만 --cookies 를 전달하므로 미설정 시 기존 동작 그대로.
-      - ${YTDLP_COOKIES_FILE:-/dev/null}:/run/secrets/yt-cookies.txt:ro
     # yt-dlp 다운로드 + librosa 분석은 외부 네트워크 필요 (YouTube).
     # 결정성/PII 정책은 Python tool 측 `mask_url` 가 보장.
     environment:
       - PYTHONUNBUFFERED=1
-      - TMPDIR=/data/tmp
-      - YTDLP_COOKIES_FILE=/run/secrets/yt-cookies.txt
-      # PO token provider sidecar 위치(#1813). analyze.py 가 설정 시 yt-dlp extractor-args
-      # 로 주입해 web client 추출 시 토큰을 받는다. compose 네트워크의 서비스명으로 접근.
-      - YTDLP_POT_PROVIDER_URL=http://bgutil-provider:4416

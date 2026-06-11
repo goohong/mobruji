@@ -9,19 +9,10 @@ import math
 import pytest
 
 from analyze import (
-    METHOD_SPLEETER_2STEMS,
-    METHOD_VOCAL_SKIP,
-    PLAYER_CLIENT_CHAIN,
-    POT_EXTRACTOR_KEY,
-    analysis_method_label,
     confidence_score,
     extract_range,
     frequency_to_midi,
-    harden_ydl_opts,
     mask_url,
-    run_with_client_chain,
-    youtube_cookies_file,
-    youtube_pot_provider_url,
 )
 
 
@@ -118,161 +109,7 @@ class TestMaskUrl:
         assert "secret" not in masked
 
 
-class TestAnalysisMethodLabel:
-    def test_vocal_skip_when_disabled(self) -> None:
-        assert analysis_method_label(False) == METHOD_VOCAL_SKIP
-
-    def test_spleeter_when_enabled(self) -> None:
-        assert analysis_method_label(True) == METHOD_SPLEETER_2STEMS
-
-    def test_labels_are_distinct(self) -> None:
-        assert METHOD_VOCAL_SKIP != METHOD_SPLEETER_2STEMS
-
-
-class TestYoutubeCookiesFile:
-    def test_unset_returns_none(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        assert youtube_cookies_file() is None
-
-    def test_missing_file_returns_none(self, monkeypatch, tmp_path) -> None:
-        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(tmp_path / "nope.txt"))
-        assert youtube_cookies_file() is None
-
-    def test_existing_file_returns_path(self, monkeypatch, tmp_path) -> None:
-        cookie = tmp_path / "cookies.txt"
-        cookie.write_text("# Netscape HTTP Cookie File\n")
-        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(cookie))
-        assert youtube_cookies_file() == str(cookie)
-
-    def test_directory_path_returns_none(self, monkeypatch, tmp_path) -> None:
-        # 디렉토리는 쿠키 파일이 아니다 (예: /dev/null 마운트 fallback 도 is_file False).
-        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(tmp_path))
-        assert youtube_cookies_file() is None
-
-
-class TestYoutubePotProviderUrl:
-    def test_unset_returns_none(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_POT_PROVIDER_URL", raising=False)
-        assert youtube_pot_provider_url() is None
-
-    def test_blank_returns_none(self, monkeypatch) -> None:
-        monkeypatch.setenv("YTDLP_POT_PROVIDER_URL", "   ")
-        assert youtube_pot_provider_url() is None
-
-    def test_set_returns_trimmed_url(self, monkeypatch) -> None:
-        monkeypatch.setenv("YTDLP_POT_PROVIDER_URL", "  http://bgutil-provider:4416  ")
-        assert youtube_pot_provider_url() == "http://bgutil-provider:4416"
-
-
-class TestHardenYdlOpts:
-    def test_sets_single_player_client(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        opts = harden_ydl_opts({"quiet": True}, "android")
-        assert opts["extractor_args"]["youtube"]["player_client"] == ["android"]
-        assert opts["quiet"] is True
-
-    def test_does_not_mutate_base(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        base = {"quiet": True}
-        harden_ydl_opts(base, "web")
-        assert "extractor_args" not in base
-
-    def test_omits_cookies_when_unset(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        assert "cookiefile" not in harden_ydl_opts({}, "web")
-
-    def test_includes_cookies_when_present(self, monkeypatch, tmp_path) -> None:
-        cookie = tmp_path / "cookies.txt"
-        cookie.write_text("# Netscape HTTP Cookie File\n")
-        monkeypatch.setenv("YTDLP_COOKIES_FILE", str(cookie))
-        assert harden_ydl_opts({}, "web")["cookiefile"] == str(cookie)
-
-    def test_omits_pot_provider_when_unset(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        monkeypatch.delenv("YTDLP_POT_PROVIDER_URL", raising=False)
-        assert POT_EXTRACTOR_KEY not in harden_ydl_opts({}, "web")["extractor_args"]
-
-    def test_injects_pot_base_url_when_set(self, monkeypatch) -> None:
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        monkeypatch.setenv("YTDLP_POT_PROVIDER_URL", "http://bgutil-provider:4416")
-        opts = harden_ydl_opts({}, "web")
-        assert opts["extractor_args"][POT_EXTRACTOR_KEY]["base_url"] == [
-            "http://bgutil-provider:4416"
-        ]
-        # web client 와 PO token provider 가 함께 설정돼야 토큰으로 차단을 푼다.
-        assert opts["extractor_args"]["youtube"]["player_client"] == ["web"]
-
-
-class TestRunWithClientChain:
-    def test_chain_covers_known_clients(self) -> None:
-        assert PLAYER_CLIENT_CHAIN[0] == "web"
-        assert "android" in PLAYER_CLIENT_CHAIN
-
-    def test_falls_back_to_next_client_on_download_error(self, monkeypatch) -> None:
-        yt_dlp = pytest.importorskip("yt_dlp")
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-        seen: list[str] = []
-
-        class FakeYDL:
-            def __init__(self, opts: dict) -> None:
-                self.client = opts["extractor_args"]["youtube"]["player_client"][0]
-
-            def __enter__(self) -> "FakeYDL":
-                return self
-
-            def __exit__(self, *exc) -> bool:
-                return False
-
-        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
-
-        def action(ydl: "FakeYDL"):
-            seen.append(ydl.client)
-            if ydl.client != "ios":
-                raise yt_dlp.utils.DownloadError("blocked")
-            return "ok"
-
-        assert run_with_client_chain({"quiet": True}, action) == "ok"
-        assert seen == ["web", "android", "ios"]
-
-    def test_raises_last_error_when_all_clients_fail(self, monkeypatch) -> None:
-        yt_dlp = pytest.importorskip("yt_dlp")
-        monkeypatch.delenv("YTDLP_COOKIES_FILE", raising=False)
-
-        class FakeYDL:
-            def __init__(self, opts: dict) -> None:
-                pass
-
-            def __enter__(self) -> "FakeYDL":
-                return self
-
-            def __exit__(self, *exc) -> bool:
-                return False
-
-        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
-
-        def action(ydl: "FakeYDL"):
-            raise yt_dlp.utils.DownloadError("blocked")
-
-        with pytest.raises(yt_dlp.utils.DownloadError):
-            run_with_client_chain({}, action, clients=("web", "android"))
-
-
 def test_module_has_tooling_version() -> None:
     from analyze import TOOLING_VERSION
 
     assert TOOLING_VERSION.startswith("analyze-py-")
-
-
-def test_result_defaults_to_vocal_skip_method() -> None:
-    from analyze import AnalysisResult
-
-    result = AnalysisResult(
-        songMeta={},
-        lowMidi=55,
-        highMidi=71,
-        key="C",
-        tempo=120.0,
-        durationSec=45.0,
-        confidence=0.8,
-    )
-    assert result.analysisMethod == METHOD_VOCAL_SKIP

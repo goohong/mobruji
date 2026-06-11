@@ -373,35 +373,11 @@ describe("/voice-range/auto 페이지 mutation/cleanup race 가드 (#1115 / #112
   it("시나리오 3: lowMidi > highMidi 시 handleSave 가 mutation 호출 0건 + Button disabled (invariant 박제)", async () => {
     const user = userEvent.setup();
 
-    // 두 손잡이 슬라이더(#1706)는 low ≤ high 를 구조적으로 클램프하므로 UI 조작으로는
-    // 크로스오버를 만들 수 없다. 대신 측정값 자체가 low(60) > high(50) 로 들어오는
-    // 케이스로 invariant 가드를 박제한다 — 측정 단계는 low/high 를 독립 측정하므로
-    // 사용자가 낮은 음을 더 높게 부르면 실제로 발생 가능한 상태다.
-    const crossedDeps = buildDeps({
-      runPhase: vi.fn().mockImplementation(async (phase, _stream, onSample) => {
-        const midi = phase === "low" ? 60 : 50;
-        const sample: PitchSample = {
-          elapsedMs: 500,
-          frequencyHz: phase === "low" ? 261.63 : 196.0,
-          clarity: 0.95,
-          isStable: true,
-          midi,
-        };
-        onSample(sample);
-        return {
-          midi,
-          confirmed: true,
-          stableSampleCount: 5,
-          totalSampleCount: 5,
-        } as MeasurementResult;
-      }),
-    });
-
     const { client } = renderWithExposedQueryClient(
-      <AutoVoiceRangePage deps={crossedDeps} />,
+      <AutoVoiceRangePage deps={buildDeps()} />,
     );
 
-    // 측정 시작 → RESULT 단계 진입 (측정 결과 low=60 > high=50).
+    // 측정 시작 → RESULT 단계 진입 (deps default 는 low=48, high=69 결과 반환).
     await user.click(screen.getByRole("button", { name: /측정 시작/ }));
 
     await waitFor(() => {
@@ -410,7 +386,16 @@ describe("/voice-range/auto 페이지 mutation/cleanup race 가드 (#1115 / #112
       ).toBeInTheDocument();
     });
 
-    // validationError 노출 (측정값 크로스오버).
+    // 슬라이더로 lowMidi 를 highMidi 보다 크게 조정 → validationError 발생.
+    const lowSlider = screen.getByTestId("low-midi-slider") as HTMLInputElement;
+    const highSlider = screen.getByTestId("high-midi-slider") as HTMLInputElement;
+
+    // fireEvent.change 로 input value 직접 설정 — range slider 는 user.type 이 안 먹는다.
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.change(highSlider, { target: { value: "50" } });
+    fireEvent.change(lowSlider, { target: { value: "60" } });
+
+    // validationError 노출.
     await waitFor(() => {
       expect(
         screen.getByText(/최저음은 최고음보다 같거나 낮아야 합니다/),

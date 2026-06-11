@@ -25,7 +25,7 @@ class CreateRecommendationCommandTest {
     void create_valid_minimal() {
         // given / when
         final CreateRecommendationCommand command = new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, null, null, null, List.of(), false);
+                "session-1", 48, 72, Mood.CALM, null, null, List.of(), false);
 
         // then
         assertThat(command.sessionId()).isEqualTo("session-1");
@@ -40,7 +40,7 @@ class CreateRecommendationCommandTest {
     @DisplayName("null guard: sessionId가 null이면 NullPointerException")
     void create_nullSessionId_throws() {
         assertThatThrownBy(() -> new CreateRecommendationCommand(
-                null, 48, 72, Mood.CALM, 120, null, null, List.of(), false))
+                null, 48, 72, Mood.CALM, 120, null, List.of(), false))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("sessionId");
     }
@@ -49,7 +49,7 @@ class CreateRecommendationCommandTest {
     @DisplayName("null guard: excludeSongIds가 null이면 NullPointerException")
     void create_nullExcludeSongIds_throws() {
         assertThatThrownBy(() -> new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, 120, null, null, null, false))
+                "session-1", 48, 72, Mood.CALM, 120, null, null, false))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("excludeSongIds");
     }
@@ -62,7 +62,7 @@ class CreateRecommendationCommandTest {
 
         // when
         final CreateRecommendationCommand command = new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, null, null, null, source, false);
+                "session-1", 48, 72, Mood.CALM, null, null, source, false);
         source.add(999L);
 
         // then
@@ -74,7 +74,7 @@ class CreateRecommendationCommandTest {
     void create_excludeSongIds_isUnmodifiable() {
         // given
         final CreateRecommendationCommand command = new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, null, null, null, List.of(1L, 2L), false);
+                "session-1", 48, 72, Mood.CALM, null, null, List.of(1L, 2L), false);
 
         // when / then
         assertThatThrownBy(() -> command.excludeSongIds().add(3L))
@@ -85,7 +85,7 @@ class CreateRecommendationCommandTest {
     @DisplayName("invariant: preferredBpm이 30 미만이면 IllegalArgumentException")
     void create_preferredBpmTooLow_throws() {
         assertThatThrownBy(() -> new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, 29, null, null, List.of(), false))
+                "session-1", 48, 72, Mood.CALM, 29, null, List.of(), false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("preferredBpm")
                 .hasMessageContaining("29");
@@ -95,7 +95,7 @@ class CreateRecommendationCommandTest {
     @DisplayName("invariant: preferredBpm이 300 초과면 IllegalArgumentException")
     void create_preferredBpmTooHigh_throws() {
         assertThatThrownBy(() -> new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, 301, null, null, List.of(), false))
+                "session-1", 48, 72, Mood.CALM, 301, null, List.of(), false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("preferredBpm")
                 .hasMessageContaining("301");
@@ -106,9 +106,9 @@ class CreateRecommendationCommandTest {
     void create_preferredBpmBoundary_allowed() {
         // given / when
         final CreateRecommendationCommand lower = new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, 30, null, null, List.of(), false);
+                "session-1", 48, 72, Mood.CALM, 30, null, List.of(), false);
         final CreateRecommendationCommand upper = new CreateRecommendationCommand(
-                "session-1", 48, 72, Mood.CALM, 300, null, null, List.of(), false);
+                "session-1", 48, 72, Mood.CALM, 300, null, List.of(), false);
 
         // then
         assertThat(lower.preferredBpm()).isEqualTo(30);

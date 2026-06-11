@@ -10,8 +10,3 @@ export { Card, CardHeader, CardBody, CardFooter } from "./Card";
 export { Input } from "./Input";
 export { Chip } from "./Chip";
 export type { ChipTone } from "./Chip";
-export { Skeleton } from "./Skeleton";
-export { StepIndicator } from "./StepIndicator";
-export { HeartPop } from "./HeartPop";
-export { VoiceRangeSlider } from "./VoiceRangeSlider";
-export type { VoiceRangeSliderProps } from "./VoiceRangeSlider";

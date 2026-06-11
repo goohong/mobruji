@@ -11,7 +11,6 @@ import java.util.stream.Collectors;
 
 import com.mobruji.recommendation.domain.AgeGroup;
 import com.mobruji.song.domain.Mood;
-import com.mobruji.song.domain.VocalGender;
 
 /**
  * 추천 요청 식별자로부터 결정적 seed(long)를 도출하는 유틸.
@@ -47,7 +46,6 @@ public final class SeedDeriver {
      * @param mood           요청 분위기(nullable).
      * @param preferredBpm   사용자 선호 BPM(nullable, v2 #218 입력). null과 정수 입력은 다른 seed.
      * @param ageGroup       요청자 연령대(nullable, #1487 입력). null과 enum 입력은 다른 seed.
-     * @param gender         성별 필터(nullable, #1767 입력). null과 enum 입력은 다른 seed.
      * @param excludeSongIds 결과에서 제외할 곡 ID 목록(nullable → 빈 리스트로 처리).
      *                       내부에서 정렬·중복 제거 후 직렬화하므로 호출 측 순서 무관.
      * @return 같은 입력에 대해 항상 같은 long.
@@ -59,11 +57,10 @@ public final class SeedDeriver {
             final Mood mood,
             final Integer preferredBpm,
             final AgeGroup ageGroup,
-            final VocalGender gender,
             final List<Long> excludeSongIds) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         final String canonical = canonicalize(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup, gender, excludeSongIds);
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup, excludeSongIds);
         final byte[] digest = sha256(canonical);
         return toLongBigEndian(digest);
     }
@@ -84,11 +81,10 @@ public final class SeedDeriver {
             final Mood mood,
             final Integer preferredBpm,
             final AgeGroup ageGroup,
-            final VocalGender gender,
             final List<Long> excludeSongIds) {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         final String canonical = canonicalize(
-                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup, gender, excludeSongIds);
+                sessionId, voiceRangeLow, voiceRangeHigh, mood, preferredBpm, ageGroup, excludeSongIds);
         final byte[] digest = sha256(canonical);
         return toHexPrefix(digest, INPUT_HASH_HEX_LENGTH);
     }
@@ -100,12 +96,10 @@ public final class SeedDeriver {
             final Mood mood,
             final Integer preferredBpm,
             final AgeGroup ageGroup,
-            final VocalGender gender,
             final List<Long> excludeSongIds) {
         final String moodToken = mood == null ? "" : mood.name();
         final String bpmToken = preferredBpm == null ? "" : preferredBpm.toString();
         final String ageGroupToken = ageGroup == null ? "" : ageGroup.name();
-        final String genderToken = gender == null ? "" : gender.name();
         final String excludeToken = normalizeExcludeIds(excludeSongIds);
         return sessionId
                 + FIELD_SEPARATOR + voiceRangeLow
@@ -113,7 +107,6 @@ public final class SeedDeriver {
                 + FIELD_SEPARATOR + moodToken
                 + FIELD_SEPARATOR + bpmToken
                 + FIELD_SEPARATOR + ageGroupToken
-                + FIELD_SEPARATOR + genderToken
                 + FIELD_SEPARATOR + excludeToken;
     }
 

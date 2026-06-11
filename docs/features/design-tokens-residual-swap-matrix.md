@@ -1,12 +1,12 @@
 ---
 feature: Design tokens residual zinc swap 매트릭스 — ADR-0018 단계 4 완결성 추적
 slug: design-tokens-residual-swap-matrix
-status: shipped
+status: implementing
 owner: @goohong
 scope: web
-related_issues: [1044, 1659]
-related_prs: [1219, 1249, 1253, 1256, 1259, 1659]
-last_reviewed: 2026-06-03
+related_issues: [1044]
+related_prs: [1219, 1249, 1253, 1256, 1259]
+last_reviewed: 2026-05-29
 ---
 
 # Design tokens residual zinc swap 매트릭스 — ADR-0018 단계 4 완결성 추적
@@ -44,13 +44,13 @@ PR #1259 audit 결과 5 카테고리 후속 백로그 (SongDetailModal 전용 �
 - [x] 비활성 (주석 마커) 75건 별도 추적 — swap 완료 시 동시 정리 (정보성 cleanup)
 
 #### sub-PR 분할 + 의존성 (본 spec §6)
-- [x] PR 분할 5종 정의 (우선순위 / 의존성 / 신규 토큰 필요 / LOC 예상 / 회귀 risk)
-- [x] 의존성 그래프 (한 PR 가 다른 PR 의 토큰 결정에 의존) 명시
-- [x] 단계 4 swap 완결 게이트 (active count == 0 + 신규 토큰 결정 + 테스트 동기 swap) 정의 — **PR #1659 에서 게이트 통과 (활성 0)**
+- [ ] PR 분할 5종 정의 (우선순위 / 의존성 / 신규 토큰 필요 / LOC 예상 / 회귀 risk)
+- [ ] 의존성 그래프 (한 PR 가 다른 PR 의 토큰 결정에 의존) 명시
+- [ ] 단계 4 swap 완결 게이트 (active count == 0 + 신규 토큰 결정 + 테스트 동기 swap) 정의
 
 #### ADR-0018 status update (본 spec 의존)
-- [x] ADR-0018 본문에 "## Status timeline" 섹션 신설 — `accepted (2026-05-24)` → `implementing (2026-05-26 PR 1 #1131 머지부터)` → `implemented (2026-06-03 PR #1659 게이트 통과)` 전이 박제
-- [x] ADR-0018 `## Consequences` 에 "단계 4 진행도" 표 — sub-PR 수 / 누적 swap 라인 수 / 잔존 카운트 (본 spec §5 cross-link)
+- [ ] ADR-0018 본문에 "## Status timeline" 섹션 신설 — `accepted (2026-05-24)` → `implementing (2026-05-26 PR 1 #1131 머지부터)` → `implemented (단계 4 swap 완결 게이트 통과 시)` 전이 박제
+- [ ] ADR-0018 `## Consequences` 에 "단계 4 진행도" 표 — sub-PR 수 / 누적 swap 라인 수 / 잔존 카운트 (본 spec §5 cross-link)
 
 ### 비기능 요구사항
 
@@ -79,9 +79,7 @@ PR #1259 audit 결과 5 카테고리 후속 백로그 (SongDetailModal 전용 �
 
 ### 5-1) 잔존 zinc 매트릭스 (develop @ 20f3cb8 기준)
 
-> **완결 (2026-06-03, PR #1659)**: 아래 표는 초안 측정 시점 (41건 / 10 파일) 의 박제. sub-PR 1~5 + PR #1659 누적 swap 으로 **활성 hardcode 카운트 == 0** (§5-1 측정 명령 재현 결과 빈 출력). PR #1659 가 잔존 primitive (Button/Card/Chip) + nav/floating (ThemeToggle/HomeLink/BottomNav) + recommend (SongCard/SongDetailModal) + soft ring / floating / nav / subtle border 신규 토큰 7종을 마감. tokens.css / `*.test.ts` / `darkModeCoverage.test.ts` 의 의도적 zinc 참조는 보존 (토큰 정의 내부 박제).
-
-#### 활성 hardcode (실제 className 사용) — 41건 / 10 파일 (→ 0, PR #1659 완결)
+#### 활성 hardcode (실제 className 사용) — 41건 / 10 파일
 
 | # | 파일 | 카운트 | 분류 | 다음 sub-PR | 신규 토큰 필요 |
 |---|---|---:|---|---|---|
@@ -271,4 +269,3 @@ sub-PR 0 (신규 토큰 4종 ADR-0018 보강) — 모든 sub-PR 의 선행 조�
 - **2026-05-29**: 초안 작성 (status=implementing). PR #1259 audit 발견 5 카테고리 백로그 → 5 sub-PR + 1 신규 토큰 spec 으로 단계 4 swap 완결 경로 명확화. 활성 hardcode 41 / 10 파일 / 신규 토큰 4종 measure-grep 박제.
 - **2026-05-29**: ADR-0018 status timeline 신설 결정 — `accepted (2026-05-24)` → `implementing (2026-05-26 PR 1 #1131 머지부터)` → `implemented (단계 4 swap 완결 게이트 통과 시)`.
 - **2026-05-29**: 단계 4 swap 완결 게이트 4 조건 (활성 == 0 + 신규 토큰 결정 + 테스트 동기 + 주석 cleanup) 정의 — `ui-ux-redesign.md §6` 컴포넌트 redesign 진입 사전 조건.
-- **2026-06-03 (PR #1659)**: 잔존 zinc swap 완결 — 활성 hardcode 카운트 0 달성. 신규 의미 토큰 7종 (`--ring-soft-hover` / `--ring-soft-focus-within` / `--surface-floating` / `--surface-floating-hover` / `--surface-nav` / `--surface-nav-blur` / `--border-subtle`) 추가. opacity-suffix 배경 (ThemeToggle/HomeLink/BottomNav `bg-*/90·95·80`) 은 Tailwind `/opacity` 와 `var()` 비호환 회피 위해 baked-alpha rgba 토큰으로 고정. Button.test/Chip.test assertion 동기 갱신 + tokens.test 신규 7종 가드 추가. ADR-0018 status `implementing` → `implemented` 전이. 매트릭스 status `implementing` → `shipped`. 게이트 4조건 중 "주석 마커 cleanup" 은 활성 swap 8 파일의 swap-history 주석만 갱신 (이미 완료된 파일의 설명용 JSDoc 은 문서 가치로 보존 — scope creep 회피).

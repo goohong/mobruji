@@ -17,15 +17,14 @@ class ScoreBreakdownResponseTest {
      * fe 14 matchReason 펼침 UX가 의존하는 6개 신호 필드 이름. 변경 시 fe 호환성 회귀 — 본 테스트로 wire format을 잠근다.
      */
     private static final Set<String> EXPECTED_FIELDS = Set.of(
-            "keyMatch", "rangeFit", "genreMatch", "moodMatch", "popularity", "tempoMatch", "generationFit",
-            "genderFit");
+            "keyMatch", "rangeFit", "genreMatch", "moodMatch", "popularity", "tempoMatch", "generationFit");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     @DisplayName("from: domain ScoreBreakdown의 6신호를 그대로 DTO로 매핑한다 (v2 #218)")
     void from_mapsAllFields() {
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.8, 0.0, 1.0, 1.0, 0.6, 0.0, 0.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.8, 0.0, 1.0, 1.0, 0.6, 0.0);
 
         final ScoreBreakdownResponse response = ScoreBreakdownResponse.from(breakdown);
 
@@ -46,7 +45,7 @@ class ScoreBreakdownResponseTest {
     @Test
     @DisplayName("JSON 직렬화: 6신호 필드가 모두 정확한 이름(camelCase)으로 노출된다 — fe 14 펼침 호환성 가드")
     void serializesAllSixFieldsWithExpectedNames() throws Exception {
-        final ScoreBreakdownResponse response = new ScoreBreakdownResponse(1.0, 0.8, 0.0, 1.0, 1.0, 0.6, 0.0, 0.0);
+        final ScoreBreakdownResponse response = new ScoreBreakdownResponse(1.0, 0.8, 0.0, 1.0, 1.0, 0.6, 0.0);
 
         final String json = objectMapper.writeValueAsString(response);
         final JsonNode node = objectMapper.readTree(json);
@@ -66,7 +65,7 @@ class ScoreBreakdownResponseTest {
     @Test
     @DisplayName("JSON 직렬화: 기대하지 않은 extra 필드는 없다 — 스키마 안정성")
     void serializesNoExtraFields() throws Exception {
-        final ScoreBreakdownResponse response = new ScoreBreakdownResponse(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.0, 0.0);
+        final ScoreBreakdownResponse response = new ScoreBreakdownResponse(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.0);
 
         final JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(response));
 
@@ -79,7 +78,7 @@ class ScoreBreakdownResponseTest {
     @Test
     @DisplayName("JSON 직렬화: 0.0 값도 누락 없이 포함된다 — null과 0.0의 wire-level 구분")
     void serializesZeroValuesExplicitly() throws Exception {
-        final ScoreBreakdownResponse response = new ScoreBreakdownResponse(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        final ScoreBreakdownResponse response = new ScoreBreakdownResponse(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
         final JsonNode node = objectMapper.readTree(objectMapper.writeValueAsString(response));
 
@@ -93,7 +92,7 @@ class ScoreBreakdownResponseTest {
     @Test
     @DisplayName("JSON round-trip: 직렬화 → 역직렬화 결과가 원본과 동등 (DTO 호환성)")
     void jsonRoundTripPreservesAllFields() throws Exception {
-        final ScoreBreakdownResponse original = new ScoreBreakdownResponse(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.0, 0.0);
+        final ScoreBreakdownResponse original = new ScoreBreakdownResponse(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.0);
 
         final String json = objectMapper.writeValueAsString(original);
         final ScoreBreakdownResponse restored = objectMapper.readValue(json, ScoreBreakdownResponse.class);

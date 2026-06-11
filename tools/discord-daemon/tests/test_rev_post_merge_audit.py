@@ -21,9 +21,7 @@ import asyncio
 import json
 import subprocess
 import sys
-import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -170,55 +168,7 @@ class FormatRevPostMergeTest(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3b) load_announced_prs / save_announced_prs — 영속 dedup store (#7)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class AnnouncedStoreTest(unittest.TestCase):
-
-    def _tmp_path(self) -> str:
-        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        tmp.close()
-        Path(tmp.name).unlink()
-        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
-        return tmp.name
-
-    def test_load_missing_file_returns_empty(self) -> None:
-        self.assertEqual(bot.load_announced_prs(self._tmp_path()), {})
-
-    def test_save_then_load_roundtrip(self) -> None:
-        path = self._tmp_path()
-        now = datetime(2026, 6, 3, tzinfo=timezone.utc)
-        bot.save_announced_prs({101: now.isoformat()}, path)
-        loaded = bot.load_announced_prs(path, now=now)
-        self.assertIn(101, loaded)
-
-    def test_load_prunes_entries_older_than_retention(self) -> None:
-        path = self._tmp_path()
-        now = datetime(2026, 6, 3, tzinfo=timezone.utc)
-        old = (now - timedelta(days=8)).isoformat()
-        recent = (now - timedelta(days=1)).isoformat()
-        bot.save_announced_prs({1: old, 2: recent}, path)
-        loaded = bot.load_announced_prs(path, now=now, retention_days=7)
-        self.assertNotIn(1, loaded)  # 8일 전 — prune.
-        self.assertIn(2, loaded)  # 1일 전 — 보존.
-
-    def test_load_corrupt_json_returns_empty(self) -> None:
-        path = self._tmp_path()
-        Path(path).write_text("{not json", encoding="utf-8")
-        self.assertEqual(bot.load_announced_prs(path), {})
-
-    def test_load_ignores_non_int_keys_and_bad_ts(self) -> None:
-        path = self._tmp_path()
-        Path(path).write_text(
-            json.dumps({"abc": "2026-06-03T00:00:00+00:00", "5": "not-a-date"}),
-            encoding="utf-8",
-        )
-        self.assertEqual(bot.load_announced_prs(path), {})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4) rev_post_merge_audit_loop — asyncio mock
+# 4) rev_post_merge_audit_loop — asyncio mock — 5건
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -270,16 +220,6 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
         inject.assert_not_called()
         self.assertEqual(channel.sent, [])
 
-    def _tmp_announced(self) -> str:
-        """테스트별 격리 announce store 경로 (실제 ~/.mobruji 오염 방지)."""
-        tmp = tempfile.NamedTemporaryFile(
-            suffix=".json", delete=False
-        )
-        tmp.close()
-        Path(tmp.name).unlink()  # 부재 상태로 시작 (load → 빈 dict).
-        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
-        return tmp.name
-
     async def test_candidates_emit_event_and_push(self) -> None:
         # (#1447) tmux inject → post_merge_review_requested event 발행으로 전환.
         channel = FakeChannel()
@@ -291,7 +231,6 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
                 inject_target="mobruji:0.0",
                 poll_interval=1,
                 initial_delay=0,
-                announced_path=self._tmp_announced(),
                 candidate_fetcher=lambda: [851],
             )
             await _run_loop_iters(coro, iterations=5)
@@ -314,7 +253,6 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
                 poll_interval=1,
                 initial_delay=0,
                 debounce_seconds=900,
-                announced_path=self._tmp_announced(),
                 candidate_fetcher=lambda: [777],
                 time_source=lambda: fake_mono[0],
             )
@@ -322,55 +260,6 @@ class RevPostMergeAuditLoopTest(unittest.IsolatedAsyncioTestCase):
         # 같은 PR → event 정확히 1회 (이후 iter 는 debounce 적중).
         self.assertEqual(emit.call_count, 1)
         self.assertEqual(sum(1 for m in channel.sent if "#777" in m), 1)
-
-    async def test_already_announced_pr_not_repushed(self) -> None:
-        """(#7) 영속 store 에 이미 공지된 PR 은 채널 재 push 안 함.
-
-        debounce(in-memory)가 만료돼 fresh 로 재등장해도, announce store 가
-        남아 있으면 Discord push 는 건너뛴다 (= bridge 재시작·15분 재폴링 도배 fix).
-        """
-        announced_path = self._tmp_announced()
-        # 사전 공지 기록 — PR #909 는 이미 채널에 알린 상태.
-        bot.save_announced_prs({909: "2026-06-03T00:00:00+00:00"}, announced_path)
-        channel = FakeChannel()
-        client = FakeClient(channel)
-        # debounce 를 0 으로 둬 매 iter fresh 통과시키되, store gate 만으로 push 차단.
-        with mock.patch.object(bot, "append_agent_event", return_value=1):
-            coro = bot.rev_post_merge_audit_loop(
-                client,
-                digest_channel_id=222,
-                inject_target="mobruji:0.0",
-                poll_interval=1,
-                initial_delay=0,
-                debounce_seconds=0,
-                announced_path=announced_path,
-                candidate_fetcher=lambda: [909],
-            )
-            await _run_loop_iters(coro, iterations=10)
-        # 영속 store gate → 채널 push 0회.
-        self.assertEqual(sum(1 for m in channel.sent if "#909" in m), 0)
-
-    async def test_announced_persisted_after_first_push(self) -> None:
-        """(#7) 첫 push 성공 시 announce store 에 PR 이 기록된다."""
-        announced_path = self._tmp_announced()
-        channel = FakeChannel()
-        client = FakeClient(channel)
-        with mock.patch.object(bot, "append_agent_event", return_value=1):
-            coro = bot.rev_post_merge_audit_loop(
-                client,
-                digest_channel_id=222,
-                inject_target="mobruji:0.0",
-                poll_interval=1,
-                initial_delay=0,
-                debounce_seconds=900,
-                announced_path=announced_path,
-                candidate_fetcher=lambda: [555],
-            )
-            await _run_loop_iters(coro, iterations=5)
-        # 채널 push 1회 + store 에 영속.
-        self.assertEqual(sum(1 for m in channel.sent if "#555" in m), 1)
-        reloaded = bot.load_announced_prs(announced_path)
-        self.assertIn(555, reloaded)
 
     async def test_poll_interval_zero_disables_loop(self) -> None:
         channel = FakeChannel()

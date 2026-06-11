@@ -14,13 +14,7 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useParams } from "next/navigation";
 
 import SongDetailPage from "./page";
@@ -96,15 +90,12 @@ describe("SongDetailPage", () => {
       expect(screen.getByText("Hello")).toBeInTheDocument();
     });
     expect(screen.getByText("Adele")).toBeInTheDocument();
-    expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
-    // 최고음 파5, 최저음 솔3 — 한국어 단독 (#1310 사용자 정정 2026-06-03)
-    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/최저음 솔3/)).toBeInTheDocument();
-    // 키 라벨 (F 단조 — #1719 한글 표기)
-    expect(screen.getByText(/키 F 단조/)).toBeInTheDocument();
-    // 분위기 칩 — 코드값(EMOTIONAL) 이 아니라 한국어 라벨로 노출 (#1764)
-    expect(screen.getByText("감성적인")).toBeInTheDocument();
-    expect(screen.queryByText("EMOTIONAL")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
+    // 최고음 파5 (F5), 최저음 솔3 (G3) — #318 한국어 (SPN) 병기
+    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/최저음 솔3 \(G3\)/)).toBeInTheDocument();
+    // 키 라벨 (F Minor)
+    expect(screen.getByText(/키 F Minor/)).toBeInTheDocument();
     // 메타 셀
     expect(screen.getByText("2015")).toBeInTheDocument();
     expect(screen.getByText("12345")).toBeInTheDocument();
@@ -179,73 +170,6 @@ describe("SongDetailPage", () => {
 
     expect(screen.getByText(/곡을 찾을 수 없습니다/)).toBeInTheDocument();
     expect(readSongByIdMock).not.toHaveBeenCalled();
-  });
-
-  // closes #1666 — 단건 상세 페이지에도 앨범 커버를 노출한다. 카드/모달과 동일한
-  // SongDetailContent 의 large AlbumCover 를 재사용하므로 placeholder/onError fallback
-  // 동작이 그대로 따라온다.
-  describe("앨범 커버 (closes #1666)", () => {
-    it("albumCoverUrl 이 string 이면 <img> 가 렌더된다", async () => {
-      useParamsMock.mockReturnValue({ id: "1" });
-      readSongByIdMock.mockResolvedValueOnce(
-        buildSong({ albumCoverUrl: "https://example.com/cover.jpg" }),
-      );
-
-      renderWithQueryClient(<SongDetailPage />);
-
-      const img = (await screen.findByAltText(
-        "Hello 앨범 커버",
-      )) as HTMLImageElement;
-      expect(img.tagName).toBe("IMG");
-      expect(img.getAttribute("src")).toBe("https://example.com/cover.jpg");
-    });
-
-    it("albumCoverUrl 이 null 이면 placeholder 로 fallback 한다", async () => {
-      useParamsMock.mockReturnValue({ id: "1" });
-      readSongByIdMock.mockResolvedValueOnce(
-        buildSong({ albumCoverUrl: null }),
-      );
-
-      renderWithQueryClient(<SongDetailPage />);
-
-      await waitFor(() => {
-        expect(
-          screen.getByLabelText(/Hello 앨범 커버 \(이미지 없음\)/),
-        ).toBeInTheDocument();
-      });
-      expect(screen.queryByRole("img", { name: /Hello 앨범 커버$/ })).toBeNull();
-    });
-
-    it("img onError 시 placeholder 로 fallback 한다", async () => {
-      useParamsMock.mockReturnValue({ id: "1" });
-      readSongByIdMock.mockResolvedValueOnce(
-        buildSong({ albumCoverUrl: "https://example.com/404.jpg" }),
-      );
-
-      renderWithQueryClient(<SongDetailPage />);
-
-      const img = await screen.findByAltText("Hello 앨범 커버");
-      fireEvent.error(img);
-      expect(
-        screen.getByLabelText(/Hello 앨범 커버 \(이미지 없음\)/),
-      ).toBeInTheDocument();
-    });
-
-    // closes #1687 (PR7) — 카드 thumbnail 과 같은 album-{id} 이름을 cover 에 줘서
-    // /history → /songs/[id] 라우트 전환 시 hero morph 한다.
-    it("cover 에 album-{id} view-transition-name 이 적용된다 (hero morph)", async () => {
-      useParamsMock.mockReturnValue({ id: "1" });
-      readSongByIdMock.mockResolvedValueOnce(
-        buildSong({ albumCoverUrl: "https://example.com/cover.jpg" }),
-      );
-
-      renderWithQueryClient(<SongDetailPage />);
-
-      const img = (await screen.findByAltText(
-        "Hello 앨범 커버",
-      )) as HTMLImageElement;
-      expect(img.style.viewTransitionName).toBe("album-1");
-    });
   });
 
   // closes #107 — 곡 상세 페이지의 정상 응답/404 두 상태에 대해 a11y 검사.

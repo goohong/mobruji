@@ -271,15 +271,10 @@ PR rev 가 머지 가능으로 판정해도 운영 `.env` 동기화는 별도 �
 | #모부르지-지시 (forum) | `DIRECTIVE_BOARD_FORUM_ID` | 1507992370044600442 | 사용자 지시 directive-board. event-driven (PR #1129) — `directive_append.sh` / `directive_status.sh` 호출 |
 | #모부르지-be (forum) | `BE_CHANNEL_ID` / `BE_FORUM_ID` | 1507987421831233648 | be sub-agent launch / 완료 / milestone / audit |
 | #모부르지-fe (forum) | `FE_CHANNEL_ID` / `FE_FORUM_ID` | 1507987424884691015 | fe sub-agent launch / 완료 / milestone / audit |
-| #모부르지-rev (forum) | `REV_CHANNEL_ID` / `REV_FORUM_ID` | 1507987428005380106 | **rev 사이클** launch / 완료 / milestone (사이클 단위 추적 — 아래 §8-9 참조) |
-| #모부르지-pr-review (forum) | `PR_REVIEW_FORUM_ID` | (사용자 신설) | **개별 PR 단위** 리뷰 추적 (1 PR = 1 thread, open 🟡 → merge 후 사후 QA 🔵 단계 전이 — `pr-webhook-rev-forum.md`) |
+| #모부르지-rev (forum) | `REV_CHANNEL_ID` / `REV_FORUM_ID` | 1507987428005380106 | rev sub-agent launch / 완료 / 2단계 e2e 진행 (🟡 Pre-merge review / 🔵 Post-merge audit) |
 | #모부르지-plan (forum) | `PLAN_CHANNEL_ID` / `PLAN_FORUM_ID` | 1507987431331201154 | plan sub-agent launch / 완료 / docs 변경 |
 | #모부르지-digest | `DIGEST_CHANNEL_ID` | 1507617571384328312 | cron digest 본체 (5분 주기 4 사이클 aggregate) + cross-cycle decision |
 | #모부르지-알림 / -alert | `ALERT_CHANNEL_ID` | (별도) | cycle idle / future-ts ERROR / Claude usage 임계 |
-
-> **REV_FORUM_ID vs PR_REVIEW_FORUM_ID 혼동 주의 (2026-06-03 plan #1592 후속 명확화)**: 두
-> forum 은 이름이 비슷하나 **추적 단위가 다른 별도 채널** 입니다 — 통합하지 않고 역할
-> 분리를 유지합니다. 상세 구분은 §8-9.
 
 > **2026-05-28 정리 (이슈 #1190, directive 1508005814928019550)**: 구 텍스트 채널
 > `DIRECTIVE_BOARD_CHANNEL_ID` env 는 PR #1129 event-driven 전환으로 폐기 — `.env.example`
@@ -554,23 +549,6 @@ fi
 
 - **위임 링크**: directive launch 시 `directive_status.sh <id> in_progress [pr_url] [cycle]` 로 위임 cycle 채널·PR URL 을 directive thread 에 기록하고 `진행` 태그로 전이한다 (`agent-launch-wrapper.sh` 강제). **자동 완료**: sub-agent PR body 의 `directive: <id>` 라인 → PR 머지 webhook → `directive_status.sh completed` 자동 호출 → `완료` 태그 전이 (자식 완료 시 부모 directive `🟢` cascade). 상세: `actors/nmae.md §6`.
 
-### 8-9) rev forum (`REV_FORUM_ID`) vs pr-review forum (`PR_REVIEW_FORUM_ID`) — 역할 구분
-
-> 2026-06-03 plan 사이클 (#1592 후속) 명확화. 두 forum 은 **이름이 비슷해 혼동되나 추적 단위가 다른 별도 채널** 이다. **통합하지 않고 역할 분리를 유지** 한다 (분석 결론 — 사이클 추적과 개별 PR 추적은 라이프사이클·시간 축이 다름).
-
-| 구분 | `REV_FORUM_ID` (rev 사이클 forum) | `PR_REVIEW_FORUM_ID` (pr-review forum) |
-|---|---|---|
-| 추적 단위 | **rev 사이클** 1회 (rev sub-agent launch ~ 완료) | **개별 PR** 1건 (1 PR = 1 thread) |
-| thread 신설 시점 | nmae 가 rev sub-agent launch 직전 (`agent-launch-wrapper.sh` / `--forum-post rev`) | actor 가 `gh pr create` 호출 시 PostToolUse hook 자동 신설 (`pr-webhook-rev-forum.md §3-1`) |
-| thread 1개의 수명 | 한 rev 사이클 동안 (여러 PR 을 한 사이클에서 검토할 수 있음) | 한 PR 의 전 생애 (open → merge 후 사후 QA 까지 단계 전이로 통합) |
-| 태그 의미 | 사이클 진행 상태 (`대기` / `진행` / `완료` / `차단` — §8-3 표준) | PR 리뷰 단계 (`🟡 1차 review` = 머지 전 → `🔵 사후 E2E QA` = 머지 후) |
-| 도메인 용어 | `RevCycleThread` (사이클 thread) | `PrReviewThread` (PR thread) — `06-domain-model.md §4` |
-| 채널 ID 출처 | 기존 cycle forum (bot.py boot probe 5 forum 중 하나) | 사용자가 별도 신설 (`pr-webhook-rev-forum.md §6-2`) |
-| SoT spec | 본 문서 §8-1 ~ §8-5 (cycle forum 운영) | `docs/features/pr-webhook-rev-forum.md` |
-
-- **요약**: 한 rev 사이클 thread (`REV_FORUM_ID`) 안에서 여러 PR 을 검토 보고할 수 있고, 그 각 PR 은 동시에 `PR_REVIEW_FORUM_ID` 에 자기 단독 thread 를 갖는다. 둘은 cross-ref 만 하고 코드 결합은 없다 (`pr-webhook-rev-forum.md §6-1` 모듈 경계).
-- **혼동 사고 방지**: 신규 env 추가 시 두 변수명을 같이 적지 말 것. `REV_FORUM_ID` 를 pr-review thread 신설에 재사용하면 사이클 thread 와 PR thread 가 한 채널에 섞여 사용자 추적이 깨진다 (`pr-webhook-rev-forum.md §6-2 round 18 정정` 참조 — 이름 충돌로 신규 변수 분리한 사유).
-
 ## §7 변경 이력
 
 | 일자 | 변경 | PR |
@@ -578,5 +556,4 @@ fi
 | 2026-05-21 | 최초 작성 (카테고리 3종 + 명령 syntax 정의) | #175 |
 | 2026-05-24 | §8 forum 채널 강제 + 4 mode + 태그 자동 전이 (#17 사용자 forum 전환 wave) | #1155 |
 | 2026-05-29 | §8-7 placeholder thread_id 가드 F-1~F-4 cross-ref + `--digest` 단발 모드 fallback 종착점 박제 (plan round 16) | #1336 |
-| 2026-05-31 | §8-8 directive 자동 완료 + 위임 링크 동작 기록 (흐름검증) | #1336 후속 |
-| 2026-06-03 | §8-9 rev forum vs pr-review forum 역할 구분 표 + 채널↔env 매핑에 `PR_REVIEW_FORUM_ID` 행 추가 (#1592 후속 명확화) | _본 PR_ |
+| 2026-05-31 | §8-8 directive 자동 완료 + 위임 링크 동작 기록 (흐름검증) | _본 PR_ |

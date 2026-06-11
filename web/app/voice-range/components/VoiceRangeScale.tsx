@@ -12,7 +12,7 @@
  *   - 외부 차트 라이브러리 없이 SVG 직접 렌더 (번들 부담 회피).
  *   - 가로축 = 음높이(왼쪽 낮은음 → 오른쪽 높은음). 옥타브 기준선(C-노트) + 계이름 라벨.
  *   - 벤치마크 밴드(옅게) 위에 사용자 밴드(강조)를 겹쳐 같은 음높이 축에서 비교.
- *   - 양 끝에 사용자 최저음/최고음 음표명(한국어 음명).
+ *   - 양 끝에 사용자 최저음/최고음 음표명(계이름 병기, 좁으면 SPN 단독은 호출 측 정책).
  *
  * 접근성:
  *   - SVG 에 role="img" + 요약 aria-label (시각화 없이도 이해 가능).
@@ -22,7 +22,8 @@
 
 import {
   INVALID_MIDI_A11Y_FALLBACK,
-  midiToKoreanNoteName,
+  midiToCombinedNoteName,
+  midiToNoteName,
 } from "@/lib/notes";
 import {
   NEUTRAL_BENCHMARK,
@@ -44,12 +45,6 @@ type Props = {
   benchmark?: VoiceRangeBenchmark;
   /** 시각화 위에 들어갈 짧은 제목(스크린리더 + 시각). 생략 시 라벨 없음. */
   caption?: string;
-  /**
-   * 톤다운(축소) 변형. 결과 페이지 헤더처럼 음역 막대가 보조 정보일 때, 막대의
-   * 렌더 폭(=비례 높이)을 줄이고 사용자 밴드 대비를 낮춰 시선 비중을 절제한다
-   * (recommend-page-visual-ux-audit-1708 V7). 기본 false → 기존 화면 불변.
-   */
-  compact?: boolean;
 };
 
 export function VoiceRangeScale({
@@ -57,7 +52,6 @@ export function VoiceRangeScale({
   highMidi,
   benchmark = NEUTRAL_BENCHMARK,
   caption,
-  compact = false,
 }: Props) {
   // 비유한 입력 가드 (#757/#766 철학) — 의미 없는 막대 대신 안내 텍스트.
   if (!Number.isFinite(lowMidi) || !Number.isFinite(highMidi)) {
@@ -93,9 +87,9 @@ export function VoiceRangeScale({
 
   const octaveAnchors = pickOctaveAnchors(rangeLow, rangeHigh);
 
-  const lowNote = midiToKoreanNoteName(lowMidi);
-  const highNote = midiToKoreanNoteName(highMidi);
-  const ariaLabel = `내 음역대 ${lowNote}부터 ${highNote}까지. 평균 음역대 ${midiToKoreanNoteName(benchmark.lowMidi)}부터 ${midiToKoreanNoteName(benchmark.highMidi)}까지와 비교한 막대.`;
+  const lowCombined = midiToCombinedNoteName(lowMidi);
+  const highCombined = midiToCombinedNoteName(highMidi);
+  const ariaLabel = `내 음역대 ${midiToNoteName(lowMidi)}부터 ${midiToNoteName(highMidi)}까지. 평균 음역대 ${midiToNoteName(benchmark.lowMidi)}부터 ${midiToNoteName(benchmark.highMidi)}까지와 비교한 막대.`;
 
   return (
     <figure className="flex flex-col gap-2">
@@ -108,9 +102,7 @@ export function VoiceRangeScale({
         role="img"
         aria-label={ariaLabel}
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className={`w-full text-[var(--text-tertiary)] ${
-          compact ? "max-w-[240px]" : "max-w-md"
-        }`}
+        className="w-full max-w-md text-[var(--text-tertiary)]"
       >
         {/* 음계 backdrop(전체 트랙) */}
         <rect
@@ -143,7 +135,7 @@ export function VoiceRangeScale({
                 textAnchor="middle"
                 className="fill-[var(--text-tertiary)] text-[9px]"
               >
-                {midiToKoreanNoteName(midi)}
+                {midiToCombinedNoteName(midi)}
               </text>
             </g>
           );
@@ -161,13 +153,12 @@ export function VoiceRangeScale({
           opacity={0.45}
         >
           <title>
-            평균 음역대 {midiToKoreanNoteName(benchmark.lowMidi)} ~{" "}
-            {midiToKoreanNoteName(benchmark.highMidi)}
+            평균 음역대 {midiToCombinedNoteName(benchmark.lowMidi)} ~{" "}
+            {midiToCombinedNoteName(benchmark.highMidi)}
           </title>
         </rect>
 
-        {/* 사용자 밴드 — 강조(brand). 자동 측정 viz(#1700, PitchWaveRing)의 brand
-            톤과 맞춰 "내 음역"을 한눈에 평균(회색)과 구분되게 한다(#1722). */}
+        {/* 사용자 밴드 — 강조 */}
         <rect
           data-testid="voice-range-scale-user-band"
           x={userX1}
@@ -175,53 +166,31 @@ export function VoiceRangeScale({
           width={Math.max(2, userX2 - userX1)}
           height={userLaneHeight}
           rx={5}
-          className="fill-[var(--brand-500)]"
-          opacity={compact ? 0.85 : undefined}
+          className="fill-[var(--chart-bar-active-bg)]"
         >
           <title>
-            내 음역대 {lowNote} ~ {highNote}
+            내 음역대 {lowCombined} ~ {highCombined}
           </title>
         </rect>
 
-        {/* 사용자 양 끝 음표명(한국어 음명) */}
+        {/* 사용자 양 끝 음표명(계이름 병기) */}
         <text
           x={userX1}
           y={benchLaneY - 5}
           textAnchor="middle"
-          className="fill-[var(--brand-600)] text-[10px] font-semibold"
+          className="fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
         >
-          {lowNote}
+          {lowCombined}
         </text>
         <text
           x={userX2}
           y={benchLaneY - 5}
           textAnchor="middle"
-          className="fill-[var(--brand-600)] text-[10px] font-semibold"
+          className="fill-[var(--chart-bar-active-bg)] text-[10px] font-semibold"
         >
-          {highNote}
+          {highCombined}
         </text>
       </svg>
-
-      {/* 평균 범위 vs 내 음역 레전드 — 색 의미를 명시해 "검은 막대 한 덩어리"로
-          읽히던 AS-IS 를 해소한다(#1722). 톤다운(compact) 변형은 보조 정보라 생략. */}
-      {compact ? null : (
-        <div className="flex items-center gap-4 text-xs text-[var(--text-caption)]">
-          <span className="flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-3 rounded-sm bg-[var(--brand-500)]"
-            />
-            내 음역
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-3 rounded-sm bg-[var(--chart-bar-inactive-bg)]"
-            />
-            평균 범위
-          </span>
-        </div>
-      )}
     </figure>
   );
 }

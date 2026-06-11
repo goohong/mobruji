@@ -18,7 +18,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { SongCard, buildYouTubeSearchUrl, getSongHue } from "./SongCard";
+import { SongCard, buildYouTubeSearchUrl } from "./SongCard";
 import { expectNoA11yViolations } from "@/lib/test-helpers/a11y";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 import { useBookmarksStore } from "@/store/bookmarks";
@@ -111,13 +111,12 @@ describe("SongCard", () => {
       </ul>,
     );
     expect(
-      screen.getByLabelText(/가창 난이도 어려움/),
+      screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
     expect(screen.getByText("POP")).toBeInTheDocument();
-    // closes #1719 — score 원값은 카드 표면에 노출하지 않는다.
-    expect(screen.queryByText(/score/)).not.toBeInTheDocument();
+    expect(screen.getByText(/score 0\.91/)).toBeInTheDocument();
   });
 
   it("difficulty가 없고 lowMidi/highMidi만 있으면 client-side 계산 라벨을 노출한다", () => {
@@ -129,12 +128,12 @@ describe("SongCard", () => {
       </ul>,
     );
     expect(
-      screen.getByLabelText(/가창 난이도 어려움/),
+      screen.getByLabelText(/가창 난이도 Hard/),
     ).toBeInTheDocument();
-    // 최고음 음표명 노출 — MIDI 77 = 파5 (한국어 단독, #1310 사용자 정정 2026-06-03)
-    expect(screen.getByLabelText(/최고음 파5/)).toBeInTheDocument();
-    // 최저음(작게) — MIDI 55 = 솔3
-    expect(screen.getByText("솔3")).toBeInTheDocument();
+    // 최고음 음표명 노출 — MIDI 77 = 파5 (F5) (#318 한국어 (SPN) 병기)
+    expect(screen.getByLabelText(/최고음 파5 \(F5\)/)).toBeInTheDocument();
+    // 최저음(작게) — MIDI 55 = 솔3 (G3)
+    expect(screen.getByText("솔3 (G3)")).toBeInTheDocument();
   });
 
   it("난이도 정보가 전혀 없으면 난이도 라벨을 숨기되 나머지는 정상 노출", () => {
@@ -147,7 +146,7 @@ describe("SongCard", () => {
     expect(screen.queryByLabelText(/가창 난이도/)).not.toBeInTheDocument();
     // 카드 자체는 렌더됨
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
-    expect(screen.getByText("C 장조")).toBeInTheDocument();
+    expect(screen.getByText("C Major")).toBeInTheDocument();
   });
 
   // closes #91 #92 — 검색 페이지에서 song prop으로 카드 렌더 시
@@ -161,7 +160,7 @@ describe("SongCard", () => {
     );
     expect(screen.getByText("테스트 곡")).toBeInTheDocument();
     expect(screen.getByText("가수")).toBeInTheDocument();
-    expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
     // 추천 컨텍스트 전용 표시는 모두 숨김.
     expect(screen.queryByText(/score/)).not.toBeInTheDocument();
     expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
@@ -216,7 +215,7 @@ describe("SongCard", () => {
       // 카드 표면 핵심 정보는 그대로 보인다.
       expect(screen.getByText("테스트 곡")).toBeInTheDocument();
       expect(screen.getByText("가수")).toBeInTheDocument();
-      expect(screen.getByLabelText(/가창 난이도 어려움/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/가창 난이도 Hard/)).toBeInTheDocument();
       // 상세는 모달로 위임 — 카드 표면에 없어야 한다.
       expect(screen.queryByText(/score/)).not.toBeInTheDocument();
       expect(screen.queryByText(/음역 매칭/)).not.toBeInTheDocument();
@@ -355,15 +354,15 @@ describe("SongCard", () => {
       expect(screen.getByText("키 매칭")).toBeInTheDocument();
       expect(screen.getByText("장르")).toBeInTheDocument();
       expect(screen.getByText("음역 적합")).toBeInTheDocument();
-      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (한국어 단독, #1310 사용자 정정 2026-06-03)
+      // 음역 적합 detail에 사용자/곡 음역이 함께 표시 (#318: 한국어 (SPN) 병기)
       expect(
         screen.getByText(
-          "사용자 도3-솔4 vs 곡 솔3-파5",
+          "사용자 도3 (C3)-솔4 (G4) vs 곡 솔3 (G3)-파5 (F5)",
         ),
       ).toBeInTheDocument();
-      // 추정값 안내 footnote (#1764 — 서버/기술 용어 '클라이언트·백엔드' 제거)
+      // 추정값 안내 footnote
       expect(
-        screen.getByText(/대략적인 추정값/),
+        screen.getByText(/클라이언트 추정값입니다/),
       ).toBeInTheDocument();
     });
 
@@ -448,134 +447,6 @@ describe("SongCard", () => {
         .map((toggle) => toggle.getAttribute("aria-controls"));
       expect(controlsIds).toHaveLength(2);
       expect(new Set(controlsIds).size).toBe(controlsIds.length);
-    });
-  });
-
-  // closes #1683 — 좌측 gradient stripe + stagger fade-in 진입.
-  describe("gradient stripe + stagger 진입 (#1683)", () => {
-    it("li 에 stagger 클래스와 --card-index / --song-hue 인라인 변수가 부여된다", () => {
-      const item = buildItem({ difficulty: "NORMAL" });
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} index={3} />
-        </ul>,
-      );
-      const card = screen.getByRole("listitem");
-      expect(card).toHaveClass("animate-card-enter");
-      expect(card.style.getPropertyValue("--card-index")).toBe("3");
-      // hue 는 getSongHue(song.id) 결정값과 일치해야 한다.
-      expect(card.style.getPropertyValue("--song-hue")).toBe(
-        String(getSongHue(item.song.id)),
-      );
-    });
-
-    it("index 미지정 시 --card-index 는 0 으로 떨어진다 (단일 카드 즉시 진입)", () => {
-      const item = buildItem({ difficulty: "EASY" });
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} />
-        </ul>,
-      );
-      const card = screen.getByRole("listitem");
-      expect(card.style.getPropertyValue("--card-index")).toBe("0");
-    });
-
-    it("좌측 accent stripe(.song-accent-stripe)가 aria-hidden 으로 렌더된다", () => {
-      const item = buildItem({ difficulty: "HARD" });
-      const { container } = renderWithQueryClient(
-        <ul>
-          <SongCard item={item} index={1} />
-        </ul>,
-      );
-      const stripe = container.querySelector(".song-accent-stripe");
-      expect(stripe).not.toBeNull();
-      expect(stripe).toHaveAttribute("aria-hidden", "true");
-    });
-
-    it("href / 모달 모드에서도 stripe 와 stagger 변수가 유지된다", () => {
-      const item = buildItem({ difficulty: "NORMAL" });
-      const { container, rerender } = renderWithQueryClient(
-        <ul>
-          <SongCard item={item} index={2} href="/songs/1" />
-        </ul>,
-      );
-      let card = screen.getByRole("listitem");
-      expect(card).toHaveClass("animate-card-enter");
-      expect(card.style.getPropertyValue("--card-index")).toBe("2");
-      expect(container.querySelector(".song-accent-stripe")).not.toBeNull();
-
-      rerender(
-        <ul>
-          <SongCard item={item} index={5} onShowDetail={() => {}} />
-        </ul>,
-      );
-      card = screen.getByRole("listitem");
-      expect(card).toHaveClass("animate-card-enter");
-      expect(card.style.getPropertyValue("--card-index")).toBe("5");
-      expect(container.querySelector(".song-accent-stripe")).not.toBeNull();
-    });
-  });
-
-  // closes #1721 — 검색 카드(/songs)에 "내 음역 적합" 배지 + 한 줄 사유 + 적합도 보더.
-  describe("검색 카드 음역 적합 표시 (#1721)", () => {
-    it("voiceFit 가 주어지면 '내 음역 적합' 배지와 한 줄 사유를 노출한다", () => {
-      const { song } = buildItem({ lowMidi: 55, highMidi: 67 });
-      renderWithQueryClient(
-        <ul>
-          <SongCard song={song} voiceFit={0.85} />
-        </ul>,
-      );
-      expect(screen.getByLabelText(/내 음역 적합 85%/)).toBeInTheDocument();
-      expect(
-        screen.getByText("내 음역대에 잘 맞아 편하게 부를 수 있어요."),
-      ).toBeInTheDocument();
-    });
-
-    it("voiceFit 미지정 검색 카드는 배지/사유 없이 hue 보더만 유지한다", () => {
-      const { song } = buildItem();
-      const { container } = renderWithQueryClient(
-        <ul>
-          <SongCard song={song} />
-        </ul>,
-      );
-      expect(screen.queryByLabelText(/내 음역 적합/)).not.toBeInTheDocument();
-      const stripe = container.querySelector(".song-accent-stripe");
-      expect(stripe).not.toBeNull();
-      expect(stripe).not.toHaveAttribute("data-fit");
-    });
-
-    it("적합도 레벨이 좌측 보더 data-fit 으로 매핑된다 (high=green/mid=amber/low=neutral)", () => {
-      const { song } = buildItem({ lowMidi: 55, highMidi: 67 });
-      const high = renderWithQueryClient(
-        <ul>
-          <SongCard song={song} voiceFit={0.9} />
-        </ul>,
-      );
-      expect(
-        high.container.querySelector(".song-accent-stripe"),
-      ).toHaveAttribute("data-fit", "high");
-      cleanup();
-
-      const mid = renderWithQueryClient(
-        <ul>
-          <SongCard song={song} voiceFit={0.5} />
-        </ul>,
-      );
-      expect(mid.container.querySelector(".song-accent-stripe")).toHaveAttribute(
-        "data-fit",
-        "mid",
-      );
-      cleanup();
-
-      const low = renderWithQueryClient(
-        <ul>
-          <SongCard song={song} voiceFit={0.1} />
-        </ul>,
-      );
-      expect(low.container.querySelector(".song-accent-stripe")).toHaveAttribute(
-        "data-fit",
-        "low",
-      );
     });
   });
 
@@ -867,8 +738,6 @@ describe("SongCard", () => {
 
     it("buildYouTubeSearchUrl: 한글 제목/아티스트도 안전하게 인코딩한다", () => {
       const url = buildYouTubeSearchUrl("밤편지", "아이유");
-      // 직전 PR (#1310) 무차별 한국어 치환이 percent-encoding hex (%A4 → %라4 등)
-      // 까지 깨먹은 회귀 복구. percent-encoded 바이트는 한국어 음명 치환과 무관.
       expect(url).toBe(
         "https://www.youtube.com/results?search_query=%EB%B0%A4%ED%8E%B8%EC%A7%80+%EC%95%84%EC%9D%B4%EC%9C%A0",
       );
@@ -986,81 +855,6 @@ describe("SongCard", () => {
       expect(
         screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/),
       ).toBeInTheDocument();
-    });
-  });
-
-  // 이슈 #1600 — P-E 안전곡 등 페르소나 사유("안심 포인트") 노출.
-  describe("페르소나 사유 (#1600)", () => {
-    it("BE personaReason 이 있으면 '안심 포인트' 라벨과 함께 노출한다", () => {
-      const item = buildItem(
-        { difficulty: "EASY" },
-        { persona: "P-E", personaReason: "느린 템포라 따라 부르기 쉬워요." },
-      );
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} activePersona="P-E" />
-        </ul>,
-      );
-      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
-      expect(
-        screen.getByText("느린 템포라 따라 부르기 쉬워요."),
-      ).toBeInTheDocument();
-    });
-
-    it("BE personaReason 이 없어도 활성 P-E + EASY 곡이면 client fallback 사유를 노출한다", () => {
-      const item = buildItem({ difficulty: "EASY" });
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} activePersona="P-E" />
-        </ul>,
-      );
-      expect(screen.getByText("안심 포인트")).toBeInTheDocument();
-      expect(screen.getByText(/부담 없이/)).toBeInTheDocument();
-    });
-
-    it("의도 모드 미선택(activePersona=null)이면 페르소나 사유 줄을 그리지 않는다", () => {
-      const item = buildItem({ difficulty: "EASY" });
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} />
-        </ul>,
-      );
-      expect(screen.queryByText("안심 포인트")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("hero morph view-transition-name (closes #1687, PR7)", () => {
-    it("href 모드(라우트 이동)에서는 thumbnail 에 album-{id} 이름이 붙는다", () => {
-      const item = buildItem();
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} href="/songs/1" />
-        </ul>,
-      );
-      const cover = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
-      expect((cover as HTMLElement).style.viewTransitionName).toBe("album-1");
-    });
-
-    it("모달 모드에서는 thumbnail 에 view-transition-name 을 붙이지 않는다", () => {
-      const item = buildItem();
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} onShowDetail={() => {}} />
-        </ul>,
-      );
-      const cover = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
-      expect((cover as HTMLElement).style.viewTransitionName).toBeFalsy();
-    });
-
-    it("plain 모드(href/모달 모두 없음)에서도 이름을 붙이지 않는다", () => {
-      const item = buildItem();
-      renderWithQueryClient(
-        <ul>
-          <SongCard item={item} />
-        </ul>,
-      );
-      const cover = screen.getByLabelText(/테스트 곡 앨범 커버 \(이미지 없음\)/);
-      expect((cover as HTMLElement).style.viewTransitionName).toBeFalsy();
     });
   });
 });

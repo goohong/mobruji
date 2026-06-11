@@ -349,7 +349,6 @@ class RecommendationPropertiesValidationTest {
                 "recommendation.weights.popularity=0.1",
                 "recommendation.weights.tempo-match=0.1",
                 "recommendation.weights.generation=0.15",
-                "recommendation.weights.gender=0.1",
                 "recommendation.diversity.max-same-artist=2",
                 "recommendation.diversity.max-same-genre=4",
                 "recommendation.tempo.distance-tolerance=40",
@@ -359,9 +358,6 @@ class RecommendationPropertiesValidationTest {
                 "recommendation.generation.distance-tolerance-years=15",
                 "recommendation.generation.representative-year.TWENTIES=2015",
                 "recommendation.generation.representative-year.FORTIES=1995",
-                "recommendation.gender.estimated-match-score=0.6",
-                "recommendation.gender.mixed-score=0.5",
-                "recommendation.gender.unknown-score=0.3",
                 "recommendation.result-count=10",
                 "recommendation.jitter-magnitude=0.01",
                 "recommendation.seed-strategy=derived"

@@ -15,17 +15,16 @@ import org.junit.jupiter.api.Test;
 class MetadataSourceTest {
 
     @Test
-    @DisplayName("6개 source가 정의되어 있다")
-    void values_containsExactlySixSources() {
+    @DisplayName("5개 source가 정의되어 있다")
+    void values_containsExactlyFiveSources() {
         assertThat(MetadataSource.values())
-                .hasSize(6)
+                .hasSize(5)
                 .containsExactlyInAnyOrder(
                         MetadataSource.MANUAL_SEED,
                         MetadataSource.EXTERNAL_API,
                         MetadataSource.USER_CONTRIBUTION,
                         MetadataSource.INFERRED,
-                        MetadataSource.AUDIO_ANALYSIS,
-                        MetadataSource.ESTIMATED);
+                        MetadataSource.AUDIO_ANALYSIS);
     }
 
     @Test

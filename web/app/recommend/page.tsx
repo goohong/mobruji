@@ -35,31 +35,12 @@
  *   - 매 페이지의 queryFn 은 호출 시점의 누적 `excludedSongIds`(store snapshot)을
  *     전달한다 → BE SeedDeriver(PR #64) + entity 영속화(PR #74) 효과로 결정성을
  *     유지하면서도 페이지마다 다른 결과를 반환받는다.
- *   - 시드 소진 감지 → `getNextPageParam`이 `undefined`를 반환해 추가 페치를 멈춘다.
- *     빈 페이지뿐 아니라 **이미 본 곡으로만 채워진 n건 페이지**(신규 고유 0건, #1818)도
- *     소진으로 보고 멈춘다 — 풀이 마르면 BE 가 중복 곡을 다시 채워 보낼 수 있어서다.
- *     첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA, 2페이지 이후 소진이면
- *     "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
- *
- * 이슈 #1822 (2026-06-04) — 무한 스크롤 버벅임/깜빡임/스크롤바 진동 종합 fix:
- *   - sentinel IntersectionObserver 를 `isFetchingNextPage`/`hasNextPage` 의존에서
- *     떼어내 **한 번만 생성**한다. 직전 구현은 페치 상태가 토글될 때마다 ref 콜백이
- *     새 함수로 발급돼 observer 가 재생성됐고, 재생성 직후 sentinel 이 rootMargin
- *     안에 있으면 교차가 즉시 재평가돼 페치가 폭주(11ms 간격)했다. observer 를
- *     안정화하면 교차 임계 통과 시에만 콜백이 1회 발화 → **1교차 = 1페치** 가 보장된다.
- *     최신 페치 상태/함수는 ref 로 읽어 stale closure 를 피한다.
- *   - 로딩 푸터를 **고정 높이**로 둬서 스켈레톤 append/remove 로 인한 리스트 높이
- *     변동(스크롤바 떨림)을 없앤다. 페치 중에도 푸터 높이는 변하지 않는다.
+ *   - 시드 소진(빈 페이지) 감지 → `getNextPageParam`이 `undefined`를 반환해 추가
+ *     페치를 멈춘다. 첫 페이지부터 빈 응답이면 음역대 재입력 fallback CTA,
+ *     2페이지 이후 빈 응답이면 "더 이상 추천할 곡이 없어요" 안내 + 음역대 재입력 CTA.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
@@ -69,32 +50,23 @@ import {
   createRecommendation,
   Mood,
   RecommendationCreateRequest,
-  RecommendationPersona,
   RecommendationResponse,
   RecommendedSongResponse,
-  RequestedGender,
 } from "@/lib/api/recommendation";
 import {
   readVoiceRange,
   VoiceRangeResponse,
   VoiceRangeSourceMethod,
 } from "@/lib/api/voice-range";
-import { midiToKoreanNoteName } from "@/lib/notes";
-import {
-  computeVoiceFitRatio,
-  type UserVoiceRange,
-} from "@/lib/scoreBreakdown";
-import { StepIndicator } from "@/components/ui";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import { VoiceRangeIntuition } from "@/app/voice-range/components/VoiceRangeIntuition";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
 import { useHistoryStore } from "@/store/history";
-import { useOnboardingPrefsStore } from "@/store/onboardingPrefs";
 import { useSessionStore } from "@/store/session";
 
-import { RecommendModeGroup } from "./components/RecommendModeGroup";
-import { RecommendRefinePanel } from "./components/RecommendRefinePanel";
+import { RecommendFilters } from "./components/RecommendFilters";
 import { SongCard, SongCardSkeleton } from "./components/SongCard";
-import { SongDetailSheet } from "./components/SongDetailSheet";
+import { SongDetailModal } from "./components/SongDetailModal";
 import { SongDetailContent } from "./components/SongDetailContent";
 import { SwipeDeck } from "./components/SwipeDeck";
 
@@ -103,72 +75,10 @@ const SKELETON_COUNT = 4;
  * IntersectionObserver sentinel 의 rootMargin.
  *
  * 사용자가 리스트 끝에 도달하기 전에 미리 다음 batch 페치를 트리거해서
- * 무한 스크롤이 "끊김 없이" 보이도록 한다. (#1822) 직전 400px 는 첫 페이지가
- * 짧을 때 마운트 직후 sentinel 이 곧장 margin 안에 들어와 2페이지가 즉시 당겨지는
- * 과도 prefetch 를 유발했다. 안정 observer(1교차=1페치) 와 함께 200px 로 완화해
- * "끝에 가까워질 때" 한 박자 늦게 자연스럽게 다음 페이지를 준비한다.
+ * 무한 스크롤이 "끊김 없이" 보이도록 한다. 너무 크면 첫 페이지 마운트 직후에
+ * 두 번째 페이지가 즉시 페치돼서 의도와 어긋날 수 있으니 적당히 400px 만 둔다.
  */
-const SENTINEL_ROOT_MARGIN = "200px";
-
-/**
- * 결과 정렬 기준(이슈 #1765).
- *
- * - `composite` 추천순(종합): BE 가 음역 적합·분위기·인기·템포·세대 가중을 종합해 매긴
- *   `score` 순서(= 피드 도착 순서)를 그대로 유지하는 기본값. 회귀 0 을 위해 재정렬하지 않는다.
- * - `voiceFit` 음역 적합순 / `moodFit` 분위기 적합순: 이미 로드된 결과를 해당 축으로
- *   클라이언트에서 내림차순 재정렬한다(추가 BE 호출 없음).
- *
- * 인기순은 클라이언트에 곡 단위 인기 신호가 없어(종합 `score` 에만 녹아 있음) 별도 BE 정렬
- * 파라미터/필드가 필요하므로 1차 범위에서 제외한다. 서비스 특성상 "내 음역대에 맞나"·"고른
- * 분위기에 맞나"가 노래방 선곡에서 가장 의미 있는 축이라 이 둘만 노출한다.
- */
-type RecommendationSortKey = "composite" | "voiceFit" | "moodFit";
-
-const SORT_OPTIONS = [
-  {
-    key: "composite",
-    label: "추천순",
-    caption: "음역 적합도·분위기·인기 등을 종합한 점수순으로 정렬했어요.",
-  },
-  {
-    key: "voiceFit",
-    label: "음역 적합순",
-    caption: "내 음역대에 잘 맞는 곡부터 정렬했어요.",
-  },
-  {
-    key: "moodFit",
-    label: "분위기 적합순",
-    caption: "고른 분위기에 잘 맞는 곡부터 정렬했어요.",
-  },
-] as const satisfies ReadonlyArray<{
-  key: RecommendationSortKey;
-  label: string;
-  caption: string;
-}>;
-
-/**
- * 정렬 축별 비교값(내림차순 기준, 높을수록 앞). 값이 없는 곡은 `-1` 로 항상 뒤로 보낸다.
- *
- * `voiceFit` 은 BE 설명가능성 필드(#1484)를 우선 쓰고, 없으면(과거 재조회 경로 등) 곡 음역과
- * 사용자 음역의 겹침 비율(`computeVoiceFitRatio`, /songs 음역 적합 배지와 동일 직관)로 추정한다.
- */
-function sortValueFor(
-  item: RecommendedSongResponse,
-  sortKey: "voiceFit" | "moodFit",
-  userRange: UserVoiceRange,
-): number {
-  if (sortKey === "moodFit") {
-    return typeof item.moodFit === "number" ? item.moodFit : -1;
-  }
-  if (typeof item.voiceFit === "number") {
-    return item.voiceFit;
-  }
-  const { lowMidi, highMidi } = item.song;
-  if (typeof lowMidi === "number" && typeof highMidi === "number") {
-    return computeVoiceFitRatio(userRange, lowMidi, highMidi);
-  }
-  return -1;
-}
+const SENTINEL_ROOT_MARGIN = "400px";
 
 export default function RecommendPage() {
   const sessionId = useSessionStore((state) => state.sessionId);
@@ -194,40 +104,13 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   const appendExcluded = useSessionStore((state) => state.appendExcluded);
   const appendHistory = useHistoryStore((state) => state.appendRecommendation);
 
-  // 즉석 페르소나(P-C) 입력 — 분위기/나이대/성별 (directive roadmap-mood-age-ui + #1814).
-  // 화면 로컬 상태이되, 가입 온보딩(#1814)에서 영속한 취향이 있으면 기본값으로 pre-fill 한다
-  // (`useOnboardingPrefsStore`, localStorage). 값이 바뀌면 queryKey 가 바뀌어 추천이 첫
-  // 페이지부터 재발화된다. 미선택(null)은 createRecommendation 에서 필드를 생략 → 기존 동작 유지.
-  // getState() 로 마운트 시점 1회만 읽는다 — 이후 사용자의 화면 편집이 우선이라 store 변화를
-  // 구독하지 않는다(온보딩 값은 어디까지나 "기본값").
-  const [selectedMood, setSelectedMood] = useState<Mood | null>(
-    () => useOnboardingPrefsStore.getState().mood,
-  );
+  // 즉석 페르소나(P-C) 입력 — 분위기/나이대 (directive roadmap-mood-age-ui).
+  // 영속하지 않는 화면 로컬 상태. 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터
+  // 재발화된다. 미선택(null)은 createRecommendation 에서 필드를 생략 → 기존 동작 유지.
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
   const [selectedAgeGroup, setSelectedAgeGroup] = useState<AgeGroup | null>(
-    () => useOnboardingPrefsStore.getState().ageGroup,
+    null,
   );
-  const [selectedGender, setSelectedGender] = useState<RequestedGender | null>(
-    () => useOnboardingPrefsStore.getState().gender,
-  );
-  // 추천 의도 모드(P-E 안전곡 등, 이슈 #1600) — mood/ageGroup 과 동일한 화면 로컬 상태.
-  // 값이 바뀌면 queryKey 가 바뀌어 추천이 첫 페이지부터 재발화된다. null(미선택)은
-  // createRecommendation 에서 persona 를 생략 → 현행 default 추천(하위호환).
-  const [selectedPersona, setSelectedPersona] =
-    useState<RecommendationPersona | null>(null);
-
-  // closes #1715 — 분위기·나이대 필터를 한 번에 비우는 "모두 해제". 의도 모드(persona)는
-  // 별개의 "추천 방식 진입"이라 RecommendModeGroup 에 분리돼 있어 여기서 비우지 않는다.
-  const clearFilters = useCallback(() => {
-    setSelectedMood(null);
-    setSelectedAgeGroup(null);
-    setSelectedGender(null);
-  }, []);
-  // closes #1715 — 결과에 영향을 주는(쿼리 재발화) 적용 조건 수. 결과 요약 "조건 N개 적용됨"에 쓴다.
-  const appliedFilterCount =
-    (selectedMood !== null ? 1 : 0) +
-    (selectedAgeGroup !== null ? 1 : 0) +
-    (selectedGender !== null ? 1 : 0) +
-    (selectedPersona !== null ? 1 : 0);
 
   const isVoiceRangeReady =
     voiceRangeQuery.isSuccess &&
@@ -265,8 +148,6 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       voiceRangeIdFromStore,
       selectedMood,
       selectedAgeGroup,
-      selectedGender,
-      selectedPersona,
     ],
     enabled:
       isVoiceRangeReady &&
@@ -288,33 +169,10 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
       if (selectedAgeGroup !== null) {
         request.ageGroup = selectedAgeGroup;
       }
-      if (selectedGender !== null) {
-        request.gender = selectedGender;
-      }
-      if (selectedPersona !== null) {
-        request.persona = selectedPersona;
-      }
       return createRecommendation(request);
     },
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.recommendations.length === 0) {
-        return undefined;
-      }
-      // 신규 고유 0건 종료가드 (#1818): 누적 excludeSongIds 로 풀이 소진되면 BE 가
-      // 빈 페이지 대신 이미 본 곡을 다시 채운 n건 페이지로 응답할 수 있다. 마지막
-      // 페이지가 비어 있지 않더라도 이전 페이지들에 없던 "신규 고유" 곡이 하나도
-      // 없으면 더 가져올 게 없다고 보고 멈춘다 — 안 그러면 sentinel 이 중복 페이지를
-      // 무한히 당겨오고(미종료) display 중복 제거가 같은 풀만 반복 페치하게 된다.
-      const seenBeforeLastPage = new Set<number>();
-      for (const page of allPages.slice(0, -1)) {
-        for (const rec of page.recommendations) {
-          seenBeforeLastPage.add(rec.song.id);
-        }
-      }
-      const hasFreshSong = lastPage.recommendations.some(
-        (rec) => !seenBeforeLastPage.has(rec.song.id),
-      );
-      if (!hasFreshSong) {
         return undefined;
       }
       return allPages.length;
@@ -331,14 +189,7 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
   // 0 으로 리셋한다.
   useEffect(() => {
     lastProcessedPageCountRef.current = 0;
-  }, [
-    sessionId,
-    voiceRangeIdFromStore,
-    selectedMood,
-    selectedAgeGroup,
-    selectedGender,
-    selectedPersona,
-  ]);
+  }, [sessionId, voiceRangeIdFromStore, selectedMood, selectedAgeGroup]);
 
   useEffect(() => {
     if (!pages || pages.length === 0) {
@@ -433,42 +284,57 @@ function RecommendContent({ sessionId }: RecommendContentProps) {
    */
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-8">
+      <div className="w-full max-w-2xl flex flex-col gap-8">
         <header className="space-y-2">
-          <StepIndicator current={2} total={2} />
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
+            Step 2
+          </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             추천 결과
           </h1>
-          <VoiceRangeHeaderSummary voiceRange={voiceRange} />
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-[var(--text-secondary)]">
+              내 음역대: {midiToCombinedNoteName(voiceRange.lowestNoteMidi)} ~{" "}
+              {midiToCombinedNoteName(voiceRange.highestNoteMidi)}
+            </p>
+            <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
+          </div>
+          <VoiceRangeIntuition
+            lowMidi={voiceRange.lowestNoteMidi}
+            highMidi={voiceRange.highestNoteMidi}
+          />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2">
+            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
+                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
+                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
+            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
+              <Link
+                href="/voice-range/auto"
+                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
+              >
+                마이크로 다시 측정
+              </Link>
+            ) : null}
+            <Link
+              href="/voice-range"
+              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
+            >
+              음역대 다시 입력
+            </Link>
+          </div>
         </header>
 
-        {/* (성격별 그룹화 #1712) 필터 그룹 — 분위기/나이대만 묶은 접이식 "추천 다듬기".
-            "지금 결과를 그 자리에서 좁히는" 필터로, 결과 위에 둔다. 모드 진입(의도·호스트)은
-            결과 아래 RecommendModeGroup 으로 분리한다. */}
-        <RecommendRefinePanel
+        <RecommendFilters
           selectedMood={selectedMood}
           selectedAgeGroup={selectedAgeGroup}
-          selectedGender={selectedGender}
           onMoodChange={setSelectedMood}
           onAgeGroupChange={setSelectedAgeGroup}
-          onGenderChange={setSelectedGender}
-          onClearAll={clearFilters}
         />
 
         <RecommendationFeed
           query={recommendQuery}
-          sessionId={sessionId}
           userVoiceRangeLow={voiceRange.lowestNoteMidi}
           userVoiceRangeHigh={voiceRange.highestNoteMidi}
-          activePersona={selectedPersona}
-          appliedFilterCount={appliedFilterCount}
-        />
-
-        {/* (성격별 그룹화 #1712) 모드 진입 그룹 — "다른 방식으로 추천받기": 의도 모드 토글
-            + 호스트 모드 이동을 한 섹션 제목 아래 묶어 "필터 조정"과 별개로 인지하게 한다. */}
-        <RecommendModeGroup
-          selectedPersona={selectedPersona}
-          onPersonaChange={setSelectedPersona}
         />
       </div>
     </main>
@@ -484,35 +350,17 @@ type RecommendationFeedProps = {
     number
   >>;
   /**
-   * 익명 세션 ID — 스와이프 덱이 좋아요한 곡을 seed 로 `POST /api/v1/recommendations/next`
-   * 를 호출(무한 로드)할 때 필요하다.
-   */
-  sessionId: string;
-  /**
    * 사용자 음역대 — 추천 카드의 "자세히 보기" 패널에서 음역 적합 점수를 계산할 때 사용.
    * (closes #141) 추천 컨텍스트에서는 항상 알 수 있는 값이라 필수로 받는다.
    */
   userVoiceRangeLow: number;
   userVoiceRangeHigh: number;
-  /**
-   * 사용자가 고른 의도 페르소나(P-E 안전곡 등, 이슈 #1600). 결과 카드에 페르소나 사유
-   * fallback 근거로 전달한다. 미선택(null)이면 카드는 페르소나 사유 줄을 생략한다.
-   */
-  activePersona: RecommendationPersona | null;
-  /**
-   * 결과에 적용된 조건(분위기·나이대·의도) 수(이슈 #1715). 결과 요약에 "조건 N개 적용됨"
-   * 신호로 노출한다. 0 이면 적용 문구를 생략한다.
-   */
-  appliedFilterCount: number;
 };
 
 function RecommendationFeed({
   query,
-  sessionId,
   userVoiceRangeLow,
   userVoiceRangeHigh,
-  activePersona,
-  appliedFilterCount,
 }: RecommendationFeedProps) {
   const {
     data,
@@ -534,53 +382,13 @@ function RecommendationFeed({
   // 기본은 기존 리스트 — 회귀 0. 스와이프는 같은 무한 쿼리를 한 곡씩 소비한다.
   const [viewMode, setViewMode] = useState<"list" | "swipe">("list");
 
-  // closes #1765 — 결과 정렬 기준 선택. 기본은 종합 추천순(BE 도착 순서 유지) → 회귀 0.
-  const [sortKey, setSortKey] = useState<RecommendationSortKey>("composite");
-
   // 모든 페이지의 추천 곡을 평탄화. 페이지 경계 정보는 사용자에게 노출하지 않는다.
-  // closes #1799 — 소규모 음역곡 풀(음역곡 100)에서 다음 페이지에 같은 곡이 재등장할 수
-  // 있어 song.id 로 중복 제거한다(첫 등장 유지). 미적용 시 스와이프 덱에 같은 곡이 두 번 뜬다.
   const allRecommendations = useMemo(() => {
     if (!data) {
       return [];
     }
-    const seen = new Set<number>();
-    return data.pages
-      .flatMap((page) => page.recommendations)
-      .filter((item) => {
-        if (seen.has(item.song.id)) {
-          return false;
-        }
-        seen.add(item.song.id);
-        return true;
-      });
+    return data.pages.flatMap((page) => page.recommendations);
   }, [data]);
-
-  /**
-   * (closes #1765) 선택한 정렬 기준으로 재정렬한 목록.
-   *
-   * `composite` 는 BE 종합 점수 순서(피드 도착 순서)를 그대로 유지한다. `voiceFit`/`moodFit`
-   * 은 이미 로드된 전체 목록을 해당 축 내림차순으로 클라이언트 재정렬한다 — 동점이면 원래
-   * 추천(종합) 순서를 유지(stable)해 결과가 임의로 흔들리지 않게 한다.
-   */
-  const sortedRecommendations = useMemo(() => {
-    if (sortKey === "composite") {
-      return allRecommendations;
-    }
-    const userRange: UserVoiceRange = {
-      lowMidi: userVoiceRangeLow,
-      highMidi: userVoiceRangeHigh,
-    };
-    return allRecommendations
-      .map((item, index) => ({ item, index }))
-      .sort((a, b) => {
-        const diff =
-          sortValueFor(b.item, sortKey, userRange) -
-          sortValueFor(a.item, sortKey, userRange);
-        return diff !== 0 ? diff : a.index - b.index;
-      })
-      .map((entry) => entry.item);
-  }, [allRecommendations, sortKey, userVoiceRangeLow, userVoiceRangeHigh]);
 
   /**
    * (closes #426 / closes #443) 스크린 리더용 라이브 영역 메시지.
@@ -634,54 +442,39 @@ function RecommendationFeed({
     }
   }
 
-  // (#1822) 최신 페치 상태/함수를 ref 로 보관 — sentinel observer 콜백이
-  // stale closure 없이 읽는다. ref 라 값이 바뀌어도 observer 를 재생성하지 않아
-  // "1교차 = 1페치" 안정성을 유지한다. (react-hooks/refs: 렌더 중 ref 쓰기 금지 →
-  // effect 에서만 갱신.)
-  const fetchStateRef = useRef({
-    hasNextPage,
-    isFetchingNextPage,
-    fetchNextPage,
-  });
-  useEffect(() => {
-    fetchStateRef.current = { hasNextPage, isFetchingNextPage, fetchNextPage };
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
   // IntersectionObserver 로 sentinel 진입을 감지해 다음 batch 페치.
-  // (#1822) ref 콜백은 빈 의존성으로 **안정 함수** 라, sentinel DOM 노드가
-  // mount/unmount 될 때만 observer 를 생성/해제한다(재렌더로는 재생성 안 됨).
-  // 직전엔 fetchNextPage/hasNextPage/isFetchingNextPage 의존이라 페치 상태가
-  // 토글될 때마다 콜백이 새로 발급 → observer 재생성 → 재연결 직후 sentinel 이
-  // margin 안이면 교차가 즉시 재평가돼 페치가 폭주했다. 안정 observer 는 교차
-  // 임계를 실제로 통과할 때만 1회 발화하므로 폭주가 사라진다. 페치 게이트
-  // (hasNextPage/isFetchingNextPage) 는 ref 에서 읽어 콜백 안에서 판단한다.
-  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) {
-      return;
-    }
-    if (typeof IntersectionObserver === "undefined") {
-      // SSR/구식 브라우저 safety net — 진입 감지 불가하면 무한 스크롤이 동작하지
-      // 않지만 본 페이지는 client component 라 실질 영향은 거의 없다.
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (!entry?.isIntersecting) {
-          return;
-        }
-        const state = fetchStateRef.current;
-        if (state.hasNextPage && !state.isFetchingNextPage) {
-          state.fetchNextPage();
-        }
-      },
-      { rootMargin: SENTINEL_ROOT_MARGIN },
-    );
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
+  // ref 콜백 패턴: sentinel DOM 노드가 마운트/언마운트될 때마다 observer 를
+  // 다시 연결한다. 의존성에 fetchNextPage/hasNextPage/isFetchingNextPage 가 들어가서
+  // 상태가 바뀌면 콜백이 새 함수로 발급되어 observer 가 갱신된다.
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) {
+        return;
+      }
+      if (typeof IntersectionObserver === "undefined") {
+        // SSR/구식 브라우저 safety net — 진입 감지 불가하면 무한 스크롤이 동작하지
+        // 않지만 본 페이지는 client component 라 실질 영향은 거의 없다.
+        return;
+      }
+      if (!hasNextPage || isFetchingNextPage) {
+        return;
+      }
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry?.isIntersecting) {
+            fetchNextPage();
+          }
+        },
+        { rootMargin: SENTINEL_ROOT_MARGIN },
+      );
+      observer.observe(node);
+      return () => {
+        observer.disconnect();
+      };
+    },
+    [fetchNextPage, hasNextPage, isFetchingNextPage],
+  );
 
   // 1차 페치(첫 페이지) 로딩 — skeleton 다수로 카드 공간 인지를 유지.
   if (isPending) {
@@ -689,7 +482,7 @@ function RecommendationFeed({
       <ul
         aria-busy="true"
         aria-label="추천 결과 로딩 중"
-        className="grid grid-cols-1 gap-3 lg:grid-cols-2"
+        className="flex flex-col gap-3"
       >
         {Array.from({ length: SKELETON_COUNT }).map((_, idx) => (
           <SongCardSkeleton key={idx} />
@@ -748,19 +541,12 @@ function RecommendationFeed({
     return (
       <div className="flex flex-col gap-4">
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-        <SortControl sortKey={sortKey} onChange={setSortKey} />
-        <ResultSummary
-          count={allRecommendations.length}
-          appliedFilterCount={appliedFilterCount}
-          sortKey={sortKey}
-        />
         <SwipeDeck
-          recommendations={sortedRecommendations}
+          recommendations={allRecommendations}
           userVoiceRange={userRange}
           hasMore={hasNextPage}
           isFetchingMore={isFetchingNextPage}
           onNeedMore={fetchNextPage}
-          sessionId={sessionId}
         />
       </div>
     );
@@ -769,12 +555,6 @@ function RecommendationFeed({
   return (
     <div className="flex flex-col gap-4">
       <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-      <SortControl sortKey={sortKey} onChange={setSortKey} />
-      <ResultSummary
-        count={allRecommendations.length}
-        appliedFilterCount={appliedFilterCount}
-        sortKey={sortKey}
-      />
       {/*
         (closes #426) 스크린 리더 라이브 영역 — 첫 페이지/추가 페이지 도착 시 안내.
         시각적으로는 `sr-only` 로 숨기지만 SR 은 polite 큐로 안내 메시지를 읽는다.
@@ -790,19 +570,17 @@ function RecommendationFeed({
       >
         {liveMessage}
       </div>
-      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {sortedRecommendations.map((item, index) => (
+      <ul className="flex flex-col gap-3">
+        {allRecommendations.map((item) => (
           <SongCard
             key={item.song.id}
             item={item}
-            index={index}
             userVoiceRange={userRange}
-            activePersona={activePersona}
             onShowDetail={() => setSelected(item)}
           />
         ))}
       </ul>
-      <SongDetailSheet
+      <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected.song) : ""}
@@ -810,38 +588,37 @@ function RecommendationFeed({
         {selected ? (
           <SongDetailContent item={selected} userVoiceRange={userRange} />
         ) : null}
-      </SongDetailSheet>
+      </SongDetailModal>
       {/*
         Footer 영역:
-          - hasNextPage 가 true 면 sentinel 겸 **고정 높이 로딩 푸터** 노출.
+          - hasNextPage 가 true 면 sentinel + skeleton(로딩 중일 때) 노출.
           - hasNextPage 가 false 면 시드 소진 안내 + 음역대 재입력 CTA 노출.
             (이미 한 페이지 이상 본 후이므로 "더 이상 없어요" 톤은 부드럽게.)
       */}
       {hasNextPage ? (
-        /*
-          (#1822) sentinel 겸 로딩 푸터. 직전엔 페치 중 SongCardSkeleton 2장을
-          append/remove 해서 리스트 높이가 출렁였고(스크롤바 진동), 높이 변동이
-          sentinel 위치를 흔들어 과도 prefetch 도 거들었다. 이제 푸터를 **고정
-          높이**로 두고 페치 중에만 내부에 스피너를 토글한다 — 높이는 그대로라
-          진동이 없다. IntersectionObserver 가 이 노드 진입을 감지해 다음 batch 를
-          페치하며, 테스트 식별용 data-testid 를 둔다.
-        */
-        <div
-          ref={sentinelRef}
-          data-testid="recommend-sentinel"
-          aria-busy={isFetchingNextPage}
-          aria-label={isFetchingNextPage ? "다음 추천 결과 로딩 중" : undefined}
-          className="flex h-14 w-full items-center justify-center"
-        >
+        <div className="flex flex-col gap-3">
           {isFetchingNextPage ? (
-            <span className="inline-flex items-center gap-2 text-sm text-[var(--text-caption)]">
-              <span
-                aria-hidden="true"
-                className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--brand-500)] motion-reduce:animate-none"
-              />
-              다음 추천을 불러오는 중...
-            </span>
+            <ul
+              aria-busy="true"
+              aria-label="다음 추천 결과 로딩 중"
+              className="flex flex-col gap-3"
+            >
+              {Array.from({ length: 2 }).map((_, idx) => (
+                <SongCardSkeleton key={idx} />
+              ))}
+            </ul>
           ) : null}
+          {/*
+            sentinel: 사용자가 리스트 끝에 가까워지면 IntersectionObserver 가
+            진입을 감지해 fetchNextPage 를 호출한다. 시각적으로는 보이지 않지만
+            테스트가 식별할 수 있도록 data-testid 를 둔다.
+          */}
+          <div
+            ref={sentinelRef}
+            data-testid="recommend-sentinel"
+            aria-hidden="true"
+            className="h-1 w-full"
+          />
         </div>
       ) : (
         <div
@@ -860,96 +637,6 @@ function RecommendationFeed({
           </Link>
         </div>
       )}
-    </div>
-  );
-}
-
-type ResultSummaryProps = {
-  count: number;
-  appliedFilterCount: number;
-  sortKey: RecommendationSortKey;
-};
-
-/**
- * 결과 요약 줄 (이슈 #1715) — 지금까지 불러온 추천 곡 수 + 적용된 조건 수를 시각적으로
- * 노출한다. 필터를 토글하면 쿼리가 재발화돼 스켈레톤(로딩 신호)이 잠깐 뜨고, 새 결과가
- * 오면 이 줄의 곡 수/적용 문구가 갱신돼 "조건이 결과에 반영됐다"가 한눈에 보인다.
- * (스크린 리더 안내는 별도 aria-live 영역이 담당 — 여기는 시각 신호.)
- *
- * closes #1765 — 현재 정렬 기준을 한 줄 캡션으로 노출한다. 음역만 본다는 오해를 막고
- * (기본 종합 정렬), 정렬 칩을 바꾸면 캡션도 함께 바뀌어 "지금 무슨 순서인지"가 보인다.
- * (이슈 #1764) 종합 정렬 기준 노출의 후속 — 정적 안내를 정렬 선택 캡션으로 확장하며
- * 상세 모달 FitBadge(#1484) 설명가능성과 결을 맞춘다.
- */
-function ResultSummary({
-  count,
-  appliedFilterCount,
-  sortKey,
-}: ResultSummaryProps) {
-  const sortCaption =
-    SORT_OPTIONS.find((option) => option.key === sortKey)?.caption ??
-    SORT_OPTIONS[0].caption;
-  return (
-    <div className="flex flex-col gap-1">
-      <p
-        data-testid="recommend-result-summary"
-        className="text-xs text-[var(--text-caption)]"
-      >
-        <span className="font-medium text-[var(--text-secondary)]">
-          추천 {count}곡
-        </span>
-        {appliedFilterCount > 0 ? (
-          <span> · 조건 {appliedFilterCount}개 적용됨</span>
-        ) : null}
-      </p>
-      <p
-        data-testid="recommend-sort-criteria"
-        className="text-xs text-[var(--text-caption)]"
-      >
-        {sortCaption}
-      </p>
-    </div>
-  );
-}
-
-type SortControlProps = {
-  sortKey: RecommendationSortKey;
-  onChange: (key: RecommendationSortKey) => void;
-};
-
-/**
- * 추천 결과 정렬 기준 선택 칩 (closes #1765).
- *
- * `role="radiogroup"` + 각 칩 `aria-checked` 로 스크린 리더가 현재 정렬을 읽게 한다.
- * 전환 애니메이션은 `motion-reduce:transition-none` 으로 prefers-reduced-motion 을 존중한다.
- */
-function SortControl({ sortKey, onChange }: SortControlProps) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label="추천 정렬 기준"
-      data-testid="recommend-sort-control"
-      className="flex flex-wrap items-center gap-1 self-start"
-    >
-      {SORT_OPTIONS.map(({ key, label }) => {
-        const active = sortKey === key;
-        return (
-          <button
-            key={key}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(key)}
-            className={`min-h-9 rounded-full px-3 text-sm font-medium transition-colors duration-[var(--duration-base)] motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] ${
-              active
-                ? "bg-[var(--brand-500)] text-white"
-                : "bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            {label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -1042,80 +729,6 @@ function NoSessionFallback() {
       ctaHref="/voice-range"
       ctaLabel="음역대 입력하러 가기"
     />
-  );
-}
-
-type VoiceRangeHeaderSummaryProps = {
-  voiceRange: VoiceRangeResponse;
-};
-
-/**
- * 헤더 음역대 요약 + 접이식 보조 정보 (recommend-page-visual-ux-audit #1711).
- *
- * 결과 우선 노출을 위해 헤더에는 "내 음역대: X ~ Y" + 소스 뱃지만 상시 노출하고,
- * 음역 직관 막대(VoiceRangeIntuition)·재측정/재입력 링크 등 보조 정보는 "음역대 자세히"
- * disclosure(기본 접힘) 안으로 내린다 → 모바일에서 첫 곡 카드가 더 위로 올라온다.
- */
-function VoiceRangeHeaderSummary({ voiceRange }: VoiceRangeHeaderSummaryProps) {
-  const [expanded, setExpanded] = useState(false);
-  const detailId = useId();
-
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm text-[var(--text-secondary)]">
-          내 음역대: {midiToKoreanNoteName(voiceRange.lowestNoteMidi)} ~{" "}
-          {midiToKoreanNoteName(voiceRange.highestNoteMidi)}
-        </p>
-        <SourceMethodBadge sourceMethod={voiceRange.sourceMethod} />
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={detailId}
-          onClick={() => setExpanded((prev) => !prev)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--text-caption)] underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)] focus-visible:ring-offset-2"
-        >
-          음역대 자세히
-          <span
-            aria-hidden="true"
-            className={`transition-transform duration-[var(--duration-base)] ${
-              expanded ? "rotate-180" : ""
-            }`}
-          >
-            ⌄
-          </span>
-        </button>
-      </div>
-
-      {expanded ? (
-        <div id={detailId} className="space-y-2">
-          <VoiceRangeIntuition
-            lowMidi={voiceRange.lowestNoteMidi}
-            highMidi={voiceRange.highestNoteMidi}
-            compact
-          />
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
-            {/* (closes #282) MIC 측정 결과면 "마이크로 다시 측정" 을 1차 액션으로
-                강조한다. 자동 측정 결과를 보던 사용자가 "조금 더 끝까지 내볼까?"
-                할 때 한 번 클릭으로 같은 흐름에 다시 들어가게 한다. */}
-            {voiceRange.sourceMethod === "MIC_MEASURE" ? (
-              <Link
-                href="/voice-range/auto"
-                className="text-sm font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
-              >
-                마이크로 다시 측정
-              </Link>
-            ) : null}
-            <Link
-              href="/voice-range"
-              className="text-sm font-medium text-[var(--text-secondary)] underline-offset-4 hover:underline"
-            >
-              음역대 다시 입력
-            </Link>
-          </div>
-        </div>
-      ) : null}
-    </div>
   );
 }
 

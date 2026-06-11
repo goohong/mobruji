@@ -20,7 +20,6 @@
 #   12. 다중 PR URL → 첫 번째만 사용.
 #   13. malformed JSON stdin → silent exit 0.
 #   14. gh pr merge --auto → 가드 (실제 머지 아님).
-#   18. MOBRUJI_AGENT_DIR 미설정 → script sibling ../agent 자동 탐색 (#1769).
 
 set -uo pipefail
 
@@ -538,45 +537,6 @@ JSON
   rm -rf "$tmpdir"
 }
 
-# ── case 18: MOBRUJI_AGENT_DIR 미설정 → script sibling 자동 탐색 (#1769) ──────
-# 사고 박제: env 미설정 시 기존 fallback ${MOBRUJI_DIR}/agent (= ~/.mobruji/agent) 가
-# 실재하지 않아 tools_cycle import 가 매 hook 발사마다 silent 실패했다. 이제 script
-# 실제 위치 sibling ../agent (= repo tools/agent) 를 자동 탐색해야 한다.
-case18_agent_dir_autodiscover() {
-  echo "[case18] MOBRUJI_AGENT_DIR 미설정 → repo tools/agent 자동 탐색 (#1769)"
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  # fake python3 — 호출 시 받은 MOBRUJI_AGENT_DIR env 캡처.
-  cat > "$tmpdir/python3" <<EOF
-#!/usr/bin/env bash
-echo "AGENTDIR: \${MOBRUJI_AGENT_DIR:-}" >> "$tmpdir/agentdir_capture.txt"
-exit 0
-EOF
-  chmod +x "$tmpdir/python3"
-
-  local stdin_json
-  stdin_json=$(cat <<'JSON'
-{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create --base develop"},"tool_response":{"output":"https://github.com/goohong/mobruji/pull/1769"}}
-JSON
-)
-  # MOBRUJI_AGENT_DIR 만 unset — 자동 탐색 경로를 강제.
-  (env -u MOBRUJI_AGENT_DIR \
-    PATH="$tmpdir:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin" \
-    HOME="$tmpdir" \
-    MOBRUJI_DIR="$tmpdir" \
-    MOBRUJI_HOOK_ACTOR="be" \
-    MOBRUJI_AGENT_PYTHON="$tmpdir/python3" \
-    bash "$SCRIPT_PATH" <<< "$stdin_json") >/dev/null 2>&1
-
-  local resolved
-  resolved=$(grep '^AGENTDIR:' "$tmpdir/agentdir_capture.txt" 2>/dev/null | head -1 | sed 's/^AGENTDIR: //')
-  _assert "case18 자동 탐색된 AGENT_DIR 에 tools_cycle.py 존재" \
-    "[[ -n '$resolved' ]] && [[ -f '$resolved/tools_cycle.py' ]]"
-  _assert "case18 깨진 legacy fallback(~/.mobruji/agent) 아님" \
-    "[[ '$resolved' != '$tmpdir/agent' ]]"
-  rm -rf "$tmpdir"
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
 case1_gh_pr_create_match
 case2_gh_pr_merge_match
@@ -595,7 +555,6 @@ case14_auto_merge_guard
 case15_cwd_fallback
 case16_cwd_no_match_skip
 case17_helper_excluded
-case18_agent_dir_autodiscover
 
 echo
 echo "결과: PASS=$PASS FAIL=$FAIL"

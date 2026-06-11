@@ -112,7 +112,7 @@ rev 🟡 Pre-merge review (단계 1) / 🔵 Post-merge audit (단계 2) trigger 
 
 | # | 시나리오 | 페이지 | 검증 |
 |---|---|---|---|
-| S1 | 홈 로드 + 측정 안 한 사용자 진입 경로 | `/` | 페이지 200, 페르소나 카드(`내 목소리부터 알아보기` → `/voice-range/auto`) + `직접 입력으로 시작`(→ `/voice-range`) 존재, 콘솔 에러 0건 |
+| S1 | 홈 로드 + 측정 안 한 사용자 CTA | `/` | 페이지 200, `text=음역대 측정` CTA 존재, 콘솔 에러 0건 |
 | S2 | 홈 로드 + 측정 한 사용자 CTA | `/` (localStorage seed) | `text=추천 받기` CTA 존재, 음역대 요약 표시 |
 | S3 | recommend 페이지 로드 | `/recommend` | 페이지 200, 추천 목록 영역 렌더, 콘솔 에러 0건 |
 | S4 | songs 목록 페이지 로드 | `/songs` | 페이지 200, 곡 카드 1+ 렌더 또는 empty state |

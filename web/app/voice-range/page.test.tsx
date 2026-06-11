@@ -20,6 +20,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -90,30 +91,6 @@ function renderWithExposedQueryClient(ui: ReactNode) {
   return { ...rendered, client };
 }
 
-/** 음역대 슬라이더의 두 손잡이(role=slider)를 라벨로 가져온다. */
-function getRangeThumbs() {
-  return {
-    low: screen.getByRole("slider", { name: "최저음" }),
-    high: screen.getByRole("slider", { name: "최고음" }),
-  };
-}
-
-/**
- * 손잡이를 키보드 화살표로 N 반음만큼 이동시킨다 (양수=오른쪽/상승).
- * 슬라이더는 ArrowRight/Left 로 1 반음씩 조정한다.
- */
-async function stepThumb(
-  user: ReturnType<typeof userEvent.setup>,
-  thumb: HTMLElement,
-  semitones: number,
-) {
-  thumb.focus();
-  const key = semitones >= 0 ? "{ArrowRight}" : "{ArrowLeft}";
-  for (let i = 0; i < Math.abs(semitones); i += 1) {
-    await user.keyboard(key);
-  }
-}
-
 beforeEach(() => {
   sessionMock.reset();
   pushMock.mockReset();
@@ -159,23 +136,30 @@ describe("VoiceRangePage 렌더", () => {
     ).toBeInTheDocument();
   });
 
-  it("최저음 / 최고음 손잡이가 C2~C6 범위의 슬라이더로 렌더된다 (#1706)", () => {
+  it("최저음 / 최고음 select에 C2~C6 옵션이 모두 렌더된다", () => {
     renderWithQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
+    const [lowSelect, highSelect] = screen.getAllByRole("combobox");
 
-    // C2(MIDI 36) ~ C6(MIDI 84) 범위. 최저음 손잡이의 상한은 최고음(69),
-    // 최고음 손잡이의 하한은 최저음(48) 으로 동적으로 제약된다.
-    expect(low).toHaveAttribute("aria-valuemin", "36");
-    expect(low).toHaveAttribute("aria-valuemax", "69");
-    expect(high).toHaveAttribute("aria-valuemin", "48");
-    expect(high).toHaveAttribute("aria-valuemax", "84");
+    // C2(MIDI 36) ~ C6(MIDI 84) = 49개
+    const lowOptions = within(lowSelect).getAllByRole("option");
+    const highOptions = within(highSelect).getAllByRole("option");
+    expect(lowOptions.length).toBe(49);
+    expect(highOptions.length).toBe(49);
+
+    // 첫 옵션은 C2, 마지막은 C6 형식 확인 (#318: 한국어 (SPN) · MIDI N)
+    expect(lowOptions[0]).toHaveTextContent(/도2 \(C2\) · MIDI 36/);
+    expect(lowOptions[lowOptions.length - 1]).toHaveTextContent(
+      /도6 \(C6\) · MIDI 84/,
+    );
   });
 
   it("기본값으로 최저음 C3(MIDI 48), 최고음 A4(MIDI 69)가 선택된다", () => {
     renderWithQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
-    expect(low).toHaveAttribute("aria-valuenow", "48");
-    expect(high).toHaveAttribute("aria-valuenow", "69");
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    expect(lowSelect.value).toBe("48");
+    expect(highSelect.value).toBe("69");
   });
 });
 
@@ -193,11 +177,13 @@ describe("VoiceRangePage 제출 흐름", () => {
     });
 
     renderWithQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
 
-    // 최저음 D3(MIDI 50, 48→+2), 최고음 F4(MIDI 65, 69→-4)로 변경.
-    await stepThumb(user, low, 2);
-    await stepThumb(user, high, -4);
+    // 최저음 D3(MIDI 50), 최고음 F4(MIDI 65)로 변경.
+    await user.selectOptions(lowSelect, "50");
+    await user.selectOptions(highSelect, "65");
 
     await user.click(screen.getByRole("button", { name: /추천 받기/ }));
 
@@ -254,9 +240,11 @@ describe("VoiceRangePage 제출 흐름", () => {
     createVoiceRangeMock.mockResolvedValueOnce(response);
 
     const { client } = renderWithExposedQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
-    await stepThumb(user, low, 2);
-    await stepThumb(user, high, -4);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+    await user.selectOptions(lowSelect, "50");
+    await user.selectOptions(highSelect, "65");
     await user.click(screen.getByRole("button", { name: /추천 받기/ }));
 
     await waitFor(() => {
@@ -268,16 +256,25 @@ describe("VoiceRangePage 제출 흐름", () => {
     );
   });
 
-  it("최저음 손잡이는 최고음을 넘지 못하도록 클램프된다 (#1706 제약)", async () => {
+  it("최저음이 최고음보다 높으면 validation 메시지를 보여주고 제출하지 않는다", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
 
-    // 최저음(48)을 최고음(69) 너머로 30 반음 올려도 최고음에서 멈춘다.
-    await stepThumb(user, low, 30);
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
 
-    expect(low).toHaveAttribute("aria-valuenow", "69");
-    expect(high).toHaveAttribute("aria-valuenow", "69");
+    expect(
+      screen.getByText(/최저음은 최고음보다 같거나 낮아야 합니다/),
+    ).toBeInTheDocument();
+
+    // 버튼이 disabled여서 click 자체가 mutation을 트리거하지 않는다.
+    const submit = screen.getByRole("button", { name: /추천 받기/ });
+    expect(submit).toBeDisabled();
+    await user.click(submit);
+    expect(createVoiceRangeMock).not.toHaveBeenCalled();
   });
 });
 
@@ -475,12 +472,66 @@ describe("VoiceRangePage mutation 경계 가드 (race/unmount/Button reflect)", 
   });
 });
 
-// closes #107 — 음역대 입력 페이지는 슬라이더 2개(두 손잡이) + 폼 라벨 + submit
-// 버튼이 핵심 a11y 위험 영역. 초기 상태와 submit 에러 상태를 검사한다.
+// closes #107 — 음역대 입력 페이지는 49개 옵션 select 2개 + 폼 라벨 + submit 버튼이
+// 핵심 a11y 위험 영역. 정상 상태와 validation 에러 상태 둘 다 검사한다.
 describe("VoiceRangePage a11y", () => {
   it("초기 렌더 상태에 a11y 위반이 없다", async () => {
     const { container } = renderWithQueryClient(<VoiceRangePage />);
     await expectNoA11yViolations(container);
+  });
+
+  it("validation 에러 메시지 노출 상태에도 a11y 위반이 없다", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
+
+    expect(
+      screen.getByText(/최저음은 최고음보다 같거나 낮아야 합니다/),
+    ).toBeInTheDocument();
+
+    await expectNoA11yViolations(container);
+  });
+
+  // closes #464 — validation 에러 시 SR announce 보장.
+  // role="alert" 가 부여되어 메시지가 등장하는 즉시 SR 이 읽고,
+  // select 둘 다 aria-invalid="true" + aria-describedby 로 연결되어
+  // 어떤 필드가 어떤 이유로 잘못됐는지 SR 사용자도 인지한다.
+  it("validation 에러 시 role=alert 메시지가 노출된다 (#464)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/최저음은 최고음보다 같거나 낮아야 합니다/);
+  });
+
+  it("validation 에러 시 select 둘 다 aria-invalid + aria-describedby 가 설정된다 (#464)", async () => {
+    const user = userEvent.setup();
+    renderWithQueryClient(<VoiceRangePage />);
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
+
+    await user.selectOptions(highSelect, "40");
+    await user.selectOptions(lowSelect, "60");
+
+    expect(lowSelect).toHaveAttribute("aria-invalid", "true");
+    expect(highSelect).toHaveAttribute("aria-invalid", "true");
+    // describedby 가 가리키는 id 가 실제로 alert element 의 id 와 일치.
+    const describedById = lowSelect.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    const alert = screen.getByRole("alert");
+    expect(alert.id).toBe(describedById);
   });
 
   it("submit 에러 시 role=alert 메시지가 노출된다 (#464)", async () => {
@@ -500,20 +551,22 @@ describe("VoiceRangePage a11y", () => {
 });
 
 // closes #552 — 폼 키보드 탐색(Tab) 자연 순서 회귀 가드.
-// 폼 내부 focusable: 최저음 손잡이 → 최고음 손잡이 → "추천 받기" submit button.
+// 폼 내부 focusable: 최저음 select → 최고음 select → "추천 받기" submit button.
 // tabIndex 미지정/끼어드는 요소 회귀를 방지한다.
 describe("VoiceRangePage 폼 Tab 키보드 탐색", () => {
   it("최저음 → 최고음 → 추천 받기 버튼 순으로 Tab 포커스가 이동한다", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
     const submitButton = screen.getByRole("button", { name: /추천 받기/ });
 
-    low.focus();
-    expect(low).toHaveFocus();
+    lowSelect.focus();
+    expect(lowSelect).toHaveFocus();
 
     await user.tab();
-    expect(high).toHaveFocus();
+    expect(highSelect).toHaveFocus();
 
     await user.tab();
     expect(submitButton).toHaveFocus();
@@ -525,16 +578,18 @@ describe("VoiceRangePage 폼 Tab 키보드 탐색", () => {
   it("submit → 최고음 → 최저음 순으로 Shift+Tab 포커스가 역방향 이동한다 (#563)", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<VoiceRangePage />);
-    const { low, high } = getRangeThumbs();
+    const [lowSelect, highSelect] = screen.getAllByRole(
+      "combobox",
+    ) as HTMLSelectElement[];
     const submitButton = screen.getByRole("button", { name: /추천 받기/ });
 
     submitButton.focus();
     expect(submitButton).toHaveFocus();
 
     await user.tab({ shift: true });
-    expect(high).toHaveFocus();
+    expect(highSelect).toHaveFocus();
 
     await user.tab({ shift: true });
-    expect(low).toHaveFocus();
+    expect(lowSelect).toHaveFocus();
   });
 });

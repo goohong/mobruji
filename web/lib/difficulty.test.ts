@@ -9,11 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  deriveDifficulty,
-  difficultyLabel,
-  resolveSongDifficulty,
-} from "./difficulty";
+import { deriveDifficulty, difficultyLabel } from "./difficulty";
 
 describe("deriveDifficulty", () => {
   it("highMidi < 71 이고 음역폭이 좁으면 EASY", () => {
@@ -86,28 +82,8 @@ describe("deriveDifficulty 비정상 입력 (회귀 방지 고정)", () => {
 
 describe("difficultyLabel", () => {
   it("난이도 enum을 표시 라벨로 매핑", () => {
-    expect(difficultyLabel("EASY")).toBe("쉬움");
-    expect(difficultyLabel("NORMAL")).toBe("보통");
-    expect(difficultyLabel("HARD")).toBe("어려움");
-  });
-});
-
-describe("resolveSongDifficulty", () => {
-  it("difficulty 가 있으면 그 값을 우선한다 (BE 우선)", () => {
-    expect(
-      resolveSongDifficulty({ difficulty: "HARD", lowMidi: 50, highMidi: 55 }),
-    ).toBe("HARD");
-  });
-
-  it("difficulty 가 없고 low/high 가 있으면 client-side 계산값을 돌려준다", () => {
-    // highMidi=77(F5) → HARD
-    expect(resolveSongDifficulty({ lowMidi: 55, highMidi: 77 })).toBe("HARD");
-  });
-
-  it("난이도 정보가 전혀 없으면 null 을 돌려준다", () => {
-    expect(resolveSongDifficulty({})).toBeNull();
-    expect(
-      resolveSongDifficulty({ difficulty: null, lowMidi: null, highMidi: null }),
-    ).toBeNull();
+    expect(difficultyLabel("EASY")).toBe("Easy");
+    expect(difficultyLabel("NORMAL")).toBe("Normal");
+    expect(difficultyLabel("HARD")).toBe("Hard");
   });
 });

@@ -29,7 +29,7 @@ cycle forum (BE/FE/REV/PLAN) thread 가 launch 시점에 1회 tag 부착 + 본�
 
 ### 기능 요구사항
 
-- [x] **모든 cycle 작업 = individual thread** — backlog single thread (`[BACKLOG] <cycle>`) 폐기 (2026-06-03 구현 — discord-reply.sh `--cycle-backlog-upsert` no-op + wrapper `--refresh-backlog` skip + upsert.sh no-op).
+- [ ] **모든 cycle 작업 = individual thread** — backlog single thread (`[BACKLOG] <cycle>`) 폐기.
 - [ ] **tag 4종**:
   - 🟡 대기 (launch 전)
   - ⏳ 진행 (launch 후)
@@ -41,7 +41,7 @@ cycle forum (BE/FE/REV/PLAN) thread 가 launch 시점에 1회 tag 부착 + 본�
   - 🟡 → ⏳: wrapper launch 시 기존 🟡 thread 재사용 + retag (코드 강제).
   - ⏳ → ✅: bot.py polling (`cycle_thread_complete_on_merge_loop`, PR B 자매) — PR 머지 detect (학습 의존 X).
 - [ ] **❌ 학습 의존 + 사유 강제**: `discord-reply.sh --forum-retag <id> <cycle> "실패" --reason "<사유>"` 호출. `--reason` 누락 시 exit 1 + 본문 `❌ 종결 사유: <reason>` 자동 PATCH.
-- [x] **backlog deprecate** (2026-06-03): `tools/cycle-backlog/upsert.sh` no-op + `discord-reply.sh --cycle-backlog-upsert` no-op (thread-creating tool 단 차단) + `agent-launch-wrapper.sh --refresh-backlog` warning + skip. 기존 `[BACKLOG]` thread (be/fe/plan) archive+lock 완료.
+- [ ] **backlog deprecate**: `tools/cycle-backlog/upsert.sh` + `agent-launch-wrapper.sh --refresh-backlog` flag warning + 기존 `[BACKLOG]` thread archive (사용자 결정).
 
 ### 비기능 요구사항
 
@@ -171,12 +171,11 @@ discord-reply.sh --forum-retag <thread_id> <cycle> "실패" --reason "<사유>"
 2. `--reason` 있으면 본문에 `❌ 종결 사유: <reason>` line 자동 PATCH (기존 `✅ 결과` 섹션 교체).
 3. ✅ / 🟡 / ⏳ tag 시 `--reason` 옵션 (선택).
 
-### 5-7) backlog deprecate path (구현 완료 2026-06-03)
+### 5-7) backlog deprecate path
 
-- `tools/cycle-backlog/upsert.sh` — deprecation warning stderr emit 후 no-op exit 0 (호환). 디버깅용 escape: `CYCLE_BACKLOG_FORCE=1` 시에만 markdown 빌드 (그래도 discord push 는 아래 차단으로 no-op).
-- `discord-reply.sh --cycle-backlog-upsert` — **thread-creating tool 단에서 차단**: 신설/PATCH 안 하고 deprecation warning + no-op exit 0. 어느 호출자(wrapper / upsert.sh / 수동 / agent)가 호출해도 새 `[BACKLOG]` 스레드가 생기지 않는다 (회귀 root-cause 차단 지점).
-- `agent-launch-wrapper.sh --refresh-backlog` flag / `CYCLE_BACKLOG_REFRESH_DEFAULT` → warning + skip (인자 파싱 호환 유지).
-- 기존 `[BACKLOG] <cycle>` thread (be/fe/plan, rev 는 부재) = archive+lock 완료 (history 보존, 삭제 X). bot.py 자동 삭제 X.
+- `tools/cycle-backlog/upsert.sh` 의 첫 줄에 deprecation warning stderr emit. exit 0 (호환).
+- `agent-launch-wrapper.sh --refresh-backlog` flag → warning + skip (호환).
+- 기존 `[BACKLOG] <cycle>` thread = history archive 로 남김 (Discord 채널에서 사용자 결정 시 삭제). bot.py 가 자동 삭제 X.
 
 ### 5-8) rev 사이클 완료 retag (#1514)
 
@@ -215,7 +214,7 @@ graceful degradation — 부분 revert OK.
 - [x] **PR cf-1 (본 PR)**: spec + sub-agent.md §1-11 룰 update + actors/nmae.md §11-? register-pending 호출 의무.
 - [ ] **PR cf-2**: agent-launch-wrapper.sh — `--register-pending` mode 신설 + launch mode 가 기존 🟡 thread 재사용 + template 확장.
 - [ ] **PR cf-3**: bot.py `cycle_thread_complete_on_merge_loop` 신설 + discord-reply.sh `--reason` 검증 + 본문 자동 PATCH.
-- [x] **PR cf-4 (cleanup, 2026-06-03)**: backlog deprecate — `--cycle-backlog-upsert`/`upsert.sh`/`--refresh-backlog` no-op + 기존 `[BACKLOG] <cycle>` thread (be/fe/plan) archive+lock. 사용자 directive 마다 옛 양식 스레드 재생성하던 회귀 차단.
+- [ ] **PR cf-4 (optional cleanup)**: backlog deprecate (warning) + 기존 `[BACKLOG] <cycle>` thread archive.
 
 ## 8) 테스트 전략
 

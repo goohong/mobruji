@@ -22,13 +22,13 @@ class RecommendationHistoryResponseTest {
     @DisplayName("from: 요청 엔티티 + 결과 도메인 → DTO 매핑 (mood=UPBEAT, preferredBpm=130)")
     void from_mapsAllFieldsWithMoodAndBpm() {
         final RecommendationRequestEntity recommendationRequestEntity = RecommendationRequestEntity.create(
-                "session-x", 48, 72, Mood.UPBEAT, 130, null, null, List.of(5L, 7L));
+                "session-x", 48, 72, Mood.UPBEAT, 130, null, List.of(5L, 7L));
         final Song song = Song.builder()
                 .title("t").artist("a")
                 .keyOriginal(MusicalKey.C_MAJOR)
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.9, 0.0, 1.0, 0.5, 0.7, 0.0, 0.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.9, 0.0, 1.0, 0.5, 0.7, 0.0);
         final RecommendationResult recommendationResult = new RecommendationResult(
                 100L,
                 List.of(new ScoredRecommendation(song, 0.8, "음역 적합", 1, breakdown)));
@@ -51,7 +51,7 @@ class RecommendationHistoryResponseTest {
     @DisplayName("from: mood=null 일 때 mood 필드도 null 로 직렬화 (spec §5-2 — mood 옵션)")
     void from_nullMoodSerializesAsNull() {
         final RecommendationRequestEntity recommendationRequestEntity = RecommendationRequestEntity.create(
-                "session-y", 48, 72, null, null, null, null, List.of());
+                "session-y", 48, 72, null, null, null, List.of());
         final RecommendationResult recommendationResult = new RecommendationResult(101L, List.of());
 
         final RecommendationHistoryResponse recommendationHistoryResponse = RecommendationHistoryResponse.from(
@@ -66,7 +66,7 @@ class RecommendationHistoryResponseTest {
     @DisplayName("from: breakdown 미보유 ScoredRecommendation(과거 추천 재조회) → 응답의 breakdown 도 null")
     void from_breakdownNull_propagatesNullToResponse() {
         final RecommendationRequestEntity recommendationRequestEntity = RecommendationRequestEntity.create(
-                "session-z", 48, 72, Mood.CALM, null, null, null, List.of());
+                "session-z", 48, 72, Mood.CALM, null, null, List.of());
         final Song song = Song.builder()
                 .title("t").artist("a")
                 .keyOriginal(MusicalKey.C_MAJOR)
@@ -87,7 +87,7 @@ class RecommendationHistoryResponseTest {
     @DisplayName("from: 결과의 추천 순서(rankPosition) 가 응답 리스트 순서로 그대로 보존")
     void from_preservesRecommendationOrder() {
         final RecommendationRequestEntity recommendationRequestEntity = RecommendationRequestEntity.create(
-                "session-w", 48, 72, Mood.UPBEAT, 120, null, null, List.of());
+                "session-w", 48, 72, Mood.UPBEAT, 120, null, List.of());
         final Song s1 = Song.builder().title("first").artist("a")
                 .keyOriginal(MusicalKey.C_MAJOR).metadataSource(MetadataSource.MANUAL_SEED).build();
         final Song s2 = Song.builder().title("second").artist("b")

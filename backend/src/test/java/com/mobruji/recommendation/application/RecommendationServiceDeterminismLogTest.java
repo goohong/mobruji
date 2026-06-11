@@ -208,10 +208,10 @@ class RecommendationServiceDeterminismLogTest {
         for (int i = 1; i <= size; i++) {
             catalog.add(buildSong((long) i, "s" + i, "A" + i));
         }
-        given(songRepository.findAllWithVocalRange()).willReturn(catalog);
+        given(songRepository.findAll()).willReturn(catalog);
 
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0);
-        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any(), any()))
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.0);
+        given(recommendationScorer.score(any(Song.class), anyInt(), anyInt(), any(), any(), any(), any()))
                 .willReturn(new Scored(0.9, breakdown));
 
         final List<ScoredSong> diversified = new ArrayList<>();
@@ -229,7 +229,7 @@ class RecommendationServiceDeterminismLogTest {
                 VOICE_LOW,
                 VOICE_HIGH,
                 Mood.UPBEAT,
-                PREFERRED_BPM, null, null,
+                PREFERRED_BPM, null,
                 excludeSongIds, false);
     }
 
@@ -255,7 +255,7 @@ class RecommendationServiceDeterminismLogTest {
 
     private static RecommendationRequestEntity persistedRequestEntity() throws Exception {
         final RecommendationRequestEntity entity = RecommendationRequestEntity.create(
-                SESSION_ID, VOICE_LOW, VOICE_HIGH, Mood.UPBEAT, PREFERRED_BPM, null, null, List.of());
+                SESSION_ID, VOICE_LOW, VOICE_HIGH, Mood.UPBEAT, PREFERRED_BPM, null, List.of());
         final Field idField = RecommendationRequestEntity.class.getDeclaredField("id");
         idField.setAccessible(true);
         idField.set(entity, 100L);

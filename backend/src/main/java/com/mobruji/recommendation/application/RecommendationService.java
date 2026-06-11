@@ -21,8 +21,6 @@ import com.mobruji.song.infrastructure.SongRepository;
 
 import lombok.RequiredArgsConstructor;
 
-import com.mobruji.recommendation.domain.FeedbackReaction;
-import com.mobruji.recommendation.domain.FilterRelaxation;
 import com.mobruji.recommendation.domain.Recommendation;
 import com.mobruji.recommendation.domain.RecommendationNotFoundException;
 import com.mobruji.recommendation.domain.RecommendationRequestEntity;
@@ -31,7 +29,6 @@ import com.mobruji.recommendation.domain.ScoredRecommendation;
 import com.mobruji.recommendation.domain.SeedSongsNotFoundException;
 import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
-import com.mobruji.recommendation.infrastructure.SessionFeedbackRepository;
 
 @Service
 @Transactional
@@ -58,7 +55,6 @@ public class RecommendationService {
     private final DiversityPostProcessor diversityPostProcessor;
     private final RecommendationProperties recommendationProperties;
     private final SeedSongProfiler seedSongProfiler;
-    private final SessionFeedbackRepository sessionFeedbackRepository;
 
     /**
      * "부른 곡 기반 다음곡 추천"(#1486). 사용자가 부른 곡({@code seedSongIds})에서 음역대·분위기·BPM 을
@@ -68,35 +64,21 @@ public class RecommendationService {
      * 결과에서 자동 제외하도록 {@code excludeSongIds} 에 합친 뒤 {@link #create} 파이프라인을 그대로 재사용한다.
      * 별도 점수 함수를 두지 않아 스코어링·다양성·영속·결정성 로직이 단일 경로로 유지된다.
      *
-     * <p>스와이프 세션 반응 결합(#1545): {@code useSessionFeedback}(기본 true) 이면 서버에 저장된 세션 반응을
-     * 추가 신호로 합친다 — {@code LIKE} 곡을 부른곡 시드와 함께 선호 집합({@link SeedSongProfiler} 입력)으로,
-     * {@code PASS} 곡을 회피/제외 집합으로 합쳐 후보를 재정렬·필터한다. 반응이 0건이면 기여 0(콜드스타트 —
-     * 기존 결과 하위호환). 결합도 정렬·중복 제거로 결정성을 보존한다.
-     *
-     * <p>요청한 {@code seedSongIds}(+ 결합한 LIKE 곡) 가 카탈로그에서 하나도 조회되지 않으면 추천을 만들 수 없으므로
+     * <p>요청한 {@code seedSongIds} 가 카탈로그에서 하나도 조회되지 않으면 추천을 만들 수 없으므로
      * {@link SeedSongsNotFoundException}(422) 을 던진다.
      */
     public RecommendationResult createFromSeeds(final NextRecommendationCommand nextRecommendationCommand) {
-        // 선호 집합 = 부른곡 시드 + 세션 LIKE 곡 / 회피 집합 = 명시 제외 + 세션 PASS 곡.
-        // 삽입 순서를 보존하되 LinkedHashSet 으로 중복을 제거한다(결정성은 SeedDeriver 정렬이 최종 보존).
-        final List<Long> preferenceSeedIds = new ArrayList<>(
-                new LinkedHashSet<>(nextRecommendationCommand.seedSongIds()));
-        final List<Long> avoidanceExcludeIds = new ArrayList<>(
-                new LinkedHashSet<>(nextRecommendationCommand.excludeSongIds()));
-        if (nextRecommendationCommand.useSessionFeedback()) {
-            mergeSessionFeedbackSignals(
-                    nextRecommendationCommand.sessionId(), preferenceSeedIds, avoidanceExcludeIds);
-        }
-
-        final List<Song> seedSongs = songRepository.findAllById(preferenceSeedIds);
+        final List<Long> seedSongIds = nextRecommendationCommand.seedSongIds();
+        final List<Song> seedSongs = songRepository.findAllById(seedSongIds);
         if (seedSongs.isEmpty()) {
-            throw new SeedSongsNotFoundException(preferenceSeedIds);
+            throw new SeedSongsNotFoundException(seedSongIds);
         }
 
-        // 부른 곡(seed)은 결과에서 자동 제외 — 방금 부른/좋아요한 시드 곡을 다시 추천하지 않는다.
-        // 회피 집합과 seed 를 합쳐 중복 제거(순서 무관, 결정성은 SeedDeriver 가 정렬로 보존).
-        final List<Long> mergedExcludeIds = new ArrayList<>(new LinkedHashSet<>(avoidanceExcludeIds));
-        for (final Long seedSongId : preferenceSeedIds) {
+        // 부른 곡(seed)은 결과에서 자동 제외 — 방금 부른 곡을 다시 추천하지 않는다.
+        // 명시 제외(스와이프 패스 등)와 seed 를 합쳐 중복 제거(순서 무관, 결정성은 SeedDeriver 가 정렬로 보존).
+        final List<Long> mergedExcludeIds = new ArrayList<>(
+                new LinkedHashSet<>(nextRecommendationCommand.excludeSongIds()));
+        for (final Long seedSongId : seedSongIds) {
             if (!mergedExcludeIds.contains(seedSongId)) {
                 mergedExcludeIds.add(seedSongId);
             }
@@ -105,52 +87,10 @@ public class RecommendationService {
         final CreateRecommendationCommand derivedCommand = seedSongProfiler.profile(
                 nextRecommendationCommand.sessionId(), seedSongs, mergedExcludeIds,
                 nextRecommendationCommand.excludeSessionHistory());
-        // 무한 스와이프(#1763)는 본/패스한 곡을 excludeSongIds 에 누적해 다음 batch 를 이어 붙인다. 풀이 소진되면
-        // 빈 응답으로 종료해야 프론트 무한스크롤이 멈춘다(#1817). 0건 fallback(#1668)을 끄면 이미 본 곡을 다시
-        // 노출(재surface)하지 않고 빈 결과로 끝낸다 — #1668 "가까운 곡" UX 는 재추천(create) 버튼 경로에만 둔다.
-        return create(derivedCommand, false);
+        return create(derivedCommand);
     }
 
-    /**
-     * 세션 스와이프 반응(#1545)을 결합 신호로 누적한다. {@code LIKE} 곡은 선호 시드 집합 끝에, {@code PASS} 곡은
-     * 회피 제외 집합 끝에 추가한다(이미 있으면 skip). 각 reaction 은 인덱스 1쿼리(오래된순)로 조회해 N+1 을 피한다.
-     */
-    private void mergeSessionFeedbackSignals(
-            final String sessionId,
-            final List<Long> preferenceSeedIds,
-            final List<Long> avoidanceExcludeIds) {
-        sessionFeedbackRepository
-                .findBySessionIdAndReactionOrderByCreatedAtAsc(sessionId, FeedbackReaction.LIKE)
-                .forEach(feedback -> {
-                    if (!preferenceSeedIds.contains(feedback.getSongId())) {
-                        preferenceSeedIds.add(feedback.getSongId());
-                    }
-                });
-        sessionFeedbackRepository
-                .findBySessionIdAndReactionOrderByCreatedAtAsc(sessionId, FeedbackReaction.PASS)
-                .forEach(feedback -> {
-                    if (!avoidanceExcludeIds.contains(feedback.getSongId())) {
-                        avoidanceExcludeIds.add(feedback.getSongId());
-                    }
-                });
-    }
-
-    /**
-     * 재추천(create) 버튼 경로의 공개 진입점. 결과 0건이면 제외 필터를 단계적으로 완화해 가까운 곡으로 채우는
-     * 0건 fallback(#1668)을 적용한다(빈 화면 방지 UX). 무한 스와이프(#1763)의 풀 소진 종료(#1817)는
-     * {@link #createFromSeeds} 가 fallback 을 끈 {@link #create(CreateRecommendationCommand, boolean)} 로 처리한다.
-     */
     public RecommendationResult create(final CreateRecommendationCommand createRecommendationCommand) {
-        return create(createRecommendationCommand, true);
-    }
-
-    /**
-     * {@code relaxOnZeroResult} 가 {@code true} 면 결과 0건일 때 제외 필터를 단계적으로 완화하는 fallback(#1668)을
-     * 적용한다. {@code false} 면 완화 없이 빈 결과를 그대로 돌려준다 — 무한 스와이프(#1763)에서 본/패스한 곡 풀이
-     * 소진되면 이미 본 곡을 재노출하지 않고 빈 응답으로 종료시키기 위함이다(#1817).
-     */
-    private RecommendationResult create(
-            final CreateRecommendationCommand createRecommendationCommand, final boolean relaxOnZeroResult) {
         final long startNanos = System.nanoTime();
         // 세션 단위 자동 중복 회피(#1549): 플래그가 켜지면 같은 세션의 이전 추천 결과 곡 + 이전 제외/부른 곡을
         // 클라이언트가 넘긴 excludeSongIds 에 누적 병합한다. 병합 결과를 영속·필터·seed 에 일관되게 사용해
@@ -168,52 +108,38 @@ public class RecommendationService {
                         createRecommendationCommand.mood(),
                         createRecommendationCommand.preferredBpm(),
                         createRecommendationCommand.ageGroup(),
-                        createRecommendationCommand.gender(),
                         excludeSongIds));
 
         // 후보 곡 단계에서 excludeSongIds 필터링.
         // spec §3 기능 요구사항: "이미 들었어요" → 결과에서 제외.
         // 점수 계산 전에 필터해 점수 산정 비용을 절약하고, 다양성 후처리(아티스트/장르 cap)도 제외 후 카탈로그 위에서 작동.
-        // 후보 universe 는 음역대 보유 곡만(#1744): 음역대 미보유 곡은 voiceFit 을 실측 band 로 못 구해 0.5 중립으로
-        // 추천 풀을 오염시키므로(추천 곡 전부 50% 사고) 후보에서 제외한다. backfill 완료 곡은 자동 편입된다.
         final Set<Long> excludeSet = new HashSet<>(excludeSongIds);
-        final List<Song> rangedSongs = songRepository.findAllWithVocalRange();
-        final List<Song> candidates = rangedSongs.stream()
+        final List<Song> allSongs = songRepository.findAll();
+        final List<Song> candidates = allSongs.stream()
                 .filter(song -> !excludeSet.contains(song.getId()))
                 .toList();
 
         // seed에 excludeSongIds를 정렬된 형태로 포함 (누적 패턴: rev 사이클 3 경고).
         // 같은 voiceRange여도 제외 곡 셋이 달라지면 다른 seed → 다른 jitter → 다른 결과.
         final SeedContext seedContext = buildSeedContext(savedRequest, excludeSongIds);
-        final int resultCount = recommendationProperties.resultCount();
-        final List<FilterRelaxation> relaxedFilters = new ArrayList<>();
-        List<ScoredSong> diversified = rankCandidates(candidates, savedRequest, seedContext.seed(), resultCount);
+        final Random random = new Random(seedContext.seed());
+        final List<ScoredSong> scoredSongs = candidates.stream()
+                .map(song -> {
+                    final Scored scored = recommendationScorer.score(
+                            song,
+                            savedRequest.getVoiceRangeLow(),
+                            savedRequest.getVoiceRangeHigh(),
+                            savedRequest.getMood(),
+                            savedRequest.getPreferredBpm(),
+                            savedRequest.getAgeGroup(),
+                            random);
+                    return new ScoredSong(song, scored);
+                })
+                .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.scored.total()).reversed())
+                .toList();
 
-        // 0건 fallback(#1668): 결과가 비면 빈 화면 대신 제외 필터를 가장 덜 침습적인 순서로 완화해 재질의한다.
-        // 완화 대상은 제외 곡 셋뿐이다 — 음역대 보유 조건(#1744)은 완화하지 않는다(미보유 곡은 voiceFit 오염원이므로
-        // 빈 화면이 더 낫다). 분위기·연령대는 점수 신호일 뿐 후보를 줄이지 않는다.
-        // 음역대는 점수 순(가까운 순) 정렬로 끝까지 보존 — 완전 무관 곡이 아닌 가까운 곡부터 노출한다.
-        // relaxOnZeroResult=false(무한 스와이프 #1763)면 풀 소진 시 빈 결과로 종료해 재surface 를 막는다(#1817).
-        if (relaxOnZeroResult && diversified.isEmpty()) {
-            // 1단계: 세션 단위 자동 중복 회피(#1549)로 누적된 제외만 풀고, 사용자가 명시한 제외 곡은 유지한다.
-            final Set<Long> clientExcludeSet = new HashSet<>(createRecommendationCommand.excludeSongIds());
-            if (clientExcludeSet.size() < excludeSet.size()) {
-                final List<Song> sessionHistoryRelaxed = rangedSongs.stream()
-                        .filter(song -> !clientExcludeSet.contains(song.getId()))
-                        .toList();
-                diversified = rankCandidates(sessionHistoryRelaxed, savedRequest, seedContext.seed(), resultCount);
-                if (!diversified.isEmpty()) {
-                    relaxedFilters.add(FilterRelaxation.SESSION_HISTORY);
-                }
-            }
-            // 2단계: 그래도 0건이면 사용자 명시 제외 곡까지 후보에 포함한다(빈 화면보다는 가까운 곡 노출).
-            if (diversified.isEmpty() && !rangedSongs.isEmpty()) {
-                diversified = rankCandidates(rangedSongs, savedRequest, seedContext.seed(), resultCount);
-                if (!diversified.isEmpty()) {
-                    relaxedFilters.add(FilterRelaxation.EXCLUDED_SONGS);
-                }
-            }
-        }
+        final int resultCount = recommendationProperties.resultCount();
+        final List<ScoredSong> diversified = diversityPostProcessor.apply(scoredSongs, resultCount);
 
         // 결과 row를 개별 save 호출이 아닌 saveAll로 모아 영속한다.
         // - IDENTITY 전략이라 Hibernate JDBC batch insert는 적용되지 않지만,
@@ -247,48 +173,14 @@ public class RecommendationService {
         // RANDOM 전략일 때는 seed/hash 가 비결정이므로 hash="-" 로 표기해 운영자가 구분.
         final long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
         log.info(
-                "event=recommendation.created request.input.hash={} seed={} algoVersion={} resultCount={} "
-                        + "relaxed={} relaxedFilters={} durationMs={}",
+                "event=recommendation.created request.input.hash={} seed={} algoVersion={} resultCount={} durationMs={}",
                 seedContext.inputHash(),
                 seedContext.seed(),
                 ALGO_VERSION,
                 recommendations.size(),
-                !relaxedFilters.isEmpty(),
-                relaxedFilters,
                 durationMs);
 
-        return new RecommendationResult(savedRequest.getId(), recommendations, relaxedFilters);
-    }
-
-    /**
-     * 후보 곡을 점수 내림차순으로 정렬한 뒤 다양성 캡을 적용해 상위 결과를 고른다. {@link #create} 의 정상 경로와
-     * 0건 fallback(#1668) 재질의가 같은 산식·결정성을 공유하도록 추출했다.
-     *
-     * <p>{@code seed} 로 매 호출 새 {@link Random} 을 만들어, 같은 입력(같은 후보·seed)이면 같은 jitter·순서를 보장한다
-     * (spec §3 비기능 — 결정성). 후보 리스트는 정렬된 입력 순서를 유지해 jitter 배정이 결정적이다.
-     */
-    private List<ScoredSong> rankCandidates(
-            final List<Song> candidates,
-            final RecommendationRequestEntity savedRequest,
-            final long seed,
-            final int resultCount) {
-        final Random random = new Random(seed);
-        final List<ScoredSong> scoredSongs = candidates.stream()
-                .map(song -> {
-                    final Scored scored = recommendationScorer.score(
-                            song,
-                            savedRequest.getVoiceRangeLow(),
-                            savedRequest.getVoiceRangeHigh(),
-                            savedRequest.getMood(),
-                            savedRequest.getPreferredBpm(),
-                            savedRequest.getAgeGroup(),
-                            savedRequest.getGender(),
-                            random);
-                    return new ScoredSong(song, scored);
-                })
-                .sorted(Comparator.comparingDouble((ScoredSong scoredSong) -> scoredSong.scored.total()).reversed())
-                .toList();
-        return diversityPostProcessor.apply(scoredSongs, resultCount);
+        return new RecommendationResult(savedRequest.getId(), recommendations);
     }
 
     /**
@@ -423,7 +315,6 @@ public class RecommendationService {
                 savedRequest.getMood(),
                 savedRequest.getPreferredBpm(),
                 savedRequest.getAgeGroup(),
-                savedRequest.getGender(),
                 excludeSongIds);
         final String inputHash = SeedDeriver.hashHex16(
                 savedRequest.getSessionId(),
@@ -432,7 +323,6 @@ public class RecommendationService {
                 savedRequest.getMood(),
                 savedRequest.getPreferredBpm(),
                 savedRequest.getAgeGroup(),
-                savedRequest.getGender(),
                 excludeSongIds);
         return new SeedContext(seed, inputHash);
     }

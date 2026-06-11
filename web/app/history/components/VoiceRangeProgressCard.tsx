@@ -32,7 +32,8 @@
 
 import {
   INVALID_MIDI_A11Y_FALLBACK,
-  midiToKoreanNoteName,
+  midiToCombinedNoteName,
+  midiToNoteName,
 } from "@/lib/notes";
 import { formatRelativeKorean } from "@/lib/relativeTime";
 import type {
@@ -160,11 +161,11 @@ export function VoiceRangeProgressCard({ summary }: Props) {
            * 회귀 시에도 의미 없는 "dash dash" 낭독을 차단한다.
            */}
           최근 측정{" "}
-          {midiToKoreanNoteName(latest.lowMidi, {
+          {midiToNoteName(latest.lowMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           })}{" "}
           ~{" "}
-          {midiToKoreanNoteName(latest.highMidi, {
+          {midiToNoteName(latest.highMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           })}{" "}
           · {points.length}회 측정 기록
@@ -207,7 +208,7 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 textAnchor="end"
                 className="fill-[var(--text-tertiary)] text-[9px]"
               >
-                {midiToKoreanNoteName(midi)}
+                {midiToNoteName(midi)}
               </text>
             </g>
           );
@@ -239,16 +240,16 @@ export function VoiceRangeProgressCard({ summary }: Props) {
           // 좁아 fallback 텍스트가 길어도 그 자리에 표시되도록 허용한다 —
           // raw NaN 이 들어오는 회귀는 명세상 발생하지 않아야 하지만, 가시화
           // 되었을 때 의미 없는 "--" 표시보다 안내가 낫다.
-          const highNoteShort = midiToKoreanNoteName(point.highMidi, {
+          const highNoteShort = midiToNoteName(point.highMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
-          const lowNoteShort = midiToKoreanNoteName(point.lowMidi, {
+          const lowNoteShort = midiToNoteName(point.lowMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
-          const highNoteLabel = midiToKoreanNoteName(point.highMidi, {
+          const highNoteCombined = midiToCombinedNoteName(point.highMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
-          const lowNoteLabel = midiToKoreanNoteName(point.lowMidi, {
+          const lowNoteCombined = midiToCombinedNoteName(point.lowMidi, {
             a11yFallback: INVALID_MIDI_A11Y_FALLBACK,
           });
 
@@ -267,8 +268,8 @@ export function VoiceRangeProgressCard({ summary }: Props) {
                 }
               >
                 <title>
-                  {formatRelativeKorean(point.requestedAt)}: {lowNoteLabel}{" "}
-                  ~ {highNoteLabel} ({point.highMidi - point.lowMidi} 반음)
+                  {formatRelativeKorean(point.requestedAt)}: {lowNoteCombined}{" "}
+                  ~ {highNoteCombined} ({point.highMidi - point.lowMidi} 반음)
                 </title>
               </rect>
               {/*
@@ -403,5 +404,5 @@ function buildAriaLabel(
   // a11y fallback 을 반드시 적용. "--" 가 들어가면 "dash dash 음역" 으로
   // 의미 없이 낭독되어 사용자 혼란.
   const a11yOptions = { a11yFallback: INVALID_MIDI_A11Y_FALLBACK };
-  return `음역 발전 차트. 첫 측정 ${midiToKoreanNoteName(earliest.lowMidi, a11yOptions)}~${midiToKoreanNoteName(earliest.highMidi, a11yOptions)}, 최근 측정 ${midiToKoreanNoteName(latest.lowMidi, a11yOptions)}~${midiToKoreanNoteName(latest.highMidi, a11yOptions)}, ${direction}.`;
+  return `음역 발전 차트. 첫 측정 ${midiToNoteName(earliest.lowMidi, a11yOptions)}~${midiToNoteName(earliest.highMidi, a11yOptions)}, 최근 측정 ${midiToNoteName(latest.lowMidi, a11yOptions)}~${midiToNoteName(latest.highMidi, a11yOptions)}, ${direction}.`;
 }

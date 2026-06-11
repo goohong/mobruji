@@ -279,9 +279,9 @@ describe("/history 페이지 query/source 전환 race 가드 (fixture refixture,
     });
     expect(screen.queryByText("곡-10")).not.toBeInTheDocument();
 
-    // 헤더 카피도 BE source 분기 — "지금까지 받은 N건의 추천을 불러왔어요"
+    // 헤더 카피도 BE source 분기 — "세션 ID 기준 N건의 추천을 서버에서 불러왔어요"
     expect(
-      screen.getByText(/지금까지 받은 1건의 추천을 불러왔어요/),
+      screen.getByText(/세션 ID 기준 1건의 추천을 서버에서 불러왔어요/),
     ).toBeInTheDocument();
   });
 

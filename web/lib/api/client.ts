@@ -26,25 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-
-/**
- * 현재 인증 토큰을 제공하는 함수(없으면 null). 로그인 유지(#1768)를 위해
- * `AuthSessionRestorer` 가 마운트 시 auth store 와 연결해 등록한다 — 등록 전(SSR/
- * 미연결)에는 null provider 라 Bearer 를 붙이지 않는다(익명 흐름 호환).
- */
-let authTokenProvider: () => string | null = () => null;
-
-/**
- * apiFetch 가 모든 요청에 자동 첨부할 Authorization Bearer 토큰 공급자를 등록한다.
- *
- * - `web/lib/api` 집중 원칙: 도메인 함수는 토큰을 신경 쓰지 않고, 토큰 주입은 이
- *   provider 한 곳으로 일원화한다.
- * - 호출 측이 `Authorization` 헤더를 직접 지정하면 그 값이 우선한다(아래 spread 순서).
- */
-export function setAuthTokenProvider(provider: () => string | null): void {
-  authTokenProvider = provider;
-}
+type Method = "GET" | "POST" | "PUT" | "DELETE";
 
 type RequestOptions = {
   method?: Method;
@@ -65,16 +47,11 @@ export async function apiFetch<TResponse>(
   const { method = "GET", body, signal, headers } = options;
 
   const url = `${API_BASE_URL}${path}`;
-  // 로그인 유지(#1768): provider 가 토큰을 주면 Authorization Bearer 를 자동 첨부한다.
-  // 토큰이 없으면(익명/비로그인) 헤더를 추가하지 않아 익명 흐름과 호환된다. 호출 측이
-  // headers 로 Authorization 을 직접 지정하면 마지막 spread 가 이겨 그 값이 우선한다.
-  const bearerToken = authTokenProvider();
   const init: RequestInit = {
     method,
     headers: {
       Accept: "application/json",
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(bearerToken !== null ? { Authorization: `Bearer ${bearerToken}` } : {}),
       ...(headers ?? {}),
     },
     signal,

@@ -1,0 +1,126 @@
+name: CD Dev — NCP
+
+# Phase 4 NCP dev 배포 — docs/features/ncp-dev-deployment.md §5-3.
+#
+# 흐름:
+#   develop 머지 (또는 수동 dispatch) → SSH NCP → git pull → docker compose build/up
+#   → /actuator/health/liveness 30회 polling (총 150s) → 통과 OK, 실패 시 직전 SHA 롤백.
+#
+# 필요한 secret (없으면 graceful skip):
+#   NCP_SSH_HOST  — NCP VM IP (예: 101.79.20.94)
+#   NCP_SSH_USER  — SSH 계정 (예: mobruji)
+#   NCP_SSH_KEY   — Ed25519/RSA 개인키 본문 (PEM)
+#
+# NCP 사전 셋업: tools/deploy/ncp-bootstrap-dev.sh (#370) + .env.dev 토큰 입력.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'web/**'
+      - 'docker-compose.dev.yml'
+      - 'nginx/**'
+      - 'tools/deploy/**'
+      - '.env.dev.example'
+      - '.github/workflows/cd-dev.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 동시 배포 직렬화 — 같은 호스트를 두 deploy 가 동시에 만지지 않도록.
+concurrency:
+  group: cd-dev-ncp
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      NCP_SSH_HOST: ${{ secrets.NCP_SSH_HOST }}
+      NCP_SSH_USER: ${{ secrets.NCP_SSH_USER }}
+      NCP_SSH_KEY: ${{ secrets.NCP_SSH_KEY }}
+    steps:
+      - name: Skip notice (no NCP secrets)
+        if: env.NCP_SSH_KEY == '' || env.NCP_SSH_HOST == ''
+        run: |
+          echo "NCP_SSH_KEY 또는 NCP_SSH_HOST secret 미등록 — dev 배포 skip."
+          echo "셋업: docs/features/ncp-dev-deployment.md §5-3"
+          echo "  gh secret set NCP_SSH_HOST --repo goohong/mobruji"
+          echo "  gh secret set NCP_SSH_USER --repo goohong/mobruji"
+          echo "  gh secret set NCP_SSH_KEY  --repo goohong/mobruji < ~/.ssh/id_ed25519"
+
+      - name: Set up SSH
+        if: env.NCP_SSH_KEY != '' && env.NCP_SSH_HOST != ''
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$NCP_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$NCP_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to NCP
+        if: env.NCP_SSH_KEY != '' && env.NCP_SSH_HOST != ''
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          GIT_SHA_SHORT=$(echo "$GIT_SHA" | cut -c1-7)
+          echo "[cd-dev] deploying $GIT_SHA_SHORT to ${NCP_SSH_USER}@${NCP_SSH_HOST}"
+
+          ssh -i ~/.ssh/id_ed25519 \
+            -o ServerAliveInterval=30 \
+            -o StrictHostKeyChecking=accept-new \
+            "${NCP_SSH_USER}@${NCP_SSH_HOST}" \
+            "GIT_SHA=$GIT_SHA_SHORT bash -se" <<'REMOTE'
+              set -euo pipefail
+              cd ~/mobruji
+
+              # 이전 SHA 저장 (healthcheck 실패 시 롤백 대상).
+              PREV_SHA=$(git rev-parse HEAD)
+              echo "[cd-dev] previous=$(echo "$PREV_SHA" | cut -c1-7)  → new=$GIT_SHA"
+
+              git fetch origin develop
+              git reset --hard origin/develop
+
+              if [ ! -f .env.dev ]; then
+                  echo "[cd-dev] .env.dev 부재 — bootstrap 필요 (tools/deploy/ncp-bootstrap-dev.sh)"
+                  exit 2
+              fi
+
+              # 이미지 tag 가 .env.dev 의 GIT_SHA 를 통해 inline.
+              # docker compose 가 자동으로 .env.dev + GIT_SHA env 를 합쳐 읽도록 export.
+              export GIT_SHA
+              docker compose -f docker-compose.dev.yml --env-file .env.dev build \
+                  --build-arg GIT_SHA="$GIT_SHA"
+              docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --remove-orphans
+
+              # healthcheck — nginx 통해 backend liveness. 총 150s window.
+              # ADR-0028: 80 은 https 로 301 리다이렉트되므로 443 직접 호출.
+              # -k: localhost 는 server_name(nip.io)과 불일치해 cert 검증 skip (local probe).
+              echo "[cd-dev] waiting for /actuator/health/liveness ..."
+              HEALTHY=0
+              for i in $(seq 1 30); do
+                  if curl -fsSk https://localhost/actuator/health/liveness >/dev/null 2>&1; then
+                      echo "[cd-dev] healthy after ${i}*5s"
+                      HEALTHY=1
+                      break
+                  fi
+                  sleep 5
+              done
+
+              if [ "$HEALTHY" -ne 1 ]; then
+                  echo "[cd-dev] healthcheck timeout — 이전 SHA 로 롤백"
+                  docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 80 backend || true
+                  git reset --hard "$PREV_SHA"
+                  export GIT_SHA=$(echo "$PREV_SHA" | cut -c1-7)
+                  docker compose -f docker-compose.dev.yml --env-file .env.dev build \
+                      --build-arg GIT_SHA="$GIT_SHA"
+                  docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --remove-orphans
+                  echo "[cd-dev] 롤백 완료 — new 배포 실패"
+                  exit 1
+              fi
+
+              echo "[cd-dev] success — $(docker compose -f docker-compose.dev.yml --env-file .env.dev ps --format json | jq -r '.[] | "\(.Service): \(.State)"' 2>/dev/null || docker compose -f docker-compose.dev.yml --env-file .env.dev ps)"
+          REMOTE

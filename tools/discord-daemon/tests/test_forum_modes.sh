@@ -73,7 +73,6 @@ _write_env() {
     echo "FE_FORUM_ID=forum-fe"
     echo "REV_FORUM_ID=forum-rev"
     echo "PLAN_FORUM_ID=forum-plan"
-    echo "INFRA_FORUM_ID=forum-infra"
   } > "$env_path"
   printf '%s' "$env_path"
 }
@@ -214,7 +213,7 @@ case5_unknown_forum_env() {
 
   local stderr
   stderr=$(_run "$tmpdir" "$env_path" \
-    --forum-post bogus "제목" "진행" "본문" 2>&1 >/dev/null)
+    --forum-post infra "제목" "진행" "본문" 2>&1 >/dev/null)
   local rc=$?
 
   _assert "case5 returncode != 0" "[[ $rc -ne 0 ]]"
@@ -399,60 +398,6 @@ case12_forum_post_auto_tag_id_unset() {
     "echo '$stderr' | grep -q 'PLAN_FORUM_ID'"
 }
 
-# ── case 13: --forum-post infra "테스트" "진행" "본문" → infra forum 라우팅 ───
-case13_forum_post_infra() {
-  echo "[case13] --forum-post infra 정상 라우팅 (#1679)"
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  trap "rm -rf $tmpdir" RETURN
-  local capture="$tmpdir/capture.txt"
-  : > "$capture"
-  _write_fake_curl "$tmpdir" "$capture" \
-    '[{"id":"tag-1","name":"진행"},{"id":"tag-2","name":"완료"}]'
-  local env_path
-  env_path=$(_write_env "$tmpdir")
-
-  local stdout
-  stdout=$(_run "$tmpdir" "$env_path" \
-    --forum-post infra "infra 사이클 진행" "진행" "본문 내용" 2>/dev/null)
-  local rc=$?
-
-  _assert "case13 returncode 0" "[[ $rc -eq 0 ]]"
-  _assert "case13 stdout = thread-123" "[[ '$stdout' == 'thread-123' ]]"
-  _assert "case13 GET forum-infra 호출" \
-    "grep -q '^GET https://discord.com/api/v10/channels/forum-infra ' $capture"
-  _assert "case13 POST forum-infra/threads 호출" \
-    "grep -q '^POST https://discord.com/api/v10/channels/forum-infra/threads ' $capture"
-  _assert "case13 payload 안 applied_tags = tag-1" \
-    "grep -q 'applied_tags' $capture && grep -q 'tag-1' $capture"
-}
-
-# ── case 14: INFRA_FORUM_ID 미설정 → 명시 에러 ──────────────────────────────
-case14_infra_forum_id_unset() {
-  echo "[case14] INFRA_FORUM_ID 미설정 → 명시 에러 (silent fallback 금지)"
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  trap "rm -rf $tmpdir" RETURN
-  local capture="$tmpdir/capture.txt"
-  : > "$capture"
-  _write_fake_curl "$tmpdir" "$capture" '[]'
-  local env_path="$tmpdir/test.env"
-  {
-    echo "DISCORD_BOT_TOKEN=stub"
-    echo "MOBRUJI_CHANNEL_ID=42"
-    echo "INFRA_FORUM_ID="
-  } > "$env_path"
-
-  local stderr
-  stderr=$(_run "$tmpdir" "$env_path" \
-    --forum-post infra "제목" "진행" "본문" 2>&1 >/dev/null)
-  local rc=$?
-
-  _assert "case14 returncode != 0" "[[ $rc -ne 0 ]]"
-  _assert "case14 stderr 안 INFRA_FORUM_ID 안내" \
-    "echo '$stderr' | grep -q 'INFRA_FORUM_ID'"
-}
-
 # ── 실행 ────────────────────────────────────────────────────────────────────────
 echo "== discord-reply.sh forum mode 테스트 =="
 case1_forum_post_directive
@@ -467,8 +412,6 @@ case9_forum_post_auto_tag_priority
 case10_forum_post_auto_tag_secondary
 case11_forum_post_auto_tag_empty
 case12_forum_post_auto_tag_id_unset
-case13_forum_post_infra
-case14_infra_forum_id_unset
 
 echo
 echo "결과: PASS=$PASS FAIL=$FAIL"

@@ -1,20 +1,13 @@
 ---
 feature: GitHub PR 이벤트 → rev forum thread 자동화 (open=1차 review, merge=사후 E2E QA) — actor trigger + PostToolUse hook 채택
 slug: pr-webhook-rev-forum
-status: implementing
+status: draft
 owner: @goohong
 scope: infra
 related_issues: [1358, 1372]
-related_prs: [1373, 1364, 1365]
-last_reviewed: 2026-06-03
+related_prs: [1373]
+last_reviewed: 2026-05-30
 ---
-
-> **상태 메모 (2026-06-03 plan #1592 후속 검증)**: 옵션 D 의 핵심 경로가 머지되어 status 를
-> `draft` → `implementing` 으로 갱신. 머지된 구성 요소 = ① `tools/discord-daemon/pr-register-rev.sh`
-> hook (PR 2-a) + `.claude/settings.json` PostToolUse 등록, ② `register_directive_pending(kind=pr_review|pr_audit)`
-> 분기 (PR #1364/#1365, `tools/agent/tools_cycle.py:_register_pr_review` / `_register_pr_audit`).
-> **단, pr-review thread 의 단계 전이(🟡→🔵)·본문 PATCH 가 실제로 동작하지 않는 정황 확인** — 아래 §16
-> 후속 이슈 참조 (코드 fix 라 plan scope 밖, 후속 이슈 제안만).
 
 # GitHub PR 이벤트 → rev forum thread 자동화
 
@@ -725,37 +718,3 @@ sequenceDiagram
   - §11 round 20 결정 로그 박제.
   - §12 자율 결정 — round 20 정정 사유 보강 (helper 학습 모호성 제거 + mmae 누락 risk 박제).
   - 결정 로그 round 17 / round 19 의 과거 "본진 자율 default" / "본진 검토" 표현도 일괄 "mmae" 로 정정 (사고 학습 의존 회피).
-- 2026-06-03 (plan #1592 후속) — status `draft` → `implementing` 갱신 (옵션 D 핵심 경로 머지: PR 2-a hook + PR #1364/#1365 register 분기). §16 후속 이슈 신설 — **pr-review thread 단계 전이(🟡→🔵)·본문 PATCH 미동작 정황 + root cause evidence 박제** (코드 fix 라 plan scope 밖). frontmatter `related_prs` 에 #1364/#1365 추가.
-
-## 16) 후속 (open issue — 단계 전이 미동작 정황 + root cause)
-
-> **plan scope 밖 (코드 fix)** — 본 절은 후속 be/infra 이슈 제안 + evidence 박제만. 실제 fix 는 별도 이슈/PR.
-
-### 16-1) 증상
-
-pr-review forum thread 가 PR open 시점에는 신설되나 (🟡), PR merge 후 단계 전이 (🟡 1차 review → 🔵 사후 E2E QA) 와 본문 PATCH (`✅ 단계 1 결과` + `📋 단계 2 체크리스트`) 가 **사용자에게 보이지 않음** — 첫 생성 후 thread 가 고정된 정황.
-
-### 16-2) root cause (evidence 기반, 2026-06-03 확인)
-
-merged 코드 (`tools/agent/tools_cycle.py`) 읽기로 확정한 끊긴 고리:
-
-1. `_register_pr_review` (PR open) 가 `forum_create_thread(...)` 를 호출하나, **thread snowflake 를 동기 반환하지 않아 `new_thread_id = None`** 으로 박힌다. 함수 내 주석 명시: `"forum_create_thread 가 thread_id 를 즉시 반환 X (bot.py polling 후 박힘). 실제 snowflake 는 bot.py 의 후속 갱신에 의존."`
-2. 그 결과 `_dedupe_append(pr_url, "pr_review", thread_id=None)` 로 dedupe 캐시에 `thread_id=None` 이 저장된다.
-3. `_register_pr_audit` (PR merge) 가 `lookup_thread_id = thread_id or _dedupe_lookup(pr_url, "pr_review")` 로 thread 를 찾는데, 캐시값이 `None` 이라 **cache miss → `단계 전이 skip` 분기**로 빠진다 (`forum_retag` / `forum_edit_starter` / `forum_comment` 전부 호출 안 됨).
-4. bot.py 에 `pr_review_registered` / `pr_audit_registered` event 를 받아 실제 Discord thread 신설 후 snowflake 를 `update_directive_status(thread_id=...)` 로 backfill 하는 **consumer loop 이 존재하지 않는다** (2026-06-03 `grep pr_review_registered tools/discord-daemon/bot.py` = 0건). 즉 1번의 "bot.py 후속 갱신" 전제가 미구현.
-
-→ **끊긴 고리 = thread_id backfill 부재**. open 시점에 None 으로 박힌 thread_id 가 영원히 채워지지 않아 merge 시점 lookup 이 항상 miss → 단계 전이가 silent skip 된다.
-
-### 16-3) 후속 이슈 제안 (be/infra)
-
-- [ ] (이슈 제안, infra) `forum_create_thread` 동기 반환 또는 bot.py `pr_review_registered` event consumer loop 신설 — open 시점 신설된 Discord thread 의 snowflake 를 `directive:` state + `rev-forum-cache.jsonl` 에 backfill. 두 후보:
-  - (a) `forum_create_thread` 가 thread snowflake 를 동기 반환하도록 (REST `POST /channels/{forum}/threads` 응답 id 즉시 파싱) → `_register_pr_review` 에서 바로 `new_thread_id` 채움.
-  - (b) bot.py 신규 loop 이 `pr_review_registered` event 를 polling 해 thread 신설 + `update_directive_status(thread_id=...)` backfill (기존 cycle forum thread 신설 패턴 거울).
-- [ ] (이슈 제안, infra) backfill 후 `_register_pr_audit` 의 cache miss 폴백 (`pr_open_handler` 재호출, §3-2 우선순위 4) 동작 검증 + 단계 전이 e2e (open → merge → 🔵 retag + body PATCH 가시) 회귀 테스트.
-- [ ] (검증 의무) fix 후 실제 PR 1건으로 open→merge 흐름을 돌려 Discord pr-review thread 가 🔵 로 전이 + 본문이 단계 2 체크리스트로 PATCH 되는지 육안 확인 (CLAUDE.md §16 검증 의무 — "되었겠지" 금지).
-
-### 16-4) 관련
-
-- 코드: `tools/agent/tools_cycle.py:_register_pr_review` / `_register_pr_audit`, `tools/discord-daemon/bot.py` (consumer loop 부재).
-- merged: PR #1364 / #1365 (register 분기), PR 2-a hook (`pr-register-rev.sh`).
-- 도메인 용어: `PrReviewThread` (`06-domain-model.md §4-2`).

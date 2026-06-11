@@ -3,10 +3,8 @@
 설계: agent 가 직접 Discord REST API 호출 X. events 테이블 에 'agent_reply' /
 'agent_forum_action' kind 로 INSERT — bot.py 가 polling 으로 SELECT + Discord
 push. **사고 path code 차단**:
-  - agent 가 별도 forum thread 만들지 X — forum_comment 안에서 thread_id 강제
-  - quote-reply (message_reference) 영구 제거 (#1631, 2026-06-03) — stale target
-    message_id 로 엉뚱한 메시지에 답글 거는 사고 차단. bot.py _push_agent_reply
-    도 reference=None 으로 정렬. 답은 thread/채널 plain 메시지로만 push.
+  - agent 가 별 forum thread 만들지 X — forum_comment 안에서 thread_id 강제
+  - reply_to_msg_id 가 명시 인자 — 옛 메시지 reply 사고 차단
   - Discord push 실패 = events.consumed_by 미설정 + retry path
 
 spec: tools/agent/README.md (Phase 1.3).
@@ -26,19 +24,17 @@ def post_discord_message(
     channel_id: str,
     body: str,
     *,
+    reply_to_msg_id: str | None = None,
     thread_id: str | None = None,
     choices: list[str] | None = None,
     dialogue_style: str | None = None,
 ) -> dict[str, Any]:
     """Discord 채널 (또는 thread) 에 message push.
 
-    2026-06-03 (#1631): quote-reply (reply_to_msg_id / message_reference) 제거.
-    stale target 으로 엉뚱한 메시지에 답글 거는 사고 차단 — 답은 채널/thread plain
-    메시지로만 push. thread 컨텍스트만으로 어떤 대화에 대한 답인지 충분히 가시.
-
     Args:
         channel_id: Discord 채널 ID (snowflake)
         body: 메시지 본문
+        reply_to_msg_id: 사용자 메시지 reply 형태 (선택)
         thread_id: thread 안 push 시 (선택)
         choices: 선택지 list (최대 10). bot 가 push 후 reaction 미리
             부착, 사용자 tap 시 그 value 가 user_message 로 들어옴.
@@ -48,6 +44,7 @@ def post_discord_message(
     payload: dict[str, Any] = {
         "channel_id": channel_id,
         "body": body,
+        "reply_to_msg_id": reply_to_msg_id,
         "thread_id": thread_id,
     }
     if choices:

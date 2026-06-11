@@ -377,19 +377,6 @@ REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET: Final[str] = "mobruji:0.0"
 REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS: Final[int] = 15 * 60  # 15분
 # debounce cache 사이즈 cap — 메모리 누수 방지 (LRU 비슷한 단순 cap).
 REV_POST_MERGE_AUDIT_DEBOUNCE_MAX_ENTRIES: Final[int] = 256
-# Discord 공지 중복 차단 — 영속 store (#7 사용자 "digest 스팸" fix).
-# 기존 in-memory debounce(monotonic) 는 bridge 재시작마다 리셋 → autodeploy
-# 재시작이 잦은 운영에서 같은 머지 PR 이 매 재시작마다 재공지됐다. 또 15분
-# debounce 는 PR 이 `rev-post-merge-pass` 라벨을 받기 전까지 24h 윈도우 내내
-# 15분 간격 재공지를 반복해 채널이 같은 PR 번호로 도배됐다 (사용자 가시 스팸).
-# → "이미 Discord 공지한 PR" 을 파일에 영속 기록하고 재공지는 절대 하지 않는다.
-#   (rev 큐 적재 event 발행은 멱등이라 그대로 두되, 채널 push 만 1회로 강제.)
-# 형식: {"<pr_number>": "<iso ts>"}.  retention = 7일 (오래된 항목은 load 시
-# prune — 파일 무한 증식 방지).
-REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT: Final[str] = (
-    "~/.mobruji/rev-post-merge-announced.json"
-)
-REV_POST_MERGE_AUDIT_ANNOUNCED_RETENTION_DAYS: Final[int] = 7
 # gh CLI search 윈도우 — 사용자 spec §3-2 "develop 머지 직후 ~5분 deploy 대기".
 # 1h 윈도우면 deploy 끝난 PR 만 대상이고, 너무 오래된 머지는 retry 부담만 됨.
 REV_POST_MERGE_AUDIT_SEARCH_WINDOW: Final[str] = "24h"
@@ -2312,17 +2299,7 @@ async def _forum_create_thread(client: discord.Client, payload: dict) -> None:
         logger.warning("forum_create_thread: forum %s 미발견 / type 불일치 — drop", forum_id)
         return
     result = await forum.create_thread(name=title, content=body)
-    new_thread_id = getattr(result.thread, "id", None)
-    logger.info("forum_create_thread: forum=%s thread=%s", forum_id, new_thread_id or "?")
-    # 구멍 C fix — tools/agent.tools_cycle.forum_create_thread 는 thread snowflake 를
-    # 즉시 반환 못 받아 rev-forum-dedupe.jsonl 에 thread_id=None 으로 박는다 →
-    # 머지 시 _register_pr_audit 의 _dedupe_lookup miss → 단계 전이(🟡→🔵) skip.
-    # bot.py 는 실제 thread snowflake 를 알므로 여기서 dedupe cache 에 backfill 한다.
-    # pr_url 은 starter body 의 'URL: <pr_url>' 줄에서 추출 (pr_review template 양식).
-    if new_thread_id is not None:
-        pr_url = extract_pr_url_from_forum_body(body)
-        if pr_url:
-            backfill_rev_forum_dedupe(pr_url, str(new_thread_id))
+    logger.info("forum_create_thread: forum=%s thread=%s", forum_id, getattr(result.thread, "id", "?"))
 
 
 async def _forum_comment(client: discord.Client, payload: dict) -> None:
@@ -4696,73 +4673,6 @@ def fetch_rev_post_merge_candidates(
     return pr_numbers
 
 
-def load_announced_prs(
-    path: str = REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
-    *,
-    now: datetime | None = None,
-    retention_days: int = REV_POST_MERGE_AUDIT_ANNOUNCED_RETENTION_DAYS,
-) -> dict[int, str]:
-    """이미 Discord 에 공지한 PR 번호 → iso ts 맵을 파일에서 load 합니다 (#7).
-
-    bridge 재시작에도 살아남는 영속 dedup store. 파일 부재 / 깨짐 / 타입 이상은
-    빈 dict 로 graceful fallback (loop 가 다음 push 부터 새로 기록).
-
-    retention_days 이전 항목은 prune 해서 반환 (파일 무한 증식 방지). prune 된
-    결과는 호출부가 즉시 ``save_announced_prs`` 로 다시 써 디스크에도 반영한다.
-    """
-    if now is None:
-        now = datetime.now(timezone.utc)
-    target = Path(path).expanduser()
-    try:
-        raw = target.read_text(encoding="utf-8")
-    except (OSError, ValueError):
-        return {}
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("rev post-merge announce store 파싱 실패 (무시): %s", target)
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    cutoff = now - timedelta(days=retention_days)
-    result: dict[int, str] = {}
-    for key, value in payload.items():
-        try:
-            pr_number = int(key)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(value, str):
-            continue
-        try:
-            ts = datetime.fromisoformat(value)
-        except ValueError:
-            continue
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        if ts < cutoff:
-            continue  # retention 초과 — prune.
-        result[pr_number] = value
-    return result
-
-
-def save_announced_prs(
-    announced: dict[int, str],
-    path: str = REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
-) -> None:
-    """공지한 PR 맵을 파일에 atomic write 합니다 (#7). 실패는 warning 만."""
-    target = Path(path).expanduser()
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        serializable = {str(num): ts for num, ts in announced.items()}
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        tmp.write_text(
-            json.dumps(serializable, ensure_ascii=False), encoding="utf-8"
-        )
-        tmp.replace(target)
-    except OSError as exc:
-        logger.warning("rev post-merge announce store write 실패 (무시): %s", exc)
-
-
 def filter_debounced_prs(
     candidates: list[int],
     last_inject_at: dict[int, float],
@@ -5220,293 +5130,13 @@ def extract_cycle_forum_refs_from_body(body: str) -> list[tuple[str, str]]:
     return result
 
 
-def lookup_pr_cycle_thread(pr_number: int) -> tuple[str, str] | None:
-    """(#7) agent_state 의 `pr_cycle_thread:<N>` 매핑 조회 → (cycle, thread_id) 또는 None.
-
-    subagent_runner._persist_pr_cycle_thread 가 PR 생성 시점에 저장한 신뢰 매핑.
-    cycle_thread_complete_on_merge_loop 의 **1순위 lookup** — PR 본문 cycle-forum ref 가
-    누락/placeholder/앵커 미스여도 머지 완료 태그가 붙도록 보장한다 (본문 파싱 의존 제거).
-
-    graceful — DB 부재/깨짐/형식 이상은 None 반환(loop 가 본문 ref fallback 으로 진행).
-    cycle 은 be/fe/rev/plan, thread_id 는 snowflake(17–20 자리)일 때만 유효.
-    """
-    try:
-        conn = sqlite3.connect(str(AGENT_EVENTS_DB_PATH), isolation_level=None, timeout=5.0)
-        try:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT value FROM agent_state WHERE key = ?",
-                (f"pr_cycle_thread:{pr_number}",),
-            ).fetchone()
-        finally:
-            conn.close()
-    except (sqlite3.Error, OSError) as exc:
-        logger.warning("lookup_pr_cycle_thread 실패 pr=#%s: %r", pr_number, exc)
-        return None
-    if not row:
-        return None
-    try:
-        payload = json.loads(row["value"])
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    cycle = str(payload.get("cycle") or "").lower()
-    thread_id = str(payload.get("thread_id") or "")
-    if cycle not in ("be", "fe", "rev", "plan"):
-        return None
-    if not (thread_id.isdigit() and 17 <= len(thread_id) <= 20):
-        return None
-    return (cycle, thread_id)
-
-
-# ─── 구멍 A/C 공통 — rev forum thread 완료 자동 retag + dedupe backfill ─────────
-#
-# 배경 (cycle forum '완료' 태그 자동화 구멍):
-#   - 구멍 A: rev sub-agent 는 PR 을 만들지 않고 리뷰만 한다. 그래서 rev forum 의
-#     "PR #N rev review" thread 는 `cycle-forum:` 참조를 받을 PR 본문이 없어
-#     cycle_thread_complete_on_merge_loop 가 영원히 못 잡는다 → rev forum 에 진행
-#     스레드가 무한 정체. FIX = PR #N 머지 시 rev forum 에서 제목에 `#N` 을 가진
-#     비-완료 thread 를 찾아 discord-reply.sh --forum-retag <thread> rev 완료 호출.
-#   - 구멍 C: register_directive_pending(kind=pr_review) 가 forum_create_thread 의
-#     snowflake 를 즉시 못 받아 rev-forum-dedupe.jsonl 에 thread_id=None 으로 박음 →
-#     머지 시 _register_pr_audit 의 _dedupe_lookup miss. _forum_create_thread 가
-#     생성 직후 backfill_rev_forum_dedupe 로 실제 thread_id 를 채워 해소.
-#
-# rev forum thread 제목은 tools/agent.tools_cycle._build_pr_review_template 가
-# `📌 PR #{N} rev review — ...` 로 만든다 (또는 cycle launch thread 의 `… #N`).
-# 머지 PR 번호 N 을 제목에서 word-boundary 로 매칭 (#12 가 #123 에 오매칭 안 되게).
-REV_FORUM_DEDUPE_FILENAME: Final[str] = "rev-forum-dedupe.jsonl"
-REV_FORUM_DEDUPE_CAP: Final[int] = 1000
-# 완료로 간주하는 태그 이름 — 이미 완료면 retag skip (멱등 + Discord API 절약).
-REV_FORUM_DONE_TAG_NAMES: Final[frozenset[str]] = frozenset({"완료", "✅ 완료", "✅"})
-# PR URL 추출 — github PR URL (starter body 의 'URL: <pr_url>' 줄).
-_PR_URL_RE: Final = re.compile(
-    r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+", re.IGNORECASE
-)
-
-
-def extract_pr_url_from_forum_body(body: str) -> str | None:
-    """rev forum starter body 에서 github PR URL 추출 (구멍 C backfill 용).
-
-    pr_review template (`_build_pr_review_template`) 가 본문에 `> URL: <pr_url>`
-    줄을 박는다. 첫 매칭 PR URL 반환. 없으면 None.
-    """
-    if not body:
-        return None
-    match = _PR_URL_RE.search(body)
-    return match.group(0) if match else None
-
-
-def _rev_forum_dedupe_path() -> Path:
-    return Path.home() / ".mobruji" / REV_FORUM_DEDUPE_FILENAME
-
-
-def backfill_rev_forum_dedupe(pr_url: str, thread_id: str) -> None:
-    """rev-forum-dedupe.jsonl 에 실제 thread_id 를 backfill (구멍 C).
-
-    tools/agent.tools_cycle._dedupe_append 와 동일 schema
-    (`{pr_url, kind, thread_id, ts}`) — 같은 (pr_url, "pr_review") 의 thread_id=None
-    entry 를 실제 snowflake 로 보강한다. _dedupe_lookup 은 최신 entry 우선이라
-    append 만으로 충분 (lookup 이 reversed 순회). cap FIFO truncate.
-    graceful — IO 실패 시 조용히 return (본 흐름 차단 금지).
-    """
-    path = _rev_forum_dedupe_path()
-    entry = {
-        "pr_url": pr_url,
-        "kind": "pr_review",
-        "thread_id": thread_id,
-        "ts": int(time.time()),
-    }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        logger.warning("backfill_rev_forum_dedupe: append 실패 pr=%s: %r", pr_url, exc)
-        return
-    logger.info(
-        "backfill_rev_forum_dedupe: pr=%s thread=%s dedupe cache backfill 완료",
-        pr_url, thread_id,
-    )
-    # cap FIFO truncate (best-effort).
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        if len(lines) > REV_FORUM_DEDUPE_CAP:
-            tail = lines[-REV_FORUM_DEDUPE_CAP:]
-            path.write_text("\n".join(tail) + "\n", encoding="utf-8")
-    except OSError:
-        return
-
-
-def title_references_pr(title: str, pr_number: int) -> bool:
-    """forum thread 제목이 PR #N 을 참조하는지 (word-boundary `#N`).
-
-    `#12` 가 `#123` 에 오매칭되지 않도록 뒤에 숫자가 오면 거부.
-    """
-    if not title or pr_number <= 0:
-        return False
-    pattern = rf"#0*{pr_number}(?!\d)"
-    return re.search(pattern, title) is not None
-
-
-def thread_is_done(thread: "discord.Thread") -> bool:
-    """forum thread 가 이미 완료 태그를 달고 있는지 (멱등 retag skip 용)."""
-    for tag in getattr(thread, "applied_tags", []) or []:
-        name = getattr(tag, "name", "") or ""
-        if name in REV_FORUM_DONE_TAG_NAMES:
-            return True
-    return False
-
-
-async def find_rev_threads_for_pr(
-    client: "discord.Client",
-    rev_forum_id: int,
-    pr_number: int,
-    *,
-    archived_limit: int = 50,
-) -> list[str]:
-    """rev forum 에서 제목이 PR #N 을 참조하는 비-완료 thread id list.
-
-    active threads (forum.threads) + 최근 archived threads 둘 다 검사. 이미 완료
-    태그가 달린 thread 는 제외 (멱등). discord.py API 부재/실패 시 graceful — 빈 list.
-    """
-    forum = client.get_channel(rev_forum_id)
-    if forum is None:
-        return []
-    matched: list[str] = []
-    seen_ids: set[int] = set()
-
-    def _consider(thread: "discord.Thread") -> None:
-        tid = getattr(thread, "id", None)
-        if tid is None or tid in seen_ids:
-            return
-        seen_ids.add(tid)
-        name = getattr(thread, "name", "") or ""
-        if title_references_pr(name, pr_number) and not thread_is_done(thread):
-            matched.append(str(tid))
-
-    for thread in getattr(forum, "threads", []) or []:
-        _consider(thread)
-    # archived threads — discord.py async iterator. 부재/오류 graceful.
-    archived_iter = getattr(forum, "archived_threads", None)
-    if callable(archived_iter):
-        try:
-            async for thread in forum.archived_threads(limit=archived_limit):
-                _consider(thread)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "find_rev_threads_for_pr: archived_threads 조회 실패 pr=#%d: %r",
-                pr_number, exc,
-            )
-    return matched
-
-
-REV_FORUM_COMPLETE_ENV_KEY: Final[str] = "REV_FORUM_ID"
-
-
-async def rev_forum_complete_on_merge_loop(
-    client: "discord.Client",
-    rev_forum_id: int,
-    *,
-    poll_interval: int = DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
-    initial_delay: int = 30,
-    fetcher=None,
-) -> None:
-    """5분 polling — develop 머지 PR #N 마다 rev forum 의 'PR #N' thread 완료 retag.
-
-    구멍 A fix. rev sub-agent 는 PR 을 안 만들어 cycle_thread_complete_on_merge_loop
-    (PR body 의 cycle-forum 참조 의존) 가 rev thread 를 못 잡는다 → 무한 정체.
-    이 loop 는 PR 번호 ↔ rev thread 제목(`#N`)으로 역추적해 완료 retag.
-
-    동작:
-      1. ``initial_delay`` 초 warmup.
-      2. ``poll_interval`` 마다 develop 머지 PR list (body 불필요, 번호만).
-      3. 각 PR #N → rev forum 에서 제목 `#N` 비-완료 thread 찾아
-         discord-reply.sh --forum-retag <thread> rev 완료.
-      4. ``poll_interval <= 0`` 또는 rev_forum_id == 0 → disabled.
-    """
-    if poll_interval <= 0 or not rev_forum_id:
-        logger.info(
-            "rev_forum_complete_on_merge_loop disabled "
-            "(poll_interval=%d rev_forum_id=%s)",
-            poll_interval, rev_forum_id,
-        )
-        return
-
-    fetch = fetcher or fetch_recent_merged_prs_with_body
-    seen_prs: set[int] = set()
-    reply_script = Path.home() / ".mobruji" / "discord-reply.sh"
-
-    if initial_delay > 0:
-        await asyncio.sleep(initial_delay)
-
-    while True:
-        try:
-            record_loop_heartbeat("rev_forum_complete_on_merge_loop")
-            prs = fetch()
-            for pr in prs:
-                pr_number = pr.get("number")
-                if not isinstance(pr_number, int) or pr_number in seen_prs:
-                    continue
-                thread_ids = await find_rev_threads_for_pr(
-                    client, rev_forum_id, pr_number,
-                )
-                if not thread_ids:
-                    # 매칭 thread 없음 — 이 process 내 재조회 skip (PR 은 stable).
-                    seen_prs.add(pr_number)
-                    continue
-                if not reply_script.exists():
-                    logger.warning(
-                        "rev_forum_complete_on_merge: discord-reply.sh 부재 — skip"
-                    )
-                    break
-                logger.info(
-                    "rev_forum_complete_on_merge: PR #%d → rev thread 완료 retag: %s",
-                    pr_number, thread_ids,
-                )
-                for thread_id in thread_ids:
-                    try:
-                        subprocess.run(  # noqa: S603 — sibling script
-                            ["bash", str(reply_script),
-                             "--forum-retag", thread_id, "rev", "완료"],
-                            check=False, timeout=15.0, capture_output=True,
-                        )
-                        logger.info(
-                            "rev_forum_complete_on_merge: ✅ retag thread=%s pr=#%d",
-                            thread_id, pr_number,
-                        )
-                    except (OSError, subprocess.TimeoutExpired) as exc:
-                        logger.warning(
-                            "rev_forum_complete_on_merge: forum-retag 실패 "
-                            "thread=%s pr=#%d: %r",
-                            thread_id, pr_number, exc,
-                        )
-                seen_prs.add(pr_number)
-                if len(seen_prs) > 200:
-                    seen_prs = set(list(seen_prs)[100:])
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("rev_forum_complete_on_merge_loop iter 실패: %r", exc)
-
-        await asyncio.sleep(poll_interval)
-
-
 async def cycle_thread_complete_on_merge_loop(
     *,
     poll_interval: int = DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
     initial_delay: int = 30,
     fetcher=None,
 ) -> None:
-    """5분 polling — 머지 PR → cycle forum thread 를 자동 ✅ retag.
-
-    thread lookup 우선순위 (#7):
-      1순위 agent_state 의 ``pr_cycle_thread:<N>`` 매핑 (subagent_runner 가 PR 생성
-            시점 영속 — 본문 파싱 무관 신뢰 채널).
-      2순위(fallback) PR 본문의 ``cycle-forum: <cycle>:<thread_id>`` ref (하위호환).
-    둘을 dedup 병합 — 본문 ref 주입 실패(placeholder / 줄-시작 앵커 미스 /
-    cycle_thread_id 누락)로 영구 정체하던 구멍을 매핑이 메운다.
+    """5분 polling — PR body 의 cycle-forum: <cycle>:<thread_id> 매칭 시 자동 ✅ retag.
 
     spec: docs/features/cycle-forum-operation.md §5-5 (PR cf-3). PR B 자매 — 같은 fetcher / seen cap / heartbeat.
     """
@@ -5529,21 +5159,8 @@ async def cycle_thread_complete_on_merge_loop(
                 pr_number = pr.get("number")
                 if not isinstance(pr_number, int) or pr_number in seen_prs:
                     continue
-                # (#7) 1순위 = agent_state 의 PR→thread 매핑(본문 파싱 무관 신뢰 채널).
-                # 2순위(fallback) = PR 본문 cycle-forum ref(하위호환). 둘 dedup 병합 —
-                # 본문 주입 실패(placeholder / 앵커 미스 / cycle_thread_id 누락)로 영구
-                # 정체하던 구멍(예: PR #1593)을 매핑으로 메운다.
                 body = pr.get("body") or ""
-                refs: list[tuple[str, str]] = []
-                seen_refs: set[tuple[str, str]] = set()
-                mapping = lookup_pr_cycle_thread(pr_number)
-                if mapping is not None:
-                    refs.append(mapping)
-                    seen_refs.add(mapping)
-                for ref in extract_cycle_forum_refs_from_body(body):
-                    if ref not in seen_refs:
-                        seen_refs.add(ref)
-                        refs.append(ref)
+                refs = extract_cycle_forum_refs_from_body(body)
                 if not refs:
                     continue
                 if not reply_script.exists():
@@ -5552,9 +5169,8 @@ async def cycle_thread_complete_on_merge_loop(
                     )
                     break
                 logger.info(
-                    "cycle_thread_complete_on_merge: PR #%d cycle-forum 매칭: %s (src=%s)",
+                    "cycle_thread_complete_on_merge: PR #%d body 에서 cycle-forum 매칭: %s",
                     pr_number, refs,
-                    "state+body" if mapping is not None else "body",
                 )
                 for cycle, thread_id in refs:
                     try:
@@ -5593,10 +5209,8 @@ async def rev_post_merge_audit_loop(
     debounce_seconds: int = REV_POST_MERGE_AUDIT_DEBOUNCE_SECONDS,
     pass_label: str = REV_POST_MERGE_PASS_LABEL,
     search_window: str = REV_POST_MERGE_AUDIT_SEARCH_WINDOW,
-    announced_path: str = REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
     candidate_fetcher=None,
     time_source=time.monotonic,
-    wall_clock=None,
 ) -> None:
     """5분 polling — develop 머지된 PR 단계 2 (dev 배포 E2E 검증) 자동 trigger
     (#1008).
@@ -5606,40 +5220,29 @@ async def rev_post_merge_audit_loop(
     동작:
       1. ``initial_delay`` 초 warmup 후 polling 시작.
       2. ``poll_interval`` 초마다 `gh pr list ... -label:rev-post-merge-pass` 호출.
-      3. 후보 PR ≥ 1 → in-memory debounce 적용 후 fresh PR 만 추출.
-      4. fresh ≥ 1 → rev 큐 적재 event 발행 (멱등).
-      5. fresh 중 **영속 store 에 아직 공지 안 된 PR** 만 Discord ``digest_channel_id``
-         에 1회 push + announce store 에 기록. 이미 공지된 PR 은 절대 재 push 안 함
-         (#7 — bridge 재시작·15분 재폴링에도 같은 PR 도배 방지).
-      6. graceful skip — gh CLI 실패 / fresh 없음 / Discord channel 부재 시
+      3. 후보 PR ≥ 1 → debounce 적용 후 fresh PR 만 추출.
+      4. fresh ≥ 1:
+         - nmae tmux pane (``inject_target``) 에 inject
+           (단계 2 (dev 배포 E2E 검증) launch 알림).
+         - Discord ``digest_channel_id`` 에 push (cycle digest 채널 공유).
+         - 각 fresh PR `last_inject_at` 갱신.
+      5. graceful skip — gh CLI 실패 / fresh 없음 / tmux 부재 / Discord channel 부재 시
          warn 1회 + 다음 iter 재시도.
-      7. ``poll_interval <= 0`` 이면 disabled — 즉시 return (테스트 용).
+      6. ``poll_interval <= 0`` 이면 disabled — 즉시 return (테스트 용).
 
     asyncio.CancelledError 는 외부로 전파해 bot 종료 시 깔끔히 정리.
 
     Args:
-        announced_path: 이미 Discord 공지한 PR 영속 store 경로 (#7). 재시작에도
-            살아남아 재공지를 막는다. 테스트는 tmp 경로 주입.
         candidate_fetcher: ``() -> list[int]`` 콜러블. None 이면 기본
             ``fetch_rev_post_merge_candidates`` 사용. 테스트 stub 진입점.
         time_source: monotonic 시각 source. 테스트 stub.
-        wall_clock: announce ts 기록용 ``() -> datetime`` 콜러블. None 이면
-            ``datetime.now(timezone.utc)``. 테스트 stub.
     """
     if poll_interval <= 0:
         logger.info("rev_post_merge_audit_loop disabled (poll_interval<=0)")
         return
 
-    if wall_clock is None:
-        def wall_clock() -> datetime:  # noqa: E306
-            return datetime.now(timezone.utc)
-
     # (#1447) tmux inject 폐기 → event 발행. inject_session/missing_session 가드 불요.
     last_inject_at: dict[int, float] = {}
-    # (#7) 영속 dedup — 이미 Discord 공지한 PR 은 재시작/재폴링에도 재 push 금지.
-    # load 시 retention prune 된 결과를 즉시 다시 써 디스크에도 반영한다.
-    announced = load_announced_prs(announced_path, now=wall_clock())
-    save_announced_prs(announced, announced_path)
     missing_channel_warned = False
 
     if candidate_fetcher is None:
@@ -5686,35 +5289,25 @@ async def rev_post_merge_audit_loop(
                     "pr_title": "",
                 })
 
-            # (#7) Discord push 는 영속 store 기준 "아직 공지 안 한 PR" 만.
-            # 재시작/재폴링으로 같은 PR 이 fresh 로 재등장해도 채널엔 1회만 알린다.
-            to_announce = [pr for pr in fresh if pr not in announced]
-            if to_announce:
-                channel = client.get_channel(digest_channel_id)
-                if channel is None:
-                    if not missing_channel_warned:
-                        logger.warning(
-                            "rev post-merge audit: Discord channel 부재 — push skip (channel_id=%s)",
-                            digest_channel_id,
-                        )
-                        missing_channel_warned = True
-                else:
-                    missing_channel_warned = False
-                    sent = await send_with_retry(
-                        channel, content=format_rev_post_merge_discord(to_announce)
+            channel = client.get_channel(digest_channel_id)
+            if channel is None:
+                if not missing_channel_warned:
+                    logger.warning(
+                        "rev post-merge audit: Discord channel 부재 — push skip (channel_id=%s)",
+                        digest_channel_id,
                     )
-                    if sent:
-                        announce_ts = wall_clock().isoformat()
-                        for pr in to_announce:
-                            announced[pr] = announce_ts
-                        save_announced_prs(announced, announced_path)
+                    missing_channel_warned = True
+            else:
+                missing_channel_warned = False
+                await send_with_retry(
+                    channel, content=format_rev_post_merge_discord(fresh)
+                )
 
             for pr in fresh:
                 last_inject_at[pr] = mono_now
             logger.info(
-                "rev_post_merge_audit_loop: event fresh=%s announced=%s candidates=%d",
+                "rev_post_merge_audit_loop: inject fresh=%s candidates=%d",
                 ",".join(f"#{n}" for n in fresh),
-                ",".join(f"#{n}" for n in to_announce) or "(none)",
                 len(candidates),
             )
         except asyncio.CancelledError:
@@ -6669,10 +6262,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
         "REV_POST_MERGE_AUDIT_INJECT_TARGET",
         REV_POST_MERGE_AUDIT_DEFAULT_INJECT_TARGET,
     )
-    rev_post_merge_audit_announced_path = env.get(
-        "REV_POST_MERGE_AUDIT_ANNOUNCED_PATH",
-        REV_POST_MERGE_AUDIT_ANNOUNCED_PATH_DEFAULT,
-    )
 
     # Claude API usage tracker (#1020) — env 해석.
     claude_usage_loop_enabled = (
@@ -7012,7 +6601,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
                     digest_channel_id,
                     inject_target=rev_post_merge_audit_inject_target,
                     poll_interval=rev_post_merge_audit_interval,
-                    announced_path=rev_post_merge_audit_announced_path,
                 )
             )
             logger.info(
@@ -7058,22 +6646,6 @@ def build_client(env: dict[str, str], ledger: DedupLedger | None) -> discord.Cli
             client.loop.create_task(cycle_thread_complete_on_merge_loop())
             logger.info(
                 "cycle_thread_complete_on_merge_loop launched: interval=%ds (5min polling)",
-                DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
-            )
-
-        # 구멍 A fix — rev forum thread 완료 자동 retag (PR body cycle-forum 참조 부재
-        # 보강). rev sub-agent 는 PR 을 안 만들어 cycle_thread_complete_on_merge_loop
-        # 가 rev thread 를 못 잡으므로, PR #N 머지 → rev forum 의 '#N' thread 완료 retag.
-        if not hasattr(client, "_rev_forum_complete_on_merge_task_started"):
-            client._rev_forum_complete_on_merge_task_started = True  # type: ignore[attr-defined]
-            client.loop.create_task(
-                rev_forum_complete_on_merge_loop(
-                    client, forum_channel_ids.get("rev", 0),
-                )
-            )
-            logger.info(
-                "rev_forum_complete_on_merge_loop launched: rev_forum=%s interval=%ds (5min polling)",
-                forum_channel_ids.get("rev", 0) or "unset",
                 DIRECTIVE_COMPLETE_POLL_INTERVAL_DEFAULT,
             )
 

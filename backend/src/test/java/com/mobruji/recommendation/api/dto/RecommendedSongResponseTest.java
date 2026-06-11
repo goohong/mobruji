@@ -22,7 +22,7 @@ class RecommendedSongResponseTest {
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .lowMidi(57).highMidi(81)
                 .build();
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.92, 0.75, 0.6, 0.5, 0.85, 0.0, 0.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.92, 0.75, 0.6, 0.5, 0.85, 0.0);
         final ScoredRecommendation scoredRecommendation = new ScoredRecommendation(
                 song, 0.78, "음역 적합", 2, breakdown);
 
@@ -38,10 +38,10 @@ class RecommendedSongResponseTest {
         // 분위기 변별력(#1485): moodFit은 breakdown.moodMatch 노출, 사유는 유사도 구간별 한국어
         assertThat(recommendedSongResponse.moodFit()).isEqualTo(0.6);
         assertThat(recommendedSongResponse.moodFitReason()).isEqualTo("요청하신 분위기와 잘 어울려요");
-        // 연습 지원(#1494): 곡 음역(57~81) → HARD + 음역 범위 A3~A5 사유
+        // 연습 지원(#1494): 곡 음역(57~81) → HARD + 최고음 A5 사유
         assertThat(recommendedSongResponse.practiceDifficulty()).isEqualTo(com.mobruji.song.domain.Difficulty.HARD);
         assertThat(recommendedSongResponse.practiceDifficultyReason())
-                .isEqualTo("음역 A3~A5, 고음·넓은 음역이라 도전적인 곡이에요");
+                .isEqualTo("최고음 A5, 고음·넓은 음역이라 도전적인 곡이에요");
         assertThat(recommendedSongResponse.rankPosition()).isEqualTo(2);
         assertThat(recommendedSongResponse.breakdown()).isNotNull();
         assertThat(recommendedSongResponse.breakdown().keyMatch()).isEqualTo(1.0);

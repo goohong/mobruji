@@ -24,7 +24,6 @@ import lombok.extern.slf4j.Slf4j;
  * <li>{@code voice_range}</li>
  * <li>{@code like_feedback}</li>
  * <li>{@code bookmark_feedback}</li>
- * <li>{@code session_feedback}</li>
  * <li>{@code recommendation_request_exclude_song} (FK to recommendation_request)</li>
  * <li>{@code recommendation} (FK to recommendation_request)</li>
  * <li>{@code recommendation_request}</li>
@@ -96,7 +95,6 @@ public class SessionDataCascadeDeleter {
         deleted += jdbcTemplate.update("DELETE FROM voice_range WHERE session_id = ?", sessionId);
         deleted += jdbcTemplate.update("DELETE FROM like_feedback WHERE session_id = ?", sessionId);
         deleted += jdbcTemplate.update("DELETE FROM bookmark_feedback WHERE session_id = ?", sessionId);
-        deleted += jdbcTemplate.update("DELETE FROM session_feedback WHERE session_id = ?", sessionId);
 
         // sessionId 원문은 로그 금지 (ADR-0011 §Decision). 행 수만 노출.
         log.info("anonymous-session cascade-delete: deleted_rows={}", deleted);

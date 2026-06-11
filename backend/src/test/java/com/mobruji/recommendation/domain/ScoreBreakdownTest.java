@@ -11,7 +11,7 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("정상: 6신호 모두 [0,1] 안이면 생성 가능")
     void create_valid() {
-        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.5, 0.0, 1.0, 1.0, 0.75, 0.0, 0.0);
+        final ScoreBreakdown breakdown = new ScoreBreakdown(1.0, 0.5, 0.0, 1.0, 1.0, 0.75, 0.0);
 
         assertThat(breakdown.keyMatch()).isEqualTo(1.0);
         assertThat(breakdown.rangeFit()).isEqualTo(0.5);
@@ -24,30 +24,30 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("경계: 0.0과 1.0은 허용된다")
     void create_boundary_zero_and_one() {
-        new ScoreBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-        new ScoreBreakdown(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0);
+        new ScoreBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        new ScoreBreakdown(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0);
         // 예외 없으면 통과
     }
 
     @Test
     @DisplayName("음수: 어느 신호든 [0,1]을 벗어나면 IllegalArgumentException")
     void create_negative_throws() {
-        assertThatThrownBy(() -> new ScoreBreakdown(-0.1, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(-0.1, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("keyMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, -0.1, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, -0.1, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rangeFit");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, -0.1, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, -0.1, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("genreMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, -0.1, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, -0.1, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("moodMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, -0.1, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, -0.1, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("popularity");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, -0.1, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, -0.1, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tempoMatch");
     }
@@ -55,9 +55,9 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("1.0 초과: IllegalArgumentException")
     void create_aboveOne_throws() {
-        assertThatThrownBy(() -> new ScoreBreakdown(1.1, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(1.1, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, 1.1, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, 1.1, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tempoMatch");
     }
@@ -65,9 +65,9 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("NaN: IllegalArgumentException")
     void create_nan_throws() {
-        assertThatThrownBy(() -> new ScoreBreakdown(Double.NaN, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(Double.NaN, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, Double.NaN, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, Double.NaN, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tempoMatch");
     }
@@ -80,16 +80,16 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("1.0 초과 (회귀 가드): rangeFit/genreMatch/moodMatch/popularity 도 각각 거부")
     void create_aboveOne_throws_remainingSignals() {
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 1.1, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 1.1, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rangeFit");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 1.1, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 1.1, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("genreMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 1.1, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 1.1, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("moodMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.1, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.1, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("popularity");
     }
@@ -102,16 +102,16 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("NaN (회귀 가드): rangeFit/genreMatch/moodMatch/popularity 도 각각 거부")
     void create_nan_throws_remainingSignals() {
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, Double.NaN, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, Double.NaN, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rangeFit");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, Double.NaN, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, Double.NaN, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("genreMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, Double.NaN, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, Double.NaN, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("moodMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, Double.NaN, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, Double.NaN, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("popularity");
     }
@@ -124,10 +124,10 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("POSITIVE_INFINITY (회귀 가드): 모든 신호 거부")
     void create_positiveInfinity_throws() {
-        assertThatThrownBy(() -> new ScoreBreakdown(Double.POSITIVE_INFINITY, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(Double.POSITIVE_INFINITY, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("keyMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, Double.POSITIVE_INFINITY, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, Double.POSITIVE_INFINITY, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tempoMatch");
     }
@@ -139,10 +139,10 @@ class ScoreBreakdownTest {
     @Test
     @DisplayName("NEGATIVE_INFINITY (회귀 가드): 모든 신호 거부")
     void create_negativeInfinity_throws() {
-        assertThatThrownBy(() -> new ScoreBreakdown(Double.NEGATIVE_INFINITY, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(Double.NEGATIVE_INFINITY, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("keyMatch");
-        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, Double.NEGATIVE_INFINITY, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(0.5, 0.5, 0.0, 0.0, 1.0, Double.NEGATIVE_INFINITY, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tempoMatch");
     }
@@ -156,9 +156,9 @@ class ScoreBreakdownTest {
     @DisplayName("부동소수점 경계 (회귀 가드): MIN_VALUE 양수 허용 / -MIN_VALUE 음수 거부")
     void create_subnormalBoundary() {
         // 양의 subnormal — 0.0 보다 크고 1.0 이내 → 허용
-        new ScoreBreakdown(Double.MIN_VALUE, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0);
+        new ScoreBreakdown(Double.MIN_VALUE, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0);
         // 음의 subnormal — 가드 거부
-        assertThatThrownBy(() -> new ScoreBreakdown(-Double.MIN_VALUE, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0))
+        assertThatThrownBy(() -> new ScoreBreakdown(-Double.MIN_VALUE, 0.5, 0.0, 0.0, 1.0, 0.5, 0.0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("keyMatch");
     }

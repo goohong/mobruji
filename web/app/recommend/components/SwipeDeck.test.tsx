@@ -16,16 +16,10 @@
 import { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import {
-  SwipeDeck,
-  resolveSwipeIntent,
-  computeExitDurationMs,
-  SWIPE_EXIT_DURATION_MS,
-  SWIPE_EXIT_MIN_DURATION_MS,
-} from "./SwipeDeck";
+import { SwipeDeck, resolveSwipeIntent } from "./SwipeDeck";
 import type { RecommendedSongResponse } from "@/lib/api/recommendation";
 import type { UserVoiceRange } from "@/lib/scoreBreakdown";
 import { useLikesStore } from "@/store/likes";
@@ -37,19 +31,9 @@ vi.mock("@/lib/api/feedback", () => ({
   toggleBookmark: vi.fn(),
 }));
 
-vi.mock("@/lib/api/recommendation", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/lib/api/recommendation")>();
-  return { ...actual, nextRecommendation: vi.fn() };
-});
-
 import { toggleLike } from "@/lib/api/feedback";
-import { nextRecommendation } from "@/lib/api/recommendation";
 
 const toggleLikeMock = vi.mocked(toggleLike);
-const nextRecommendationMock = vi.mocked(nextRecommendation);
-
-const SESSION_ID = "00000000-0000-4000-8000-000000000001";
 
 function renderWithQueryClient(ui: ReactNode) {
   const client = new QueryClient({
@@ -120,11 +104,6 @@ beforeEach(() => {
   }
   toggleLikeMock.mockReset();
   toggleLikeMock.mockResolvedValue({ liked: true, songId: 1 });
-  nextRecommendationMock.mockReset();
-  nextRecommendationMock.mockResolvedValue({
-    requestId: "11111111-1111-4111-8111-111111111111",
-    recommendations: [],
-  });
 });
 
 afterEach(() => {
@@ -149,42 +128,6 @@ describe("resolveSwipeIntent", () => {
     // 폭 100 → ratio 25px 보다 최소 80px 가 우선.
     expect(resolveSwipeIntent(50, 100)).toBeNull();
     expect(resolveSwipeIntent(90, 100)).toBe("like");
-  });
-
-  it("변위는 작아도 같은 방향 빠른 플릭이면 관성으로 커밋한다", () => {
-    // 변위 40px(임계 100 미만)이지만 우측으로 빠르게 튕김 → like.
-    expect(resolveSwipeIntent(40, 400, 1.2)).toBe("like");
-    expect(resolveSwipeIntent(-40, 400, -1.2)).toBe("pass");
-  });
-
-  it("속도가 느리거나 변위가 미세하면 플릭으로 보지 않는다", () => {
-    // 속도 임계 미만.
-    expect(resolveSwipeIntent(40, 400, 0.3)).toBeNull();
-    // 변위가 최소 px 미만(미세 떨림).
-    expect(resolveSwipeIntent(10, 400, 1.5)).toBeNull();
-  });
-
-  it("속도와 변위 방향이 어긋나면 커밋하지 않는다", () => {
-    // 오른쪽으로 끌었지만 릴리즈 순간 왼쪽으로 튕김 → 모호 → null.
-    expect(resolveSwipeIntent(40, 400, -1.2)).toBeNull();
-  });
-});
-
-describe("computeExitDurationMs", () => {
-  it("느린 릴리즈는 기본 지속을 쓴다", () => {
-    expect(computeExitDurationMs(0)).toBe(SWIPE_EXIT_DURATION_MS);
-    expect(computeExitDurationMs(0.4)).toBe(SWIPE_EXIT_DURATION_MS);
-  });
-
-  it("빠른 플릭일수록 지속이 짧아진다(관성 감속)", () => {
-    const slowFlick = computeExitDurationMs(0.8);
-    const fastFlick = computeExitDurationMs(2.0);
-    expect(fastFlick).toBeLessThan(slowFlick);
-    expect(fastFlick).toBeLessThanOrEqual(SWIPE_EXIT_DURATION_MS);
-  });
-
-  it("매우 빠른 플릭은 최소 지속으로 수렴한다", () => {
-    expect(computeExitDurationMs(5)).toBe(SWIPE_EXIT_MIN_DURATION_MS);
   });
 });
 
@@ -279,126 +222,7 @@ describe("SwipeDeck", () => {
         onNeedMore={onNeedMore}
       />,
     );
-    // remaining(2) <= PREFETCH_THRESHOLD(2) + seed 없음 → 부모 batch 폴백 프리페치.
+    // remaining(2) <= PREFETCH_THRESHOLD(2) → 마운트 직후 프리페치.
     expect(onNeedMore).toHaveBeenCalled();
-  });
-
-  it("첫 카드에 어포던스 힌트와 뒷장 스택(미리보기)을 노출한다", () => {
-    renderWithQueryClient(
-      <SwipeDeck
-        recommendations={[makeItem(1, 1), makeItem(2, 2), makeItem(3, 3)]}
-        userVoiceRange={USER_RANGE}
-        hasMore={false}
-        isFetchingMore={false}
-        onNeedMore={vi.fn()}
-        sessionId={SESSION_ID}
-      />,
-    );
-    expect(screen.getByTestId("swipe-affordance")).toBeInTheDocument();
-    // 윗장 뒤로 다음 2장(STACK_PEEK_COUNT)을 겹쳐 보여준다.
-    expect(screen.getAllByTestId("swipe-peek-card")).toHaveLength(2);
-  });
-
-  it("카드 표면은 컴팩트 요약만 노출하고 풀상세는 감춘다 (#1808)", () => {
-    renderWithQueryClient(
-      <SwipeDeck
-        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
-        userVoiceRange={USER_RANGE}
-        hasMore={false}
-        isFetchingMore={false}
-        onNeedMore={vi.fn()}
-      />,
-    );
-    // 요약: 제목/아티스트는 보인다.
-    expect(screen.getByText("곡 1")).toBeInTheDocument();
-    expect(screen.getByText("가수 1")).toBeInTheDocument();
-    // 풀상세(추천 사유/음역 셀)는 시트를 열기 전엔 카드 표면에 없다.
-    expect(screen.queryByText("추천 사유")).not.toBeInTheDocument();
-    expect(screen.queryByText("사유 1")).not.toBeInTheDocument();
-    expect(screen.queryByText("최고음")).not.toBeInTheDocument();
-  });
-
-  it("'상세 보기' 탭하면 바텀시트에 풀상세가 노출된다 (#1808)", async () => {
-    const user = userEvent.setup();
-    renderWithQueryClient(
-      <SwipeDeck
-        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
-        userVoiceRange={USER_RANGE}
-        hasMore={false}
-        isFetchingMore={false}
-        onNeedMore={vi.fn()}
-      />,
-    );
-
-    await user.click(
-      screen.getByRole("button", { name: /곡 1 상세 정보 보기/ }),
-    );
-
-    // 시트(dialog) + 풀상세 컨텐츠 노출.
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("추천 사유")).toBeInTheDocument();
-    expect(screen.getByText("사유 1")).toBeInTheDocument();
-  });
-
-  it("좋아요한 곡을 seed 로 잔량 임계 이하 시 /next 무한 로드를 호출한다", async () => {
-    const user = userEvent.setup();
-    const onNeedMore = vi.fn();
-    nextRecommendationMock.mockResolvedValue({
-      requestId: "22222222-2222-4222-8222-222222222222",
-      recommendations: [makeItem(3, 3), makeItem(4, 4)],
-    });
-    renderWithQueryClient(
-      <SwipeDeck
-        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
-        userVoiceRange={USER_RANGE}
-        hasMore={false}
-        isFetchingMore={false}
-        onNeedMore={onNeedMore}
-        sessionId={SESSION_ID}
-      />,
-    );
-
-    // 곡1 좋아요 → seed [1] 생성, 잔량(1) ≤ 임계 → seed 기반 /next 호출.
-    await user.click(
-      screen.getByRole("button", { name: /곡 1.*좋아요하고 다음 곡/ }),
-    );
-
-    await waitFor(() => expect(nextRecommendationMock).toHaveBeenCalled());
-    const arg = nextRecommendationMock.mock.calls[0][0];
-    expect(arg.sessionId).toBe(SESSION_ID);
-    expect(arg.seedSongIds).toContain(1);
-    expect(arg.excludeSongIds).toEqual(expect.arrayContaining([1, 2]));
-    // seed 경로가 살아 있으면 부모 batch 폴백은 쓰지 않는다.
-    expect(onNeedMore).not.toHaveBeenCalled();
-  });
-
-  it("seed 기반 결과를 끊김 없이 덱에 이어 붙인다(무한 append)", async () => {
-    const user = userEvent.setup();
-    nextRecommendationMock.mockResolvedValue({
-      requestId: "33333333-3333-4333-8333-333333333333",
-      recommendations: [makeItem(3, 3), makeItem(4, 4)],
-    });
-    renderWithQueryClient(
-      <SwipeDeck
-        recommendations={[makeItem(1, 1), makeItem(2, 2)]}
-        userVoiceRange={USER_RANGE}
-        hasMore={false}
-        isFetchingMore={false}
-        onNeedMore={vi.fn()}
-        sessionId={SESSION_ID}
-      />,
-    );
-
-    // 곡1 좋아요 → /next append(곡3·곡4). 곡2 패스 → 다음은 종료가 아니라 곡3.
-    await user.click(
-      screen.getByRole("button", { name: /곡 1.*좋아요하고 다음 곡/ }),
-    );
-    await waitFor(() => expect(nextRecommendationMock).toHaveBeenCalled());
-    await user.click(
-      screen.getByRole("button", { name: /곡 2.*패스하고 다음 곡/ }),
-    );
-
-    expect(screen.getByText("가수 3")).toBeInTheDocument();
-    expect(screen.queryByTestId("swipe-deck-end")).not.toBeInTheDocument();
   });
 });

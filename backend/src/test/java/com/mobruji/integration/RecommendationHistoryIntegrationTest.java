@@ -22,7 +22,6 @@ import com.mobruji.recommendation.infrastructure.RecommendationRepository;
 import com.mobruji.recommendation.infrastructure.RecommendationRequestRepository;
 import com.mobruji.song.domain.MetadataSource;
 import com.mobruji.song.domain.Mood;
-import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
 import com.mobruji.song.infrastructure.SongRepository;
@@ -248,8 +247,6 @@ class RecommendationHistoryIntegrationTest {
         return Song.builder()
                 .title(title).artist(artist).releaseYear(2020)
                 .keyOriginal(key).bpm(120).mood(mood)
-                .lowMidi(MusicalKeyMidiResolver.rootMidi(key) - 7)
-                .highMidi(MusicalKeyMidiResolver.rootMidi(key) + 7)
                 .language("ko").genre(genre)
                 .metadataSource(MetadataSource.MANUAL_SEED)
                 .build();

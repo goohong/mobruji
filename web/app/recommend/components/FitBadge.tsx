@@ -103,87 +103,6 @@ export function PracticeDifficultyBadge({
   );
 }
 
-/**
- * 조옮김 권장 행 (#1544, BE suggestedTranspose / transposedVoiceFit / suggestedTransposeReason).
- *
- * voiceFit 이 낮아 원조(原調)로는 부르기 버거운 곡에, BE 가 권장 조옮김량(반음)과 조옮김 후
- * 재계산 적합도를 내려준다. 연습형(P-A) 사용자가 "그럼 몇 키 내려/올려 부르면 되지?"를 바로
- * 알 수 있도록, 사유 문장 + (가능하면) `현재 voiceFit → 조옮김 후 transposedVoiceFit` 비교를
- * 함께 노출한다.
- *
- * graceful 처리:
- *   - `suggestedTransposeReason`(또는 `suggestedTranspose`) 중 하나라도 있으면 행을 그린다.
- *     원조가 음역에 잘 맞아 조옮김이 불요한 곡/과거 추천에서는 모두 `null` → 행 생략.
- *   - `transposedVoiceFit` 가 숫자가 아니면 before→after 비교는 생략하고 사유만 노출한다.
- */
-type TransposeSuggestionProps = {
-  item: RecommendedSongResponse;
-};
-
-const SUGGEST_TONE = "bg-[var(--badge-warning-bg)] text-[var(--badge-warning-fg)]";
-
-function TransposeSuggestion({ item }: TransposeSuggestionProps) {
-  const reason = item.suggestedTransposeReason ?? null;
-  const semitones = item.suggestedTranspose ?? null;
-  const transposedFit = item.transposedVoiceFit ?? null;
-  const currentFit = item.voiceFit ?? null;
-  // BE 가 권장 사유 또는 반음 수 중 하나라도 내려줬을 때만 노출. 둘 다 없으면 호출 측에서
-  // 행 자체를 건너뛴다(조옮김 불요 곡/과거 추천).
-  const valueLabel =
-    typeof semitones === "number" ? formatTransposeLabel(semitones) : "권장";
-  const showComparison =
-    typeof currentFit === "number" && typeof transposedFit === "number";
-  return (
-    <div className="flex flex-col gap-1">
-      <dt>
-        <span
-          aria-label={`조옮김 ${valueLabel}`}
-          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${SUGGEST_TONE}`}
-        >
-          <span aria-hidden="true">조옮김 권장</span>
-          <span aria-hidden="true" className="tabular-nums">
-            {valueLabel}
-          </span>
-        </span>
-      </dt>
-      {reason ? (
-        <dd className="text-xs text-[var(--text-secondary)]">{reason}</dd>
-      ) : null}
-      {showComparison ? (
-        <dd
-          aria-label={`조옮김 시 음역 적합도 ${toFitDisplay(currentFit).percent}%에서 ${toFitDisplay(transposedFit).percent}%로 상승`}
-          className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]"
-        >
-          <span aria-hidden="true" className="font-mono tabular-nums">
-            음역 {toFitDisplay(currentFit).percent}%
-          </span>
-          <span aria-hidden="true">→</span>
-          <span
-            aria-hidden="true"
-            className="font-mono font-semibold tabular-nums text-[var(--badge-success-fg)]"
-          >
-            {toFitDisplay(transposedFit).percent}%
-          </span>
-        </dd>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * 반음 정수를 사용자 표기로. 양수는 "+N키"(올림), 음수는 "N키"(부호 그대로, 내림),
- * 0 은 "원조" 로 표기한다. BE 사유 문장과 결이 맞게 "키" 단위를 쓴다.
- */
-export function formatTransposeLabel(semitones: number): string {
-  if (semitones === 0) {
-    return "원조";
-  }
-  if (semitones > 0) {
-    return `+${semitones}키`;
-  }
-  return `${semitones}키`;
-}
-
 type FitReasonsProps = {
   item: RecommendedSongResponse;
 };
@@ -196,12 +115,7 @@ export function FitReasons({ item }: FitReasonsProps) {
   // (필드 미반영 과거 추천) 경로에서는 종전대로 적합도 행만 그린다.
   const hasPracticeDifficulty =
     practiceDifficulty !== null || practiceDifficultyReason !== null;
-  // 조옮김 권장 행은 사유 또는 반음 수 중 하나라도 있을 때 노출(#1544). 음역이 잘 맞아
-  // 조옮김이 불요한 곡/과거 추천에서는 둘 다 null → 생략.
-  const hasTransposeSuggestion =
-    (item.suggestedTranspose ?? null) !== null ||
-    (item.suggestedTransposeReason ?? null) !== null;
-  if (rows.length === 0 && !hasPracticeDifficulty && !hasTransposeSuggestion) {
+  if (rows.length === 0 && !hasPracticeDifficulty) {
     return null;
   }
   return (
@@ -218,7 +132,6 @@ export function FitReasons({ item }: FitReasonsProps) {
           ) : null}
         </div>
       ))}
-      {hasTransposeSuggestion ? <TransposeSuggestion item={item} /> : null}
       {hasPracticeDifficulty ? (
         <div key="practice-difficulty" className="flex flex-col gap-1">
           <dt>

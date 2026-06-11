@@ -131,7 +131,6 @@ frontmatter의 `status` 필드로 추적한다.
 | [helper-thread-stream](helper-thread-stream.md) | Helper UX 묶음 — bot 1초 auto-ack + Discord thread stream + reply.referenced_message forwarding | draft | 2026-05-24 |
 | [helper-writing-marker-timing-fix](helper-writing-marker-timing-fix.md) | helper writing marker timing fix | implementing | 2026-05-27 |
 | [internal-label-scrub](internal-label-scrub.md) | 내부 ID 라벨 scrub (A1/B2/D1 → user-friendly paraphrase 분리) | draft | 2026-05-24 |
-| [legal-risk-data-collection-and-pii](legal-risk-data-collection-and-pii.md) | 외부 데이터 수집·사용자 PII 처리 법적 리스크 레지스터 (저작권/약관/개인정보 3축) | draft | 2026-06-03 |
 | [librosa-ci-build-monitoring](librosa-ci-build-monitoring.md) | librosa CI 빌드 시간 모니터링 + 캐싱 전략 | draft | 2026-05-24 |
 | [loop-heartbeat-reliability](loop-heartbeat-reliability.md) | Loop heartbeat reliability — `record_loop_heartbeat` "skip on continue" 패턴 일소 (try/finally 단일 종점) | draft | 2026-05-28 |
 | [maestro-auto-wake](maestro-auto-wake.md) | maestro 자동 wake 사이클 (idle 시 self-perpetuating + secondary backup) | approved | 2026-05-24 |
@@ -169,7 +168,6 @@ frontmatter의 `status` 필드로 추적한다.
 | Slug | Feature | Status | Last reviewed |
 |---|---|---|---|
 | [audio-tooling-bootstrap](audio-tooling-bootstrap.md) | Python 오디오 분석 툴링 부트스트랩 | shipped | 2026-05-24 |
-| [entry-flow-browse-first](entry-flow-browse-first.md) | 진입 흐름 재정의 — browse-first + measure-on-intent (음역대 강제 제거) | draft | 2026-06-03 |
 | [external-api-fallback](external-api-fallback.md) | 외부 API graceful fallback (Spotify / MusicBrainz / YouTube / iTunes 횡단) | draft | 2026-05-24 |
 | [musicbrainz-integration](musicbrainz-integration.md) | MusicBrainz 통합 — ISRC/mbid backfill + 메타 보강 | draft | 2026-05-24 |
 | [song-catalog-genre-browse](song-catalog-genre-browse.md) | 장르 카탈로그 — 노래방 책 형태 곡 열람 (둘러보기) | draft | 2026-05-29 |

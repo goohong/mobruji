@@ -1,16 +1,13 @@
 # test 프로파일은 Spring Security 미도입 단계에서 결정적 token 사용 (#224 #228).
 # 실제 token 값은 의미 없음 — 테스트가 동일 값을 헤더로 보낸다.
-# CORS 허용 origin: localhost:3000 (dev) + https://101-79-20-94.nip.io (NCP dev canonical,
-# ADR-0028) + http://test-allowed (E2E 검증용).
+# CORS 허용 origin: localhost:3000 (dev) + http://test-allowed (E2E 검증용).
 # 명시되지 않은 origin(예: http://evil.example)은 framework 가 preflight 403 응답.
-# 추천 받기 P0 사고(#1593) 가드 — application.yml default 와 미러링.
 mobruji:
   admin:
     token: test-admin-token
   cors:
     allowed-origins:
       - http://localhost:3000
-      - https://101-79-20-94.nip.io
       - http://test-allowed
 
 spring:

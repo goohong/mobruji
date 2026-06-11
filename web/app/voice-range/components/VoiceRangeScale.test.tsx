@@ -23,8 +23,8 @@ describe("VoiceRangeScale", () => {
     const label = img.getAttribute("aria-label") ?? "";
     expect(label).toContain("내 음역대");
     expect(label).toContain("평균 음역대");
-    expect(label).toContain("도3"); // low 48
-    expect(label).toContain("라4"); // high 69
+    expect(label).toContain("C3"); // low 48
+    expect(label).toContain("A4"); // high 69
   });
 
   it("사용자 밴드와 벤치마크 밴드를 모두 렌더한다", () => {
@@ -72,17 +72,6 @@ describe("VoiceRangeScale", () => {
     expect(width).toBeGreaterThanOrEqual(2);
   });
 
-  it("평균 범위 / 내 음역 레전드를 노출한다 (#1722)", () => {
-    render(<VoiceRangeScale lowMidi={48} highMidi={69} />);
-    expect(screen.getByText("내 음역")).toBeTruthy();
-    expect(screen.getByText("평균 범위")).toBeTruthy();
-  });
-
-  it("compact 변형은 레전드를 생략한다 (#1722)", () => {
-    render(<VoiceRangeScale lowMidi={48} highMidi={69} compact />);
-    expect(screen.queryByText("평균 범위")).toBeNull();
-  });
-
   it("caption 을 figcaption 으로 노출한다", () => {
     render(
       <VoiceRangeScale lowMidi={48} highMidi={69} caption="내 음역대 한눈에" />,
@@ -105,9 +94,9 @@ describe("VoiceRangeScale", () => {
       />,
     );
     const label = screen.getByRole("img").getAttribute("aria-label") ?? "";
-    // NEUTRAL low 45 = 라2, high 60 = 도4
-    expect(label).toContain("라2");
-    expect(label).toContain("도4");
+    // NEUTRAL low 45 = A2, high 60 = C4
+    expect(label).toContain("A2");
+    expect(label).toContain("C4");
   });
 
   it("a11y 위반(serious/critical) 이 없다", async () => {

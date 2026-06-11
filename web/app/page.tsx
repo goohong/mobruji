@@ -21,12 +21,9 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
-import { midiToKoreanNoteName } from "@/lib/notes";
+import { midiToCombinedNoteName } from "@/lib/notes";
 import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import { useSessionStore } from "@/store/session";
-import { OnboardingIntentPicker } from "@/app/components/OnboardingIntentPicker";
-import { HomeAccountNav } from "@/app/components/HomeAccountNav";
-import { BrandWordmark } from "@/components/brand/BrandWordmark";
 
 /**
  * zustand persist hydration 완료 여부를 React에 구독시킨다.
@@ -77,8 +74,10 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
       <div className="w-full max-w-md flex flex-col items-center gap-8">
-        <header className="flex flex-col items-center space-y-3 text-center">
-          <BrandWordmark lang="ko" size="md" theme="auto" />
+        <header className="space-y-3 text-center">
+          <p className="text-sm font-medium uppercase tracking-widest text-[var(--text-caption)]">
+            mobruji
+          </p>
           <h1 className="text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl">
             오늘 노래방, 뭐 부르지?
           </h1>
@@ -91,11 +90,8 @@ export default function Home() {
 
         <SecondaryNav />
 
-        <HomeAccountNav />
-
         <p className="text-xs text-[var(--text-disclaimer)]">
-          가입 없이 익명으로 바로 쓸 수 있어요. 로그인하면 음역대·취향이 기기를 옮겨도
-          유지됩니다.
+          익명 세션으로 동작합니다. 회원가입 없음.
         </p>
       </div>
     </main>
@@ -106,9 +102,8 @@ export default function Home() {
  * 측정 안 한(또는 마운트 전) 사용자에게 노출되는 패널.
  *
  * - 1→4 단계 흐름을 ordered list로 안내해 첫 진입 사용자가 전체 그림을 파악하게 한다.
- * - 진입 분기는 `<OnboardingIntentPicker>` 로 위임 — 3 페르소나 경로 카드 + "그냥
- *   둘러보기" 보조 경로. 의도별로 측정 진입 카피를 다르게 옷 입혀 D3 표기 충격(P1)과
- *   동기 불일치를 완화한다 (first-user-onboarding-flow.md §2·§3, PR 2).
+ * - primary CTA는 자동 측정. 직접 입력은 보조 link로 한 단계 내린다 — 자동 측정이
+ *   현재 가장 정확하고 ux 마찰이 적기 때문에 (PR #271 폴리싱 완료).
  */
 function NewUserPanel() {
   return (
@@ -121,10 +116,10 @@ function NewUserPanel() {
           id="home-onboarding-heading"
           className="text-lg font-semibold text-[var(--text-primary)]"
         >
-          무엇을 도와드릴까요?
+          시작하기
         </h2>
         <p className="text-sm text-[var(--text-secondary)]">
-          원하는 걸 고르면 그에 맞춰 안내해드려요. 아무거나 골라도 막다른 길은 없어요.
+          음역대를 알아야 부르기 편한 키의 곡만 추려서 보여드릴 수 있어요.
         </p>
       </div>
 
@@ -138,7 +133,20 @@ function NewUserPanel() {
         <FlowStep index={4} label="좋아요·북마크로 다시 찾아보기" />
       </ol>
 
-      <OnboardingIntentPicker />
+      <div className="flex flex-col gap-2">
+        <Link
+          href="/voice-range/auto"
+          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--brand-500)] px-6 text-base font-medium text-white transition-colors duration-[var(--duration-base)] hover:bg-[var(--brand-600)] hover:shadow-[var(--shadow-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)] focus-visible:ring-offset-2"
+        >
+          음역대 측정하기
+        </Link>
+        <Link
+          href="/voice-range"
+          className="inline-flex h-11 w-full items-center justify-center rounded-full border border-[var(--cta-secondary-border)] bg-[var(--cta-secondary-bg)] px-6 text-sm font-medium text-[var(--cta-secondary-fg)] transition-colors hover:bg-[var(--cta-secondary-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cta-secondary-ring)]"
+        >
+          직접 입력으로 시작
+        </Link>
+      </div>
     </section>
   );
 }
@@ -233,8 +241,8 @@ function VoiceRangeSummary({
   isPending,
 }: VoiceRangeSummaryProps) {
   if (voiceRange) {
-    const lowNote = midiToKoreanNoteName(voiceRange.lowestNoteMidi);
-    const highNote = midiToKoreanNoteName(voiceRange.highestNoteMidi);
+    const lowNote = midiToCombinedNoteName(voiceRange.lowestNoteMidi);
+    const highNote = midiToCombinedNoteName(voiceRange.highestNoteMidi);
     return (
       <p
         aria-label="저장된 음역대"
@@ -272,15 +280,11 @@ function VoiceRangeSummary({
  * 측정 여부와 무관하게 노출 — 검색은 측정 없이도 진입 가능한 경로, 좋아요/북마크/이력은
  * 빈 상태(empty)도 친화 메시지를 가지고 있어 측정 안 한 사용자가 눌러도 막다른 길이
  * 아니다. 따라서 분기 바깥에 둔다.
- *
- * 라벨은 글로벌 nav(BottomNav/DesktopNav)와 통일한다 (closes #1717) — /history 는
- * 탭 라벨과 동일하게 "이력". 측정/추천은 위 primary CTA 가 이미 담당하므로 여기서는
- * 콘텐츠 목적지(검색/이력/좋아요/북마크)만 둔다.
  */
 function SecondaryNav() {
   const items: Array<{ href: string; label: string }> = [
     { href: "/songs", label: "곡 검색" },
-    { href: "/history", label: "이력" },
+    { href: "/history", label: "받은 추천" },
     { href: "/likes", label: "좋아요" },
     { href: "/bookmarks", label: "북마크" },
   ];

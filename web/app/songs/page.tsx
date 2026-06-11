@@ -29,30 +29,24 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
-import { searchSongs, type SongResponse } from "@/lib/api/song";
-import { readVoiceRange, type VoiceRangeResponse } from "@/lib/api/voice-range";
 import {
-  computeVoiceFitRatio,
-  type UserVoiceRange,
-} from "@/lib/scoreBreakdown";
-import {
-  deriveDifficulty,
-  difficultyLabel,
-  type Difficulty,
-} from "@/lib/difficulty";
+  searchSongs,
+  type SongListResponse,
+  type SongResponse,
+} from "@/lib/api/song";
+import { deriveDifficulty, type Difficulty } from "@/lib/difficulty";
 import { formatSongDisplayTitle } from "@/lib/songTitle";
-import { useSessionStore } from "@/store/session";
 import { Chip, Input } from "@/components/ui";
 
 import { SongCard } from "../recommend/components/SongCard";
-import { SongDetailSheet } from "../recommend/components/SongDetailSheet";
+import { SongDetailModal } from "../recommend/components/SongDetailModal";
 import { SongDetailContent } from "../recommend/components/SongDetailContent";
 
 const DEBOUNCE_MS = 300;
 const DIFFICULTY_OPTIONS: { key: Difficulty; label: string }[] = [
-  { key: "EASY", label: difficultyLabel("EASY") },
-  { key: "NORMAL", label: difficultyLabel("NORMAL") },
-  { key: "HARD", label: difficultyLabel("HARD") },
+  { key: "EASY", label: "Easy" },
+  { key: "NORMAL", label: "Normal" },
+  { key: "HARD", label: "Hard" },
 ];
 
 /*
@@ -95,10 +89,10 @@ export default function SongSearchPage() {
 function SearchPageFallback() {
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
+      <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            둘러보기
+            Browse
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
@@ -170,53 +164,39 @@ function SongSearchPageInner() {
   ]);
 
   const enabled = debouncedKeyword.length > 0;
-  const query = useQuery<SongResponse[], Error>({
+  const query = useQuery<SongListResponse, Error>({
     queryKey: ["songs", "search", debouncedKeyword],
     queryFn: ({ signal }) => searchSongs(debouncedKeyword, signal),
     enabled,
   });
 
-  // closes #1721 — 세션 음역대가 있으면 검색 카드에도 "내 음역 적합" 배지를 그린다.
-  // 음역대 미등록(404)/세션 없음은 graceful — 배지를 그냥 생략하고 검색은 그대로 동작한다.
-  const sessionId = useSessionStore((state) => state.sessionId);
-  const voiceRangeQuery = useQuery<VoiceRangeResponse, Error>({
-    queryKey: ["voice-range", sessionId],
-    queryFn: ({ signal }) => readVoiceRange(sessionId!, { signal }),
-    enabled: sessionId !== null,
-    retry: false,
-  });
-  const userVoiceRange = useMemo<UserVoiceRange | null>(() => {
-    const data = voiceRangeQuery.data;
-    if (!data) {
-      return null;
-    }
-    return { lowMidi: data.lowestNoteMidi, highMidi: data.highestNoteMidi };
-  }, [voiceRangeQuery.data]);
+  // BE가 #1551부터 bare 배열 대신 wrapper `{items, ...}`를 반환 → items를 곡 목록으로 사용.
+  const songItems = query.data?.items;
 
   // 응답 곡들의 unique genre들 (필터 chip 옵션). null/공백은 제외, 사전 순 고정.
   const availableGenres = useMemo<string[]>(() => {
-    if (!query.data) {
+    if (!songItems) {
       return [];
     }
     const set = new Set<string>();
-    for (const song of query.data) {
+    for (const song of songItems) {
       if (song.genre && song.genre.trim().length > 0) {
         set.add(song.genre);
       }
     }
     return Array.from(set).sort();
-  }, [query.data]);
+  }, [songItems]);
 
   const filteredSongs = useMemo<SongResponse[]>(() => {
-    if (!query.data) {
+    if (!songItems) {
       return [];
     }
     const genreActive = selectedGenres.size > 0;
     const difficultyActive = selectedDifficulties.size > 0;
     if (!genreActive && !difficultyActive) {
-      return query.data;
+      return songItems;
     }
-    return query.data.filter((song) => {
+    return songItems.filter((song) => {
       if (genreActive && (!song.genre || !selectedGenres.has(song.genre))) {
         return false;
       }
@@ -228,7 +208,7 @@ function SongSearchPageInner() {
       }
       return true;
     });
-  }, [query.data, selectedGenres, selectedDifficulties]);
+  }, [songItems, selectedGenres, selectedDifficulties]);
 
   const toggleGenre = useCallback((genre: string) => {
     setSelectedGenres((prev) => toggleInSet(prev, genre));
@@ -246,10 +226,10 @@ function SongSearchPageInner() {
 
   return (
     <main className="flex flex-1 flex-col items-center bg-[var(--bg-subtle)] px-[var(--page-padding-x)] py-[var(--page-padding-y)]">
-      <div className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
+      <div className="w-full max-w-2xl flex flex-col gap-6">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-caption)]">
-            둘러보기
+            Browse
           </p>
           <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
             곡 검색
@@ -288,9 +268,10 @@ function SongSearchPageInner() {
           isFetching={query.isFetching}
           error={query.error}
           songs={filteredSongs}
-          rawCount={query.data?.length ?? 0}
+          rawCount={songItems?.length ?? 0}
+          totalCount={query.data?.totalCount ?? 0}
+          hasNext={query.data?.hasNext ?? false}
           filtersActive={filtersActive}
-          userVoiceRange={userVoiceRange}
         />
       </div>
     </main>
@@ -386,9 +367,13 @@ type SearchResultProps = {
   isFetching: boolean;
   error: Error | null;
   songs: SongResponse[];
+  /** 현재 페이지(서버 응답 items) 곡 수. */
   rawCount: number;
+  /** 필터 통과 전체 곡 수(서버 totalCount). 현재 페이지 곡 수와 다를 수 있다. */
+  totalCount: number;
+  /** 다음 페이지 존재 여부(서버 hasNext). */
+  hasNext: boolean;
   filtersActive: boolean;
-  userVoiceRange: UserVoiceRange | null;
 };
 
 function SearchResult({
@@ -398,8 +383,9 @@ function SearchResult({
   error,
   songs,
   rawCount,
+  totalCount,
+  hasNext,
   filtersActive,
-  userVoiceRange,
 }: SearchResultProps) {
   if (!enabled) {
     return (
@@ -472,9 +458,11 @@ function SearchResult({
       >
         {filtersActive
           ? `필터 결과 ${songs.length}곡 / 전체 ${rawCount}곡`
-          : `${rawCount}곡`}
+          : hasNext
+            ? `${rawCount}곡 (전체 ${totalCount}곡 중 일부)`
+            : `${totalCount}곡`}
       </p>
-      <SongSearchResultList songs={songs} userVoiceRange={userVoiceRange} />
+      <SongSearchResultList songs={songs} />
     </div>
   );
 }
@@ -486,42 +474,28 @@ function SearchResult({
  */
 type SongSearchResultListProps = {
   songs: SongResponse[];
-  userVoiceRange: UserVoiceRange | null;
 };
 
-function SongSearchResultList({
-  songs,
-  userVoiceRange,
-}: SongSearchResultListProps) {
+function SongSearchResultList({ songs }: SongSearchResultListProps) {
   const [selected, setSelected] = useState<SongResponse | null>(null);
   return (
     <>
-      {/*
-       * 와이드 뷰포트(≥1024px) 2컬럼 그리드 (closes #1717). items-start 로 같은 행의
-       * 카드가 균일 높이로 늘어나며 본문↔footer 사이 void 가 생기는 것을 막는다 —
-       * 카드 높이는 각자 콘텐츠에 맞춘다. 모바일은 단일 컬럼 유지.
-       */}
-      <ul
-        aria-label="검색 결과"
-        className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2"
-      >
-        {songs.map((song, index) => (
+      <ul aria-label="검색 결과" className="flex flex-col gap-3">
+        {songs.map((song) => (
           <SongCard
             key={song.id}
             song={song}
-            index={index}
-            voiceFit={resolveSearchVoiceFit(song, userVoiceRange)}
             onShowDetail={() => setSelected(song)}
           />
         ))}
       </ul>
-      <SongDetailSheet
+      <SongDetailModal
         open={selected !== null}
         onClose={() => setSelected(null)}
         titleLabel={selected ? formatSongDisplayTitle(selected) : ""}
       >
         {selected ? <SongDetailContent song={selected} /> : null}
-      </SongDetailSheet>
+      </SongDetailModal>
     </>
   );
 }
@@ -530,26 +504,6 @@ function SongSearchResultList({
  * 응답 곡에 BE가 채워준 difficulty가 있으면 그것을, 없으면 lowMidi/highMidi로 계산,
  * 둘 다 없으면 null. 필터는 null인 곡을 제외한다.
  */
-/**
- * 검색 카드 "내 음역 적합" 배지용 client 적합도(0~1) (#1721).
- *
- * 세션 음역대가 있고 곡이 음역(lowMidi/highMidi)을 보유했을 때만 겹침 비율을 계산한다.
- * 둘 중 하나라도 없으면 `undefined` → SongCard 가 배지/사유/보더 매핑을 생략한다.
- */
-function resolveSearchVoiceFit(
-  song: SongResponse,
-  userVoiceRange: UserVoiceRange | null,
-): number | undefined {
-  if (
-    userVoiceRange === null ||
-    typeof song.lowMidi !== "number" ||
-    typeof song.highMidi !== "number"
-  ) {
-    return undefined;
-  }
-  return computeVoiceFitRatio(userVoiceRange, song.lowMidi, song.highMidi);
-}
-
 function songDifficulty(song: SongResponse): Difficulty | null {
   if (song.difficulty) {
     return song.difficulty;

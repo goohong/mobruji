@@ -68,10 +68,9 @@ public class AudioAnalysisScheduledBackfill {
         final SongAudioBackfillCommand.BackfillSummary summary = backfillCommand.runBackfill(targets,
                 CONFIDENCE_THRESHOLD);
         LOG.info(
-                "audio scheduled backfill: done analyzed={} successful={} updated={} skipped={} "
-                        + "skipped_implausible={} failed={}",
+                "audio scheduled backfill: done analyzed={} successful={} updated={} skipped={} failed={}",
                 summary.analyzed(), summary.successful(), summary.updated(),
-                summary.skippedLowConfidence(), summary.skippedImplausibleRange(), summary.failed());
+                summary.skippedLowConfidence(), summary.failed());
     }
 
     /**

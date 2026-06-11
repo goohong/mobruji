@@ -56,7 +56,7 @@ class RecommendationCreateRequestTest {
     @DisplayName("excludeSongIdsOrEmpty: null 입력은 빈 리스트로 정규화")
     void excludeSongIdsOrEmpty_nullBecomesEmpty() {
         final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, 120, null, null, null, null);
+                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, 120, null, null, null);
 
         assertThat(recommendationCreateRequest.excludeSongIdsOrEmpty()).isEmpty();
     }
@@ -66,7 +66,7 @@ class RecommendationCreateRequestTest {
     void excludeSongIdsOrEmpty_preservesOrderAndDuplicates() {
         final List<Long> excludeSongIds = List.of(3L, 1L, 3L, 2L);
         final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, Mood.CALM, null, null, null, excludeSongIds, null);
+                VALID_SESSION_ID, 48, 72, Mood.CALM, null, null, excludeSongIds, null);
 
         assertThat(recommendationCreateRequest.excludeSongIdsOrEmpty())
                 .containsExactly(3L, 1L, 3L, 2L);
@@ -76,11 +76,11 @@ class RecommendationCreateRequestTest {
     @DisplayName("excludeSessionHistoryOrFalse: null/false 는 false, true 는 true 로 정규화")
     void excludeSessionHistoryOrFalse_normalizesNull() {
         final RecommendationCreateRequest nullFlag = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, null, null, null, null, null);
+                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, null, null, null, null);
         final RecommendationCreateRequest falseFlag = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, null, null, null, null, false);
+                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, null, null, null, false);
         final RecommendationCreateRequest trueFlag = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, null, null, null, null, true);
+                VALID_SESSION_ID, 48, 72, Mood.UPBEAT, null, null, null, true);
 
         assertThat(nullFlag.excludeSessionHistoryOrFalse()).isFalse();
         assertThat(falseFlag.excludeSessionHistoryOrFalse()).isFalse();
@@ -91,7 +91,7 @@ class RecommendationCreateRequestTest {
     @DisplayName("toCommand: DTO 필드를 그대로 CreateRecommendationCommand 로 매핑하고 excludeSongIds 는 정규화")
     void toCommand_mapsAllFieldsAndNormalizesExcludeSongIds() {
         final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
-                VALID_SESSION_ID_ALT_A, 50, 80, Mood.UPBEAT, 140, null, null, List.of(10L, 20L), true);
+                VALID_SESSION_ID_ALT_A, 50, 80, Mood.UPBEAT, 140, null, List.of(10L, 20L), true);
 
         final CreateRecommendationCommand createRecommendationCommand = recommendationCreateRequest.toCommand();
 
@@ -108,7 +108,7 @@ class RecommendationCreateRequestTest {
     @DisplayName("toCommand: excludeSongIds null 입력도 빈 리스트로 정규화되어 매핑")
     void toCommand_nullExcludeSongIdsBecomesEmpty() {
         final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
-                VALID_SESSION_ID_ALT_B, 48, 72, null, null, null, null, null, null);
+                VALID_SESSION_ID_ALT_B, 48, 72, null, null, null, null, null);
 
         final CreateRecommendationCommand createRecommendationCommand = recommendationCreateRequest.toCommand();
 
@@ -156,7 +156,7 @@ class RecommendationCreateRequestTest {
     @DisplayName("Validator 실행: 정상 입력(UUIDv4 sessionId + MIDI/BPM 경계값) → violation 없음 (#666)")
     void validator_validBoundaryInput_passes() {
         final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 12, 119, Mood.UPBEAT, 30, null, null, List.of(1L), true);
+                VALID_SESSION_ID, 12, 119, Mood.UPBEAT, 30, null, List.of(1L), true);
 
         final Set<ConstraintViolation<RecommendationCreateRequest>> violations = validator.validate(
                 recommendationCreateRequest);
@@ -168,7 +168,7 @@ class RecommendationCreateRequestTest {
     @DisplayName("Validator 실행: 선택 필드(mood/preferredBpm/excludeSongIds) 모두 null → violation 없음")
     void validator_optionalFieldsAllNull_passes() {
         final RecommendationCreateRequest recommendationCreateRequest = new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, null, null, null, null, null, null);
+                VALID_SESSION_ID, 48, 72, null, null, null, null, null);
 
         final Set<ConstraintViolation<RecommendationCreateRequest>> violations = validator.validate(
                 recommendationCreateRequest);
@@ -180,19 +180,19 @@ class RecommendationCreateRequestTest {
     @DisplayName("Validator 실행: sessionId blank / MIDI 범위 외 / BPM 범위 외 / 필수 null → violation 발생 (#666)")
     void validator_invalidInputs_produceViolations() {
         assertThat(validator.validate(new RecommendationCreateRequest(
-                "", 48, 72, null, null, null, null, null, null))).isNotEmpty();
+                "", 48, 72, null, null, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, 11, 72, null, null, null, null, null, null))).isNotEmpty();
+                VALID_SESSION_ID, 11, 72, null, null, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 120, null, null, null, null, null, null))).isNotEmpty();
+                VALID_SESSION_ID, 48, 120, null, null, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, null, 72, null, null, null, null, null, null))).isNotEmpty();
+                VALID_SESSION_ID, null, 72, null, null, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, null, null, null, null, null, null, null))).isNotEmpty();
+                VALID_SESSION_ID, 48, null, null, null, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, null, 29, null, null, null, null))).isNotEmpty();
+                VALID_SESSION_ID, 48, 72, null, 29, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, null, 301, null, null, null, null))).isNotEmpty();
+                VALID_SESSION_ID, 48, 72, null, 301, null, null, null))).isNotEmpty();
     }
 
     @Test
@@ -200,17 +200,17 @@ class RecommendationCreateRequestTest {
     void validator_nonUuidV4SessionId_violates() {
         // SessionRotateRequest / VoiceRangeCreateRequest 와 동일한 형식 강제.
         assertThat(validator.validate(new RecommendationCreateRequest(
-                "session-1", 48, 72, null, null, null, null, null, null))).isNotEmpty();
+                "session-1", 48, 72, null, null, null, null, null))).isNotEmpty();
         assertThat(validator.validate(new RecommendationCreateRequest(
-                "k6-load-1716543210-3", 48, 72, null, null, null, null, null, null))).isNotEmpty();
+                "k6-load-1716543210-3", 48, 72, null, null, null, null, null))).isNotEmpty();
         // 대문자 UUID 거부
         assertThat(validator.validate(new RecommendationCreateRequest(
-                "550E8400-E29B-41D4-A716-446655449401", 48, 72, null, null, null, null, null, null))).isNotEmpty();
+                "550E8400-E29B-41D4-A716-446655449401", 48, 72, null, null, null, null, null))).isNotEmpty();
         // 65자 임의 string
         assertThat(validator.validate(new RecommendationCreateRequest(
-                "r".repeat(65), 48, 72, null, null, null, null, null, null))).isNotEmpty();
+                "r".repeat(65), 48, 72, null, null, null, null, null))).isNotEmpty();
         // 유효 UUIDv4 → violation 없음 (대조군)
         assertThat(validator.validate(new RecommendationCreateRequest(
-                VALID_SESSION_ID, 48, 72, null, null, null, null, null, null))).isEmpty();
+                VALID_SESSION_ID, 48, 72, null, null, null, null, null))).isEmpty();
     }
 }

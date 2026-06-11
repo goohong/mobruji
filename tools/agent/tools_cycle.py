@@ -159,15 +159,6 @@ def set_cycle_state(
     return {"event_id": event_id, "cycle": cycle, "changes": changes}
 
 
-# ─── rev forum 태그명 (rev 포럼 available_tags 와 정확히 일치) ─────────────────
-#
-# rev 포럼 available_tags (#1805): 🟡 Pre-merge review / 🔵 Post-merge audit /
-# ✅ rev pass / ❌ rev fail. 여기 값이 available_tags 와 다르면 Discord 가 신규 태그를
-# 만들거나 무시해 태그가 안 붙는다 — 반드시 정확히 일치시킨다.
-PR_REVIEW_TAG = "🟡 Pre-merge review"
-PR_AUDIT_TAG = "🔵 Post-merge audit"
-
-
 # ─── 7. register_directive_pending ───────────────────────────────────────────
 #
 # 시그니처 분기 (2026-05-30 PR 2-b, #1364):
@@ -301,7 +292,7 @@ def _register_pr_review(
         # PR 단위 양식.
         title, body = _build_pr_review_template(directive_id, summary, pr_url)
         try:
-            td.forum_create_thread(forum_id, title, body, tags=[PR_REVIEW_TAG])
+            td.forum_create_thread(forum_id, title, body, tags=["🟡 1차 review"])
         except Exception as exc:  # noqa: BLE001
             # forum_create_thread 자체 실패 시 (NCP bot.py polling miss / sqlite IO) —
             # state 박지만 thread_id=None 으로 graceful. hook script 가 alert counter
@@ -376,7 +367,7 @@ def _register_pr_audit(
     if lookup_thread_id:
         # 단계 전이: 🟡 → 🔵 retag + body PATCH + comment append.
         try:
-            td.forum_retag(lookup_thread_id, PR_AUDIT_TAG)
+            td.forum_retag(lookup_thread_id, "🔵 사후 E2E QA")
         except Exception as exc:  # noqa: BLE001
             _stderr_warn(
                 f"register_directive_pending(pr_audit): forum_retag 실패 — "

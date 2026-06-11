@@ -90,27 +90,11 @@ if [ "$local_sha" = "$remote_sha" ]; then
   exit 0
 fi
 
-# 자가 치유 (#1621): 배포 체크아웃은 **develop 고정**이다. sub-agent 등이 feature
-# 브랜치로 전환하거나 로컬 수정으로 오염되면(실사고 2026-06-03: docs/...#1310 브랜치
-# + bot.py 로컬 edit) 기존엔 "분기 — skip" 으로 영영 stuck → 라이브 봇이 옛 코드로 돌고
-# 머지된 fix 가 안 닿음. 무인 운행 치명. 비-develop / 분기 감지 시 origin/develop 로
-# **강제 복구**(배포 체크아웃엔 정당한 로컬 작업이 없어 force 안전). BRIDGE_SELF_HEAL=0 면 구동작.
-cur_branch=$(g rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
-if [ "$cur_branch" != "develop" ] || ! g merge-base --is-ancestor "$local_sha" "$remote_sha"; then
-  if [ "${BRIDGE_SELF_HEAL:-1}" != "1" ]; then
-    log "WARN: ${local_sha:0:8} 분기(branch=${cur_branch}) — self-heal off, skip"
-    update_status diverged "${local_sha:0:8}" "${remote_sha:0:8}"
-    exit 1
-  fi
-  log "SELFHEAL(#1621): 오염 감지 (branch=${cur_branch}, head=${local_sha:0:8}) — origin/develop 강제 복구"
-  if ! g checkout -f -B develop "$remote_sha" 2>/dev/null; then
-    log "WARN: SELFHEAL checkout 실패 — 수동 확인 필요, skip"
-    update_status diverged "${local_sha:0:8}" "${remote_sha:0:8}"
-    exit 1
-  fi
-  update_status selfheal "${local_sha:0:8}" "${remote_sha:0:8}"
-  log "SELFHEAL 완료 → develop@$(g rev-parse --short HEAD) (아래 변경 판정·재시작 진행)"
-  # HEAD 가 이제 origin/develop 이라 아래 git pull 은 no-op, changed 는 정상 산출됨.
+# fast-forward 가능(local 이 remote 의 조상)할 때만 — 로컬 분기 시 clobber 방지.
+if ! g merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+  log "WARN: ${local_sha:0:8} 가 origin/develop 조상 아님 (로컬 분기) — 수동 확인 필요, skip"
+  update_status diverged "${local_sha:0:8}" "${remote_sha:0:8}"
+  exit 1
 fi
 
 changed=$(g diff --name-only "$local_sha" "$remote_sha")

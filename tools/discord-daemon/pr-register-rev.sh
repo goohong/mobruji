@@ -228,24 +228,7 @@ if ! command -v "$PY_BIN" >/dev/null 2>&1 && [[ ! -x "$PY_BIN" ]]; then
 fi
 
 # agent dir (PYTHONPATH) 결정.
-# 사고 박제 (#1769): MOBRUJI_AGENT_DIR 미설정 시 기존 fallback ${MOBRUJI_DIR}/agent
-# (= ~/.mobruji/agent) 가 실재하지 않아 `from tools_cycle import ...` 가 매 hook 발사마다
-# `ModuleNotFoundError: No module named 'tools_cycle'` 로 silent 실패했다. 특히 PR 머지
-# 시 호출되는 kind=pr_audit (rev forum 단계 전이 🟡→🔵 + 본문 PATCH) 가 영구히 안 돼
-# pr-review forum thread 가 🟡 에 고정됐다. env 미설정 시 본 script 의 실제 위치
-# (symlink 해소) sibling `../agent` (= repo tools/agent) 를 우선 자동 탐색한다.
-if [[ -n "${MOBRUJI_AGENT_DIR:-}" ]]; then
-  AGENT_DIR="$MOBRUJI_AGENT_DIR"  # 명시 override 존중.
-else
-  AGENT_DIR="${MOBRUJI_DIR}/agent"  # legacy fallback (자동 탐색 실패 시 graceful).
-  SELF_REAL=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")
-  SELF_SIBLING=$(cd "$(dirname "$SELF_REAL")/../agent" 2>/dev/null && pwd || true)
-  if [[ -n "$SELF_SIBLING" && -f "${SELF_SIBLING}/tools_cycle.py" ]]; then
-    AGENT_DIR="$SELF_SIBLING"
-  elif [[ -f "/home/mobruji/mobruji/tools/agent/tools_cycle.py" ]]; then
-    AGENT_DIR="/home/mobruji/mobruji/tools/agent"
-  fi
-fi
+AGENT_DIR="${MOBRUJI_AGENT_DIR:-${MOBRUJI_DIR}/agent}"
 
 # register_directive_pending 호출 (실패 시 alert counter 증가).
 # 시그니처는 PR 2-b 에서 확장 — 본 PR 단계에서는 호출 자체가 import 실패 가능.

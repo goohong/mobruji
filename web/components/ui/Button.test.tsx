@@ -28,10 +28,7 @@ describe("Button", () => {
     const button = screen.getByRole("button", { name: "저장" });
     expect(button).toBeInTheDocument();
     expect(button.className).toContain("h-12");
-    expect(button.className).toContain("bg-[var(--brand-500)]");
-    expect(button.className).toContain("active:scale-95");
-    expect(button.className).toContain("ease-[var(--ease-spring)]");
-    expect(button.className).toContain("motion-reduce:active:scale-100");
+    expect(button.className).toContain("bg-zinc-900");
     expect(button.getAttribute("type")).toBe("button");
 
     fireEvent.click(button);
@@ -62,7 +59,7 @@ describe("Button", () => {
     );
 
     const button = screen.getByRole("button", { name: "삭제" });
-    expect(button.className).toContain("bg-[var(--danger-500)]");
+    expect(button.className).toContain("bg-rose-600");
     expect(button.className).toContain("w-full");
   });
 });

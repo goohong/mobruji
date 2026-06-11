@@ -29,10 +29,8 @@ import com.mobruji.song.infrastructure.SongRepository;
  *
  * <ul>
  * <li>(title, artist) 자연키로 기존 row를 찾고, 없으면 insert.</li>
- * <li>이미 존재하면 {@link Song#backfillMissingFields} 로 음역대 **null 필드만** 채운다 — 운영 중
- * 수정된 값은 덮지 않는다.</li>
- * <li>{@code genre} 는 시드 전용 권위 필드라 {@link Song#reconcileSeedGenre} 로 시드 값에 맞춰
- * 재분류를 반영한다(이슈 #1675).</li>
+ * <li>이미 존재하면 {@link Song#backfillMissingFields} 로 **null 필드만** 채운다 — 운영 중 수정된
+ * 값은 덮지 않는다.</li>
  * </ul>
  *
  * <p>이전에는 `count > 0` 이면 통째로 skip했으나, 새 컬럼(lowMidi/highMidi/difficulty) 추가 후
@@ -94,9 +92,8 @@ public class SongSeedLoader implements ApplicationRunner {
                     inserted++;
                 } else {
                     final Song song = existing.get();
-                    final boolean midiChanged = song.backfillMissingFields(entry.lowMidi(), entry.highMidi(), null);
-                    final boolean genreChanged = song.reconcileSeedGenre(entry.genre());
-                    if (midiChanged || genreChanged) {
+                    final boolean changed = song.backfillMissingFields(entry.lowMidi(), entry.highMidi(), null);
+                    if (changed) {
                         songRepository.save(song);
                         backfilled++;
                     } else {

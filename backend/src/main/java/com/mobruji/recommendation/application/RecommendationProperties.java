@@ -42,7 +42,6 @@ public record RecommendationProperties(
         @NotNull @Valid Diversity diversity,
         @NotNull @Valid Tempo tempo,
         @NotNull @Valid Generation generation,
-        @NotNull @Valid Gender gender,
         @Min(1) int resultCount,
         @DecimalMin("0.0") double jitterMagnitude,
         @NotNull SeedStrategy seedStrategy
@@ -68,8 +67,7 @@ public record RecommendationProperties(
             @DecimalMin("0.0") double mood,
             @DecimalMin("0.0") double popularity,
             @DecimalMin("0.0") double tempoMatch,
-            @DecimalMin("0.0") double generation,
-            @DecimalMin("0.0") double gender
+            @DecimalMin("0.0") double generation
     ) {
     }
 
@@ -138,26 +136,5 @@ public record RecommendationProperties(
             defensive.putAll(representativeYear);
             representativeYear = Map.copyOf(defensive);
         }
-    }
-
-    /**
-     * genderFit 신호 설정 (#1767). 곡 보컬 성별과 요청 성별 필터(남자곡/여자곡)의 부분 적합 점수를 외부화한다.
-     * 큐레이션 일치는 항상 1.0(고정), 그 외 비-일치 케이스의 가산 수준만 운영 측정 후 yml 로 튜닝한다.
-     *
-     * <ul>
-     * <li>{@code estimatedMatchScore}: 큐레이션 부재 곡을 음역·키로 추정해 요청 성별과 일치할 때의 가산.
-     * 큐레이션(1.0)보다 낮춰 추정 신뢰도 차이를 반영(후순위). 기본 0.6.</li>
-     * <li>{@code mixedScore}: 큐레이션 {@code MIXED}(듀엣/혼성) 곡 — 남자곡/여자곡 어느 요청에도 부분 적합. 기본 0.5.</li>
-     * <li>{@code unknownScore}: 큐레이션·추정 모두 불가(음역·키 부재) — 후순위 중립값. 기본 0.3.</li>
-     * </ul>
-     *
-     * <p>반대 성별은 0.0(가산 없음) — 배타 제외가 아니라 음역대 등 다른 신호로 추천 풀에 잔존한다. 모든 값은 [0,1]
-     * (ScoreBreakdown raw 신호 범위). 결정성에는 영향 없음(설정 고정 시 같은 입력 → 같은 결과).
-     */
-    public record Gender(
-            @DecimalMin("0.0") @jakarta.validation.constraints.DecimalMax("1.0") double estimatedMatchScore,
-            @DecimalMin("0.0") @jakarta.validation.constraints.DecimalMax("1.0") double mixedScore,
-            @DecimalMin("0.0") @jakarta.validation.constraints.DecimalMax("1.0") double unknownScore
-    ) {
     }
 }

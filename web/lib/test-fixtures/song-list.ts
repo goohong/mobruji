@@ -32,9 +32,9 @@
  *   - PR #1100 (`song-detail.ts`) 패턴과 일관성 — 페이지 별 fixture 1곳 통합.
  */
 
-import type { SongResponse } from "@/lib/api/song";
+import type { SongListResponse, SongResponse } from "@/lib/api/song";
 
-export type { SongResponse } from "@/lib/api/song";
+export type { SongListResponse, SongResponse } from "@/lib/api/song";
 
 /**
  * 단일 `SongResponse` 빌더 (검색 결과 list 의 한 entry).
@@ -101,4 +101,32 @@ export function buildSongList(
     );
   }
   return list;
+}
+
+/**
+ * `searchSongs` 응답 wrapper(`SongListResponse`) 빌더.
+ *
+ * BE가 #1551(검색·필터 API)부터 bare 배열 대신 `{items, page, size, totalCount,
+ * hasNext}` wrapper를 반환한다. `searchSongs` 모킹은 이 형태를 그대로 돌려줘야
+ * 페이지가 `query.data.items`로 곡 목록을 읽는다.
+ *
+ * - `items`는 `buildSongList(keyword, count, idBase)`로 채운다.
+ * - `page=0`, `size`는 items 길이 이상(default 20), `totalCount=items.length`,
+ *   `hasNext=false`가 기본. meta를 검증하는 테스트는 overrides로 덮어쓴다.
+ */
+export function buildSongListResponse(
+  keyword: string,
+  count: number = 2,
+  idBase: number = 100,
+  metaOverrides: Partial<Omit<SongListResponse, "items">> = {},
+): SongListResponse {
+  const items = buildSongList(keyword, count, idBase);
+  return {
+    items,
+    page: 0,
+    size: 20,
+    totalCount: items.length,
+    hasNext: false,
+    ...metaOverrides,
+  };
 }

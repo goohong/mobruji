@@ -71,16 +71,8 @@ last_reviewed: YYYY-MM-DD
 - 라우트, 주요 컴포넌트, 상태 관리 흐름
 
 ## 6) 작업 분할 (예상 PR 리스트)
-
-> 형식 권고 — spec 머지 시 `.github/workflows/spec-impl-issue-seed.yml` 이 아래 미체크
-> `- [ ]` 항목을 항목별 구현 이슈로 자동 등록합니다 (autoseed → be/fe/plan cycle).
-> 항목에 `(be)` `(fe)` `(infra)` `(plan)` cycle 주석 또는 `scope:<x>` 를 달면 라벨이
-> 정확히 추정됩니다 (없으면 frontmatter `scope` 사용). 표/산문 형식이면 항목 파싱
-> 대신 tracking 이슈 1건만 등록됩니다. 구현 PR 머지 시 해당 항목을 `- [x]` 로 체크하면
-> 재머지 시 중복 등록되지 않습니다 (멱등 — 항목 텍스트 해시 marker).
-
-- [ ] (be) PR 1: ...
-- [ ] (fe) PR 2: ...
+- [ ] PR 1: ...
+- [ ] PR 2: ...
 
 ### 보호 영역 변경 여부 (필수 명시)
 

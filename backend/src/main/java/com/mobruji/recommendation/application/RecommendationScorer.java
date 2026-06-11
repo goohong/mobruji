@@ -10,7 +10,6 @@ import com.mobruji.recommendation.domain.TransposeSuggestion;
 import com.mobruji.song.domain.Mood;
 import com.mobruji.song.domain.MusicalKey;
 import com.mobruji.song.domain.Song;
-import com.mobruji.song.domain.VocalGender;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,15 +19,12 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * v1/v2 규칙 기반 점수 함수.
  *
  * <p>{@code score = w_voiceFit * rangeFit + w_genre * genreMatch + w_mood * moodMatch
- *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + w_generation * generationFit
- *                 + w_gender * genderFit + jitter}
+ *                 + w_popularity * popularityPrior + w_tempo * tempoMatch + w_generation * generationFit + jitter}
  *
  * <ul>
  * <li>keyMatch: 곡 키 알려짐(1.0)/UNKNOWN(0.5). 가중 합산에는 들어가지 않는 메타 신호.</li>
- * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=겹치면 overlap 비율, disjoint 면 gap 거리
- * 소프트 감쇠({@code exp(-gap/scale)}); centeredness=곡 중심↔사용자 음역 중앙 거리의 가우시안 감쇠. 넓은 음역에서
- * overlap 이 포화돼도 음역대별 변별력 유지(#1452). 저·중음역 사용자가 고음역 편중 카탈로그와 disjoint 여도 0 으로
- * 떨어지지 않고 곡별로 변별된다(#1639).</li>
+ * <li>rangeFit: {@code reachability * centeredness} (0~1). reachability=곡 음역(root±7)과 사용자 음역의 overlap 비율,
+ * centeredness=곡 키 중심이 사용자 음역 중앙에 가까운 정도. 넓은 음역에서 overlap 이 포화돼도 음역대별 변별력 유지(#1452).</li>
  * <li>genreMatch: v1에서 입력 필드 없음 → 0 고정 (가중치만 보존).</li>
  * <li>moodMatch: 분위기 연속 유사도. 정확히 일치 1.0, 미입력·곡 mood 부재 0.0, 그 외 (energy,brightness) 좌표 거리 기반 유사도(#1485).</li>
  * <li>popularityPrior: 시드 데이터에 popularity 컬럼 없음 → 1.0 고정 (모든 곡에 동일 가산).</li>
@@ -36,8 +32,6 @@ import com.mobruji.recommendation.infrastructure.MusicalKeyMidiResolver;
  * 곡 BPM이 null이거나 사용자 선호 BPM이 결정될 수 없으면 0.5(중립).</li>
  * <li>generationFit (#1487): {@code 1.0 - min(1.0, |songReleaseYear - representativeYear| / toleranceYears)}.
  * 연령대 미입력 또는 곡 발매연도 부재면 0.0(가중 없음) — 미입력 시 랭킹 영향 없음(하위호환).</li>
- * <li>genderFit (#1767): 요청 성별 필터(남자곡/여자곡)와 곡 보컬 성별 적합도. 큐레이션 일치 1.0, 추정 일치·혼성·추정
- * 불가는 부분 가산, 반대 성별 0.0. 성별 미입력이면 0.0(가중 없음, 배타 제외가 아니라 가산 가중).</li>
  * <li>jitter: 동순위 분산용. seed 고정으로 결정성 유지 가능.</li>
  * </ul>
  *
@@ -73,29 +67,6 @@ public class RecommendationScorer {
      */
     static final double TRANSPOSE_SUGGEST_FIT_THRESHOLD = 0.4;
 
-    /**
-     * disjoint(겹침 0) 곡의 reachability 소프트 감쇠 스케일(반음). 사용자 음역과 곡 음역 사이 gap 이 클수록
-     * {@code Math.exp(-gap / GAP_SCALE)} 로 0 에 수렴하되 정확히 0 은 되지 않는다. 옥타브(12반음) 떨어지면
-     * {@code 1/e≈0.368} 가 되도록 12 로 둔다. hard-zero 산식은 저·중음역 사용자에게 모든 곡 voiceFit=0 을
-     * 만들어 변별을 못 했기에(#1639), gap 거리 기반 양수로 가까운 곡일수록 높은 값을 준다.
-     */
-    static final double REACHABILITY_GAP_SCALE = 12.0;
-
-    /**
-     * centeredness 가우시안 sigma 의 하한(반음). 사용자 음역폭이 0 에 가까워도 분모가 0 이 되지 않도록 보호하며,
-     * 일반적으로는 {@code Math.max(1.0, userSpan/2.0)} 로 음역폭에 비례한다. 선형 hard-clip 은 중심 거리가
-     * {@code userSpan/2} 를 넘으면 centeredness=0 → voiceFit=0 이라 변별을 못 했기에(#1639) 가우시안으로 매끄럽게 감쇠한다.
-     */
-    static final double CENTEREDNESS_SIGMA_FLOOR = 1.0;
-
-    /**
-     * 큐레이션 부재 곡의 보컬 성별 추정 분기점(곡 최고음 MIDI). highMidi 가 이 값 이상이면 FEMALE, 미만이면 MALE 로
-     * 추정한다(#1767). 곡 보컬 멜로디 최고음이 성별을 가르는 가장 변별력 있는 단일 신호라 highMidi 만으로 추정하고,
-     * highMidi 가 없으면 추정하지 않는다(=unknownScore) — v1 key→MIDI 휴리스틱은 모든 키를 옥타브 4(60~71)로
-     * 접어 성별 변별이 불가능하기 때문. D#5(75) 부근을 경계로 둔다(난이도 NORMAL/HARD 경계와 정합).
-     */
-    static final int ESTIMATED_GENDER_HIGH_MIDI_SPLIT = 75;
-
     private final RecommendationProperties recommendationProperties;
 
     public Scored score(
@@ -105,21 +76,17 @@ public class RecommendationScorer {
             final Mood requestedMood,
             final Integer preferredBpm,
             final AgeGroup ageGroup,
-            final VocalGender gender,
             final Random random) {
         final RecommendationProperties.Weights weights = recommendationProperties.weights();
         final RecommendationProperties.Tempo tempo = recommendationProperties.tempo();
         final RecommendationProperties.Generation generation = recommendationProperties.generation();
-        final RecommendationProperties.Gender genderConfig = recommendationProperties.gender();
-        final double rangeFit = voiceRangeFit(
-                song.getLowMidi(), song.getHighMidi(), song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
+        final double rangeFit = voiceRangeFit(song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         final double keyMatch = keyMatch(song.getKeyOriginal());
         final double genreMatch = genreMatch();
         final double moodMatch = moodMatch(song.getMood(), requestedMood);
         final double popularityPrior = popularityPrior(song);
         final double tempoMatch = tempoMatch(song.getBpm(), preferredBpm, requestedMood, tempo);
         final double generationFit = generationFit(song.getReleaseYear(), ageGroup, generation);
-        final double genderFit = genderFit(gender, song, genderConfig);
         final double jitterMagnitude = recommendationProperties.jitterMagnitude();
         final double jitter = (random.nextDouble() * 2 - 1) * jitterMagnitude;
         final double total = weights.voiceFit() * rangeFit
@@ -128,10 +95,9 @@ public class RecommendationScorer {
                 + weights.popularity() * popularityPrior
                 + weights.tempoMatch() * tempoMatch
                 + weights.generation() * generationFit
-                + weights.gender() * genderFit
                 + jitter;
         final ScoreBreakdown breakdown = new ScoreBreakdown(
-                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit, genderFit);
+                keyMatch, rangeFit, genreMatch, moodMatch, popularityPrior, tempoMatch, generationFit);
         final TransposeSuggestion suggestedTranspose = suggestTranspose(
                 song.getKeyOriginal(), voiceRangeLow, voiceRangeHigh);
         return new Scored(total, breakdown, suggestedTranspose);
@@ -146,48 +112,6 @@ public class RecommendationScorer {
     }
 
     /**
-     * 곡 실측 음역(audio analysis 적재: {@code low_midi}/{@code high_midi}) 우선 적합도 산정.
-     *
-     * <p>둘 다 not-null 이면 실측 band 로 reachability/centeredness 산식을 그대로 적용한다 — 키 root±7 휴리스틱은
-     * 곡 분포를 53~78 MIDI 좁은 구간으로 갇히게 만들어 사용자 음역대 변화에 따른 변별력이 약한 사고를 만들었다 (#1632).
-     * 한쪽이라도 null 이면 기존 키 root±7 휴리스틱({@link #voiceRangeFit(MusicalKey, int, int)})으로 폴백해
-     * 미적재 곡의 하위호환을 유지한다.
-     *
-     * <p>spec: {@code docs/features/recommendation-algorithm-v1.md} §6 v1+v2 (voiceRangeFit 산식) — 실측 데이터
-     * 활용은 같은 산식의 입력 정확도 향상에 그쳐 가중치/결정성/SeedDeriver 입력에는 영향이 없다.
-     */
-    static double voiceRangeFit(
-            final Integer songLowMidi,
-            final Integer songHighMidi,
-            final MusicalKey keyOriginal,
-            final int voiceLow,
-            final int voiceHigh) {
-        if (songLowMidi != null && songHighMidi != null) {
-            return voiceRangeFitForBand(songLowMidi, songHighMidi, voiceLow, voiceHigh);
-        }
-        return voiceRangeFit(keyOriginal, voiceLow, voiceHigh);
-    }
-
-    /**
-     * 곡 음역 band(songLow, songHigh) 가 주어졌을 때의 음역 적합도(0~1). reachability/centeredness 산식은
-     * {@link #voiceRangeFitForRoot}와 동일하며, 중심점만 root MIDI 대신 band 중심 {@code (songLow+songHigh)/2} 로
-     * 잡는다. 곡 실측 음역과 휴리스틱 음역에 같은 산식을 일관 적용해 결과 해석을 단일 패턴으로 유지한다.
-     */
-    static double voiceRangeFitForBand(
-            final int songLow, final int songHigh, final int voiceLow, final int voiceHigh) {
-        final int songSpan = songHigh - songLow;
-        final int userSpan = voiceHigh - voiceLow;
-        if (songSpan <= 0 || userSpan <= 0) {
-            return 0.0;
-        }
-        final double reachability = reachability(songLow, songHigh, voiceLow, voiceHigh, songSpan);
-        final double songCenter = (songLow + songHigh) / 2.0;
-        final double userCenter = (voiceLow + voiceHigh) / 2.0;
-        final double centeredness = centeredness(Math.abs(songCenter - userCenter), userSpan);
-        return reachability * centeredness;
-    }
-
-    /**
      * 키 root MIDI 가 주어졌을 때의 음역 적합도(0~1). {@link #voiceRangeFit}이 위임하며, 조옮김 탐색은
      * {@code rootMidi} 에 반음 이동량을 더한 값으로 같은 산식을 재사용해 voiceFit 과 비교 가능한 값을 얻는다.
      */
@@ -199,43 +123,16 @@ public class RecommendationScorer {
         if (songSpan <= 0 || userSpan <= 0) {
             return 0.0;
         }
-        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율. overlap>0 이면 비율, disjoint 면
-        // gap 거리 기반 소프트 감쇠 — 안 겹쳐도 가까운 곡은 양수라 변별이 살아난다(#1639).
-        final double reachability = reachability(songLow, songHigh, voiceLow, voiceHigh, songSpan);
-        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 멀수록 가우시안으로 매끄럽게 감쇠.
+        // (1) reachability: 사용자가 곡 음역(root±7) 중 실제 닿을 수 있는 비율.
+        final int overlap = Math.max(0, Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow));
+        final double reachability = Math.min(1.0, (double) overlap / songSpan);
+        // (2) centeredness: 곡 키 중심이 사용자 음역 중앙에 가까울수록 1.0, 가장자리·바깥이면 0.0.
         // reachability 단독은 사용자 음역이 곡 음역을 완전히 포함하면(넓은 음역) 모든 곡이 1.0 으로 포화돼
         // 음역대 입력이 순위에 반영되지 않는다(#1452). centeredness 를 곱해 음역대별 변별력을 회복한다.
         final double userCenter = (voiceLow + voiceHigh) / 2.0;
-        final double centeredness = centeredness(Math.abs(rootMidi - userCenter), userSpan);
+        final double centerDistance = Math.abs(rootMidi - userCenter);
+        final double centeredness = Math.max(0.0, 1.0 - centerDistance / (userSpan / 2.0));
         return reachability * centeredness;
-    }
-
-    /**
-     * reachability(0~1): 곡 음역과 사용자 음역의 겹침 비율. overlap&gt;0 이면 {@code min(1.0, overlap/songSpan)} 그대로,
-     * 겹침이 없으면(disjoint) 두 구간 최소 거리 gap 에 대해 {@code Math.exp(-gap / REACHABILITY_GAP_SCALE)} 로
-     * 소프트 감쇠한다. hard-zero 가 저·중음역 사용자에게 모든 곡 voiceFit=0 을 만들던 사고(#1639)를 막고,
-     * disjoint 라도 가까운 곡일수록 큰 값을 줘 곡별 변별을 유지한다.
-     */
-    private static double reachability(
-            final int songLow, final int songHigh, final int voiceLow, final int voiceHigh, final int songSpan) {
-        final int overlap = Math.min(songHigh, voiceHigh) - Math.max(songLow, voiceLow);
-        if (overlap > 0) {
-            return Math.min(1.0, (double) overlap / songSpan);
-        }
-        final int gap = -overlap;
-        return Math.exp(-gap / REACHABILITY_GAP_SCALE);
-    }
-
-    /**
-     * centeredness(0~1): 곡 중심과 사용자 음역 중앙의 거리 {@code centerDistance} 를 가우시안으로 환산한다.
-     * {@code Math.exp(-0.5 * (centerDistance / sigma)^2)}, sigma = {@code max(CENTEREDNESS_SIGMA_FLOOR, userSpan/2)}.
-     * 선형 hard-clip 은 거리가 {@code userSpan/2} 를 넘으면 0 → voiceFit=0 이라 변별을 못 했기에(#1639), 멀어도 0 이
-     * 되지 않고 매끄럽게 감쇠하도록 가우시안을 쓴다.
-     */
-    private static double centeredness(final double centerDistance, final int userSpan) {
-        final double sigma = Math.max(CENTEREDNESS_SIGMA_FLOOR, userSpan / 2.0);
-        final double normalized = centerDistance / sigma;
-        return Math.exp(-0.5 * normalized * normalized);
     }
 
     /**
@@ -419,55 +316,6 @@ public class RecommendationScorer {
         final double distance = Math.abs((double) releaseYear - representativeYear);
         final double normalized = Math.min(1.0, distance / generation.distanceToleranceYears());
         return 1.0 - normalized;
-    }
-
-    /**
-     * genderFit 신호 (#1767). 요청 성별 필터(남자곡/여자곡)와 곡 보컬 성별의 부분 적합도(0~1).
-     *
-     * <p>우선순위:
-     * <ul>
-     * <li>요청 성별이 null(미입력) → 0.0 (가중 없음 — 배타 제외가 아니라 다른 신호로 추천 풀에 잔존).</li>
-     * <li>큐레이션 {@link Song#getVocalGender()} 보유 — 권위값. MIXED(듀엣/혼성)는 {@code mixedScore},
-     * 요청과 같으면 1.0, 반대면 0.0.</li>
-     * <li>큐레이션 부재 — {@link #estimateVocalGender}로 추정. 추정 일치는 {@code estimatedMatchScore}(큐레이션보다
-     * 낮춰 신뢰도 차이 반영), 추정 불가(highMidi 부재)는 {@code unknownScore}, 추정 반대 성별은 0.0.</li>
-     * </ul>
-     *
-     * <p>가중 합산에는 weights.gender로 들어가며, raw 신호는 ScoreBreakdown에 보존된다.
-     */
-    static double genderFit(
-            final VocalGender requestGender,
-            final Song song,
-            final RecommendationProperties.Gender genderConfig) {
-        if (requestGender == null) {
-            return 0.0;
-        }
-        final VocalGender curated = song.getVocalGender();
-        if (curated != null) {
-            if (curated == VocalGender.MIXED) {
-                return genderConfig.mixedScore();
-            }
-            return curated == requestGender ? 1.0 : 0.0;
-        }
-        final VocalGender estimated = estimateVocalGender(song);
-        if (estimated == null) {
-            return genderConfig.unknownScore();
-        }
-        return estimated == requestGender ? genderConfig.estimatedMatchScore() : 0.0;
-    }
-
-    /**
-     * 큐레이션 부재 곡의 보컬 성별 추정 (#1767). 곡 최고음(highMidi)이 {@link #ESTIMATED_GENDER_HIGH_MIDI_SPLIT}
-     * 이상이면 FEMALE, 미만이면 MALE. highMidi 가 없으면 {@code null}(추정 불가) — v1 key→MIDI 휴리스틱은 모든
-     * 키를 옥타브 4 로 접어 성별 변별이 불가능하므로 키 기반 추정은 하지 않는다. 추정은 MIXED 를 만들지 않는다
-     * (혼성/듀엣은 큐레이션 전용).
-     */
-    static VocalGender estimateVocalGender(final Song song) {
-        final Integer highMidi = song.getHighMidi();
-        if (highMidi == null) {
-            return null;
-        }
-        return highMidi >= ESTIMATED_GENDER_HIGH_MIDI_SPLIT ? VocalGender.FEMALE : VocalGender.MALE;
     }
 
     /**

@@ -27,8 +27,9 @@ import lombok.NoArgsConstructor;
 @Table(name = "song", indexes = {
         @Index(name = "ix_song_title", columnList = "title"),
         @Index(name = "ix_song_artist", columnList = "artist"),
+        @Index(name = "ix_song_title_chosung", columnList = "title_chosung"),
+        @Index(name = "ix_song_artist_chosung", columnList = "artist_chosung"),
         @Index(name = "uk_song_isrc", columnList = "isrc", unique = true),
-        @Index(name = "uk_song_mb_id", columnList = "mb_id", unique = true),
 })
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -58,6 +59,20 @@ public class Song {
 
     @Column(nullable = false, length = 200)
     private String artist;
+
+    /**
+     * {@link #title} 의 초성 파생열 ({@code "발라드" → "ㅂㄹㄷ"}). 사용자 입력이 아니라 {@link ChosungDeriver}
+     * 파생값 — 초성 검색 {@code titleChosung LIKE 'ㅂㄹㄷ%'} prefix 매칭용 (spec
+     * {@code song-search-and-filter.md}). {@link #create} / {@link #backfillChosung} 에서 채운다.
+     */
+    @Column(name = "title_chosung", length = 200)
+    private String titleChosung;
+
+    /**
+     * {@link #artist} 의 초성 파생열. {@link #titleChosung} 와 동일 규칙.
+     */
+    @Column(name = "artist_chosung", length = 200)
+    private String artistChosung;
 
     @Column(name = "release_year")
     private Integer releaseYear;
@@ -100,16 +115,6 @@ public class Song {
     private String isrc;
 
     /**
-     * MusicBrainz Recording UUID (36자, 예: {@code b9ad642e-b012-41c7-b72a-42cf3437f9d8}). nullable —
-     * 매칭 전/실패 시 null. 글로벌 유일 식별자라 DB 레벨 {@code UNIQUE} 인덱스로 보호한다 — null 은
-     * MySQL 8.4 UNIQUE 가 다중 허용하므로 충돌 없음.
-     *
-     * <p>spec {@code musicbrainz-integration.md} §5-1 — {@link #backfillFromMusicBrainz} backfill 로 채운다.
-     */
-    @Column(name = "mb_id", length = 36)
-    private String mbId;
-
-    /**
      * 메타데이터 신뢰도 (0.0~1.0). 기본 1.0 = {@link MetadataSource#MANUAL_SEED} 수기 입력 신뢰도.
      * {@link #backfillFromAudioAnalysis} 시 {@link AudioAnalysisResult#confidence()} 가 저장된다.
      *
@@ -135,17 +140,6 @@ public class Song {
     @Enumerated(EnumType.STRING)
     @Column(length = 16)
     private Difficulty difficulty;
-
-    /**
-     * 곡 보컬의 성별 분류 (#1767). nullable — 큐레이션(시드/큐레이터)이 명시한 경우에만 채워진다. null 인 외부
-     * 임포트 곡은 추천 시점에 보컬 음역·키로 추정해 후순위 가산하므로(=컬럼은 큐레이션 권위값 전용), 미적재 곡도
-     * 성별 필터에서 graceful degrade 한다.
-     *
-     * <p>추천 {@code genderFit} 신호의 1순위 입력 — 적재만으로 랭킹이 바뀌므로 결정성에는 입력 변화로만 반영된다.
-     */
-    @Enumerated(EnumType.STRING)
-    @Column(name = "vocal_gender", length = 16)
-    private VocalGender vocalGender;
 
     /**
      * 곡의 음향 에너지/강렬함 정도 (0.0~1.0). nullable — 1차는 수기/시드 적재, 자동 산출은 후속
@@ -190,12 +184,10 @@ public class Song {
             final String kyNumber,
             final MetadataSource metadataSource,
             final String isrc,
-            final String mbId,
             final Double metadataConfidence,
             final Integer lowMidi,
             final Integer highMidi,
             final Difficulty difficulty,
-            final VocalGender vocalGender,
             final Float energy,
             final String albumCoverUrl) {
         Objects.requireNonNull(title, "title must not be null");
@@ -230,9 +222,33 @@ public class Song {
                 : (lowMidi != null && highMidi != null ? deriveDifficulty(lowMidi, highMidi) : null);
         final LocalDateTime now = LocalDateTime.now();
         return new Song(
-                null, title, artist, releaseYear, keyOriginal, bpm, mood, language, genre,
-                tjNumber, kyNumber, metadataSource, isrc, mbId, resolvedConfidence,
-                lowMidi, highMidi, resolvedDifficulty, vocalGender, energy, albumCoverUrl, now, now);
+                null, title, artist, ChosungDeriver.of(title), ChosungDeriver.of(artist),
+                releaseYear, keyOriginal, bpm, mood, language, genre,
+                tjNumber, kyNumber, metadataSource, isrc, resolvedConfidence,
+                lowMidi, highMidi, resolvedDifficulty, energy, albumCoverUrl, now, now);
+    }
+
+    /**
+     * 초성 파생열이 비어 있으면({@code null}) {@link #title}/{@link #artist} 에서 파생해 채운다.
+     * 마이그레이션 이전 적재된 기존 row backfill 용 ({@code ChosungBackfillRunner}). 멱등 — 이미
+     * 채워진 row 는 보존하고 변경 없음을 반환한다.
+     *
+     * @return 실제로 한 필드라도 채웠는지 여부
+     */
+    public boolean backfillChosung() {
+        boolean changed = false;
+        if (this.titleChosung == null) {
+            this.titleChosung = ChosungDeriver.of(this.title);
+            changed = true;
+        }
+        if (this.artistChosung == null) {
+            this.artistChosung = ChosungDeriver.of(this.artist);
+            changed = true;
+        }
+        if (changed) {
+            this.updatedAt = LocalDateTime.now();
+        }
+        return changed;
     }
 
     /**
@@ -323,24 +339,6 @@ public class Song {
     }
 
     /**
-     * 시드 재적재 시 큐레이션 장르 재분류를 기존 row 에 반영한다. {@code genre} 는 spec
-     * {@code song-curation-seed-100.md} §5-5 화이트리스트로 통제되는 시드 전용 권위 필드라
-     * 운영/분석 경로가 건드리지 않는다 — {@code songs-seed.json} 이 단일 출처다. 따라서 기존
-     * row 의 {@code genre} 가 시드와 다르면 시드 값으로 갱신한다(이슈 #1675 — #1672 의 R&B → 발라드
-     * 재분류가 기존 row 에 미반영되던 회귀).
-     *
-     * @return 실제로 갱신됐는지 여부 — 호출 측 로깅에 사용
-     */
-    public boolean reconcileSeedGenre(final String newGenre) {
-        if (newGenre == null || Objects.equals(this.genre, newGenre)) {
-            return false;
-        }
-        this.genre = newGenre;
-        this.updatedAt = LocalDateTime.now();
-        return true;
-    }
-
-    /**
      * Python audio analysis tool 산출값으로 lowMidi/highMidi 를 **갱신** 한다. {@link #backfillMissingFields}
      * 가 "null 만 채움" 이라면 본 메서드는 "신뢰도 충족 시 기존 값을 덮어쓰기".
      *
@@ -349,9 +347,7 @@ public class Song {
      *
      * <ul>
      * <li>{@code result.confidence() < threshold} → no-op (수기 값 보존, false 반환).</li>
-     * <li>{@code !result.isVocalRangePlausible()} → no-op (비합리 음역대 거부, false 반환) — 합리성 가드(#1725).
-     * confidence 임계를 통과해도 반주 저음 오검출·옥타브 폴딩으로 가창 한계를 벗어난 음역은 추천 풀에 진입시키지 않는다.</li>
-     * <li>임계·합리성 통과 시 lowMidi/highMidi 를 결과로 갱신, {@link Difficulty} 를 재계산, {@link MetadataSource}
+     * <li>임계 통과 시 lowMidi/highMidi 를 결과로 갱신, {@link Difficulty} 를 재계산, {@link MetadataSource}
      * 를 {@link MetadataSource#AUDIO_ANALYSIS} 로 갱신.</li>
      * </ul>
      *
@@ -370,9 +366,6 @@ public class Song {
                     "confidenceThreshold out of [0.0, 1.0]: " + confidenceThreshold);
         }
         if (result.confidence() < confidenceThreshold) {
-            return false;
-        }
-        if (!result.isVocalRangePlausible()) {
             return false;
         }
         boolean changed = false;
@@ -402,77 +395,5 @@ public class Song {
             this.updatedAt = LocalDateTime.now();
         }
         return changed;
-    }
-
-    /**
-     * keyOriginal/genre 메타 추정 음역대를 적용한다 — 오디오 자체분석 인프라 부재(#1778) 동안의 interim 경로.
-     * {@link #backfillFromAudioAnalysis} 가 "신뢰도 충족 시 덮어쓰기" 라면, 본 메서드는 "음역대 미보유 곡에만 채움".
-     * 다음 정책:
-     *
-     * <ul>
-     * <li>{@code lowMidi}/{@code highMidi} 중 하나라도 이미 채워져 있으면 no-op({@code false} 반환) — 수기/외부/
-     * 자체분석으로 채워진 값을 추정값이 덮지 않는다 (자체분석 권위 우선).</li>
-     * <li>{@code !estimate.isVocalRangePlausible()} → no-op({@code false} 반환) — 합리성 가드(#1737).</li>
-     * <li>적용 시 lowMidi/highMidi 를 추정값으로 채우고 {@link Difficulty} 를 계산, {@link MetadataSource}
-     * 를 {@link MetadataSource#ESTIMATED} 로, {@code metadataConfidence} 를 추정 신뢰도(낮음)로 저장한다 —
-     * 추후 {@link #backfillFromAudioAnalysis} 가 자체분석 임계(기본 0.6)를 통과하면 그대로 덮어쓴다.</li>
-     * </ul>
-     *
-     * <p>본 메서드는 추천 알고리즘(점수 계산) 입력 데이터만 바꿀 뿐 알고리즘 코드 자체에는 영향이 없다 — 결정성 회귀 없음.
-     *
-     * @param estimate 메타 추정 음역 (필수)
-     * @return 실제로 적용됐는지 여부
-     */
-    public boolean applyEstimatedVocalRange(final VocalRangeEstimate estimate) {
-        Objects.requireNonNull(estimate, "estimate must not be null");
-        if (this.lowMidi != null || this.highMidi != null) {
-            return false;
-        }
-        if (!estimate.isVocalRangePlausible()) {
-            return false;
-        }
-        this.lowMidi = estimate.lowMidi();
-        this.highMidi = estimate.highMidi();
-        this.difficulty = deriveDifficulty(this.lowMidi, this.highMidi);
-        this.metadataSource = MetadataSource.ESTIMATED;
-        this.metadataConfidence = estimate.confidence();
-        this.updatedAt = LocalDateTime.now();
-        return true;
-    }
-
-    /**
-     * MusicBrainz recording 매칭 결과를 적용한다 — spec {@code musicbrainz-integration.md} §5-4.
-     *
-     * <p>멱등성 — 이미 {@code mbId} 가 채워진 곡은 no-op({@code false} 반환)으로 재실행 시 중복 매칭/덮어쓰기를
-     * 막고 운영자가 수기 지정한 값을 보존한다. {@code isrc} 는 비어 있을 때만 채운다 (기존/운영자값 보존).
-     *
-     * <p>매칭 채택 시 {@code metadataConfidence} 를 MusicBrainz score 기반 신뢰도로 갱신하고
-     * {@link MetadataSource#EXTERNAL_API} 로 표시한다. 음역대/key/tempo 는 MusicBrainz 가 제공하지 않으므로
-     * 손대지 않는다 — 추천 점수 산식 입력이 채워지지 않아 결정성 회귀가 없다.
-     *
-     * @param newMbId    MusicBrainz Recording UUID (필수)
-     * @param newIsrc    매칭 recording 의 ISRC (없으면 null)
-     * @param confidence 매칭 신뢰도 (0.0~1.0 — MusicBrainz score / 100.0)
-     * @return 실제로 적용됐는지 여부 — 이미 mbId 가 있으면 false
-     */
-    public boolean backfillFromMusicBrainz(
-            final String newMbId,
-            final String newIsrc,
-            final double confidence) {
-        Objects.requireNonNull(newMbId, "newMbId must not be null");
-        if (confidence < 0.0 || confidence > 1.0) {
-            throw new IllegalArgumentException("confidence out of [0.0, 1.0]: " + confidence);
-        }
-        if (this.mbId != null) {
-            return false;
-        }
-        this.mbId = newMbId;
-        if (this.isrc == null && newIsrc != null && !newIsrc.isBlank()) {
-            this.isrc = newIsrc;
-        }
-        this.metadataConfidence = confidence;
-        this.metadataSource = MetadataSource.EXTERNAL_API;
-        this.updatedAt = LocalDateTime.now();
-        return true;
     }
 }

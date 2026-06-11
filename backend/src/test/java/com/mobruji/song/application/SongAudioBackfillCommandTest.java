@@ -1,7 +1,6 @@
 package com.mobruji.song.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -10,15 +9,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Duration;
 import java.util.List;
-import java.util.OptionalInt;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
-import org.springframework.boot.DefaultApplicationArguments;
 
 import com.mobruji.song.domain.AudioAnalysisFailedException;
 import com.mobruji.song.domain.AudioAnalysisResult;
@@ -64,7 +59,7 @@ class SongAudioBackfillCommandTest {
         when(runner.analyzeByMetadata("high1", "artist-high1"))
                 .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
         when(runner.analyzeByMetadata("low", "artist-low"))
-                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.40, "v"));
+                .thenReturn(new AudioAnalysisResult(50, 90, "C", 120.0, 200.0, 0.40, "v"));
         when(runner.analyzeByMetadata("high2", "artist-high2"))
                 .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.75, "v"));
 
@@ -78,7 +73,6 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.successful()).isEqualTo(3);
         assertThat(summary.updated()).isEqualTo(2);
         assertThat(summary.skippedLowConfidence()).isEqualTo(1);
-        assertThat(summary.skippedImplausibleRange()).isZero();
         assertThat(summary.failed()).isZero();
 
         // updated 된 두 곡만 save 호출
@@ -89,46 +83,6 @@ class SongAudioBackfillCommandTest {
         assertThat(s1.getDifficulty()).isEqualTo(Difficulty.HARD);
         assertThat(s2.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
         assertThat(s3.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
-    }
-
-    @Test
-    @DisplayName("runBackfill: confidence 통과해도 비합리 음역대는 거부되고 skippedImplausibleRange 로 집계 (#1725)")
-    void runBackfill_implausibleRange_rejectedAndCounted() {
-        // given: confidence 는 충분히 높지만 음역이 가창 한계를 벗어난 곡 2종 + 정상 곡 1
-        final Song bassMisdetect = seedSong("bass", 60, 70);
-        final Song octaveFold = seedSong("octave", 60, 70);
-        final Song ok = seedSong("ok", 60, 70);
-
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findAll()).thenReturn(List.of(bassMisdetect, octaveFold, ok));
-
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        // lowMidi=30 < C2(36) — 반주 저음 오검출. highMidi 는 정상.
-        when(runner.analyzeByMetadata("bass", "artist-bass"))
-                .thenReturn(new AudioAnalysisResult(30, 70, "C", 120.0, 200.0, 0.95, "v"));
-        // span 42 > 40 — 옥타브 폴딩 의심.
-        when(runner.analyzeByMetadata("octave", "artist-octave"))
-                .thenReturn(new AudioAnalysisResult(40, 82, "C", 120.0, 200.0, 0.95, "v"));
-        when(runner.analyzeByMetadata("ok", "artist-ok"))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.90, "v"));
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBackfill(0.6);
-
-        // then: 분석 성공 3, 비합리 2건 거부, 정상 1곡만 적용
-        assertThat(summary.analyzed()).isEqualTo(3);
-        assertThat(summary.successful()).isEqualTo(3);
-        assertThat(summary.updated()).isEqualTo(1);
-        assertThat(summary.skippedImplausibleRange()).isEqualTo(2);
-        assertThat(summary.skippedLowConfidence()).isZero();
-        assertThat(summary.failed()).isZero();
-        // 비합리 거부 곡은 source/midi 보존, 정상 곡만 갱신
-        assertThat(bassMisdetect.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
-        assertThat(bassMisdetect.getLowMidi()).isEqualTo(60);
-        assertThat(octaveFold.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
-        assertThat(ok.getMetadataSource()).isEqualTo(MetadataSource.AUDIO_ANALYSIS);
-        verify(repo, times(1)).save(any(Song.class));
     }
 
     @Test
@@ -157,7 +111,6 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.successful()).isEqualTo(2);
         assertThat(summary.updated()).isEqualTo(2);
         assertThat(summary.skippedLowConfidence()).isZero();
-        assertThat(summary.skippedImplausibleRange()).isZero();
         assertThat(summary.failed()).isEqualTo(1);
         // 실패한 곡은 source/midi 그대로
         assertThat(s2.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
@@ -181,202 +134,8 @@ class SongAudioBackfillCommandTest {
         assertThat(summary.successful()).isZero();
         assertThat(summary.updated()).isZero();
         assertThat(summary.skippedLowConfidence()).isZero();
-        assertThat(summary.skippedImplausibleRange()).isZero();
         assertThat(summary.failed()).isZero();
         verify(runner, never()).analyzeByMetadata(anyString(), anyString());
         verify(repo, never()).save(ArgumentMatchers.any());
-    }
-
-    @Test
-    @DisplayName("runBoundedCandidateBackfill: 후보 중 limit 만큼만 분석, 전체(findAll) 미사용")
-    void runBoundedCandidateBackfill_limitsCandidates() {
-        // given: backfill 후보 3곡, limit 2
-        final Song c1 = seedSong("c1", null, null);
-        final Song c2 = seedSong("c2", null, null);
-        final Song c3 = seedSong("c3", null, null);
-
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of(c1, c2, c3));
-
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        when(runner.analyzeByMetadata("c1", "artist-c1"))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-        when(runner.analyzeByMetadata("c2", "artist-c2"))
-                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.80, "v"));
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        // when
-        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBoundedCandidateBackfill(2, 0.6);
-
-        // then: 앞 2곡만 분석/적용, 3번째 곡은 손대지 않음
-        assertThat(summary.analyzed()).isEqualTo(2);
-        assertThat(summary.successful()).isEqualTo(2);
-        assertThat(summary.updated()).isEqualTo(2);
-        verify(runner, times(2)).analyzeByMetadata(anyString(), anyString());
-        verify(runner, never()).analyzeByMetadata("c3", "artist-c3");
-        verify(repo, never()).findAll();
-        assertThat(c3.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
-    }
-
-    @Test
-    @DisplayName("runBoundedCandidateBackfill: limit 이 후보 수보다 크면 전체 후보 처리")
-    void runBoundedCandidateBackfill_limitExceedsCandidates_processesAll() {
-        final Song c1 = seedSong("c1", null, null);
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findCandidatesForBackfill(0.6)).thenReturn(List.of(c1));
-
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        when(runner.analyzeByMetadata("c1", "artist-c1"))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runBoundedCandidateBackfill(10, 0.6);
-
-        assertThat(summary.analyzed()).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("run: --backfill-audio.limit 지정 시 후보 selective query 경로로 분기 (findAll 미사용)")
-    void run_withLimitOption_routesToBoundedCandidates() {
-        final Song c1 = seedSong("c1", null, null);
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findCandidatesForBackfill(SongAudioBackfillCommand.DEFAULT_CONFIDENCE_THRESHOLD))
-                .thenReturn(List.of(c1));
-
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        when(runner.analyzeByMetadata("c1", "artist-c1"))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        cmd.run(new DefaultApplicationArguments(
-                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=5"));
-
-        verify(repo, times(1)).findCandidatesForBackfill(
-                SongAudioBackfillCommand.DEFAULT_CONFIDENCE_THRESHOLD);
-        verify(repo, never()).findAll();
-    }
-
-    @Test
-    @DisplayName("run: limit 옵션 없으면 기존 전체(findAll) 경로 유지")
-    void run_withoutLimitOption_usesFindAll() {
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findAll()).thenReturn(List.of());
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        cmd.run(new DefaultApplicationArguments("--mobruji.backfill-audio=true"));
-
-        verify(repo, times(1)).findAll();
-        verify(repo, never()).findCandidatesForBackfill(ArgumentMatchers.anyDouble());
-    }
-
-    @Test
-    @DisplayName("run: limit 값이 0/음수/비정수면 fail-fast (IllegalArgumentException)")
-    void run_invalidLimit_throws() {
-        final SongRepository repo = mock(SongRepository.class);
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
-                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=0")))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
-                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.limit=abc")))
-                .isInstanceOf(IllegalArgumentException.class);
-        verify(runner, never()).analyzeByMetadata(anyString(), anyString());
-    }
-
-    @Test
-    @DisplayName("run: target=missing-range 면 음역대 미보유 곡 query 경로로 분기 (findAll/findCandidates 미사용, #1739)")
-    void run_withMissingRangeTarget_usesMissingVocalRangeQuery() {
-        final Song m1 = seedSong("m1", null, null);
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findMissingVocalRange()).thenReturn(List.of(m1));
-
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        when(runner.analyzeByMetadata("m1", "artist-m1"))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        cmd.run(new DefaultApplicationArguments(
-                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.target=missing-range"));
-
-        verify(repo, times(1)).findMissingVocalRange();
-        verify(repo, never()).findAll();
-        verify(repo, never()).findCandidatesForBackfill(ArgumentMatchers.anyDouble());
-        verify(runner, times(1)).analyzeByMetadata("m1", "artist-m1");
-    }
-
-    @Test
-    @DisplayName("runMissingVocalRangeBackfill: limit 만큼만 chunk 처리 (id 순 앞 N곡, #1739)")
-    void runMissingVocalRangeBackfill_withLimit_chunksFirstN() {
-        final Song m1 = seedSong("m1", null, null);
-        final Song m2 = seedSong("m2", null, null);
-        final Song m3 = seedSong("m3", null, null);
-        final SongRepository repo = mock(SongRepository.class);
-        when(repo.findMissingVocalRange()).thenReturn(List.of(m1, m2, m3));
-
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        when(runner.analyzeByMetadata("m1", "artist-m1"))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-        when(runner.analyzeByMetadata("m2", "artist-m2"))
-                .thenReturn(new AudioAnalysisResult(55, 80, "C", 120.0, 200.0, 0.80, "v"));
-
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        final SongAudioBackfillCommand.BackfillSummary summary = cmd.runMissingVocalRangeBackfill(OptionalInt.of(2),
-                Duration.ZERO, 0.6);
-
-        assertThat(summary.analyzed()).isEqualTo(2);
-        assertThat(summary.updated()).isEqualTo(2);
-        verify(runner, never()).analyzeByMetadata("m3", "artist-m3");
-        assertThat(m3.getMetadataSource()).isEqualTo(MetadataSource.MANUAL_SEED);
-    }
-
-    @Test
-    @DisplayName("runBackfill: delay 지정 시 곡 사이에만 sleep, 마지막 곡 뒤엔 sleep 없음 (rate limit, #1739)")
-    void runBackfill_withDelay_sleepsBetweenSongsOnly() {
-        final Song s1 = seedSong("s1", 60, 70);
-        final Song s2 = seedSong("s2", 60, 70);
-        final Song s3 = seedSong("s3", 60, 70);
-
-        final SongRepository repo = mock(SongRepository.class);
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        when(runner.analyzeByMetadata(anyString(), anyString()))
-                .thenReturn(new AudioAnalysisResult(57, 78, "C", 120.0, 200.0, 0.85, "v"));
-
-        final AtomicInteger sleepCount = new AtomicInteger();
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry()) {
-            @Override
-            protected void sleepBetweenSongs(final Duration delay) {
-                sleepCount.incrementAndGet();
-            }
-        };
-
-        cmd.runBackfill(List.of(s1, s2, s3), 0.6, Duration.ofSeconds(5));
-
-        // 곡 3개면 사이는 2번 — 마지막 곡 뒤엔 대기하지 않는다.
-        assertThat(sleepCount.get()).isEqualTo(2);
-    }
-
-    @Test
-    @DisplayName("run: sleep-seconds 값이 음수/비정수면 fail-fast (IllegalArgumentException, #1739)")
-    void run_invalidSleepSeconds_throws() {
-        final SongRepository repo = mock(SongRepository.class);
-        final AudioAnalysisRunner runner = mock(AudioAnalysisRunner.class);
-        final SongAudioBackfillCommand cmd = new SongAudioBackfillCommand(repo, runner, new SimpleMeterRegistry());
-
-        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
-                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.sleep-seconds=-1")))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> cmd.run(new DefaultApplicationArguments(
-                "--mobruji.backfill-audio=true", "--mobruji.backfill-audio.sleep-seconds=abc")))
-                .isInstanceOf(IllegalArgumentException.class);
-        verify(runner, never()).analyzeByMetadata(anyString(), anyString());
     }
 }

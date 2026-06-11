@@ -33,6 +33,3 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-markers = [
-    "real_disk: 디스크 가드 autouse 무력화 fixture(_no_disk_pressure) 를 건너뛰고 실제 root_disk_pct 를 검증 (#1770)",
-]

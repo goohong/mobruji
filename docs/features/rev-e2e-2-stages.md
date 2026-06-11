@@ -4,9 +4,9 @@ slug: rev-e2e-2-stages
 status: draft
 owner: @goohong
 scope: infra
-related_issues: [882, 851, 1819]
+related_issues: [882, 851]
 related_prs: [889, 932, 953, 958, 1009, 1193, 1340]
-last_reviewed: 2026-06-04
+last_reviewed: 2026-05-30
 ---
 
 # rev 2 단계 e2e 자율 QA (Pre-merge / Post-merge)
@@ -82,7 +82,6 @@ mmae evidence (사용자 인식 일부 정정):
 - develop 머지 후 dev 배포 완료 대기 — `http://101.79.20.94/actuator/health/liveness` (nginx exact-match → backend:8081, **`/api/v1` 없음**) 가 green 일 때까지 polling 후 시작 (`cd-dev.yml` healthcheck 와 동일 경로). 고정 대기 아님 (false negative 회피, Q3=b)
 - **dev 환경 endpoint**: `http://101.79.20.94/` (web) + `http://101.79.20.94/api/v1/...` (backend) — `cd-dev.yml` 가 NCP VM 의 docker compose stack 5종 (`mobruji-web-dev` / `mobruji-backend-dev` / `mobruji-nginx-dev` / `mobruji-mysql-dev` / `mobruji-mysql-local`) 을 develop tip 으로 자동 갱신. dev URL 은 env(`PLAYWRIGHT_DEV_URL`/`DEV_BASE_URL`) 주입 (Q1=b)
 - **E2E 2분류 (rev 가 PR diff 보고 판정, Q2=a)**: 사용자 가시 화면(렌더/라우팅/CTA/스타일) 변경 → 브라우저 E2E (Playwright `PLAYWRIGHT_BASE_URL`=dev, config 미도입 동안 HTTP fallback) / API 계약·추천 로직·데이터 정합성 등 비가시 동작 → 프론트 호출(web/lib/api)·직접 HTTP(`curl …/api/v1/…`). 양쪽 다 건드리면 두 채널 모두
-- **무한 스크롤·페이지네이션 풀 소진 검증 (이슈 #1819, 의무)**: 추천·목록 등 더 불러오기(infinite scroll / `excludeSongIds` 누적)를 건드리는 PR 은 첫 페이지만 보지 말고 **후보 풀 소진까지** 진행해 ①종료 ②중복 0 을 확인한다. 상세 절차·Pass 조건: `stage2-dev-deploy-e2e.md §5-3` + `rev-qa-protocol.md §5-3 S2-b`.
 - 통과 → PR 코멘트 `✅ dev 배포 E2E 검증 pass` + 라벨 `rev-post-merge-pass` (멱등성 표식, rename 안 함 Q5=a)
 - 실패 → 머지된 원본 PR 에 **눈에 띄는** `🔴 dev 배포 E2E 회귀` 코멘트(나중에 PR 만 봐도 이력) + `regression:dev` 라벨 + revert 후속 이슈 + Discord push (즉시 자동). dev 롤백 = **자동 revert** (자동화 계층이 develop revert 커밋/PR → cd-dev 재배포, rev 는 read-only 라 직접 수행 X, Q4=b)
 - **SLA**: 정규 type:* = **24시간** / `type:release` = **24시간** / `type:emergency-hotfix` (정규) = **30분** (정규 단계 1 등급) / `type:emergency-hotfix` + body `security` (🔴 critical-public) = **15분**. T0 = PR `mergedAt` (GitHub API). 측정 종료 = `rev-post-merge-pass` 또는 `regression:dev` 라벨 부착 시각. security 분류 미달성 시 DIGEST + Discord 본 채널 + 사용자 reply 3 채널 동시 push — 정규 분류는 DIGEST 1 채널만. SoT: `docs/features/rev-sla.md §3-1` + §3-2 + §3-4(escalation 매트릭스).

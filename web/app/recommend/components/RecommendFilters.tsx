@@ -13,7 +13,7 @@
  *  - 스타일/토큰은 기존 ViewModeToggle 세그먼트 + badge 토큰을 재사용한다.
  */
 
-import { AgeGroup, Mood, RequestedGender } from "@/lib/api/recommendation";
+import { AgeGroup, Mood } from "@/lib/api/recommendation";
 
 /** BE Mood enum → 한국어 라벨 (history 페이지 MOOD_LABELS 와 동일 톤). */
 const MOOD_OPTIONS: ReadonlyArray<{ value: Mood; label: string }> = [
@@ -35,29 +35,18 @@ const AGE_GROUP_OPTIONS: ReadonlyArray<{ value: AgeGroup; label: string }> = [
   { value: "SIXTIES_PLUS", label: "60대+" },
 ];
 
-/** 추천 성별 필터 라벨 — 남자곡/여자곡 가중(genderFit #1781, 배타 제외 아님). */
-const GENDER_OPTIONS: ReadonlyArray<{ value: RequestedGender; label: string }> =
-  [
-    { value: "MALE", label: "남자곡" },
-    { value: "FEMALE", label: "여자곡" },
-  ];
-
 type RecommendFiltersProps = {
   selectedMood: Mood | null;
   selectedAgeGroup: AgeGroup | null;
-  selectedGender: RequestedGender | null;
   onMoodChange: (mood: Mood | null) => void;
   onAgeGroupChange: (ageGroup: AgeGroup | null) => void;
-  onGenderChange: (gender: RequestedGender | null) => void;
 };
 
 export function RecommendFilters({
   selectedMood,
   selectedAgeGroup,
-  selectedGender,
   onMoodChange,
   onAgeGroupChange,
-  onGenderChange,
 }: RecommendFiltersProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -85,19 +74,6 @@ export function RecommendFilters({
             active={selectedAgeGroup === value}
             onToggle={() =>
               onAgeGroupChange(selectedAgeGroup === value ? null : value)
-            }
-          />
-        ))}
-      </FilterChipGroup>
-
-      <FilterChipGroup label="성별" helpText="남자곡·여자곡에 가중 (선택)">
-        {GENDER_OPTIONS.map(({ value, label }) => (
-          <FilterChip
-            key={value}
-            label={label}
-            active={selectedGender === value}
-            onToggle={() =>
-              onGenderChange(selectedGender === value ? null : value)
             }
           />
         ))}

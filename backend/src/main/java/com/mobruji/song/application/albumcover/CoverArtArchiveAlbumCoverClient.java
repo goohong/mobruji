@@ -27,8 +27,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  * <p>2단계 lookup:
  * <ol>
  * <li>MusicBrainz release 검색 ({@code GET {mbBaseUrl}/release/?query=release:"{title}" AND
- * artist:"{artist}"&fmt=json&limit=1}) — {@code title}/{@code artist} 는
- * {@link AlbumCoverSearchTerms#normalize(String)} 로 괄호/{@code feat.} 노이즈를 제거한 값.
+ * artist:"{artist}"&fmt=json&limit=1})
  * → 최상위 release 의 MBID 추출.</li>
  * <li>Cover Art Archive ({@code GET {caaBaseUrl}/release/{mbid}}) → {@code images[]} 중 {@code front=true}
  * 이미지의 URL 반환. 커버 미등록 release 는 404 → empty.</li>
@@ -173,9 +172,7 @@ public class CoverArtArchiveAlbumCoverClient implements AlbumCoverLookupClient {
     }
 
     private URI buildReleaseSearchUri(final String title, final String artist) {
-        final String normalizedTitle = AlbumCoverSearchTerms.normalize(title);
-        final String normalizedArtist = AlbumCoverSearchTerms.normalize(artist);
-        final String query = "release:\"" + normalizedTitle + "\" AND artist:\"" + normalizedArtist + "\"";
+        final String query = "release:\"" + title + "\" AND artist:\"" + artist + "\"";
         return UriComponentsBuilder.fromUriString(properties.musicBrainzBaseUrl())
                 .path("/release/")
                 .queryParam("query", query)

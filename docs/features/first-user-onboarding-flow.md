@@ -152,7 +152,7 @@ last_reviewed: 2026-06-03
 ## 9) 결정 로그
 > 연대기 순. "YYYY-MM-DD: 결정 / 이유 / 출처(PR 번호 등)"
 
-- **2026-06-03 (plan, mood-mode 동반)**: **§8 Q4(P-B 측정 위치) 해소 = (a) 음역 측정을 마지막 경량 단계로 유지.** 근거: `06-domain-model.md §5-3` 에서 `RecommendationRequestEntity.voiceRangeLow/voiceRangeHigh` 가 `not null`(추천 구조상 음역 필수) + `application.yml` `voice-fit: 0.5` 1순위 가중치. (b)광역 default 는 voiceFit 을 포화시켜 dominant 신호를 노이즈화, (c)음역 optional 추천 분기는 dominant 신호+정규화+결정성 가드를 건드리는 별 규모 결정이라 본 흐름 밖. P-B 경로는 음역을 "마지막으로 목소리만" 으로 가볍게 프레이밍해 마지막에 받는다(추천 알고리즘 무변경). SoT = `mood-mode.md §9`. 출처: F3 자식 spec PR. **(c) 분기의 별 결정 SoT** = `voice-range-optional-recommendation-entry.md`(음역 미입력 fallback 피드로 측정 선행 강제를 해제하되 알고리즘은 무변경 — Option A 채택, 2026-06-03).
+- **2026-06-03 (plan, mood-mode 동반)**: **§8 Q4(P-B 측정 위치) 해소 = (a) 음역 측정을 마지막 경량 단계로 유지.** 근거: `06-domain-model.md §5-3` 에서 `RecommendationRequestEntity.voiceRangeLow/voiceRangeHigh` 가 `not null`(추천 구조상 음역 필수) + `application.yml` `voice-fit: 0.5` 1순위 가중치. (b)광역 default 는 voiceFit 을 포화시켜 dominant 신호를 노이즈화, (c)음역 optional 추천 분기는 dominant 신호+정규화+결정성 가드를 건드리는 별 규모 결정이라 본 흐름 밖. P-B 경로는 음역을 "마지막으로 목소리만" 으로 가볍게 프레이밍해 마지막에 받는다(추천 알고리즘 무변경). SoT = `mood-mode.md §9`. 출처: F3 자식 spec PR.
 - **2026-06-03**: 초안 작성 (status=draft). `user-persona-and-pain-points.md` 페르소나 A·B·C 를 첫 진입~첫 추천 한 흐름으로 묶는 상위 오케스트레이션 spec 으로 신설. 현재 단일 진입(persona 무분기) + 끊긴 "분위기·성별·속도" 약속 + 온보딩 완료 암묵 추론을 AS-IS 갭으로 박제. 3 `PersonaEntryPath`(BEGINNER/PRACTICE/MOOD) 진입 경로 설계, 각 경로를 F1/F2/F3 자식 spec 으로 핸드오프. 신규 BE 엔티티 없이 클라이언트 온보딩 상태로 진행(PoC). `06-domain-model.md §4-1` 에 `Onboarding`/`PersonaEntryPath` 용어 등재 동반.
 
 ## 10) 다음 단계

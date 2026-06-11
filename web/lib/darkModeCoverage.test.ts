@@ -19,6 +19,8 @@
  *    검사 대상 아님. tokens.css 의 `:where(html.dark)` selector 가 cover.
  *
  * 예외 (allow-list, 의도된 light hardcode):
+ *  - SongDetailModal backdrop `bg-zinc-900/60` — modal scrim 패턴은 light/dark
+ *    동일 검정 반투명이 표준. 의도된 hardcode.
  *  - 테스트 파일 (`*.test.tsx`) — assertion 문자열 검사.
  *
  * 신규 light hardcode 추가 시:
@@ -41,7 +43,14 @@ const WEB_ROOT = path.resolve(dirname, "..");
  *
  * 신규 등록 시 사유 주석 의무 (다음 reviewer 가 의도 파악할 수 있게).
  */
-const ALLOWED_LIGHT_ONLY: readonly { file: string; pattern: string; reason: string }[] = [];
+const ALLOWED_LIGHT_ONLY: readonly { file: string; pattern: string; reason: string }[] = [
+  {
+    file: "app/recommend/components/SongDetailModal.tsx",
+    pattern: "bg-zinc-900/60",
+    reason:
+      "Modal backdrop scrim — light/dark 동일 검정 반투명이 표준 modal 패턴. 의도된 hardcode.",
+  },
+];
 
 /** 회색조 palette light hardcode 패턴. 5 utility prefix × 5 palette × 톤 범위. */
 const LIGHT_HARDCODE_PATTERN =
